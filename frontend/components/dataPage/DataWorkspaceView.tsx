@@ -86,7 +86,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 
 		if (schemaId !== undefined && schemaId !== '') {
 			const sch = next.find((d) => d.id === dbId)?.schemas.find((s) => s.id === schemaId);
-			if (sch && sch.tables.length === 0 && (sch.num_of_tables ?? 0) > 0) {
+			if (sch && sch.tables.length === 0 && (sch.tables_count ?? 0) > 0) {
 				const r = await datasources.getTablesForSchema(schemaId);
 				if (r.error === true || !r.data) return;
 				next = mergeTablesIntoSchema(next, schemaId, r.data);
@@ -96,7 +96,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 		if (parts.length >= 4 && tableId !== undefined && tableId !== '') {
 			const sch2 = next.find((d) => d.id === dbId)?.schemas.find((s) => s.id === schemaId);
 			const tbl = sch2?.tables.find((t) => t.id === tableId);
-			if (tbl && tbl.columns.length === 0 && tbl.num_of_columns > 0) {
+			if (tbl && tbl.columns.length === 0 && tbl.columns_count > 0) {
 				const r = await datasources.getColumnsForTable(tableId);
 				if (r.error === true || !r.data) return;
 				next = mergeColumnsIntoTable(next, tableId, r.data);

@@ -1,13 +1,7 @@
-export type NameId = {
-	id: string;
-	name: string;
-};
-
 export type Column = {
-	id: string;
-	name: string;
+	column_name: string;
 	data_type: string;
-	database_name: string;
+	db_name: string;
 	schema_name: string;
 	table_name: string;
 	ordinal_position: number;
@@ -16,25 +10,22 @@ export type Column = {
 export type Table = {
 	id: string;
 	name: string;
-	description: string;
-	database_name: string;
+	db_name: string;
 	schema_name: string;
-	num_of_columns: number;
+	columns_count: number;
 	columns: Column[];
 };
 
 export type Schema = {
 	id: string;
-	name: string;
-	database_name: string;
-	num_of_tables: number;
+	schema_name: string;
+	tables_count: number;
 	tables: Table[];
 };
 
 export type Database = {
 	id: string;
 	name: string;
-	/** Populated on expand; 0 means no schemas. */
 	num_of_schemas: number;
 	schemas: Schema[];
 };
