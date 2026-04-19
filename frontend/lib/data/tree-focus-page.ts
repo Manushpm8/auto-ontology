@@ -158,8 +158,8 @@ export function buildTreeFocusPageFormat(
 		case DataModels.DB: {
 			const { database } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(
-					`Warehouse connection ${database.name}. ${database.schemas.length} schema(s) available.`,
+			...baseCardsForEntity(
+				'',
 					[{ label: 'Schemas', value: String(database.schemas.length) }],
 				),
 			);
@@ -191,7 +191,7 @@ export function buildTreeFocusPageFormat(
 		case DataModels.SCHEMA: {
 			const { database, schema } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(`Schema ${schema.schema_name} in ${database.name}.`, [
+				...baseCardsForEntity('', [
 					{ label: 'Schema', value: schema.schema_name },
 					{ label: 'Database', value: database.name },
 					{ label: 'Tables', value: String(schema.tables_count) },
@@ -262,7 +262,7 @@ export function buildTreeFocusPageFormat(
 		case DataModels.COLUMN: {
 			const { table, column } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(`Column ${column.column_name} in ${column.table_name}.`, [
+				...baseCardsForEntity('', [
 					{ label: 'Column', value: column.column_name },
 					{ label: 'Data type', value: column.data_type.trim() ? column.data_type : '—' },
 					{ label: 'Table', value: column.table_name },

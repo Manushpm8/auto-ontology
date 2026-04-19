@@ -29,6 +29,8 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 	const workspaceDataId = workspaceDb?.id ?? '';
 	const workspaceTitle = workspaceDb?.name ?? 'Data';
 
+	const [isEditing, setIsEditing] = useState(false);
+
 	const databasesRef = useRef<Database[]>(propDatabases);
 	const [treeDataEpoch, setTreeDataEpoch] = useState(0);
 	const treeEpochFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -164,8 +166,8 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 
 	return (
 		<div className="flex h-full min-h-[min(70dvh,520px)] flex-1 flex-col gap-6">
-			<header className="shrink-0 px-3 sm:px-4">
-				<Link
+		<header className="shrink-0 px-3 sm:px-4">
+			<Link
 					href="/"
 					className="group inline-flex items-center gap-1.5 text-sm font-medium text-zinc-500 transition-colors hover:text-emerald-700 dark:text-zinc-400 dark:hover:text-emerald-400"
 				>
@@ -187,12 +189,20 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 							inspect metadata and lineage.
 						</p>
 					</div>
-					<div className="flex items-center gap-2 rounded-full border border-zinc-200/90 bg-white/80 px-3 py-1.5 text-xs font-medium text-zinc-600 shadow-sm backdrop-blur-sm dark:border-zinc-700 dark:bg-zinc-900/80 dark:text-zinc-300">
-						<span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
-						{treeFocusId == null
-							? `${propDatabases.length} ${propDatabases.length === 1 ? 'database' : 'databases'}`
-							: workspaceDb.name}
-					</div>
+					<button
+						type="button"
+						className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 hover:border-emerald-700 active:scale-[0.97] dark:bg-emerald-500 dark:border-emerald-500 dark:hover:bg-emerald-600 dark:hover:border-emerald-600"
+						onClick={() => {
+							setIsEditing(true);
+							setTimeout(() => {
+								document
+									.getElementById('description-section')
+									?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+							}, 50);
+						}}
+					>
+						Edit
+					</button>
 				</div>
 			</header>
 			<SinglePageView
@@ -202,6 +212,12 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 				treeFocusId={treeFocusId}
 				treeDataEpoch={treeDataEpoch}
 				getSinglePage={getSinglePage}
+				isEditingDescription={isEditing}
+				onSaveDescription={() => {
+					console.log('save');
+					setIsEditing(false);
+				}}
+				onCancelEdit={() => setIsEditing(false)}
 			/>
 		</div>
 	);
