@@ -155,14 +155,13 @@ export function buildTreeFocusPageFormat(
 	const sections: ComposerSection[] = [];
 
 	switch (resolvedFocus.type) {
-	case DataModels.DB: {
-		const { database } = resolvedFocus;
-		sections.push(
-		...baseCardsForEntity(
-			database.description ?? '',
-				[{ label: 'Schemas', value: String(database.schemas.length) }],
-			),
-		);
+		case DataModels.DB: {
+			const { database } = resolvedFocus;
+			sections.push(
+				...baseCardsForEntity(database.description ?? '', [
+					{ label: 'Schemas', value: String(database.schemas.length) },
+				]),
+			);
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-schemas',
@@ -188,10 +187,10 @@ export function buildTreeFocusPageFormat(
 				},
 			};
 		}
-	case DataModels.SCHEMA: {
-		const { database, schema } = resolvedFocus;
-		sections.push(
-			...baseCardsForEntity(schema.description ?? '', [
+		case DataModels.SCHEMA: {
+			const { database, schema } = resolvedFocus;
+			sections.push(
+				...baseCardsForEntity(schema.description ?? '', [
 					{ label: 'Schema', value: schema.schema_name },
 					{ label: 'Database', value: database.name },
 					{ label: 'Tables', value: String(schema.tables_count) },
@@ -222,10 +221,10 @@ export function buildTreeFocusPageFormat(
 				},
 			};
 		}
-	case DataModels.TABLE: {
-		const { database, schema, table } = resolvedFocus;
-		sections.push(
-			...baseCardsForEntity(table.description ?? '', [
+		case DataModels.TABLE: {
+			const { database, schema, table } = resolvedFocus;
+			sections.push(
+				...baseCardsForEntity(table.description ?? '', [
 					{ label: 'Table', value: table.name },
 					{ label: 'Schema', value: table.schema_name },
 					{ label: 'Database', value: table.db_name },
@@ -259,10 +258,10 @@ export function buildTreeFocusPageFormat(
 				},
 			};
 		}
-	case DataModels.COLUMN: {
-		const { table, column } = resolvedFocus;
-		sections.push(
-			...baseCardsForEntity(column.description ?? '', [
+		case DataModels.COLUMN: {
+			const { table, column } = resolvedFocus;
+			sections.push(
+				...baseCardsForEntity(column.description ?? '', [
 					{ label: 'Column', value: column.column_name },
 					{ label: 'Data type', value: column.data_type.trim() ? column.data_type : '—' },
 					{ label: 'Table', value: column.table_name },

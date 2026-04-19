@@ -169,8 +169,8 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 
 	return (
 		<div className="flex h-full min-h-[min(70dvh,520px)] flex-1 flex-col gap-6">
-		<header className="shrink-0 px-3 sm:px-4">
-			<Link
+			<header className="shrink-0 px-3 sm:px-4">
+				<Link
 					href="/"
 					className="group inline-flex items-center gap-1.5 text-sm font-medium text-zinc-500 transition-colors hover:text-emerald-700 dark:text-zinc-400 dark:hover:text-emerald-400"
 				>
@@ -216,28 +216,26 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 				treeDataEpoch={treeDataEpoch}
 				getSinglePage={getSinglePage}
 				isEditingDescription={isEditing}
-			onSaveDescription={async (description: string) => {
-				const resolved = resolveTreeNode(treeFocusId, databasesRef.current);
+				onSaveDescription={async (description: string) => {
+					const resolved = resolveTreeNode(treeFocusId, databasesRef.current);
 
-				let nodeId: string | null = null;
-				if (resolved.type === DataModels.COLUMN) nodeId = resolved.column.id;
-				else if (resolved.type === DataModels.DB) nodeId = resolved.database.id;
-				else if (resolved.type === DataModels.SCHEMA) nodeId = resolved.schema.id;
-				else if (resolved.type === DataModels.TABLE) nodeId = resolved.table.id;
+					let nodeId: string | null = null;
+					if (resolved.type === DataModels.COLUMN) nodeId = resolved.column.id;
+					else if (resolved.type === DataModels.DB) nodeId = resolved.database.id;
+					else if (resolved.type === DataModels.SCHEMA) nodeId = resolved.schema.id;
+					else if (resolved.type === DataModels.TABLE) nodeId = resolved.table.id;
 
-				if (nodeId) {
-					await datasources.updateNode(nodeId, { description });
-					const [patched] = patchNodeInTree(
-						databasesRef.current,
-						nodeId,
-						{ description },
-					);
-					databasesRef.current = patched;
-				}
+					if (nodeId) {
+						await datasources.updateNode(nodeId, { description });
+						const [patched] = patchNodeInTree(databasesRef.current, nodeId, {
+							description,
+						});
+						databasesRef.current = patched;
+					}
 
-				setTreeDataEpoch((n) => n + 1);
-				setIsEditing(false);
-			}}
+					setTreeDataEpoch((n) => n + 1);
+					setIsEditing(false);
+				}}
 				onCancelEdit={() => setIsEditing(false)}
 			/>
 		</div>

@@ -36,5 +36,8 @@ export type ColumnsEnvelope = {
 	schema_name: string;
 	db_name: string;
 	columns_count: number;
-	columns: Pick<Column, 'id' | 'ordinal_position' | 'column_name' | 'data_type' | 'description'>[];
+	columns: Pick<
+		Column,
+		'id' | 'ordinal_position' | 'column_name' | 'data_type' | 'description'
+	>[];
 };
