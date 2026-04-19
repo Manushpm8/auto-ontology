@@ -12,8 +12,11 @@ import {
 	mergeColumnsIntoTable,
 	mergeSchemasIntoDatabase,
 	mergeTablesIntoSchema,
+	patchNodeInTree,
 } from '@/lib/data/datasource-tree-merge';
 import { datasources } from '@/api/datasources';
+import { resolveTreeNode } from '@/lib/data/tree-focus-page';
+import { DataModels } from '@/enums/datasources';
 
 export type DataWorkspaceViewProps = {
 	databases: Database[];
@@ -213,10 +216,28 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 				treeDataEpoch={treeDataEpoch}
 				getSinglePage={getSinglePage}
 				isEditingDescription={isEditing}
-				onSaveDescription={() => {
-					console.log('save');
-					setIsEditing(false);
-				}}
+			onSaveDescription={async (description: string) => {
+				const resolved = resolveTreeNode(treeFocusId, databasesRef.current);
+
+				let nodeId: string | null = null;
+				if (resolved.type === DataModels.COLUMN) nodeId = resolved.column.id;
+				else if (resolved.type === DataModels.DB) nodeId = resolved.database.id;
+				else if (resolved.type === DataModels.SCHEMA) nodeId = resolved.schema.id;
+				else if (resolved.type === DataModels.TABLE) nodeId = resolved.table.id;
+
+				if (nodeId) {
+					await datasources.updateNode(nodeId, { description });
+					const [patched] = patchNodeInTree(
+						databasesRef.current,
+						nodeId,
+						{ description },
+					);
+					databasesRef.current = patched;
+				}
+
+				setTreeDataEpoch((n) => n + 1);
+				setIsEditing(false);
+			}}
 				onCancelEdit={() => setIsEditing(false)}
 			/>
 		</div>

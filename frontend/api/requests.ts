@@ -45,4 +45,11 @@ export const requests = {
 			.then(responseBody)
 			.catch(errorHandler) as Promise<ResponseWithError<OutputType>>;
 	},
+
+	patch: <OutputType>(url: string, body: Record<string, unknown> = {}) => {
+		return api
+			.patch<OutputType>(url, body)
+			.then(responseBody)
+			.catch(errorHandler) as Promise<ResponseWithError<OutputType>>;
+	},
 };

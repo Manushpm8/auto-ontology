@@ -20,7 +20,7 @@ export type SinglePageComposerProps = {
 	};
 	entityUpdatingProperties?: Record<string, string | string[]>;
 	isEditingDescription?: boolean;
-	onSaveDescription?: () => void;
+	onSaveDescription?: (description: string) => void;
 	onCancelEdit?: () => void;
 };
 
@@ -46,7 +46,7 @@ const EditableDescriptionCard = ({
 	onCancel,
 }: {
 	section: { title: string; body: string };
-	onSave?: () => void;
+	onSave?: (description: string) => void;
 	onCancel?: () => void;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -75,7 +75,7 @@ const EditableDescriptionCard = ({
 				<button
 					type="button"
 					className="inline-flex items-center rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 hover:border-emerald-700 active:scale-[0.97] dark:bg-emerald-500 dark:border-emerald-500 dark:hover:bg-emerald-600 dark:hover:border-emerald-600"
-					onClick={onSave}
+					onClick={() => onSave?.(value)}
 				>
 					Save
 				</button>
