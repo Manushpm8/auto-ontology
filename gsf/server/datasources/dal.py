@@ -5,11 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels, RelTypes
-from server.env import get_nemo_neo4j_conn
-
-_LEGACY_REL_DB_TO_SCHEMA = "HAS_SCHEMA"
-_LEGACY_REL_SCHEMA_TO_TABLE = "HAS_TABLE"
-_LEGACY_REL_TABLE_TO_COLUMN = "HAS_COLUMN"
+from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 
 # ---------------------------------------------------------------------------
@@ -19,14 +15,12 @@ _LEGACY_REL_TABLE_TO_COLUMN = "HAS_COLUMN"
 
 def list_databases() -> list[dict[str, Any]]:
     """Return Database rows with schema counts only; ``schemas`` is empty for lazy trees."""
-    neo4j_conn = get_nemo_neo4j_conn()
+    neo4j_conn = get_neo4j_conn()
 
     rows = neo4j_conn.query_read(
         f"""
-        MATCH (db)-[r]->(s:{Labels.SCHEMA})
-        WHERE db:{Labels.DB} OR db:Database
-          AND type(r) IN ['{RelTypes.CONTAINS}', '{_LEGACY_REL_DB_TO_SCHEMA}']
-        RETURN coalesce(db.id, db.name) as id, db.name as name, count(s) as schema_count
+        MATCH (db:{Labels.DB})-[:{RelTypes.CONTAINS}]->(s:{Labels.SCHEMA})
+        RETURN db.id AS id, db.name AS name, count(s) AS schema_count
         ORDER BY name
         """,
     )
@@ -50,24 +44,18 @@ def list_schemas_for_database(db_id: str) -> dict[str, Any] | None:
 
     Returns ``None`` if no ``Database`` matches ``db_id``.
     """
-    neo4j_conn = get_nemo_neo4j_conn()
+    neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
         f"""
-        MATCH (db)-[r1]->(s:{Labels.SCHEMA})-[r2]->(t:{Labels.TABLE})
-        WHERE (db:{Labels.DB} OR db:Database)
-          AND (db.id = $db_id OR db.name = $db_id)
-          AND type(r1) IN ['{RelTypes.CONTAINS}', '{_LEGACY_REL_DB_TO_SCHEMA}']
-          AND type(r2) IN ['{RelTypes.CONTAINS}', '{_LEGACY_REL_SCHEMA_TO_TABLE}']
-        WITH coalesce(s.id, s.name) AS id, s.name AS schema_name, count(t) AS tables_count
+        MATCH (db:{Labels.DB} {{id: $db_id}})-[:{RelTypes.CONTAINS}]->
+              (s:{Labels.SCHEMA})-[:{RelTypes.CONTAINS}]->(t:{Labels.TABLE})
+        WITH s.id AS id, s.name AS schema_name, count(t) AS tables_count
         ORDER BY schema_name
         WITH collect({{id: id, schema_name: schema_name, tables_count: tables_count}}) AS schemas
         RETURN size(schemas) AS schemas_count, schemas
         """,
         {"db_id": db_id},
     )
-
-    if not rows:
-        return None
 
     record = rows[0]
     return {
@@ -86,14 +74,12 @@ def list_tables_for_schema(
     Each table dict contains ``database_name``, ``schema_name``, ``name``,
     and ``columns_count``.
     """
-    neo4j_conn = get_nemo_neo4j_conn()
+    neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
         f"""
-        MATCH (s:{Labels.SCHEMA})-[r1]->(t:{Labels.TABLE})-[r2]->(c:{Labels.COLUMN})
-        WHERE (s.id = $schema_id OR s.name = $schema_id)
-          AND type(r1) IN ['{RelTypes.CONTAINS}', '{_LEGACY_REL_SCHEMA_TO_TABLE}']
-          AND type(r2) IN ['{RelTypes.CONTAINS}', '{_LEGACY_REL_TABLE_TO_COLUMN}']
-        RETURN coalesce(t.id, t.name) AS id,
+        MATCH (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{RelTypes.CONTAINS}]->
+              (t:{Labels.TABLE})-[:{RelTypes.CONTAINS}]->(c:{Labels.COLUMN})
+        RETURN t.id AS id,
                t.name AS name,
                t.db_name AS db_name,
                t.schema_name AS schema_name,
@@ -116,12 +102,10 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
     node), ``columns_count``, and ``columns`` — a list of
     ``{ordinal_position, column_name, data_type}`` dicts.
     """
-    neo4j_conn = get_nemo_neo4j_conn()
+    neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
         f"""
-        MATCH (t:{Labels.TABLE})-[r]->(c:{Labels.COLUMN})
-        WHERE (t.id = $table_id OR t.name = $table_id)
-          AND type(r) IN ['{RelTypes.CONTAINS}', '{_LEGACY_REL_TABLE_TO_COLUMN}']
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{RelTypes.CONTAINS}]->(c:{Labels.COLUMN})
         WITH t, c ORDER BY c.ordinal_position
         WITH t, collect({{
                  ordinal_position: c.ordinal_position,

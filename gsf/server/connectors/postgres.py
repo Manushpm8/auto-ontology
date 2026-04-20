@@ -19,12 +19,22 @@ class PostgresDatabase(SQLDatabase):
     connection_string:
         A ``libpq``-style connection URI, e.g.
         ``postgresql://user:pass@host:5432/dbname``.
+    database_name:
+        Optional display name for the database. When provided, it overrides the
+        value placed in the ``database`` column returned by the introspection
+        methods. Useful when the desired catalog name differs from the physical
+        Postgres database (e.g. ``"Northwind DW"`` vs. ``"northwind_dw"``).
     """
 
-    def __init__(self, connection_string: str) -> None:
+    def __init__(
+        self,
+        connection_string: str,
+        *,
+        database_name: Optional[str] = None,
+    ) -> None:
         self._connection_string = connection_string
         self._conn: psycopg2.extensions.connection = psycopg2.connect(connection_string)
-        self._db_name = self._conn.info.dbname
+        self._db_name = database_name or self._conn.info.dbname
 
     # ------------------------------------------------------------------
     # Execution
@@ -39,6 +49,14 @@ class PostgresDatabase(SQLDatabase):
             rows = cur.fetchall()
         return pd.DataFrame(rows)
 
+    def _with_database(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Prepend a ``database`` column so NeMo ingestion can partition by DB."""
+        if df.empty or "database" in df.columns:
+            return df
+        df = df.copy()
+        df.insert(0, "database", self._db_name)
+        return df
+
     # ------------------------------------------------------------------
     # Schema introspection
     # ------------------------------------------------------------------
@@ -52,7 +70,7 @@ class PostgresDatabase(SQLDatabase):
             WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY t.table_schema, t.table_name
         """
-        return self.execute(sql)
+        return self._with_database(self.execute(sql))
 
     def get_columns(self) -> pd.DataFrame:
         sql = """
@@ -67,7 +85,7 @@ class PostgresDatabase(SQLDatabase):
             WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY c.table_schema, c.table_name, c.ordinal_position
         """
-        return self.execute(sql)
+        return self._with_database(self.execute(sql))
 
     def get_queries(self) -> pd.DataFrame:
         """Return recent queries from ``pg_stat_statements`` if available."""
@@ -95,7 +113,7 @@ class PostgresDatabase(SQLDatabase):
             WHERE v.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY v.table_schema, v.table_name
         """
-        return self.execute(sql)
+        return self._with_database(self.execute(sql))
 
     def get_pks(self) -> pd.DataFrame:
         sql = """
@@ -112,7 +130,7 @@ class PostgresDatabase(SQLDatabase):
               AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY kcu.table_schema, kcu.table_name, kcu.ordinal_position
         """
-        return self.execute(sql)
+        return self._with_database(self.execute(sql))
 
     def get_fks(self) -> pd.DataFrame:
         sql = """
@@ -134,7 +152,7 @@ class PostgresDatabase(SQLDatabase):
               AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY kcu.table_schema, kcu.table_name, kcu.column_name
         """
-        return self.execute(sql)
+        return self._with_database(self.execute(sql))
 
     # ------------------------------------------------------------------
     # Lifecycle

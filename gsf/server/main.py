@@ -7,7 +7,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from nemo_retriever.tabular_data.neo4j import neo4j_connection
-from server.datasources.router import router as datasources_router
+
+from server.env import load_server_env
+
+load_server_env()
+
+from server.datasources.router import router as datasources_router  # noqa: E402
 
 
 @asynccontextmanager
