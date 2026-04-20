@@ -53,7 +53,7 @@ export function resolveTreeNode(focusId: string | null, databases: Database[]): 
 					return { type: DataModels.TABLE, database, schema, table };
 
 				for (const column of table.columns) {
-					if (segments.length === 4 && segments[3] === column.column_name) {
+					if (segments.length === 4 && segments[3] === column.id) {
 						return { type: DataModels.COLUMN, database, schema, table, column };
 					}
 				}
@@ -276,7 +276,7 @@ export function buildTreeFocusPageFormat(
 					header: {
 						title: column.column_name,
 						subtitle: `Column · ${column.schema_name} · ${column.table_name} · ${column.db_name}`,
-						entityId: column.column_name,
+						entityId: column.id,
 						parentId: table.id,
 					},
 				},

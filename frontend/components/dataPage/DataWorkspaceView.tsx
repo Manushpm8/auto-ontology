@@ -15,8 +15,6 @@ import {
 	patchNodeInTree,
 } from '@/lib/data/datasource-tree-merge';
 import { datasources } from '@/api/datasources';
-import { resolveTreeNode } from '@/lib/data/tree-focus-page';
-import { DataModels } from '@/enums/datasources';
 
 export type DataWorkspaceViewProps = {
 	databases: Database[];
@@ -217,13 +215,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 				getSinglePage={getSinglePage}
 				isEditing={isEditing}
 				onSave={async (description: string) => {
-					const resolved = resolveTreeNode(treeFocusId, databasesRef.current);
-
-					let nodeId: string | null = null;
-					if (resolved.type === DataModels.COLUMN) nodeId = resolved.column.id;
-					else if (resolved.type === DataModels.DB) nodeId = resolved.database.id;
-					else if (resolved.type === DataModels.SCHEMA) nodeId = resolved.schema.id;
-					else if (resolved.type === DataModels.TABLE) nodeId = resolved.table.id;
+					const nodeId = treeFocusId?.split('|').at(-1) ?? null;
 
 					if (nodeId) {
 						await datasources.updateNode(nodeId, { description });

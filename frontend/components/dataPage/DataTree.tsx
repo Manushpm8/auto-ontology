@@ -266,10 +266,10 @@ function TableBlock({
 			{open && table.columns.length > 0
 				? table.columns.map((col) => (
 						<ColumnBlock
-							key={col.column_name}
+							key={col.id}
 							depth={depth + 1}
 							column={col}
-							columnFocusPath={`${tableFocusPath}|${col.column_name}`}
+							columnFocusPath={`${tableFocusPath}|${col.id}`}
 							selectedId={selectedId}
 							pathBase={pathBase}
 						/>

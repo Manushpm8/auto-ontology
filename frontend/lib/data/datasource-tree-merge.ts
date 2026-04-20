@@ -64,21 +64,31 @@ export function mergeColumnsIntoTable(
 function mergeTable(existing: Table, incoming: Table): Table {
 	const existingColumns = existing.columns ?? [];
 	const incomingColumns = incoming.columns ?? [];
-	const richestColumns =
-		incomingColumns.length > existingColumns.length
-			? incomingColumns
-			: existingColumns.length > 0
-				? existingColumns
-				: incomingColumns;
+
+	let columns: Column[];
+	if (existingColumns.length === 0) {
+		columns = incomingColumns;
+	} else if (incomingColumns.length === 0) {
+		columns = existingColumns;
+	} else {
+		const colById = new Map(existingColumns.map((c) => [c.id, c]));
+		for (const col of incomingColumns) {
+			const match = colById.get(col.id);
+			colById.set(col.id, match ? { ...match, ...col } : col);
+		}
+		const orderedIds = existingColumns.map((c) => c.id);
+		const seen = new Set(orderedIds);
+		for (const col of incomingColumns) {
+			if (!seen.has(col.id)) orderedIds.push(col.id);
+		}
+		columns = orderedIds.map((id) => colById.get(id)!);
+	}
+
 	return {
 		...existing,
 		...incoming,
-		columns: richestColumns,
-		columns_count: Math.max(
-			existing.columns_count,
-			incoming.columns_count,
-			richestColumns.length,
-		),
+		columns,
+		columns_count: Math.max(existing.columns_count, incoming.columns_count, columns.length),
 	};
 }
 
