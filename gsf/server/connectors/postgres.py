@@ -24,6 +24,15 @@ class PostgresDatabase(SQLDatabase):
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
         self._conn: psycopg2.extensions.connection = psycopg2.connect(connection_string)
+        self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
+
+    @property
+    def dialect(self) -> str:
+        return "postgres"
+
+    @property
+    def database_name(self) -> str:
+        return self._database_name
 
     # ------------------------------------------------------------------
     # Execution
@@ -45,8 +54,7 @@ class PostgresDatabase(SQLDatabase):
     def get_tables(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                t.table_catalog   AS database,
-                t.table_schema    AS schema,
+                t.table_schema    AS table_schema,
                 t.table_name      AS table_name
             FROM information_schema.tables t
             WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
@@ -56,8 +64,7 @@ class PostgresDatabase(SQLDatabase):
     def get_columns(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                c.table_catalog      AS database,
-                c.table_schema       AS schema,
+                c.table_schema       AS table_schema,
                 c.table_name         AS table_name,
                 c.column_name        AS column_name,
                 c.data_type          AS data_type,
@@ -86,8 +93,7 @@ class PostgresDatabase(SQLDatabase):
     def get_views(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                v.table_catalog    AS database,
-                v.table_schema     AS schema,
+                v.table_schema     AS table_schema,
                 v.table_name       AS table_name,
                 v.view_definition  AS view_definition
             FROM information_schema.views v
@@ -98,8 +104,7 @@ class PostgresDatabase(SQLDatabase):
     def get_pks(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                kcu.table_catalog        AS database,
-                kcu.table_schema         AS schema,
+                kcu.table_schema         AS table_schema,
                 kcu.table_name           AS table_name,
                 kcu.column_name          AS column_name,
                 kcu.ordinal_position     AS ordinal_position
@@ -115,8 +120,7 @@ class PostgresDatabase(SQLDatabase):
     def get_fks(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                kcu.table_catalog        AS database,
-                kcu.table_schema         AS schema,
+                kcu.table_schema         AS table_schema,
                 kcu.table_name           AS table_name,
                 kcu.column_name          AS column_name,
                 ccu.table_schema         AS referenced_schema,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels, RelTypes
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 
@@ -19,7 +19,7 @@ def list_databases() -> list[dict[str, Any]]:
 
     rows = neo4j_conn.query_read(
         f"""
-        MATCH (db:{Labels.DB})-[:{RelTypes.CONTAINS}]->(s:{Labels.SCHEMA})
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
         RETURN db.id AS id, db.name AS name, count(s) AS schema_count
         ORDER BY name
         """,
@@ -47,8 +47,8 @@ def list_schemas_for_database(db_id: str) -> dict[str, Any] | None:
     neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
         f"""
-        MATCH (db:{Labels.DB} {{id: $db_id}})-[:{RelTypes.CONTAINS}]->
-              (s:{Labels.SCHEMA})-[:{RelTypes.CONTAINS}]->(t:{Labels.TABLE})
+        MATCH (db:{Labels.DB} {{id: $db_id}})-[:{Edges.CONTAINS}]->
+              (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
         WITH s.id AS id, s.name AS schema_name, count(t) AS tables_count
         ORDER BY schema_name
         WITH collect({{id: id, schema_name: schema_name, tables_count: tables_count}}) AS schemas
@@ -77,8 +77,8 @@ def list_tables_for_schema(
     neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
         f"""
-        MATCH (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{RelTypes.CONTAINS}]->
-              (t:{Labels.TABLE})-[:{RelTypes.CONTAINS}]->(c:{Labels.COLUMN})
+        MATCH (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{Edges.CONTAINS}]->
+              (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
         RETURN t.id AS id,
                t.name AS name,
                t.db_name AS db_name,
@@ -105,7 +105,7 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
     neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
         f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{RelTypes.CONTAINS}]->(c:{Labels.COLUMN})
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
         WITH t, c ORDER BY c.ordinal_position
         WITH t, collect({{
                  ordinal_position: c.ordinal_position,

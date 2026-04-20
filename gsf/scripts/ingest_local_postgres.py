@@ -46,7 +46,7 @@ def ingest(databases: Iterable[str] = DATABASES) -> None:
         connector = PostgresDatabase(_conn_string(db))
         try:
             data = data_for_populate_tabular(connector)
-            populate_tabular_data(data, num_workers=4, dialect="postgres")
+            populate_tabular_data(data, num_workers=4, dialect=connector.dialect)
         finally:
             connector.close()
 
