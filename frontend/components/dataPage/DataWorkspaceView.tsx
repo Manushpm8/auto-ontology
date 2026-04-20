@@ -215,8 +215,8 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 				treeFocusId={treeFocusId}
 				treeDataEpoch={treeDataEpoch}
 				getSinglePage={getSinglePage}
-				isEditingDescription={isEditing}
-				onSaveDescription={async (description: string) => {
+				isEditing={isEditing}
+				onSave={async (description: string) => {
 					const resolved = resolveTreeNode(treeFocusId, databasesRef.current);
 
 					let nodeId: string | null = null;
@@ -236,7 +236,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 					setTreeDataEpoch((n) => n + 1);
 					setIsEditing(false);
 				}}
-				onCancelEdit={() => setIsEditing(false)}
+				onCancel={() => setIsEditing(false)}
 			/>
 		</div>
 	);
