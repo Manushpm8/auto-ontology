@@ -47,3 +47,7 @@ frontend/generated/
 next-env.d.ts
 
 lancedb/*
+
+# DuckDB database files
+*.duckdb
+*.duckdb.wal

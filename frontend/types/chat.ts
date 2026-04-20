@@ -8,7 +8,6 @@ export type ChatMessage = {
 
 export type ChatRequest = {
 	question: string;
-	dialect?: string;
 	connectorId?: string;
 	acronyms?: string;
 	customPrompts?: string;

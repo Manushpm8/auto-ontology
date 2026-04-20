@@ -25,7 +25,6 @@ export const streamChat = (
 
 	const body = JSON.stringify({
 		question: payload.question,
-		dialect: payload.dialect ?? null,
 		connector_id: payload.connectorId ?? null,
 		acronyms: payload.acronyms ?? null,
 		custom_prompts: payload.customPrompts ?? null,

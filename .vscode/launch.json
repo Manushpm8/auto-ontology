@@ -2,24 +2,23 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug Python",
+      "name": "Debug API",
       "type": "debugpy",
       "request": "launch",
       "module": "uvicorn",
       "args": [
-        "app.main:app",
+        "server.main:app",
         "--reload",
         "--host",
         "127.0.0.1",
         "--port",
         "3001"
       ],
-      "cwd": "${workspaceFolder}/python",
-      "python": "${workspaceFolder}/python/.venv/bin/python",
-      "jinja": true,
+      "cwd": "${workspaceFolder}/gsf",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/python"
-      }
+        "PYTHONPATH": "${workspaceFolder}/gsf"
+      },
+      "justMyCode": false
     }
   ]
 }
