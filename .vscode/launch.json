@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Python",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "app.main:app",
+        "--reload",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "3001"
+      ],
+      "cwd": "${workspaceFolder}/python",
+      "python": "${workspaceFolder}/python/.venv/bin/python",
+      "jinja": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/python"
+      }
+    }
+  ]
+}

@@ -9,20 +9,35 @@ The **frontend** (`frontend/`) and the **Python API** (`gsf/`) must both be runn
 ### One-time setup
 
 ```bash
+cp .env.example .env   # then edit credentials as needed
 pnpm install
 uv sync
 ```
 
 ### Start development
 
-From the repo root, run each in a separate terminal:
+Full stack (infrastructure + Next.js + FastAPI):
+
+```bash
+./scripts/setup_env.sh
+```
+
+Or infrastructure only (Postgres, pgAdmin, Neo4j):
+
+```bash
+./scripts/setup_env.sh --dev
+```
+
+Then start the app manually:
 
 ```bash
 pnpm dev        # Next.js on port 3000
 pnpm dev:api    # FastAPI on port 3001
 ```
 
-Then open **http://localhost:3000**.
+Open **http://localhost:3000**.
+
+See [scripts/README.md](scripts/README.md) for all available flags.
 
 ### Optional
 

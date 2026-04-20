@@ -12,6 +12,7 @@ from server.env import load_server_env
 
 load_server_env()
 
+from server.chat.router import router as chat_router  # noqa: E402
 from server.datasources.router import router as datasources_router  # noqa: E402
 
 
@@ -39,6 +40,7 @@ app.add_middleware(
 app.include_router(
     datasources_router, prefix="/api", tags=["datasources", "connectors"]
 )
+app.include_router(chat_router, prefix="/api", tags=["chat"])
 
 
 @app.get("/api/health")
