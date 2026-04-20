@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from infra.Neo4jConnection import get_driver
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+
+
 # ---------------------------------------------------------------------------
 # Graph queries (public API for routers / services)
 # ---------------------------------------------------------------------------
@@ -12,17 +15,14 @@ from infra.Neo4jConnection import get_driver
 
 def list_databases() -> list[dict[str, Any]]:
     """Return Database rows with schema counts only; ``schemas`` is empty for lazy trees."""
-    driver = get_driver()
+    neo4j_conn = get_neo4j_conn()
 
-    # Default routing is WRITE — same practical behavior as Session.run() on
-    # bolt://; READ routing can fail on standalone instances.
-    rows, _, _ = driver.execute_query(
-        """
-        MATCH (db:Database)-[:CONTAINS]->(s:Schema)
-        RETURN db.id as id, db.name as name, count(s) as schema_count
+    rows = neo4j_conn.query_read(
+        f"""
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+        RETURN db.id AS id, db.name AS name, count(s) AS schema_count
         ORDER BY name
         """,
-        database_="neo4j",
     )
 
     return [
@@ -44,18 +44,17 @@ def list_schemas_for_database(db_id: str) -> dict[str, Any] | None:
 
     Returns ``None`` if no ``Database`` matches ``db_id``.
     """
-    driver = get_driver()
-
-    rows, _, _ = driver.execute_query(
-        """
-        MATCH (db:Database {id: $db_id})-[:CONTAINS]->(s:Schema)-[:CONTAINS]->(t:Table)
+    neo4j_conn = get_neo4j_conn()
+    rows = neo4j_conn.query_read(
+        f"""
+        MATCH (db:{Labels.DB} {{id: $db_id}})-[:{Edges.CONTAINS}]->
+              (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
         WITH s.id AS id, s.name AS schema_name, count(t) AS tables_count
         ORDER BY schema_name
-        WITH collect({id: id, schema_name: schema_name, tables_count: tables_count}) AS schemas
+        WITH collect({{id: id, schema_name: schema_name, tables_count: tables_count}}) AS schemas
         RETURN size(schemas) AS schemas_count, schemas
         """,
-        db_id=db_id,
-        database_="neo4j",
+        {"db_id": db_id},
     )
 
     record = rows[0]
@@ -75,11 +74,11 @@ def list_tables_for_schema(
     Each table dict contains ``database_name``, ``schema_name``, ``name``,
     and ``columns_count``.
     """
-    driver = get_driver()
-
-    rows, _, _ = driver.execute_query(
-        """
-        MATCH (s:Schema {id: $schema_id})-[:CONTAINS]->(t:Table)-[:CONTAINS]->(c:Column)
+    neo4j_conn = get_neo4j_conn()
+    rows = neo4j_conn.query_read(
+        f"""
+        MATCH (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{Edges.CONTAINS}]->
+              (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
         RETURN t.id AS id,
                t.name AS name,
                t.db_name AS db_name,
@@ -87,12 +86,13 @@ def list_tables_for_schema(
                count(c) AS columns_count
         ORDER BY name
         """,
-        schema_id=schema_id,
-        database_name=database_name,
-        database_="neo4j",
+        {
+            "schema_id": schema_id,
+            "database_name": database_name,
+        },
     )
 
-    return [dict(r) for r in rows]
+    return rows
 
 
 def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
@@ -102,25 +102,23 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
     node), ``columns_count``, and ``columns`` — a list of
     ``{ordinal_position, column_name, data_type}`` dicts.
     """
-    driver = get_driver()
-
-    rows, _, _ = driver.execute_query(
-        """
-        MATCH (t:Table {id: $table_id})-[:CONTAINS]->(c:Column)
+    neo4j_conn = get_neo4j_conn()
+    rows = neo4j_conn.query_read(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
         WITH t, c ORDER BY c.ordinal_position
-        WITH t, collect({
+        WITH t, collect({{
                  ordinal_position: c.ordinal_position,
                  column_name: c.name,
                  data_type: c.data_type
-             }) AS columns
+             }}) AS columns
         RETURN t.name AS table_name,
                t.schema_name AS schema_name,
                t.db_name AS db_name,
                size(columns) AS columns_count,
                columns
         """,
-        table_id=table_id,
-        database_="neo4j",
+        {"table_id": table_id},
     )
 
-    return dict(rows[0])
+    return rows[0]

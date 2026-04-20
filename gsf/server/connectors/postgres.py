@@ -24,7 +24,15 @@ class PostgresDatabase(SQLDatabase):
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
         self._conn: psycopg2.extensions.connection = psycopg2.connect(connection_string)
-        self._db_name = self._conn.info.dbname
+        self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
+
+    @property
+    def dialect(self) -> str:
+        return "postgres"
+
+    @property
+    def database_name(self) -> str:
+        return self._database_name
 
     # ------------------------------------------------------------------
     # Execution
@@ -44,20 +52,19 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def get_tables(self) -> pd.DataFrame:
-        sql = """
+        return self.execute("""
             SELECT
-                t.table_schema    AS schema,
+                t.table_schema    AS table_schema,
                 t.table_name      AS table_name
             FROM information_schema.tables t
             WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY t.table_schema, t.table_name
-        """
-        return self.execute(sql)
+        """)
 
     def get_columns(self) -> pd.DataFrame:
-        sql = """
+        return self.execute("""
             SELECT
-                c.table_schema       AS schema,
+                c.table_schema       AS table_schema,
                 c.table_name         AS table_name,
                 c.column_name        AS column_name,
                 c.data_type          AS data_type,
@@ -66,41 +73,38 @@ class PostgresDatabase(SQLDatabase):
             FROM information_schema.columns c
             WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY c.table_schema, c.table_name, c.ordinal_position
-        """
-        return self.execute(sql)
+        """)
 
     def get_queries(self) -> pd.DataFrame:
         """Return recent queries from ``pg_stat_statements`` if available."""
         try:
-            sql = """
+            return self.execute("""
                 SELECT
                     now()      AS end_time,
                     query      AS query_text
                 FROM pg_stat_statements
                 ORDER BY total_exec_time DESC
                 LIMIT 100
-            """
-            return self.execute(sql)
+            """)
         except psycopg2.Error:
             self._conn.rollback()
             return pd.DataFrame(columns=["end_time", "query_text"])
 
     def get_views(self) -> pd.DataFrame:
-        sql = """
+        return self.execute("""
             SELECT
-                v.table_schema     AS schema,
+                v.table_schema     AS table_schema,
                 v.table_name       AS table_name,
                 v.view_definition  AS view_definition
             FROM information_schema.views v
             WHERE v.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY v.table_schema, v.table_name
-        """
-        return self.execute(sql)
+        """)
 
     def get_pks(self) -> pd.DataFrame:
-        sql = """
+        return self.execute("""
             SELECT
-                kcu.table_schema         AS schema,
+                kcu.table_schema         AS table_schema,
                 kcu.table_name           AS table_name,
                 kcu.column_name          AS column_name,
                 kcu.ordinal_position     AS ordinal_position
@@ -111,13 +115,12 @@ class PostgresDatabase(SQLDatabase):
             WHERE tc.constraint_type = 'PRIMARY KEY'
               AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY kcu.table_schema, kcu.table_name, kcu.ordinal_position
-        """
-        return self.execute(sql)
+        """)
 
     def get_fks(self) -> pd.DataFrame:
-        sql = """
+        return self.execute("""
             SELECT
-                kcu.table_schema         AS schema,
+                kcu.table_schema         AS table_schema,
                 kcu.table_name           AS table_name,
                 kcu.column_name          AS column_name,
                 ccu.table_schema         AS referenced_schema,
@@ -133,8 +136,7 @@ class PostgresDatabase(SQLDatabase):
             WHERE tc.constraint_type = 'FOREIGN KEY'
               AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY kcu.table_schema, kcu.table_name, kcu.column_name
-        """
-        return self.execute(sql)
+        """)
 
     # ------------------------------------------------------------------
     # Lifecycle
