@@ -7,6 +7,14 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels, RelTypes
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+_LABELS = {
+    "db": Labels.DB,
+    "schema": Labels.SCHEMA,
+    "table": Labels.TABLE,
+    "column": Labels.COLUMN,
+    "contains": RelTypes.CONTAINS,
+}
+
 
 # ---------------------------------------------------------------------------
 # Graph queries (public API for routers / services)
@@ -18,11 +26,12 @@ def list_databases() -> list[dict[str, Any]]:
     neo4j_conn = get_neo4j_conn()
 
     rows = neo4j_conn.query_read(
-        f"""
-        MATCH (db:{Labels.DB})-[:{RelTypes.CONTAINS}]->(s:{Labels.SCHEMA})
+        """
+        MATCH (db:%(db)s)-[:%(contains)s]->(s:%(schema)s)
         RETURN db.id AS id, db.name AS name, count(s) AS schema_count
         ORDER BY name
-        """,
+        """
+        % _LABELS,
     )
 
     return [
@@ -46,14 +55,15 @@ def list_schemas_for_database(db_id: str) -> dict[str, Any] | None:
     """
     neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
-        f"""
-        MATCH (db:{Labels.DB} {{id: $db_id}})-[:{RelTypes.CONTAINS}]->
-              (s:{Labels.SCHEMA})-[:{RelTypes.CONTAINS}]->(t:{Labels.TABLE})
+        """
+        MATCH (db:%(db)s {id: $db_id})-[:%(contains)s]->
+              (s:%(schema)s)-[:%(contains)s]->(t:%(table)s)
         WITH s.id AS id, s.name AS schema_name, count(t) AS tables_count
         ORDER BY schema_name
-        WITH collect({{id: id, schema_name: schema_name, tables_count: tables_count}}) AS schemas
+        WITH collect({id: id, schema_name: schema_name, tables_count: tables_count}) AS schemas
         RETURN size(schemas) AS schemas_count, schemas
-        """,
+        """
+        % _LABELS,
         {"db_id": db_id},
     )
 
@@ -76,16 +86,17 @@ def list_tables_for_schema(
     """
     neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
-        f"""
-        MATCH (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{RelTypes.CONTAINS}]->
-              (t:{Labels.TABLE})-[:{RelTypes.CONTAINS}]->(c:{Labels.COLUMN})
+        """
+        MATCH (s:%(schema)s {id: $schema_id})-[:%(contains)s]->
+              (t:%(table)s)-[:%(contains)s]->(c:%(column)s)
         RETURN t.id AS id,
                t.name AS name,
                t.db_name AS db_name,
                t.schema_name AS schema_name,
                count(c) AS columns_count
         ORDER BY name
-        """,
+        """
+        % _LABELS,
         {
             "schema_id": schema_id,
             "database_name": database_name,
@@ -104,20 +115,21 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
     """
     neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{RelTypes.CONTAINS}]->(c:{Labels.COLUMN})
+        """
+        MATCH (t:%(table)s {id: $table_id})-[:%(contains)s]->(c:%(column)s)
         WITH t, c ORDER BY c.ordinal_position
-        WITH t, collect({{
+        WITH t, collect({
                  ordinal_position: c.ordinal_position,
                  column_name: c.name,
                  data_type: c.data_type
-             }}) AS columns
+             }) AS columns
         RETURN t.name AS table_name,
                t.schema_name AS schema_name,
                t.db_name AS db_name,
                size(columns) AS columns_count,
                columns
-        """,
+        """
+        % _LABELS,
         {"table_id": table_id},
     )
 

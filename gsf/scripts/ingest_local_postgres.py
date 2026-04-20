@@ -1,8 +1,6 @@
 """Ingest the local docker-compose Postgres into Neo4j via NeMo Retriever.
 
-Run after ``docker compose up -d`` with the default credentials. Each physical
-Postgres database is ingested under the display name that used to live in
-Neo4j (e.g. ``northwind_dw`` -> ``Northwind DW``).
+Run after ``docker compose up -d`` and ``scripts.seed_local_postgres``.
 
 Usage::
 
@@ -15,9 +13,7 @@ import logging
 import os
 from typing import Iterable
 
-from nemo_retriever.tabular_data.ingestion.extract_data import (
-    data_for_populate_tabular,
-)
+from nemo_retriever.tabular_data.ingestion.extract_data import data_for_populate_tabular
 from nemo_retriever.tabular_data.ingestion.write_to_graph import populate_tabular_data
 
 from server.connectors.postgres import PostgresDatabase
@@ -30,13 +26,7 @@ DEFAULT_POSTGRES_PORT = 5432
 DEFAULT_POSTGRES_USER = "gsf"
 DEFAULT_POSTGRES_PASSWORD = "gsf"
 
-# (physical_db_name, display_name)
-SEEDED_DATABASES: tuple[tuple[str, str], ...] = (
-    ("northwind_dw", "Northwind DW"),
-    ("ops_oltp", "Ops OLTP"),
-    ("sales_lake", "Sales Lake"),
-    ("testdb", "testdb"),
-)
+DATABASES: tuple[str, ...] = ("testdb",)
 
 
 def _conn_string(db: str) -> str:
@@ -47,16 +37,13 @@ def _conn_string(db: str) -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
-def ingest(databases: Iterable[tuple[str, str]] = SEEDED_DATABASES) -> None:
-    """Ingest each ``(physical_db, display_name)`` pair into Neo4j."""
+def ingest(databases: Iterable[str] = DATABASES) -> None:
+    """Ingest each Postgres database in ``databases`` into Neo4j."""
     load_server_env()
 
-    for physical_db, display_name in databases:
-        logger.info("Ingesting %s (as %r)", physical_db, display_name)
-        connector = PostgresDatabase(
-            _conn_string(physical_db),
-            database_name=display_name,
-        )
+    for db in databases:
+        logger.info("Ingesting %s", db)
+        connector = PostgresDatabase(_conn_string(db))
         try:
             data = data_for_populate_tabular(connector)
             populate_tabular_data(data, num_workers=4, dialect="postgres")
