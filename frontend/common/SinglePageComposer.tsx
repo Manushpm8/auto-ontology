@@ -42,18 +42,22 @@ function composerSectionHeading(section: ComposerSection): string {
 
 const EditableDescriptionCard = ({
 	section,
-	value,
-	onChange,
+	valueRef,
 }: {
 	section: { title: string; body: string };
-	value: string;
-	onChange: (value: string) => void;
+	valueRef: React.MutableRefObject<string>;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	const [value, setValue] = useState(section.body);
 
 	useEffect(() => {
 		textareaRef.current?.focus();
 	}, []);
+
+	const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+		setValue(e.target.value);
+		valueRef.current = e.target.value;
+	};
 
 	return (
 		<div
@@ -66,7 +70,7 @@ const EditableDescriptionCard = ({
 			<textarea
 				ref={textareaRef}
 				value={value}
-				onChange={(e) => onChange(e.target.value)}
+				onChange={handleChange}
 				rows={4}
 				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-emerald-400 dark:focus:ring-emerald-400/30"
 			/>
@@ -209,15 +213,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				s.id === 'description',
 		) as (ComposerSection & { body: string }) | undefined;
 
-		const [pendingDescription, setPendingDescription] = useState(
-			descriptionSection?.body ?? '',
-		);
-
-		useEffect(() => {
-			if (isEditing && descriptionSection) {
-				setPendingDescription(descriptionSection.body);
-			}
-		}, [isEditing, descriptionSection]);
+		const pendingDescriptionRef = useRef(descriptionSection?.body ?? '');
 
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
@@ -324,55 +320,55 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								) : null}
 							</dl>
 						</div>
-					<div className="flex flex-wrap items-center gap-2">
-						{isEditing ? (
-							<>
-								<button
-									type="button"
-									className="inline-flex items-center rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 hover:border-emerald-700 active:scale-[0.97] dark:bg-emerald-500 dark:border-emerald-500 dark:hover:bg-emerald-600 dark:hover:border-emerald-600"
-									onClick={() => onSave?.(pendingDescription)}
-								>
-									Save
-								</button>
-								<button
-									type="button"
-									className="inline-flex items-center rounded-lg border border-zinc-300 bg-white px-4 py-1.5 text-sm font-medium text-zinc-700 shadow-sm transition-all hover:bg-zinc-50 active:scale-[0.97] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-									onClick={onCancel}
-								>
-									Cancel
-								</button>
-							</>
-						) : editProps && editProps.onBeginEdit && editProps.onFinishEdit ? (
-							editProps.editMode ? (
+						<div className="flex flex-wrap items-center gap-2">
+							{isEditing ? (
 								<>
 									<button
 										type="button"
-										disabled={editProps.isLoadingUpdate}
-										className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-										onClick={() => editProps.onFinishEdit?.(true)}
+										className="inline-flex items-center rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 hover:border-emerald-700 active:scale-[0.97] dark:bg-emerald-500 dark:border-emerald-500 dark:hover:bg-emerald-600 dark:hover:border-emerald-600"
+										onClick={() => onSave?.(pendingDescriptionRef.current)}
 									>
-										{editProps.isLoadingUpdate ? 'Saving…' : 'Save'}
+										Save
 									</button>
 									<button
 										type="button"
-										disabled={editProps.isLoadingUpdate}
-										className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
-										onClick={() => editProps.onFinishEdit?.(false)}
+										className="inline-flex items-center rounded-lg border border-zinc-300 bg-white px-4 py-1.5 text-sm font-medium text-zinc-700 shadow-sm transition-all hover:bg-zinc-50 active:scale-[0.97] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+										onClick={onCancel}
 									>
 										Cancel
 									</button>
 								</>
-							) : (
-								<button
-									type="button"
-									className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-									onClick={() => editProps.onBeginEdit?.()}
-								>
-									Edit
-								</button>
-							)
-						) : null}
-					</div>
+							) : editProps && editProps.onBeginEdit && editProps.onFinishEdit ? (
+								editProps.editMode ? (
+									<>
+										<button
+											type="button"
+											disabled={editProps.isLoadingUpdate}
+											className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+											onClick={() => editProps.onFinishEdit?.(true)}
+										>
+											{editProps.isLoadingUpdate ? 'Saving…' : 'Save'}
+										</button>
+										<button
+											type="button"
+											disabled={editProps.isLoadingUpdate}
+											className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
+											onClick={() => editProps.onFinishEdit?.(false)}
+										>
+											Cancel
+										</button>
+									</>
+								) : (
+									<button
+										type="button"
+										className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+										onClick={() => editProps.onBeginEdit?.()}
+									>
+										Edit
+									</button>
+								)
+							) : null}
+						</div>
 					</div>
 				</header>
 
@@ -424,11 +420,10 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 											{isEditing &&
 											section.type === ComposerSectionKind.TEXT_CARD &&
 											section.id === 'description' ? (
-											<EditableDescriptionCard
-												section={section}
-												value={pendingDescription}
-												onChange={setPendingDescription}
-											/>
+												<EditableDescriptionCard
+													section={section}
+													valueRef={pendingDescriptionRef}
+												/>
 											) : (
 												renderComposerSection(section)
 											)}
