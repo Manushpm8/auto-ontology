@@ -7,7 +7,6 @@ dependencies = [
     "nemo-retriever",
     "neo4j>=6.1.0",
     "pandas>=2.0,<3",
-    "psycopg2-binary>=2.9.11",
     "python-dotenv>=1.2.2",
     "uvicorn[standard]>=0.32.0",
 ]

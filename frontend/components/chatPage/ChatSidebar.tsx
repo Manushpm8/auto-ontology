@@ -93,11 +93,11 @@ function ConversationItem({
 			<button
 				type="button"
 				onClick={onSelect}
-			className={`w-full rounded-lg px-3 py-2 pr-8 text-left text-sm transition-colors ${
-			isActive
-				? 'bg-zinc-100 font-medium text-black'
-				: 'text-zinc-700 hover:bg-zinc-100 hover:text-black'
-			}`}
+				className={`w-full rounded-lg px-3 py-2 pr-8 text-left text-sm transition-colors ${
+					isActive
+						? 'bg-zinc-100 font-medium text-black'
+						: 'text-zinc-700 hover:bg-zinc-100 hover:text-black'
+				}`}
 			>
 				<span className="line-clamp-1">{conv.title}</span>
 				<span className="mt-0.5 block text-[10px] text-zinc-500">
@@ -198,14 +198,12 @@ export const ChatSidebar = ({
 					isOpen ? 'translate-x-0' : '-translate-x-full'
 				}`}
 			>
-		<div className="flex h-[65px] w-full shrink-0 items-center border-b border-zinc-200 px-4">
-			<Link href="/" className="flex items-center gap-3">
-				<Icon name={IconName.NvidiaLogo} className="h-6 w-auto text-[#76b900]" />
-				<span className="text-sm font-semibold tracking-wide text-black">
-					GSF
-				</span>
-			</Link>
-		</div>
+				<div className="flex h-[65px] w-full shrink-0 items-center border-b border-zinc-200 px-4">
+					<Link href="/" className="flex items-center gap-3">
+						<Icon name={IconName.NvidiaLogo} className="h-6 w-auto text-[#76b900]" />
+						<span className="text-sm font-semibold tracking-wide text-black">GSF</span>
+					</Link>
+				</div>
 
 				<div className="px-3 py-3">
 					<button
@@ -218,28 +216,27 @@ export const ChatSidebar = ({
 					</button>
 				</div>
 
-			<nav className="flex-1 overflow-y-auto px-2 pb-2">
-				{conversations.length === 0 ? (
-					<p className="px-2 py-4 text-center text-xs text-zinc-500">
-						No conversations yet
-					</p>
-				) : (
-					<ul className="space-y-0.5">
-						{conversations.map((conv) => (
-							<ConversationItem
-								key={conv.id}
-								conv={conv}
-								isActive={activeId === conv.id}
-								onSelect={() => onSelect(conv.id)}
-								onRename={(title) => onRename(conv.id, title)}
-								onDelete={() => onDelete(conv.id)}
-							/>
-						))}
-					</ul>
-				)}
-			</nav>
-
-		</aside>
+				<nav className="flex-1 overflow-y-auto px-2 pb-2">
+					{conversations.length === 0 ? (
+						<p className="px-2 py-4 text-center text-xs text-zinc-500">
+							No conversations yet
+						</p>
+					) : (
+						<ul className="space-y-0.5">
+							{conversations.map((conv) => (
+								<ConversationItem
+									key={conv.id}
+									conv={conv}
+									isActive={activeId === conv.id}
+									onSelect={() => onSelect(conv.id)}
+									onRename={(title) => onRename(conv.id, title)}
+									onDelete={() => onDelete(conv.id)}
+								/>
+							))}
+						</ul>
+					)}
+				</nav>
+			</aside>
 		</>
 	);
 };
