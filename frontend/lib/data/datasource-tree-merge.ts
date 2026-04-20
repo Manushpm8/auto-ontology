@@ -1,122 +1,140 @@
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 
 export function mergeSchemasIntoDatabase(
-	dbs: Database[],
-	dbId: string,
+	databases: Database[],
+	databaseId: string,
 	schemas: Schema[],
 ): Database[] {
-	return dbs.map((db) => (db.id === dbId ? { ...db, schemas } : db));
+	return databases.map((database) =>
+		database.id === databaseId ? { ...database, schemas } : database,
+	);
 }
 
 export function mergeTablesIntoSchema(
-	dbs: Database[],
+	databases: Database[],
 	schemaId: string,
 	tables: Table[],
 ): Database[] {
-	return dbs.map((db) => ({
-		...db,
-		schemas: db.schemas.map((s) => (s.id === schemaId ? { ...s, tables } : s)),
+	return databases.map((database) => ({
+		...database,
+		schemas: database.schemas.map((schema) =>
+			schema.id === schemaId ? { ...schema, tables } : schema,
+		),
 	}));
 }
 
 /** Upsert columns for one table (merged from columns API). */
 export function mergeColumnsIntoTable(
-	dbs: Database[],
+	databases: Database[],
 	tableId: string,
 	columns: Column[],
 ): Database[] {
-	return dbs.map((db) => ({
-		...db,
-		schemas: (db.schemas ?? []).map((s) => ({
-			...s,
-			tables: (s.tables ?? []).map((t) =>
-				t.id === tableId ? { ...t, columns, num_of_columns: columns.length } : t,
+	return databases.map((database) => ({
+		...database,
+		schemas: (database.schemas ?? []).map((schema) => ({
+			...schema,
+			tables: (schema.tables ?? []).map((table) =>
+				table.id === tableId ? { ...table, columns, columns_count: columns.length } : table,
 			),
 		})),
 	}));
 }
 
-function mergeTable(a: Table, b: Table): Table {
-	const aCols = a.columns ?? [];
-	const bCols = b.columns ?? [];
-	const pickCols = bCols.length > aCols.length ? bCols : aCols.length > 0 ? aCols : bCols;
+function mergeTable(existing: Table, incoming: Table): Table {
+	const existingColumns = existing.columns ?? [];
+	const incomingColumns = incoming.columns ?? [];
+	const richestColumns =
+		incomingColumns.length > existingColumns.length
+			? incomingColumns
+			: existingColumns.length > 0
+				? existingColumns
+				: incomingColumns;
 	return {
-		...a,
-		...b,
-		columns: pickCols,
-		num_of_columns: Math.max(a.num_of_columns, b.num_of_columns, pickCols.length),
+		...existing,
+		...incoming,
+		columns: richestColumns,
+		columns_count: Math.max(
+			existing.columns_count,
+			incoming.columns_count,
+			richestColumns.length,
+		),
 	};
 }
 
-function mergeSchema(a: Schema, b: Schema): Schema {
-	const aTables = a.tables ?? [];
-	const bTables = b.tables ?? [];
-	const byId = new Map(aTables.map((t) => [t.id, t]));
-	for (const t of bTables) {
-		const ex = byId.get(t.id);
-		byId.set(t.id, ex ? mergeTable(ex, t) : t);
+function mergeSchema(existing: Schema, incoming: Schema): Schema {
+	const existingTables = existing.tables ?? [];
+	const incomingTables = incoming.tables ?? [];
+	const tableById = new Map(existingTables.map((table) => [table.id, table]));
+	for (const table of incomingTables) {
+		const match = tableById.get(table.id);
+		tableById.set(table.id, match ? mergeTable(match, table) : table);
 	}
-	const order = [...aTables.map((t) => t.id)];
-	for (const t of bTables) {
-		if (!order.includes(t.id)) order.push(t.id);
+	const orderedIds = [...existingTables.map((table) => table.id)];
+	for (const table of incomingTables) {
+		if (!orderedIds.includes(table.id)) orderedIds.push(table.id);
 	}
-	const tables = order.map((id) => byId.get(id)!);
+	const tables = orderedIds.map((id) => tableById.get(id)!);
 	return {
-		...a,
-		...b,
+		...existing,
+		...incoming,
 		tables,
-		num_of_tables: Math.max(a.num_of_tables, b.num_of_tables, tables.length),
+		tables_count: Math.max(existing.tables_count, incoming.tables_count, tables.length),
 	};
 }
 
-function mergeDb(a: Database, b: Database): Database {
-	const aSchemas = a.schemas ?? [];
-	const bSchemas = b.schemas ?? [];
-	const byId = new Map(aSchemas.map((s) => [s.id, s]));
-	for (const s of bSchemas) {
-		const ex = byId.get(s.id);
-		byId.set(s.id, ex ? mergeSchema(ex, s) : s);
+function mergeDatabase(existing: Database, incoming: Database): Database {
+	const existingSchemas = existing.schemas ?? [];
+	const incomingSchemas = incoming.schemas ?? [];
+	const schemaById = new Map(existingSchemas.map((schema) => [schema.id, schema]));
+	for (const schema of incomingSchemas) {
+		const match = schemaById.get(schema.id);
+		schemaById.set(schema.id, match ? mergeSchema(match, schema) : schema);
 	}
-	const order = [...aSchemas.map((s) => s.id)];
-	for (const s of bSchemas) {
-		if (!order.includes(s.id)) order.push(s.id);
+	const orderedIds = [...existingSchemas.map((schema) => schema.id)];
+	for (const schema of incomingSchemas) {
+		if (!orderedIds.includes(schema.id)) orderedIds.push(schema.id);
 	}
-	const schemas = order.map((id) => byId.get(id)!);
+	const schemas = orderedIds.map((id) => schemaById.get(id)!);
 	return {
-		...a,
-		...b,
+		...existing,
+		...incoming,
 		schemas,
-		num_of_schemas: Math.max(a.num_of_schemas, b.num_of_schemas, schemas.length),
+		num_of_schemas: Math.max(existing.num_of_schemas, incoming.num_of_schemas, schemas.length),
 	};
 }
 
 /** Deep-merge catalog trees so prefetch + lazy expansion both keep richest node data. */
-export function mergeDatabaseCatalog(prev: Database[], incoming: Database[]): Database[] {
-	if (incoming.length === 0) return prev;
-	const byId = new Map(prev.map((d) => [d.id, d]));
-	for (const inc of incoming) {
-		const cur = byId.get(inc.id);
-		byId.set(inc.id, cur ? mergeDb(cur, inc) : inc);
+export function mergeDatabaseCatalog(previous: Database[], incoming: Database[]): Database[] {
+	if (incoming.length === 0) return previous;
+	const databaseById = new Map(previous.map((database) => [database.id, database]));
+	for (const incomingDb of incoming) {
+		const existing = databaseById.get(incomingDb.id);
+		databaseById.set(
+			incomingDb.id,
+			existing ? mergeDatabase(existing, incomingDb) : incomingDb,
+		);
 	}
-	const order = [...prev.map((d) => d.id)];
-	for (const d of incoming) {
-		if (!order.includes(d.id)) order.push(d.id);
+	const orderedIds = [...previous.map((database) => database.id)];
+	for (const database of incoming) {
+		if (!orderedIds.includes(database.id)) orderedIds.push(database.id);
 	}
-	return order.map((id) => byId.get(id)!);
+	return orderedIds.map((id) => databaseById.get(id)!);
 }
 
 /** Cheap fingerprint for syncing explorer state when the parent ref gains new API data. */
-export function catalogStructureFingerprint(dbs: Database[]): string {
-	return dbs
-		.map((d) => {
-			const sc = (d.schemas ?? [])
-				.map((s) => {
-					const tables = s.tables ?? [];
-					const tb = tables.map((t) => `${t.id}:${(t.columns ?? []).length}`).join(',');
-					return `${s.id}:${tables.length}:${tb}`;
+export function catalogStructureFingerprint(databases: Database[]): string {
+	return databases
+		.map((database) => {
+			const schemasPart = (database.schemas ?? [])
+				.map((schema) => {
+					const tables = schema.tables ?? [];
+					const tablesPart = tables
+						.map((table) => `${table.id}:${(table.columns ?? []).length}`)
+						.join(',');
+					return `${schema.id}:${tables.length}:${tablesPart}`;
 				})
 				.join(';');
-			return `${d.id}:${(d.schemas ?? []).length}:${sc}`;
+			return `${database.id}:${(database.schemas ?? []).length}:${schemasPart}`;
 		})
 		.join('|');
 }

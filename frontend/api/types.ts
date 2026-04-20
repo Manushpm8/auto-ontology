@@ -1,3 +1,5 @@
+import type { Column, Schema } from '@/types/datasources';
+
 export type ApiError = {
 	message: string;
 	error: boolean;
@@ -11,29 +13,18 @@ export type ResponseWithCount<T> = {
 };
 
 export type ApiResponse<T> = ResponseWithError<ResponseWithCount<T>>;
-export type RawSchemaRow = {
-	id: string;
-	schema_name: string;
-	tables_count: number;
-};
 
-export type RawSchemasResponse = {
+/** Schemas endpoint returns a non-standard envelope (not {data,count}). */
+export type SchemasResponse = {
 	schemas_count: number;
-	schemas: RawSchemaRow[];
+	schemas: Omit<Schema, 'tables'>[];
 };
 
-export type RawTableRow = {
-	id: string;
-	name: string;
-	db_name: string;
-	schema_name: string;
-	columns_count: number;
-};
-
-export type RawColumns = {
+/** Columns endpoint returns a table-scoped envelope with nested column rows. */
+export type ColumnsEnvelope = {
 	table_name: string;
 	schema_name: string;
 	db_name: string;
 	columns_count: number;
-	columns: { ordinal_position: number; column_name: string; data_type: string }[];
+	columns: Pick<Column, 'ordinal_position' | 'column_name' | 'data_type'>[];
 };

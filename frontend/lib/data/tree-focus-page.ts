@@ -9,58 +9,60 @@ export const WORKSPACE_ROOT_PARENT_ID = 'workspace-root';
 export type TreeResolved =
 	| { type: TreeFocusState.NONE }
 	| { type: TreeFocusState.LOADING }
-	| { type: DataModels.DB; db: Database }
-	| { type: DataModels.SCHEMA; db: Database; schema: Schema }
-	| { type: DataModels.TABLE; db: Database; schema: Schema; table: Table }
+	| { type: DataModels.DB; database: Database }
+	| { type: DataModels.SCHEMA; database: Database; schema: Schema }
+	| { type: DataModels.TABLE; database: Database; schema: Schema; table: Table }
 	| {
 			type: DataModels.COLUMN;
-			db: Database;
+			database: Database;
 			schema: Schema;
 			table: Table;
 			column: Column;
 	  };
 
-function focusSegments(focusId: string): string[] {
-	return focusId.split('|').filter((p) => p.length > 0);
+function splitFocusSegments(focusId: string): string[] {
+	return focusId.split('|').filter((segment) => segment.length > 0);
 }
 
-function treePendingColumnFocus(focusId: string, databases: Database[]): TreeResolved {
-	const parts = focusSegments(focusId);
-	if (parts.length !== 4) return { type: TreeFocusState.NONE };
-	const dbId = parts[0];
-	if (!dbId || !databases.some((d) => d.id === dbId)) return { type: TreeFocusState.NONE };
+function resolvePendingColumnFocus(focusId: string, databases: Database[]): TreeResolved {
+	const segments = splitFocusSegments(focusId);
+	if (segments.length !== 4) return { type: TreeFocusState.NONE };
+	const databaseId = segments[0];
+	if (!databaseId || !databases.some((database) => database.id === databaseId))
+		return { type: TreeFocusState.NONE };
 	if (isCatalogBranchLoadedForFocus(databases, focusId)) return { type: TreeFocusState.NONE };
 	return { type: TreeFocusState.LOADING };
 }
 
 export function resolveTreeNode(focusId: string | null, databases: Database[]): TreeResolved {
 	if (!focusId) return { type: TreeFocusState.NONE };
-	const parts = focusSegments(focusId);
-	if (parts.length === 0) return { type: TreeFocusState.NONE };
+	const segments = splitFocusSegments(focusId);
+	if (segments.length === 0) return { type: TreeFocusState.NONE };
 
-	for (const db of databases) {
-		if (parts[0] !== db.id) continue;
-		if (parts.length === 1) return { type: DataModels.DB, db };
+	for (const database of databases) {
+		if (segments[0] !== database.id) continue;
+		if (segments.length === 1) return { type: DataModels.DB, database };
 
-		for (const schema of db.schemas) {
-			if (parts[1] !== schema.id) continue;
-			if (parts.length === 2) return { type: DataModels.SCHEMA, db, schema };
+		for (const schema of database.schemas) {
+			if (segments[1] !== schema.id) continue;
+			if (segments.length === 2) return { type: DataModels.SCHEMA, database, schema };
 
 			for (const table of schema.tables) {
-				if (parts[2] !== table.id) continue;
-				if (parts.length === 3) return { type: DataModels.TABLE, db, schema, table };
+				if (segments[2] !== table.id) continue;
+				if (segments.length === 3)
+					return { type: DataModels.TABLE, database, schema, table };
 
 				for (const column of table.columns) {
-					if (parts.length === 4 && parts[3] === column.id) {
-						return { type: DataModels.COLUMN, db, schema, table, column };
+					if (segments.length === 4 && segments[3] === column.column_name) {
+						return { type: DataModels.COLUMN, database, schema, table, column };
 					}
 				}
 			}
 		}
 	}
 
-	if (parts.length === 4 && databases.some((d) => d.id === parts[0])) {
-		return treePendingColumnFocus(focusId, databases);
+	if (segments.length === 4 && databases.some((database) => database.id === segments[0])) {
+		return resolvePendingColumnFocus(focusId, databases);
 	}
 
 	return { type: TreeFocusState.NONE };
@@ -133,9 +135,9 @@ export function buildTreeFocusPageFormat(
 					{ key: 'name', label: 'Name' },
 					{ key: 'schemas', label: 'Schemas' },
 				],
-				rows: databases.map((d) => ({
-					name: d.name,
-					schemas: String(d.num_of_schemas),
+				rows: databases.map((database) => ({
+					name: database.name,
+					schemas: String(database.num_of_schemas),
 				})),
 			});
 		}
@@ -154,128 +156,129 @@ export function buildTreeFocusPageFormat(
 
 	switch (resolvedFocus.type) {
 		case DataModels.DB: {
+			const { database } = resolvedFocus;
 			sections.push(
 				...baseCardsForEntity(
-					`Warehouse connection ${resolvedFocus.db.name}. ${resolvedFocus.db.schemas.length} schema(s) available.`,
-					[{ label: 'Schemas', value: String(resolvedFocus.db.schemas.length) }],
+					`Warehouse connection ${database.name}. ${database.schemas.length} schema(s) available.`,
+					[{ label: 'Schemas', value: String(database.schemas.length) }],
 				),
 			);
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-schemas',
-				title: `Schemas (${resolvedFocus.db.schemas.length})`,
+				title: `Schemas (${database.schemas.length})`,
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'tables', label: 'Tables' },
 				],
-				rows: resolvedFocus.db.schemas.map((s) => ({
-					name: s.name,
-					tables: String(s.num_of_tables),
+				rows: database.schemas.map((schema) => ({
+					name: schema.schema_name,
+					tables: String(schema.tables_count),
 				})),
 			});
 			return {
 				sections,
 				header: {
 					header: {
-						title: resolvedFocus.db.name,
+						title: database.name,
 						subtitle: 'database',
-						entityId: resolvedFocus.db.id,
+						entityId: database.id,
 						parentId: workspaceDataId,
 					},
 				},
 			};
 		}
 		case DataModels.SCHEMA: {
-			const s = resolvedFocus.schema;
+			const { database, schema } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(`Schema ${s.name} in ${s.database_name}.`, [
-					{ label: 'Schema', value: s.name },
-					{ label: 'Database', value: s.database_name },
-					{ label: 'Tables', value: String(s.num_of_tables) },
+				...baseCardsForEntity(`Schema ${schema.schema_name} in ${database.name}.`, [
+					{ label: 'Schema', value: schema.schema_name },
+					{ label: 'Database', value: database.name },
+					{ label: 'Tables', value: String(schema.tables_count) },
 				]),
 			);
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-tables',
-				title: `Tables (${s.tables.length})`,
+				title: `Tables (${schema.tables.length})`,
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'columns', label: 'Columns' },
 				],
-				rows: s.tables.map((t) => ({
-					name: t.name,
-					columns: String(t.num_of_columns),
+				rows: schema.tables.map((table) => ({
+					name: table.name,
+					columns: String(table.columns_count),
 				})),
 			});
 			return {
 				sections,
 				header: {
 					header: {
-						title: s.name,
-						subtitle: `Schema · ${resolvedFocus.db.name}`,
-						entityId: s.id,
-						parentId: resolvedFocus.db.id,
+						title: schema.schema_name,
+						subtitle: `Schema · ${database.name}`,
+						entityId: schema.id,
+						parentId: database.id,
 					},
 				},
 			};
 		}
 		case DataModels.TABLE: {
-			const t = resolvedFocus.table;
+			const { database, schema, table } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(t.description, [
-					{ label: 'Table', value: t.name },
-					{ label: 'Schema', value: t.schema_name },
-					{ label: 'Database', value: t.database_name },
-					{ label: 'Columns', value: String(t.num_of_columns) },
+				...baseCardsForEntity('', [
+					{ label: 'Table', value: table.name },
+					{ label: 'Schema', value: table.schema_name },
+					{ label: 'Database', value: table.db_name },
+					{ label: 'Columns', value: String(table.columns_count) },
 				]),
 			);
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-columns',
-				title: `Columns (${t.columns.length})`,
+				title: `Columns (${table.columns.length})`,
 				columns: [
 					{ key: 'ordinal_position', label: '#' },
 					{ key: 'name', label: 'Name' },
 					{ key: 'data_type', label: 'Type' },
 				],
-				rows: t.columns.map((col) => ({
-					ordinal_position: String(col.ordinal_position),
-					name: col.name,
-					data_type: col.data_type,
+				rows: table.columns.map((column) => ({
+					ordinal_position: String(column.ordinal_position),
+					name: column.column_name,
+					data_type: column.data_type,
 				})),
 			});
 			return {
 				sections,
 				header: {
 					header: {
-						title: t.name,
-						subtitle: `Table · ${resolvedFocus.schema.name} · ${resolvedFocus.db.name}`,
-						entityId: t.id,
-						parentId: resolvedFocus.schema.id,
+						title: table.name,
+						subtitle: `Table · ${schema.schema_name} · ${database.name}`,
+						entityId: table.id,
+						parentId: schema.id,
 					},
 				},
 			};
 		}
 		case DataModels.COLUMN: {
-			const c = resolvedFocus.column;
+			const { table, column } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(`Column ${c.name} in ${c.table_name}.`, [
-					{ label: 'Column', value: c.name },
-					{ label: 'Data type', value: c.data_type.trim() ? c.data_type : '—' },
-					{ label: 'Table', value: c.table_name },
-					{ label: 'Schema', value: c.schema_name },
-					{ label: 'Database', value: c.database_name },
-					{ label: 'Position', value: String(c.ordinal_position) },
+				...baseCardsForEntity(`Column ${column.column_name} in ${column.table_name}.`, [
+					{ label: 'Column', value: column.column_name },
+					{ label: 'Data type', value: column.data_type.trim() ? column.data_type : '—' },
+					{ label: 'Table', value: column.table_name },
+					{ label: 'Schema', value: column.schema_name },
+					{ label: 'Database', value: column.db_name },
+					{ label: 'Position', value: String(column.ordinal_position) },
 				]),
 			);
 			return {
 				sections,
 				header: {
 					header: {
-						title: c.name,
-						subtitle: `Column · ${c.schema_name} · ${c.table_name} · ${c.database_name}`,
-						entityId: c.id,
-						parentId: resolvedFocus.table.id,
+						title: column.column_name,
+						subtitle: `Column · ${column.schema_name} · ${column.table_name} · ${column.db_name}`,
+						entityId: column.column_name,
+						parentId: table.id,
 					},
 				},
 			};

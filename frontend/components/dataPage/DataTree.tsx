@@ -192,7 +192,7 @@ function ColumnBlock({
 				open={open}
 				onToggle={() => setOpen((o) => !o)}
 				hasChildren={false}
-				name={column.name}
+				name={column.column_name}
 				meta="col"
 				selected={selectedId === columnFocusPath}
 				href={catalogPathFromFocusId(columnFocusPath, pathBase)}
@@ -237,21 +237,16 @@ function TableBlock({
 		syncTableFocus();
 	}, [selectedId, tableFocusPath, setOpen, syncTableFocus]);
 
-	const hasChildren = table.num_of_columns > 0;
+	const hasChildren = table.columns_count > 0;
 
 	useEffect(() => {
-		if (
-			open &&
-			!fetchedOnce.current &&
-			table.columns.length === 0 &&
-			table.num_of_columns > 0
-		) {
+		if (open && !fetchedOnce.current && table.columns.length === 0 && table.columns_count > 0) {
 			fetchedOnce.current = true;
 			onLoadColumns(tableLoadRef);
 		}
-	}, [open, table.columns.length, table.num_of_columns, tableLoadRef, onLoadColumns]);
+	}, [open, table.columns.length, table.columns_count, tableLoadRef, onLoadColumns]);
 
-	const loading = open && table.columns.length === 0 && table.num_of_columns > 0;
+	const loading = open && table.columns.length === 0 && table.columns_count > 0;
 
 	return (
 		<div>
@@ -271,10 +266,10 @@ function TableBlock({
 			{open && table.columns.length > 0
 				? table.columns.map((col) => (
 						<ColumnBlock
-							key={col.id}
+							key={col.column_name}
 							depth={depth + 1}
 							column={col}
-							columnFocusPath={`${tableFocusPath}|${col.id}`}
+							columnFocusPath={`${tableFocusPath}|${col.column_name}`}
 							selectedId={selectedId}
 							pathBase={pathBase}
 						/>
@@ -307,7 +302,7 @@ function SchemaBlock({
 	const containsFocus =
 		selectedId != null && schemaSubtreeContainsFocus(schemaFocusPath, selectedId);
 	const [open, setOpen] = useOpenBranch(containsFocus, selectedId, false);
-	const hasChildren = (schema.num_of_tables ?? 0) > 0;
+	const hasChildren = (schema.tables_count ?? 0) > 0;
 	const [loadingTables, setLoadingTables] = useState(false);
 	const syncSchemaFocus = useCallback(() => {
 		router.replace(catalogPathFromFocusId(schemaFocusPath, pathBase), { scroll: false });
@@ -322,7 +317,7 @@ function SchemaBlock({
 	}, [selectedId, schemaFocusPath, setOpen, syncSchemaFocus]);
 
 	useEffect(() => {
-		if (!open || schema.tables.length > 0 || (schema.num_of_tables ?? 0) === 0) return;
+		if (!open || schema.tables.length > 0 || (schema.tables_count ?? 0) === 0) return;
 		let cancelled = false;
 		void (async () => {
 			await Promise.resolve();
@@ -337,7 +332,7 @@ function SchemaBlock({
 		return () => {
 			cancelled = true;
 		};
-	}, [open, schemaLoadRef, schema.num_of_tables, schema.tables.length, onLoadTables]);
+	}, [open, schemaLoadRef, schema.tables_count, schema.tables.length, onLoadTables]);
 
 	return (
 		<div>
@@ -347,7 +342,7 @@ function SchemaBlock({
 				onToggle={() => setOpen((o) => !o)}
 				hasChildren={hasChildren}
 				loading={loadingTables}
-				name={schema.name}
+				name={schema.schema_name}
 				meta="schema"
 				selected={selectedId === schemaFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(schemaFocusPath, pathBase)}
