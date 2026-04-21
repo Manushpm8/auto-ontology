@@ -19,11 +19,14 @@ from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaEx
 from nemo_retriever.graph.tabular_fetch_embeddings_operator import TabularFetchEmbeddingsOp
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
 from nemo_retriever.tabular_data.retrieval import generate_sql
-from nemo_retriever.vector_store.lancedb_store import handle_lancedb
+from nemo_retriever.vector_store.lancedb_store import (
+    LanceDBConfig,
+    _build_lancedb_rows_from_df,
+    _write_rows_to_lancedb,
+)
 from nemo_retriever.params import (
     EmbedParams,
     TabularExtractParams,
-    VdbUploadParams,
 )
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
@@ -46,13 +49,11 @@ EMBED_PARAMS = EmbedParams(
     embed_modality="text",
 )
 
-VDB_PARAMS = VdbUploadParams(
-    lancedb={
-        "lancedb_uri": "lancedb",
-        "table_name": "nv-ingest-tabular",
-        "overwrite": True,
-        "create_index": True,
-    }
+LANCEDB_CONFIG = LanceDBConfig(
+    uri="lancedb",
+    table_name="nv-ingest-tabular",
+    overwrite=True,
+    create_index=False,  # local dev dataset is too small for IVF-PQ index
 )
 
 DATABASE: str = "testdb"
@@ -84,13 +85,10 @@ def ingest(database: str = DATABASE) -> None:
     result_df = results[0] if results else None
 
     if result_df is not None and not result_df.empty:
-        lancedb_params = VDB_PARAMS.lancedb
-        handle_lancedb(
-            result_df.to_dict(orient="records"),
-            uri=lancedb_params.lancedb_uri,
-            table_name=lancedb_params.table_name,
-        )
-        logger.info("Tabular ingest result:", len(result_df), "rows written to LanceDB")
+        rows = _build_lancedb_rows_from_df(result_df.to_dict(orient="records"))
+        if rows:
+            _write_rows_to_lancedb(rows, cfg=LANCEDB_CONFIG)
+        logger.info("Tabular ingest result: %d rows written to LanceDB", len(result_df))
     else:
         logger.info("Tabular ingest result: no rows produced")
 
