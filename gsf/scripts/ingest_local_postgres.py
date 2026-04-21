@@ -16,7 +16,9 @@ from gsf.server.connectors.postgres import PostgresDatabase
 from gsf.server.env import load_server_env
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
-from nemo_retriever.graph.tabular_fetch_embeddings_operator import TabularFetchEmbeddingsOp
+from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
+    TabularFetchEmbeddingsOp,
+)
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
 from nemo_retriever.tabular_data.retrieval import generate_sql
 from nemo_retriever.vector_store.lancedb_store import (
