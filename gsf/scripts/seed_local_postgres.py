@@ -21,8 +21,6 @@ logger = logging.getLogger("scripts.seed_local_postgres")
 
 DEFAULT_POSTGRES_HOST = "localhost"
 DEFAULT_POSTGRES_PORT = 5432
-DEFAULT_POSTGRES_USER = "gsf"
-DEFAULT_POSTGRES_PASSWORD = "gsf"
 DEFAULT_POSTGRES_ADMIN_DB = "postgres"
 
 SQL_DIR = Path(__file__).resolve().parent / "sql"
@@ -32,10 +30,10 @@ DATABASES: tuple[str, ...] = ("testdb",)
 
 def _conn_params(db: str) -> dict[str, str]:
     return {
-        "host": os.environ.get("GSF_POSTGRES_HOST", DEFAULT_POSTGRES_HOST),
-        "port": os.environ.get("GSF_POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)),
-        "user": os.environ.get("GSF_POSTGRES_USER", DEFAULT_POSTGRES_USER),
-        "password": os.environ.get("GSF_POSTGRES_PASSWORD", DEFAULT_POSTGRES_PASSWORD),
+        "host": os.environ.get("POSTGRES_HOST", DEFAULT_POSTGRES_HOST),
+        "port": os.environ.get("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT)),
+        "user": os.environ["POSTGRES_USER"],
+        "password": os.environ["POSTGRES_PASSWORD"],
         "dbname": db,
     }
 
@@ -64,7 +62,7 @@ def _apply_ddl(db: str) -> None:
 
 def seed() -> None:
     admin_params = _conn_params(
-        os.environ.get("GSF_POSTGRES_ADMIN_DB", DEFAULT_POSTGRES_ADMIN_DB),
+        os.environ.get("POSTGRES_ADMIN_DB", DEFAULT_POSTGRES_ADMIN_DB),
     )
     admin_conn = psycopg2.connect(**admin_params)
     admin_conn.autocommit = True
