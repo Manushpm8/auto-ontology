@@ -128,7 +128,7 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
         {"table_id": table_id},
     )
 
-    return dict(rows[0])
+    return rows[0]
 
 
 def update_node_properties(
@@ -146,9 +146,8 @@ def update_node_properties(
 
     rows = neo4j_conn.query_write(
         f"""
-        MATCH (n {{id: $node_id}})
-        WHERE n:{Labels.DB} OR n:{Labels.SCHEMA}
-              OR n:{Labels.TABLE} OR n:{Labels.COLUMN}
+        MATCH (n:{Labels.DB}|{Labels.SCHEMA}|{Labels.TABLE}|{Labels.COLUMN}
+              {{id: $node_id}})
         SET n += $props
         RETURN n.id AS id, properties(n) AS props
         """,
