@@ -12,6 +12,7 @@ import {
 	mergeColumnsIntoTable,
 	mergeSchemasIntoDatabase,
 	mergeTablesIntoSchema,
+	patchNodeInTree,
 } from '@/lib/data/datasource-tree-merge';
 import { datasources } from '@/api/datasources';
 
@@ -28,6 +29,8 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 	const workspaceDb = propDatabases[0];
 	const workspaceDataId = workspaceDb?.id ?? '';
 	const workspaceTitle = workspaceDb?.name ?? 'Data';
+
+	const [isEditing, setIsEditing] = useState(false);
 
 	const databasesRef = useRef<Database[]>(propDatabases);
 	const [treeDataEpoch, setTreeDataEpoch] = useState(0);
@@ -187,12 +190,20 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 							inspect metadata and lineage.
 						</p>
 					</div>
-					<div className="flex items-center gap-2 rounded-full border border-zinc-200/90 bg-white/80 px-3 py-1.5 text-xs font-medium text-zinc-600 shadow-sm backdrop-blur-sm dark:border-zinc-700 dark:bg-zinc-900/80 dark:text-zinc-300">
-						<span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
-						{treeFocusId == null
-							? `${propDatabases.length} ${propDatabases.length === 1 ? 'database' : 'databases'}`
-							: workspaceDb.name}
-					</div>
+					<button
+						type="button"
+						className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 hover:border-emerald-700 active:scale-[0.97] dark:bg-emerald-500 dark:border-emerald-500 dark:hover:bg-emerald-600 dark:hover:border-emerald-600"
+						onClick={() => {
+							setIsEditing(true);
+							setTimeout(() => {
+								document
+									.getElementById('description-section')
+									?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+							}, 50);
+						}}
+					>
+						Edit
+					</button>
 				</div>
 			</header>
 			<SinglePageView
@@ -202,6 +213,22 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 				treeFocusId={treeFocusId}
 				treeDataEpoch={treeDataEpoch}
 				getSinglePage={getSinglePage}
+				isEditing={isEditing}
+				onSave={async (description: string) => {
+					const nodeId = treeFocusId?.split('|').at(-1) ?? null;
+
+					if (nodeId) {
+						await datasources.updateNode(nodeId, { description });
+						const [patched] = patchNodeInTree(databasesRef.current, nodeId, {
+							description,
+						});
+						databasesRef.current = patched;
+					}
+
+					setTreeDataEpoch((n) => n + 1);
+					setIsEditing(false);
+				}}
+				onCancel={() => setIsEditing(false)}
 			/>
 		</div>
 	);

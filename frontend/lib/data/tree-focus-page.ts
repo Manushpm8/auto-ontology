@@ -53,7 +53,7 @@ export function resolveTreeNode(focusId: string | null, databases: Database[]): 
 					return { type: DataModels.TABLE, database, schema, table };
 
 				for (const column of table.columns) {
-					if (segments.length === 4 && segments[3] === column.column_name) {
+					if (segments.length === 4 && segments[3] === column.id) {
 						return { type: DataModels.COLUMN, database, schema, table, column };
 					}
 				}
@@ -158,10 +158,9 @@ export function buildTreeFocusPageFormat(
 		case DataModels.DB: {
 			const { database } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(
-					`Warehouse connection ${database.name}. ${database.schemas.length} schema(s) available.`,
-					[{ label: 'Schemas', value: String(database.schemas.length) }],
-				),
+				...baseCardsForEntity(database.description ?? '', [
+					{ label: 'Schemas', value: String(database.schemas.length) },
+				]),
 			);
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
@@ -191,7 +190,7 @@ export function buildTreeFocusPageFormat(
 		case DataModels.SCHEMA: {
 			const { database, schema } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(`Schema ${schema.schema_name} in ${database.name}.`, [
+				...baseCardsForEntity(schema.description ?? '', [
 					{ label: 'Schema', value: schema.schema_name },
 					{ label: 'Database', value: database.name },
 					{ label: 'Tables', value: String(schema.tables_count) },
@@ -225,7 +224,7 @@ export function buildTreeFocusPageFormat(
 		case DataModels.TABLE: {
 			const { database, schema, table } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity('', [
+				...baseCardsForEntity(table.description ?? '', [
 					{ label: 'Table', value: table.name },
 					{ label: 'Schema', value: table.schema_name },
 					{ label: 'Database', value: table.db_name },
@@ -262,7 +261,7 @@ export function buildTreeFocusPageFormat(
 		case DataModels.COLUMN: {
 			const { table, column } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(`Column ${column.column_name} in ${column.table_name}.`, [
+				...baseCardsForEntity(column.description ?? '', [
 					{ label: 'Column', value: column.column_name },
 					{ label: 'Data type', value: column.data_type.trim() ? column.data_type : '—' },
 					{ label: 'Table', value: column.table_name },
@@ -277,7 +276,7 @@ export function buildTreeFocusPageFormat(
 					header: {
 						title: column.column_name,
 						subtitle: `Column · ${column.schema_name} · ${column.table_name} · ${column.db_name}`,
-						entityId: column.column_name,
+						entityId: column.id,
 						parentId: table.id,
 					},
 				},

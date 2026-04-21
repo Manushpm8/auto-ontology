@@ -20,11 +20,24 @@ export type SchemasResponse = {
 	schemas: Omit<Schema, 'tables'>[];
 };
 
+/** Payload accepted by PATCH /nodes/:id — all fields optional. */
+export type NodePatch = {
+	description?: string;
+};
+
+/** Response from the node update endpoint. */
+export type NodeUpdateResponse = {
+	id: string;
+} & NodePatch;
+
 /** Columns endpoint returns a table-scoped envelope with nested column rows. */
 export type ColumnsEnvelope = {
 	table_name: string;
 	schema_name: string;
 	db_name: string;
 	columns_count: number;
-	columns: Pick<Column, 'ordinal_position' | 'column_name' | 'data_type'>[];
+	columns: Pick<
+		Column,
+		'id' | 'ordinal_position' | 'column_name' | 'data_type' | 'description'
+	>[];
 };

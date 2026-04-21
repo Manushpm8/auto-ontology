@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from server.datasources import dal
+
+
+class NodeUpdate(BaseModel):
+    description: str | None = None
+
 
 router = APIRouter()
 
@@ -58,3 +64,16 @@ def list_columns_by_table(table_id: str) -> dict:
 def list_databases() -> dict:
     rows = dal.list_databases()
     return _count_payload(rows)
+
+
+# ---------------------------------------------------------------------------
+# Node property update (/api/nodes/{node_id})
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/nodes/{node_id}")
+def update_node(node_id: str, body: NodeUpdate) -> dict:
+    """Update mutable properties of any catalog node."""
+    props = body.model_dump(exclude_none=True)
+    result = dal.update_node_properties(node_id, props)
+    return result

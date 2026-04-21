@@ -14,6 +14,9 @@ export type SinglePageViewProps = {
 	/** Increment when explorer tree merges API data so details re-render without changing focus. */
 	treeDataEpoch?: number;
 	parentId?: string;
+	isEditing?: boolean;
+	onSave?: (description: string) => void;
+	onCancel?: () => void;
 };
 
 export const SinglePageView = ({
@@ -23,6 +26,9 @@ export const SinglePageView = ({
 	getSinglePage,
 	treeFocusId = null,
 	treeDataEpoch = 0,
+	isEditing = false,
+	onSave,
+	onCancel,
 }: SinglePageViewProps): React.JSX.Element | null => {
 	const [loading, setLoading] = useState(true);
 	const [props, setProps] = useState<SinglePageFormat | null>(null);
@@ -98,6 +104,9 @@ export const SinglePageView = ({
 				rightPanel={props?.rightPanel}
 				leftPanel={props?.leftPanel}
 				entityUpdatingProperties={props?.entityUpdatingProperties}
+				isEditing={isEditing}
+				onSave={onSave}
+				onCancel={onCancel}
 			/>
 		</div>
 	);

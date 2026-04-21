@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, type ReactNode } from 'react';
+import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
@@ -19,6 +19,9 @@ export type SinglePageComposerProps = {
 		headerProps: Record<string, unknown>;
 	};
 	entityUpdatingProperties?: Record<string, string | string[]>;
+	isEditing?: boolean;
+	onSave?: (description: string) => void;
+	onCancel?: () => void;
 };
 
 type EditHeaderProps = {
@@ -37,11 +40,52 @@ function composerSectionHeading(section: ComposerSection): string {
 	}
 }
 
+const EditableDescriptionCard = ({
+	section,
+	valueRef,
+}: {
+	section: { title: string; body: string };
+	valueRef: React.MutableRefObject<string>;
+}) => {
+	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	const [value, setValue] = useState(section.body);
+
+	useEffect(() => {
+		textareaRef.current?.focus();
+	}, []);
+
+	const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+		setValue(e.target.value);
+		valueRef.current = e.target.value;
+	};
+
+	return (
+		<div
+			id="description-section"
+			className="rounded-lg border-2 border-emerald-500 bg-white/90 p-5 shadow-sm ring-1 ring-emerald-500/20 dark:border-emerald-400 dark:bg-zinc-950/50 dark:ring-emerald-400/20"
+		>
+			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+				{section.title}
+			</h2>
+			<textarea
+				ref={textareaRef}
+				value={value}
+				onChange={handleChange}
+				rows={4}
+				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-emerald-400 dark:focus:ring-emerald-400/30"
+			/>
+		</div>
+	);
+};
+
 function renderComposerSection(section: ComposerSection): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
 			return (
-				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+				<div
+					id={section.id === 'description' ? 'description-section' : undefined}
+					className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+				>
 					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 						{section.title}
 					</h2>
@@ -142,8 +186,17 @@ function breadcrumbsFromPdf(headerProps: Record<string, unknown> | undefined): B
 
 export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerProps>(
 	function SinglePageComposer(props, ref) {
-		const { sections, header, leftPanel, rightPanel, pdfProps, entityUpdatingProperties } =
-			props;
+		const {
+			sections,
+			header,
+			leftPanel,
+			rightPanel,
+			pdfProps,
+			entityUpdatingProperties,
+			isEditing,
+			onSave,
+			onCancel,
+		} = props;
 		const hh = header?.header;
 		const title = (hh?.title as string) ?? 'Untitled';
 		const subtitle = hh?.subtitle as string | undefined;
@@ -152,6 +205,15 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const editProps = hh?.editProps as EditHeaderProps | undefined;
 		const pdfPageName = (hh?.pdfProps as { pageName?: string } | undefined)?.pageName;
 		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
+
+		const descriptionSection = sections.find(
+			(s) =>
+				isComposerSection(s) &&
+				s.type === ComposerSectionKind.TEXT_CARD &&
+				s.id === 'description',
+		) as (ComposerSection & { body: string }) | undefined;
+
+		const pendingDescriptionRef = useRef(descriptionSection?.body ?? '');
 
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
@@ -259,16 +321,24 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 							</dl>
 						</div>
 						<div className="flex flex-wrap items-center gap-2">
-							{handleIsPDF ? (
-								<button
-									type="button"
-									className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-									onClick={() => handleIsPDF(true)}
-								>
-									PDF preview
-								</button>
-							) : null}
-							{editProps && editProps.onBeginEdit && editProps.onFinishEdit ? (
+							{isEditing ? (
+								<>
+									<button
+										type="button"
+										className="inline-flex items-center rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 hover:border-emerald-700 active:scale-[0.97] dark:bg-emerald-500 dark:border-emerald-500 dark:hover:bg-emerald-600 dark:hover:border-emerald-600"
+										onClick={() => onSave?.(pendingDescriptionRef.current)}
+									>
+										Save
+									</button>
+									<button
+										type="button"
+										className="inline-flex items-center rounded-lg border border-zinc-300 bg-white px-4 py-1.5 text-sm font-medium text-zinc-700 shadow-sm transition-all hover:bg-zinc-50 active:scale-[0.97] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+										onClick={onCancel}
+									>
+										Cancel
+									</button>
+								</>
+							) : editProps && editProps.onBeginEdit && editProps.onFinishEdit ? (
 								editProps.editMode ? (
 									<>
 										<button
@@ -346,7 +416,18 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 							<div className="space-y-5">
 								{sections.map((section, i) =>
 									isComposerSection(section) ? (
-										<div key={section.id}>{renderComposerSection(section)}</div>
+										<div key={section.id}>
+											{isEditing &&
+											section.type === ComposerSectionKind.TEXT_CARD &&
+											section.id === 'description' ? (
+												<EditableDescriptionCard
+													section={section}
+													valueRef={pendingDescriptionRef}
+												/>
+											) : (
+												renderComposerSection(section)
+											)}
+										</div>
 									) : (
 										<section
 											key={i}

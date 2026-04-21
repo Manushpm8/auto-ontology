@@ -1,7 +1,14 @@
 import { requests } from './requests';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import type { Params } from '@/types/params';
-import type { ApiResponse, ColumnsEnvelope, ResponseWithCount, SchemasResponse } from './types';
+import type {
+	ApiResponse,
+	ColumnsEnvelope,
+	NodePatch,
+	NodeUpdateResponse,
+	ResponseWithCount,
+	SchemasResponse,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Request dedup caches
@@ -89,4 +96,8 @@ export const datasources = {
 		columnsByTableMap.set(tableId, promise);
 		return promise;
 	},
+
+	/** Update mutable properties of any catalog node (Database, Schema, Table, or Column). */
+	updateNode: (nodeId: string, patch: NodePatch) =>
+		requests.patch<NodeUpdateResponse>(`nodes/${nodeId}`, patch),
 };

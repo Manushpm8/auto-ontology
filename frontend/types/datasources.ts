@@ -1,10 +1,12 @@
 export type Column = {
+	id: string;
 	column_name: string;
 	data_type: string;
 	db_name: string;
 	schema_name: string;
 	table_name: string;
 	ordinal_position: number;
+	description?: string;
 };
 
 export type Table = {
@@ -14,6 +16,7 @@ export type Table = {
 	schema_name: string;
 	columns_count: number;
 	columns: Column[];
+	description?: string;
 };
 
 export type Schema = {
@@ -21,6 +24,7 @@ export type Schema = {
 	schema_name: string;
 	tables_count: number;
 	tables: Table[];
+	description?: string;
 };
 
 export type Database = {
@@ -28,4 +32,5 @@ export type Database = {
 	name: string;
 	num_of_schemas: number;
 	schemas: Schema[];
+	description?: string;
 };
