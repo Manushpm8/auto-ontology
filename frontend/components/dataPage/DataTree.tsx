@@ -522,7 +522,7 @@ export function DataTree({
 		<div
 			className={`flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ${className}`}
 		>
-			<div className="shrink-0 border-b border-zinc-200/80 bg-gradient-to-r from-emerald-50/80 to-transparent px-4 py-3.5 sm:px-5 dark:border-zinc-700 dark:from-emerald-950/40">
+			<div className="flex h-[65px] shrink-0 flex-col justify-center border-b border-zinc-200/80 bg-gradient-to-r from-emerald-50/80 to-transparent px-4 sm:px-5 dark:border-zinc-700 dark:from-emerald-950/40">
 				<p className="text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-800/90 dark:text-emerald-400/90">
 					Explorer
 				</p>

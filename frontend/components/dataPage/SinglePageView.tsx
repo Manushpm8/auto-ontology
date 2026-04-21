@@ -71,7 +71,7 @@ export const SinglePageView = ({
 	if (loading) {
 		return (
 			<div
-				className="m-2 flex h-full min-h-[min(70dvh,480px)] w-full flex-col items-center justify-center gap-4 rounded-2xl border border-zinc-200/80 bg-white/70 px-8 py-12 shadow-lg shadow-zinc-200/30 backdrop-blur-[2px] sm:m-3 dark:border-zinc-700/80 dark:bg-zinc-950/50 dark:shadow-none"
+				className="flex flex-1 flex-col items-center justify-center gap-4"
 				role="status"
 			>
 				<Spinner aria-label="Loading" />
@@ -89,7 +89,7 @@ export const SinglePageView = ({
 	const hasTreeFocus = treeFocusId != null && treeFocusId !== '';
 
 	return (
-		<div className="mt-1 flex h-full min-h-0 w-full flex-1 flex-col justify-start overflow-hidden !p-[20px] sm:mt-2">
+		<div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
 			<SinglePageComposer
 				header={{
 					header: {

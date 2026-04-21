@@ -10,6 +10,7 @@ import CheckSvg from "./svg/check.svg";
 import ChatBubbleSvg from "./svg/chat-bubble.svg";
 import ChevronRightSvg from "./svg/chevron-right.svg";
 import NvidiaLogoSvg from "./svg/nvidia-logo.svg";
+import DatabaseSvg from "./svg/database.svg";
 
 export enum IconName {
   Menu = "menu",
@@ -22,6 +23,7 @@ export enum IconName {
   ChatBubble = "chat-bubble",
   ChevronRight = "chevron-right",
   NvidiaLogo = "nvidia-logo",
+  Database = "database",
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -35,6 +37,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
   [IconName.ChatBubble]: ChatBubbleSvg,
   [IconName.ChevronRight]: ChevronRightSvg,
   [IconName.NvidiaLogo]: NvidiaLogoSvg,
+  [IconName.Database]: DatabaseSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

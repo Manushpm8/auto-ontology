@@ -9,16 +9,33 @@ import {
 	type ConversationSummary,
 	type ConversationDetail,
 } from '@/api/conversations';
-import { Breadcrumbs } from '@/components/Breadcrumbs';
+import { Breadcrumbs, type BreadcrumbItem } from '@/components/Breadcrumbs';
+import { NAV_PREV_PATH_KEY } from '@/components/NavRail';
 import { ChatSidebar } from './ChatSidebar';
 import { MessageList } from './MessageList';
 import { StepIndicator } from './StepIndicator';
 import { ChatInput } from './ChatInput';
 
+const PREV_PATH_LABELS: Record<string, { label: string; href: string }> = {
+	'/data': { label: 'All Data', href: '/data' },
+};
+
+const DEFAULT_PARENT: BreadcrumbItem = { label: 'All Data', href: '/data' };
+
 export const ChatView = () => {
 	const [activeConvId, setActiveConvId] = useState<string | null>(null);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [conversations, setConversations] = useState<Conversation[]>([]);
+	const [parentCrumb, setParentCrumb] = useState<BreadcrumbItem>(DEFAULT_PARENT);
+
+	useEffect(() => {
+		const prev = sessionStorage.getItem(NAV_PREV_PATH_KEY);
+		if (!prev) return;
+		const match = Object.entries(PREV_PATH_LABELS).find(([prefix]) =>
+			prev.startsWith(prefix),
+		);
+		if (match) setParentCrumb(match[1]);
+	}, []);
 
 	const {
 		messages,
@@ -138,13 +155,8 @@ export const ChatView = () => {
 			/>
 
 			<main className="flex min-w-0 flex-1 flex-col">
-				<header className="flex items-center border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-					<Breadcrumbs
-						items={[
-							{ label: 'Home', href: '/' },
-							{ label: 'Chat', href: '/chat' },
-						]}
-					/>
+				<header className="flex h-[65px] shrink-0 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
+					<Breadcrumbs items={[parentCrumb, { label: 'Chat' }]} />
 				</header>
 
 				<MessageList messages={messages} />

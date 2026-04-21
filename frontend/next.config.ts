@@ -27,6 +27,18 @@ const nextConfig: NextConfig = {
 				destination: `${pythonApiUrl}/api/datasources/:path*`,
 			},
 			{
+				source: '/api/schemas/:path*',
+				destination: `${pythonApiUrl}/api/schemas/:path*`,
+			},
+			{
+				source: '/api/tables/:path*',
+				destination: `${pythonApiUrl}/api/tables/:path*`,
+			},
+			{
+				source: '/api/columns/:path*',
+				destination: `${pythonApiUrl}/api/columns/:path*`,
+			},
+			{
 				source: '/api/health',
 				destination: `${pythonApiUrl}/api/health`,
 			},

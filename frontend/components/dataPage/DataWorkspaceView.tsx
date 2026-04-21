@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from './SinglePageView';
@@ -12,7 +11,6 @@ import {
 	mergeColumnsIntoTable,
 	mergeSchemasIntoDatabase,
 	mergeTablesIntoSchema,
-	patchNodeInTree,
 } from '@/lib/data/datasource-tree-merge';
 import { datasources } from '@/api/datasources';
 
@@ -29,8 +27,6 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 	const workspaceDb = propDatabases[0];
 	const workspaceDataId = workspaceDb?.id ?? '';
 	const workspaceTitle = workspaceDb?.name ?? 'Data';
-
-	const [isEditing, setIsEditing] = useState(false);
 
 	const databasesRef = useRef<Database[]>(propDatabases);
 	const [treeDataEpoch, setTreeDataEpoch] = useState(0);
@@ -112,26 +108,9 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 	const getSinglePage = useCallback(
 		async (dataId: string, treeFocus: string | null): Promise<SinglePageFormat> => {
 			if (treeFocus) await hydrateBranchForFocus(treeFocus);
-			const base = buildTreeFocusPageFormat(treeFocus, databasesRef.current, dataId);
-			const treeSelectedId = treeFocus ?? undefined;
-			return {
-				...base,
-				leftPanel: {
-					width: 'minmax(280px, 32%)',
-					bulks: [],
-					slot: (
-						<DataTree
-							key="data-catalog-tree"
-							initialDatabases={databasesRef.current}
-							selectedId={treeSelectedId}
-							pathBase="/data"
-							onTreeDataUpdated={handleTreeDataUpdated}
-						/>
-					),
-				},
-			};
+			return buildTreeFocusPageFormat(treeFocus, databasesRef.current, dataId);
 		},
-		[handleTreeDataUpdated, hydrateBranchForFocus],
+		[hydrateBranchForFocus],
 	);
 
 	if (loadError) {
@@ -166,70 +145,27 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 	}
 
 	return (
-		<div className="flex h-full min-h-[min(70dvh,520px)] flex-1 flex-col gap-6">
-			<header className="shrink-0 px-3 sm:px-4">
-				<Link
-					href="/"
-					className="group inline-flex items-center gap-1.5 text-sm font-medium text-zinc-500 transition-colors hover:text-emerald-700 dark:text-zinc-400 dark:hover:text-emerald-400"
-				>
-					<span
-						className="inline-block transition-transform group-hover:-translate-x-0.5"
-						aria-hidden
-					>
-						←
-					</span>
-					Home
-				</Link>
-				<div className="mt-3 flex flex-wrap items-end justify-between gap-4 !px-[20px] !py-0">
-					<div>
-						<h1 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 sm:text-3xl">
-							Data catalog
-						</h1>
-						<p className="mt-1 max-w-2xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-							Browse schemas, tables, and columns. Select any node in the tree to
-							inspect metadata and lineage.
-						</p>
-					</div>
-					<button
-						type="button"
-						className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 hover:border-emerald-700 active:scale-[0.97] dark:bg-emerald-500 dark:border-emerald-500 dark:hover:bg-emerald-600 dark:hover:border-emerald-600"
-						onClick={() => {
-							setIsEditing(true);
-							setTimeout(() => {
-								document
-									.getElementById('description-section')
-									?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-							}, 50);
-						}}
-					>
-						Edit
-					</button>
-				</div>
-			</header>
-			<SinglePageView
-				dataId={workspaceDataId}
-				parentId={WORKSPACE_ROOT_PARENT_ID}
-				title={workspaceTitle}
-				treeFocusId={treeFocusId}
-				treeDataEpoch={treeDataEpoch}
-				getSinglePage={getSinglePage}
-				isEditing={isEditing}
-				onSave={async (description: string) => {
-					const nodeId = treeFocusId?.split('|').at(-1) ?? null;
+		<div className="flex h-screen w-full bg-white dark:bg-zinc-950">
+			<aside className="flex h-full w-[296px] shrink-0 flex-col border-r border-zinc-200 bg-white">
+				<DataTree
+					key="data-catalog-tree"
+					initialDatabases={databasesRef.current}
+					selectedId={treeFocusId ?? undefined}
+					pathBase="/data"
+					onTreeDataUpdated={handleTreeDataUpdated}
+				/>
+			</aside>
 
-					if (nodeId) {
-						await datasources.updateNode(nodeId, { description });
-						const [patched] = patchNodeInTree(databasesRef.current, nodeId, {
-							description,
-						});
-						databasesRef.current = patched;
-					}
-
-					setTreeDataEpoch((n) => n + 1);
-					setIsEditing(false);
-				}}
-				onCancel={() => setIsEditing(false)}
-			/>
+			<main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+				<SinglePageView
+					dataId={workspaceDataId}
+					parentId={WORKSPACE_ROOT_PARENT_ID}
+					title={workspaceTitle}
+					treeFocusId={treeFocusId}
+					treeDataEpoch={treeDataEpoch}
+					getSinglePage={getSinglePage}
+				/>
+			</main>
 		</div>
 	);
 }
