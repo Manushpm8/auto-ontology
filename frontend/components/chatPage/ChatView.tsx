@@ -26,16 +26,13 @@ export const ChatView = () => {
 	const [activeConvId, setActiveConvId] = useState<string | null>(null);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [conversations, setConversations] = useState<Conversation[]>([]);
-	const [parentCrumb, setParentCrumb] = useState<BreadcrumbItem>(DEFAULT_PARENT);
-
-	useEffect(() => {
+	const [parentCrumb] = useState<BreadcrumbItem>(() => {
+		if (typeof window === 'undefined') return DEFAULT_PARENT;
 		const prev = sessionStorage.getItem(NAV_PREV_PATH_KEY);
-		if (!prev) return;
-		const match = Object.entries(PREV_PATH_LABELS).find(([prefix]) =>
-			prev.startsWith(prefix),
-		);
-		if (match) setParentCrumb(match[1]);
-	}, []);
+		if (!prev) return DEFAULT_PARENT;
+		const match = Object.entries(PREV_PATH_LABELS).find(([prefix]) => prev.startsWith(prefix));
+		return match ? match[1] : DEFAULT_PARENT;
+	});
 
 	const {
 		messages,
@@ -65,8 +62,25 @@ export const ChatView = () => {
 	}, []);
 
 	useEffect(() => {
-		refreshConversations();
-	}, [refreshConversations]);
+		let active = true;
+		conversationsApi
+			.list()
+			.then((summaries: ConversationSummary[]) => {
+				if (!active) return;
+				setConversations(
+					summaries.map((s) => ({
+						id: s.id,
+						title: s.title || 'New conversation',
+						messages: [],
+						createdAt: new Date(s.createdAt).getTime(),
+					})),
+				);
+			})
+			.catch(() => {});
+		return () => {
+			active = false;
+		};
+	}, []);
 
 	const handleNewChat = useCallback(async () => {
 		clearMessages();

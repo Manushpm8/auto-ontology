@@ -35,7 +35,7 @@ export const NavRail = () => {
 		<nav className="flex h-screen w-12 shrink-0 flex-col items-center border-r border-zinc-200 bg-white py-3 dark:border-zinc-800 dark:bg-zinc-950">
 			<div className="flex flex-1 flex-col items-center gap-2">
 				{navItems.map((item) => {
-				const isActive = pathname.startsWith(item.href);
+					const isActive = pathname.startsWith(item.href);
 
 					return (
 						<Link

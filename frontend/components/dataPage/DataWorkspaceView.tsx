@@ -29,8 +29,22 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 	const workspaceTitle = workspaceDb?.name ?? 'Data';
 
 	const databasesRef = useRef<Database[]>(propDatabases);
+	const [treeDatabases, setTreeDatabases] = useState<Database[]>(propDatabases);
+	const [prevPropDbs, setPrevPropDbs] = useState(propDatabases);
 	const [treeDataEpoch, setTreeDataEpoch] = useState(0);
 	const treeEpochFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	if (propDatabases !== prevPropDbs) {
+		setPrevPropDbs(propDatabases);
+		const nextRootIds = new Set(propDatabases.map((d) => d.id));
+		const prevRootIds = new Set(prevPropDbs.map((d) => d.id));
+		const sameWorkspace =
+			nextRootIds.size === prevRootIds.size &&
+			[...nextRootIds].every((id) => prevRootIds.has(id));
+		if (!sameWorkspace) {
+			setTreeDatabases(propDatabases);
+		}
+	}
 
 	useEffect(() => {
 		const nextRootIds = new Set(propDatabases.map((d) => d.id));
@@ -58,6 +72,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 		if (treeEpochFlushRef.current != null) return;
 		treeEpochFlushRef.current = setTimeout(() => {
 			treeEpochFlushRef.current = null;
+			setTreeDatabases(databasesRef.current);
 			setTreeDataEpoch((n) => n + 1);
 		}, 0);
 	}, []);
@@ -122,7 +137,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 
 			const patch = (node: Record<string, unknown>) => ({ ...node, ...edits });
 
-			databasesRef.current = databasesRef.current.map((db) => {
+			const updated = databasesRef.current.map((db) => {
 				if (db.id === entityId) return { ...db, ...edits };
 				return {
 					...db,
@@ -143,6 +158,8 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 					}),
 				};
 			});
+			databasesRef.current = updated;
+			setTreeDatabases(updated);
 			setTreeDataEpoch((n) => n + 1);
 		},
 		[treeFocusId],
@@ -184,7 +201,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 			<aside className="flex h-full w-[296px] shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
 				<DataTree
 					key="data-catalog-tree"
-					initialDatabases={databasesRef.current}
+					initialDatabases={treeDatabases}
 					selectedId={treeFocusId ?? undefined}
 					pathBase="/data"
 					onTreeDataUpdated={handleTreeDataUpdated}

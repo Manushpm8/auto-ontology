@@ -70,10 +70,7 @@ export const SinglePageView = ({
 
 	if (loading) {
 		return (
-			<div
-				className="flex flex-1 flex-col items-center justify-center gap-4"
-				role="status"
-			>
+			<div className="flex flex-1 flex-col items-center justify-center gap-4" role="status">
 				<Spinner aria-label="Loading" />
 				<p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
 					Loading details…

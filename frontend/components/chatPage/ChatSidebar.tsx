@@ -93,11 +93,11 @@ function ConversationItem({
 			<button
 				type="button"
 				onClick={onSelect}
-			className={`w-full rounded-lg px-3 py-2 pr-8 text-left text-sm transition-colors ${
-				isActive
-					? 'bg-zinc-100 font-medium text-black dark:bg-zinc-800 dark:text-zinc-100'
-					: 'text-zinc-700 hover:bg-zinc-100 hover:text-black dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
-			}`}
+				className={`w-full rounded-lg px-3 py-2 pr-8 text-left text-sm transition-colors ${
+					isActive
+						? 'bg-zinc-100 font-medium text-black dark:bg-zinc-800 dark:text-zinc-100'
+						: 'text-zinc-700 hover:bg-zinc-100 hover:text-black dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
+				}`}
 			>
 				<span className="line-clamp-1">{conv.title}</span>
 				<span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">
@@ -201,7 +201,9 @@ export const ChatSidebar = ({
 				<div className="flex h-[65px] w-full shrink-0 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
 					<Link href="/" className="flex items-center gap-3">
 						<Icon name={IconName.NvidiaLogo} className="h-6 w-auto text-[#76b900]" />
-						<span className="text-sm font-semibold tracking-wide text-black dark:text-zinc-100">GSF</span>
+						<span className="text-sm font-semibold tracking-wide text-black dark:text-zinc-100">
+							GSF
+						</span>
 					</Link>
 				</div>
 

@@ -37,10 +37,7 @@ _CONNECTORS: list[ConnectorEntry] = [
     },
 ]
 
-_CONNECTORS_BY_NAME: dict[str, ConnectorEntry] = {
-    c["name"]: c for c in _CONNECTORS
-}
-
+_CONNECTORS_BY_NAME: dict[str, ConnectorEntry] = {c["name"]: c for c in _CONNECTORS}
 
 
 def get_connector(connector_name: str) -> SQLDatabase:

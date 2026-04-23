@@ -26,7 +26,11 @@ class DuckDBDatabase(SQLDatabase):
 
     def __init__(self, connection_string: str, *, read_only: bool = True) -> None:
         self.conn = duckdb.connect(database=connection_string, read_only=read_only)
-        logger.debug("DuckDB connected (database=%r, read_only=%s).", connection_string, read_only)
+        logger.debug(
+            "DuckDB connected (database=%r, read_only=%s).",
+            connection_string,
+            read_only,
+        )
 
     @property
     def dialect(self) -> str:
@@ -93,7 +97,13 @@ class DuckDBDatabase(SQLDatabase):
 
     def get_pks(self) -> pd.DataFrame:
         empty = pd.DataFrame(
-            columns=["database", "schema", "table_name", "column_name", "ordinal_position"]
+            columns=[
+                "database",
+                "schema",
+                "table_name",
+                "column_name",
+                "ordinal_position",
+            ]
         )
         try:
             df = self.execute(
@@ -116,8 +126,13 @@ class DuckDBDatabase(SQLDatabase):
     def get_fks(self) -> pd.DataFrame:
         empty = pd.DataFrame(
             columns=[
-                "database", "schema", "table_name", "column_name",
-                "referenced_schema", "referenced_table", "referenced_column",
+                "database",
+                "schema",
+                "table_name",
+                "column_name",
+                "referenced_schema",
+                "referenced_table",
+                "referenced_column",
             ]
         )
         try:
