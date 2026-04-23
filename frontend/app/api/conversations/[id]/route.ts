@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getPrisma } from '@/lib/prisma';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+	const prisma = getPrisma();
 	const { id } = await params;
 	const conversation = await prisma.conversation.findUnique({
 		where: { id },
@@ -16,6 +17,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+	const prisma = getPrisma();
 	const { id } = await params;
 	const body = await req.json();
 	const conversation = await prisma.conversation.update({
@@ -26,6 +28,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+	const prisma = getPrisma();
 	const { id } = await params;
 	await prisma.conversation.delete({ where: { id } });
 	return new Response(null, { status: 204 });

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { getPrisma } from '@/lib/prisma';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+	const prisma = getPrisma();
 	const { id } = await params;
 	const body = await req.json();
 

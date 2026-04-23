@@ -3,7 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-function buildConnectionString() {
+function buildConnectionString(): string {
 	const host = process.env.POSTGRES_HOST ?? 'localhost';
 	const port = process.env.POSTGRES_PORT ?? '5432';
 	const user = process.env.POSTGRES_USER;
@@ -19,13 +19,16 @@ function buildConnectionString() {
 	return `postgresql://${user}:${password}@${host}:${port}/${database}`;
 }
 
-function createPrismaClient() {
+function createPrismaClient(): PrismaClient {
 	const adapter = new PrismaPg({ connectionString: buildConnectionString() });
 	return new PrismaClient({ adapter });
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== 'production') {
-	globalForPrisma.prisma = prisma;
+/** Lazy singleton — only connects when first accessed at runtime, not at import/build time. */
+export function getPrisma(): PrismaClient {
+	const client = globalForPrisma.prisma ?? createPrismaClient();
+	if (process.env.NODE_ENV !== 'production') {
+		globalForPrisma.prisma = client;
+	}
+	return client;
 }
