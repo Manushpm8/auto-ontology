@@ -113,6 +113,41 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 		[hydrateBranchForFocus],
 	);
 
+	const syncEdits = useCallback(
+		(edits: Record<string, string>) => {
+			if (!treeFocusId || Object.keys(edits).length === 0) return;
+			const segments = treeFocusId.split('|').filter((s) => s.length > 0);
+			const entityId = segments[segments.length - 1];
+			if (!entityId) return;
+
+			const patch = (node: Record<string, unknown>) => ({ ...node, ...edits });
+
+			databasesRef.current = databasesRef.current.map((db) => {
+				if (db.id === entityId) return { ...db, ...edits };
+				return {
+					...db,
+					schemas: db.schemas.map((s) => {
+						if (s.id === entityId) return patch(s) as typeof s;
+						return {
+							...s,
+							tables: s.tables.map((t) => {
+								if (t.id === entityId) return patch(t) as typeof t;
+								return {
+									...t,
+									columns: t.columns.map((c) =>
+										c.id === entityId ? (patch(c) as typeof c) : c,
+									),
+								};
+							}),
+						};
+					}),
+				};
+			});
+			setTreeDataEpoch((n) => n + 1);
+		},
+		[treeFocusId],
+	);
+
 	if (loadError) {
 		return (
 			<div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center px-4 py-16 text-center">
@@ -164,6 +199,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 					treeFocusId={treeFocusId}
 					treeDataEpoch={treeDataEpoch}
 					getSinglePage={getSinglePage}
+					onSave={syncEdits}
 				/>
 			</main>
 		</div>

@@ -6,7 +6,9 @@ import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { isComposerSection, type ComposerSection } from '@/types/composer-section';
 import { Breadcrumbs, type BreadcrumbItem } from '@/components/Breadcrumbs';
+import { Icon, IconName } from '@/components/icons';
 import { NAV_PREV_PATH_KEY } from '@/components/NavRail';
+import { datasources } from '@/api/datasources';
 
 const PREV_PATH_LABELS: Record<string, { label: string; href: string }> = {
 	'/chat': { label: 'Chat', href: '/chat' },
@@ -26,7 +28,7 @@ export type SinglePageComposerProps = {
 	};
 	entityUpdatingProperties?: Record<string, string | string[]>;
 	isEditing?: boolean;
-	onSave?: (description: string) => void;
+	onSave?: (edits: Record<string, string>) => void;
 	onCancel?: () => void;
 };
 
@@ -39,12 +41,12 @@ function composerSectionHeading(section: ComposerSection): string {
 	}
 }
 
-const EditableDescriptionCard = ({
+const EditableTextCard = ({
 	section,
-	valueRef,
+	onChange,
 }: {
-	section: { title: string; body: string };
-	valueRef: React.MutableRefObject<string>;
+	section: { id: string; title: string; body: string };
+	onChange: (sectionId: string, value: string) => void;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const [value, setValue] = useState(section.body);
@@ -55,14 +57,11 @@ const EditableDescriptionCard = ({
 
 	const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 		setValue(e.target.value);
-		valueRef.current = e.target.value;
+		onChange(section.id, e.target.value);
 	};
 
 	return (
-		<div
-			id="description-section"
-			className="rounded-lg border-2 border-emerald-500 bg-white/90 p-5 shadow-sm ring-1 ring-emerald-500/20 dark:border-emerald-400 dark:bg-zinc-950/50 dark:ring-emerald-400/20"
-		>
+		<div className="rounded-lg border-2 border-emerald-500 bg-white/90 p-5 shadow-sm ring-1 ring-emerald-500/20 dark:border-emerald-400 dark:bg-zinc-950/50 dark:ring-emerald-400/20">
 			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 				{section.title}
 			</h2>
@@ -198,17 +197,20 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		} = props;
 		const hh = header?.header;
 		const title = (hh?.title as string) ?? 'Untitled';
+		const entityId = (hh?.entityId as string) ?? '';
 		const pdfPageName = (hh?.pdfProps as { pageName?: string } | undefined)?.pageName;
 		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
 
-		const descriptionSection = sections.find(
+		const hasEditableSections = sections.some(
 			(s) =>
 				isComposerSection(s) &&
 				s.type === ComposerSectionKind.TEXT_CARD &&
-				s.id === 'description',
-		) as (ComposerSection & { body: string }) | undefined;
+				s.editable === true,
+		);
+		const [localIsEditing, setLocalIsEditing] = useState(false);
+		const isEditingActive = isEditing || localIsEditing;
 
-		const pendingDescriptionRef = useRef(descriptionSection?.body ?? '');
+		const pendingEditsRef = useRef<Record<string, string>>({});
 
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
@@ -295,8 +297,49 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</div>
 				) : null}
 
-			<header className="flex h-[65px] shrink-0 items-center border-b border-zinc-200/80 px-4 sm:px-5 dark:border-zinc-700/80">
+			<header className="flex h-[65px] shrink-0 items-center justify-between border-b border-zinc-200/80 px-4 sm:px-5 dark:border-zinc-700/80">
 				<Breadcrumbs items={[parentCrumb, { label: title }]} />
+				{hasEditableSections && entityId && !isEditingActive && (
+					<button
+						type="button"
+						onClick={() => {
+							pendingEditsRef.current = {};
+							setLocalIsEditing(true);
+						}}
+						className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
+					>
+						<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+						Edit
+					</button>
+				)}
+				{isEditingActive && (
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							onClick={() => {
+								setLocalIsEditing(false);
+								onCancel?.();
+							}}
+							className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+						>
+							Cancel
+						</button>
+						<button
+							type="button"
+							onClick={async () => {
+								const edits = pendingEditsRef.current;
+								if (entityId && Object.keys(edits).length > 0) {
+									await datasources.updateNode(entityId, edits);
+								}
+								setLocalIsEditing(false);
+								onSave?.(edits);
+							}}
+							className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+						>
+							Save
+						</button>
+					</div>
+				)}
 			</header>
 
 				<div
@@ -344,12 +387,14 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								{sections.map((section, i) =>
 									isComposerSection(section) ? (
 										<div key={section.id}>
-											{isEditing &&
+											{isEditingActive &&
 											section.type === ComposerSectionKind.TEXT_CARD &&
-											section.id === 'description' ? (
-												<EditableDescriptionCard
+											section.editable === true ? (
+												<EditableTextCard
 													section={section}
-													valueRef={pendingDescriptionRef}
+													onChange={(id, val) => {
+														pendingEditsRef.current[id] = val;
+													}}
 												/>
 											) : (
 												renderComposerSection(section)

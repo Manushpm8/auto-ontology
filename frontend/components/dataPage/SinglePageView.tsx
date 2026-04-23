@@ -15,7 +15,7 @@ export type SinglePageViewProps = {
 	treeDataEpoch?: number;
 	parentId?: string;
 	isEditing?: boolean;
-	onSave?: (description: string) => void;
+	onSave?: (edits: Record<string, string>) => void;
 	onCancel?: () => void;
 };
 

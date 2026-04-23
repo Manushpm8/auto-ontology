@@ -5,6 +5,7 @@ export type ComposerTextCardSection = {
 	id: string;
 	title: string;
 	body: string;
+	editable?: boolean;
 };
 
 export type ComposerInfoGridSection = {
