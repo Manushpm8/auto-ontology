@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TypedDict
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 from connectors.duckdb import DuckDBDatabase
@@ -23,14 +24,22 @@ _CONNECTOR_CLASSES: dict[str, type[SQLDatabase]] = {
 # Registered connectors
 # ---------------------------------------------------------------------------
 
-_CONNECTORS: list[dict] = [
+
+class ConnectorEntry(TypedDict):
+    name: str
+    connection_string: str
+
+
+_CONNECTORS: list[ConnectorEntry] = [
     {
         "name": "duckdb",
         "connection_string": "../spider2.duckdb",
     },
 ]
 
-_CONNECTORS_BY_NAME: dict[str, dict] = {c["name"]: c for c in _CONNECTORS}
+_CONNECTORS_BY_NAME: dict[str, ConnectorEntry] = {
+    c["name"]: c for c in _CONNECTORS
+}
 
 
 
