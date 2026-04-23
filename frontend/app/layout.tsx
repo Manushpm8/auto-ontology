@@ -34,7 +34,7 @@ export default function RootLayout({
 			lang="en"
 			className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
 		>
-			<body className="flex h-full">
+			<body className="flex h-full bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
 				<NavRail />
 				<div className="min-w-0 flex-1">{children}</div>
 			</body>

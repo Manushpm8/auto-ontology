@@ -146,7 +146,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 
 	return (
 		<div className="flex h-screen w-full bg-white dark:bg-zinc-950">
-			<aside className="flex h-full w-[296px] shrink-0 flex-col border-r border-zinc-200 bg-white">
+			<aside className="flex h-full w-[296px] shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
 				<DataTree
 					key="data-catalog-tree"
 					initialDatabases={databasesRef.current}

@@ -81,7 +81,7 @@ function ConversationItem({
 								setEditing(false);
 							}
 						}}
-						className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-black outline-none focus:border-[#76b900]"
+						className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-black outline-none focus:border-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-[#76b900]"
 					/>
 				</form>
 			</li>
@@ -93,14 +93,14 @@ function ConversationItem({
 			<button
 				type="button"
 				onClick={onSelect}
-				className={`w-full rounded-lg px-3 py-2 pr-8 text-left text-sm transition-colors ${
-					isActive
-						? 'bg-zinc-100 font-medium text-black'
-						: 'text-zinc-700 hover:bg-zinc-100 hover:text-black'
-				}`}
+			className={`w-full rounded-lg px-3 py-2 pr-8 text-left text-sm transition-colors ${
+				isActive
+					? 'bg-zinc-100 font-medium text-black dark:bg-zinc-800 dark:text-zinc-100'
+					: 'text-zinc-700 hover:bg-zinc-100 hover:text-black dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
+			}`}
 			>
 				<span className="line-clamp-1">{conv.title}</span>
-				<span className="mt-0.5 block text-[10px] text-zinc-500">
+				<span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">
 					{new Date(conv.createdAt).toLocaleDateString()}
 				</span>
 			</button>
@@ -112,14 +112,14 @@ function ConversationItem({
 						e.stopPropagation();
 						setMenuOpen((o) => !o);
 					}}
-					className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-200 hover:text-zinc-700 group-hover:opacity-100"
+					className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-200 hover:text-zinc-700 group-hover:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 					aria-label="Conversation options"
 				>
 					<Icon name={IconName.DotsVertical} className="h-4 w-4" />
 				</button>
 
 				{menuOpen && (
-					<div className="absolute right-0 top-7 z-30 w-32 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
+					<div className="absolute right-0 top-7 z-30 w-32 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
 						<button
 							type="button"
 							onClick={() => {
@@ -127,7 +127,7 @@ function ConversationItem({
 								setEditValue(conv.title);
 								setEditing(true);
 							}}
-							className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100"
+							className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
 						>
 							<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
 							Rename
@@ -138,7 +138,7 @@ function ConversationItem({
 								setMenuOpen(false);
 								setConfirmDelete(true);
 							}}
-							className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
+							className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
 						>
 							<Icon name={IconName.Trash} className="h-3.5 w-3.5" />
 							Delete
@@ -177,10 +177,10 @@ export const ChatSidebar = ({
 			<button
 				type="button"
 				onClick={onToggle}
-				className="fixed top-3 left-3 z-30 rounded-lg bg-white p-2 shadow-md lg:hidden"
+				className="fixed top-3 left-3 z-30 rounded-lg bg-white p-2 shadow-md dark:bg-zinc-800 dark:shadow-zinc-900/50 lg:hidden"
 				aria-label="Toggle sidebar"
 			>
-				<Icon name={IconName.Menu} className="h-5 w-5 text-zinc-700" />
+				<Icon name={IconName.Menu} className="h-5 w-5 text-zinc-700 dark:text-zinc-200" />
 			</button>
 
 			{/* Backdrop for mobile */}
@@ -194,14 +194,14 @@ export const ChatSidebar = ({
 
 			{/* Sidebar panel */}
 			<aside
-				className={`fixed inset-y-0 left-12 z-20 flex w-[296px] flex-col border-r border-zinc-200 bg-white transition-transform duration-200 lg:static lg:translate-x-0 ${
+				className={`fixed inset-y-0 left-12 z-20 flex w-[296px] flex-col border-r border-zinc-200 bg-white transition-transform duration-200 dark:border-zinc-800 dark:bg-zinc-950 lg:static lg:translate-x-0 ${
 					isOpen ? 'translate-x-0' : '-translate-x-full'
 				}`}
 			>
-				<div className="flex h-[65px] w-full shrink-0 items-center border-b border-zinc-200 px-4">
+				<div className="flex h-[65px] w-full shrink-0 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
 					<Link href="/" className="flex items-center gap-3">
 						<Icon name={IconName.NvidiaLogo} className="h-6 w-auto text-[#76b900]" />
-						<span className="text-sm font-semibold tracking-wide text-black">GSF</span>
+						<span className="text-sm font-semibold tracking-wide text-black dark:text-zinc-100">GSF</span>
 					</Link>
 				</div>
 
@@ -209,7 +209,7 @@ export const ChatSidebar = ({
 					<button
 						type="button"
 						onClick={onNewChat}
-						className="flex w-full items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-black transition-colors hover:border-zinc-400 hover:bg-zinc-100"
+						className="flex w-full items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-black transition-colors hover:border-zinc-400 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
 					>
 						<span className="text-lg leading-none text-[#76b900]">+</span>
 						New Chat
@@ -218,7 +218,7 @@ export const ChatSidebar = ({
 
 				<nav className="flex-1 overflow-y-auto px-2 pb-2">
 					{conversations.length === 0 ? (
-						<p className="px-2 py-4 text-center text-xs text-zinc-500">
+						<p className="px-2 py-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
 							No conversations yet
 						</p>
 					) : (
