@@ -8,9 +8,9 @@ const port = process.env.POSTGRES_PORT ?? "5432";
 const database = process.env.POSTGRES_DATABASE ?? "gsf";
 
 export default defineConfig({
-  schema: "prisma/schema.prisma",
+  schema: "frontend/prisma/schema.prisma",
   migrations: {
-    path: "prisma/migrations",
+    path: "frontend/prisma/migrations",
   },
   datasource: {
     url: `postgresql://${user}:${password}@${host}:${port}/${database}`,
