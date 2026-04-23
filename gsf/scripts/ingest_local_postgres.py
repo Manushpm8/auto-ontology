@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import os
 
-from gsf.server.connectors.postgres import PostgresDatabase
+from gsf.connectors.postgres import PostgresDatabase
 from gsf.server.env import load_server_env
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
