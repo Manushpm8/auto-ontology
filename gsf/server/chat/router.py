@@ -23,7 +23,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import (
 )
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
 
-from server.chat.connectors import get_connector, list_connectors
+from server.chat.connectors import get_connector
 from server.chat.models import NODE_LABELS, ChatRequest
 
 logger = logging.getLogger(__name__)
@@ -119,12 +119,6 @@ def _stream_chat(request: ChatRequest) -> Generator[str, None, None]:
         )
 
     yield _sse("[DONE]")
-
-
-@router.get("/chat/connectors")
-def get_connectors() -> list[dict]:
-    """Return available connectors (id + name + type, no secrets)."""
-    return list_connectors()
 
 
 @router.post("/chat/completions")

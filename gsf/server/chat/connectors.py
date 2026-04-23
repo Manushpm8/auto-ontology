@@ -34,13 +34,6 @@ _CONNECTORS: list[dict] = [
 _CONNECTORS_BY_ID: dict[str, dict] = {c["id"]: c for c in _CONNECTORS}
 
 
-def list_connectors() -> list[dict]:
-    """Return public metadata for every registered connector (no secrets)."""
-    return [
-        {"id": c["id"], "name": c["name"]}
-        for c in _CONNECTORS
-    ]
-
 
 def get_connector(connector_id: str) -> SQLDatabase:
     """Instantiate and return a ready-to-use connector for a registry ID."""
