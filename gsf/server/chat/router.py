@@ -4,15 +4,24 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from datetime import datetime
 from typing import Generator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import (
-    stream_agent_response,
+    app as langgraph_app,
+    llm_client,
 )
-from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
+from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import (
+    main_system_prompt_template,
+    ONTOLOGY,
+    get_ontology_prompt,
+)
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
 
 from server.chat.connectors import get_connector, list_connectors
 from server.chat.models import NODE_LABELS, ChatRequest
@@ -26,24 +35,88 @@ def _sse(data: str) -> str:
     return f"data: {data}\n\n"
 
 
-def _stream_chat(request: ChatRequest) -> Generator[str, None, None]:
-    all_connectors = list_connectors()
-    connector = get_connector(all_connectors[0]["id"])
+def _build_state(request: ChatRequest) -> AgentState:
+    connector = None
+    if request.connector_id:
+        connector = get_connector(request.connector_id)
 
-    payload: AgentPayload = {
-        "question": request.question,
+    dialect = connector.dialect if connector and hasattr(connector, "dialect") else None
+
+    main_system_prompt = main_system_prompt_template.format(
+        date=datetime.now(),
+        ontology_prompt=get_ontology_prompt(ONTOLOGY),
+        dialect=dialect,
+    )
+
+    messages = [
+        SystemMessage(content=main_system_prompt),
+        HumanMessage(content=request.question),
+    ]
+
+    return {
+        "llm": llm_client,
+        "initial_question": request.question,
+        "dialect": dialect,
         "connector": connector,
-        "acronyms": request.acronyms or "",
-        "custom_prompts": request.custom_prompts or "",
+        "messages": messages,
+        "decision": "",
+        "path_state": {},
     }
 
-    for event in stream_agent_response(payload):
-        if event["type"] == "step":
-            node = event["node"]
-            label = NODE_LABELS.get(node, node)
-            yield _sse(json.dumps({"type": "step", "node": node, "label": label}))
+
+def _extract_answer(final_state: dict) -> dict:
+    """Pull the user-facing answer out of the final graph state."""
+    path_state = final_state.get("path_state", {})
+    final_response = path_state.get("final_response")
+
+    if final_response is None:
+        messages_out = final_state.get("messages", [])
+        if messages_out:
+            if isinstance(messages_out, dict):
+                final_response = messages_out
+            elif isinstance(messages_out[-1], dict):
+                final_response = messages_out[-1]
+            else:
+                final_response = str(messages_out[-1])
         else:
-            yield _sse(json.dumps(event))
+            final_response = ""
+
+    if isinstance(final_response, dict):
+        return final_response
+    return {"response": str(final_response)}
+
+
+def _stream_chat(request: ChatRequest) -> Generator[str, None, None]:
+    t0 = time.perf_counter()
+    state = _build_state(request)
+    final_state = dict(state)
+
+    try:
+        for step in langgraph_app.stream(state, config={"recursion_limit": 45}):
+            for node_name, node_output in step.items():
+                label = NODE_LABELS.get(node_name, node_name)
+                yield _sse(
+                    json.dumps({"type": "step", "node": node_name, "label": label})
+                )
+
+                if node_output:
+                    if "path_state" in node_output:
+                        if "path_state" not in final_state:
+                            final_state["path_state"] = {}
+                        final_state["path_state"].update(node_output["path_state"])
+                    for key, value in node_output.items():
+                        if key != "path_state":
+                            final_state[key] = value
+
+        answer = _extract_answer(final_state)
+        logger.info("Chat completed in %.2fs", time.perf_counter() - t0)
+        yield _sse(json.dumps({"type": "result", "answer": answer}))
+
+    except Exception:
+        logger.exception("Error during chat stream")
+        yield _sse(
+            json.dumps({"type": "error", "message": "An internal error occurred."})
+        )
 
     yield _sse("[DONE]")
 

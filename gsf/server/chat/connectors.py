@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
-from gsf.connectors.duckdb import DuckDBDatabase
-from gsf.connectors.postgres import PostgresDatabase
+from connectors.duckdb import DuckDBDatabase
+from connectors.postgres import PostgresDatabase
 
 logger = logging.getLogger(__name__)
 
