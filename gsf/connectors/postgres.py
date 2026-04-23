@@ -54,9 +54,8 @@ class PostgresDatabase(SQLDatabase):
     def get_tables(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                current_database() AS "database",
-                t.table_schema     AS "schema",
-                t.table_name       AS "table_name"
+                t.table_schema    AS table_schema,
+                t.table_name      AS table_name
             FROM information_schema.tables t
             WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY t.table_schema, t.table_name
@@ -65,13 +64,12 @@ class PostgresDatabase(SQLDatabase):
     def get_columns(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                current_database() AS "database",
-                c.table_schema     AS "schema",
-                c.table_name       AS "table_name",
-                c.column_name      AS "column_name",
-                c.data_type        AS "data_type",
-                c.is_nullable      AS "is_nullable",
-                c.ordinal_position AS "ordinal_position"
+                c.table_schema       AS table_schema,
+                c.table_name         AS table_name,
+                c.column_name        AS column_name,
+                c.data_type          AS data_type,
+                c.is_nullable        AS is_nullable,
+                c.ordinal_position   AS ordinal_position
             FROM information_schema.columns c
             WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY c.table_schema, c.table_name, c.ordinal_position
@@ -95,10 +93,9 @@ class PostgresDatabase(SQLDatabase):
     def get_views(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                current_database() AS "database",
-                v.table_schema     AS "schema",
-                v.table_name       AS "table_name",
-                v.view_definition  AS "view_definition"
+                v.table_schema     AS table_schema,
+                v.table_name       AS table_name,
+                v.view_definition  AS view_definition
             FROM information_schema.views v
             WHERE v.table_schema NOT IN ('pg_catalog', 'information_schema')
             ORDER BY v.table_schema, v.table_name
@@ -107,11 +104,10 @@ class PostgresDatabase(SQLDatabase):
     def get_pks(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                current_database()   AS "database",
-                kcu.table_schema     AS "schema",
-                kcu.table_name       AS "table_name",
-                kcu.column_name      AS "column_name",
-                kcu.ordinal_position AS "ordinal_position"
+                kcu.table_schema         AS table_schema,
+                kcu.table_name           AS table_name,
+                kcu.column_name          AS column_name,
+                kcu.ordinal_position     AS ordinal_position
             FROM information_schema.table_constraints tc
             JOIN information_schema.key_column_usage kcu
               ON tc.constraint_name = kcu.constraint_name
@@ -124,13 +120,12 @@ class PostgresDatabase(SQLDatabase):
     def get_fks(self) -> pd.DataFrame:
         return self.execute("""
             SELECT
-                current_database() AS "database",
-                kcu.table_schema   AS "schema",
-                kcu.table_name     AS "table_name",
-                kcu.column_name    AS "column_name",
-                ccu.table_schema   AS "referenced_schema",
-                ccu.table_name     AS "referenced_table",
-                ccu.column_name    AS "referenced_column"
+                kcu.table_schema         AS table_schema,
+                kcu.table_name           AS table_name,
+                kcu.column_name          AS column_name,
+                ccu.table_schema         AS referenced_schema,
+                ccu.table_name           AS referenced_table,
+                ccu.column_name          AS referenced_column
             FROM information_schema.table_constraints tc
             JOIN information_schema.key_column_usage kcu
               ON tc.constraint_name = kcu.constraint_name
