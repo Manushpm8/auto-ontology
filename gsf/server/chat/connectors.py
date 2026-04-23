@@ -35,6 +35,10 @@ _CONNECTORS: list[ConnectorEntry] = [
         "name": "duckdb",
         "connection_string": "../spider2.duckdb",
     },
+    {
+        "name": "postgres",
+        "connection_string": "postgresql://gsf:gsf@localhost:5432/testdb",
+    },
 ]
 
 _CONNECTORS_BY_NAME: dict[str, ConnectorEntry] = {c["name"]: c for c in _CONNECTORS}
