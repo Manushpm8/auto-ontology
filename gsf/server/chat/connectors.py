@@ -25,23 +25,22 @@ _CONNECTOR_CLASSES: dict[str, type[SQLDatabase]] = {
 
 _CONNECTORS: list[dict] = [
     {
-        "id": "duckdb-local",
         "name": "duckdb",
         "connection_string": "../spider2.duckdb",
     },
 ]
 
-_CONNECTORS_BY_ID: dict[str, dict] = {c["id"]: c for c in _CONNECTORS}
+_CONNECTORS_BY_NAME: dict[str, dict] = {c["name"]: c for c in _CONNECTORS}
 
 
 
-def get_connector(connector_id: str) -> SQLDatabase:
-    """Instantiate and return a ready-to-use connector for a registry ID."""
-    entry = _CONNECTORS_BY_ID.get(connector_id)
+def get_connector(connector_name: str) -> SQLDatabase:
+    """Instantiate and return a ready-to-use connector by name."""
+    entry = _CONNECTORS_BY_NAME.get(connector_name)
     if entry is None:
         raise KeyError(
-            f"Connector '{connector_id}' not found. "
-            f"Available: {list(_CONNECTORS_BY_ID)}"
+            f"Connector '{connector_name}' not found. "
+            f"Available: {list(_CONNECTORS_BY_NAME)}"
         )
 
     cls = _CONNECTOR_CLASSES.get(entry["name"])

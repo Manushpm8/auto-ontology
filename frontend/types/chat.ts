@@ -8,7 +8,7 @@ export type ChatMessage = {
 
 export type ChatRequest = {
 	question: string;
-	connectorId?: string;
+	connectorName?: string;
 	acronyms?: string;
 	customPrompts?: string;
 };

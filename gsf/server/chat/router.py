@@ -37,8 +37,8 @@ def _sse(data: str) -> str:
 
 def _build_state(request: ChatRequest) -> AgentState:
     connector = None
-    if request.connector_id:
-        connector = get_connector(request.connector_id)
+    if request.connector_name:
+        connector = get_connector(request.connector_name)
 
     dialect = connector.dialect if connector and hasattr(connector, "dialect") else None
 
