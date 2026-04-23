@@ -18,8 +18,6 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.main import (
 )
 from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import (
     main_system_prompt_template,
-    ONTOLOGY,
-    get_ontology_prompt,
 )
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
 
@@ -44,7 +42,8 @@ def _build_state(request: ChatRequest) -> AgentState:
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
-        ontology_prompt=get_ontology_prompt(ONTOLOGY),
+        custom_prompts="",
+        acronyms="",
         dialect=dialect,
     )
 
