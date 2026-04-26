@@ -13,6 +13,7 @@ import logging
 import os
 
 from gsf.connectors.postgres import PostgresDatabase
+from gsf.vdb.postgres import PostgresVDB
 from gsf.server.env import load_server_env
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
@@ -21,11 +22,6 @@ from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
 )
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
 from nemo_retriever.tabular_data.retrieval import generate_sql
-from nemo_retriever.vector_store.lancedb_store import (
-    LanceDBConfig,
-    _build_lancedb_rows_from_df,
-    _write_rows_to_lancedb,
-)
 from nemo_retriever.params import (
     EmbedParams,
     TabularExtractParams,
@@ -51,12 +47,7 @@ EMBED_PARAMS = EmbedParams(
     embed_modality="text",
 )
 
-LANCEDB_CONFIG = LanceDBConfig(
-    uri="lancedb",
-    table_name="nv-ingest-tabular",
-    overwrite=True,
-    create_index=False,  # local dev dataset is too small for IVF-PQ index
-)
+VDB_TABLE: str = "nv_ingest_tabular"
 
 DATABASE: str = "testdb"
 
@@ -87,15 +78,25 @@ def ingest(database: str = DATABASE) -> None:
     result_df = results[0] if results else None
 
     if result_df is not None and not result_df.empty:
-        rows = _build_lancedb_rows_from_df(result_df.to_dict(orient="records"))
-        if rows:
-            _write_rows_to_lancedb(rows, cfg=LANCEDB_CONFIG)
-        logger.info("Tabular ingest result: %d rows written to LanceDB", len(result_df))
+        records = result_df.to_dict(orient="records")
+        vdb = PostgresVDB(
+            connection_string=_conn_string("gsf"),
+            index_name=VDB_TABLE,
+            recreate=True,
+            nvidia_api_key=_NVIDIA_API_KEY,
+            # embedding_base_url="https://integrate.api.nvidia.com/v1",
+            embedding_model="nvidia/llama-nemotron-embed-1b-v2",
+        )
+        try:
+            inserted = vdb.run(records)
+        finally:
+            vdb.close()
+        logger.info("Tabular ingest result: %d rows written to Postgres", inserted)
     else:
         logger.info("Tabular ingest result: no rows produced")
 
-    sql_result = generate_sql("How many customers exists?")
-    logger.info("generate_sql result:", sql_result)
+    # sql_result = generate_sql("How many customers exists?")
+    # logger.info("generate_sql result:", sql_result)
 
 
 if __name__ == "__main__":
