@@ -32,7 +32,10 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 	const [treeDatabases, setTreeDatabases] = useState<Database[]>(propDatabases);
 	const [prevPropDbs, setPrevPropDbs] = useState(propDatabases);
 	const [treeDataEpoch, setTreeDataEpoch] = useState(0);
+	const [treeCollapsed, setTreeCollapsed] = useState(false);
 	const treeEpochFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	const toggleTreeCollapsed = useCallback(() => setTreeCollapsed((c) => !c), []);
 
 	if (propDatabases !== prevPropDbs) {
 		setPrevPropDbs(propDatabases);
@@ -195,9 +198,6 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 			</div>
 		);
 	}
-
-	const [treeCollapsed, setTreeCollapsed] = useState(false);
-	const toggleTreeCollapsed = useCallback(() => setTreeCollapsed((c) => !c), []);
 
 	return (
 		<div className="flex h-full w-full bg-white dark:bg-zinc-950">
