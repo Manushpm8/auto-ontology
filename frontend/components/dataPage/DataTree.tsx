@@ -566,21 +566,10 @@ export function DataTree({
 		<div
 			className={`flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ${className}`}
 		>
-			<div className="flex h-[65px] shrink-0 items-center border-b border-zinc-200/80 bg-gradient-to-r from-emerald-50/80 to-transparent px-4 sm:px-5 dark:border-zinc-700 dark:from-emerald-950/40">
-				<div className="flex min-w-0 flex-1 flex-col justify-center">
-					<p className="text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-800/90 dark:text-emerald-400/90">
-						Explorer
-					</p>
-					<p
-						className="mt-1 truncate text-xs leading-snug text-zinc-500 dark:text-zinc-400"
-						title={summary}
-					>
-						{summary}
-					</p>
-				</div>
+			<div className="flex h-6 shrink-0 items-center justify-end border-b border-zinc-200/80 px-1 dark:border-zinc-700">
 				<button
 					type="button"
-					className="ml-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+					className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
 					onClick={onToggleCollapse}
 					aria-label="Collapse explorer"
 				>

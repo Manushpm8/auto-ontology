@@ -200,7 +200,7 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 	const toggleTreeCollapsed = useCallback(() => setTreeCollapsed((c) => !c), []);
 
 	return (
-		<div className="flex h-screen w-full bg-white dark:bg-zinc-950">
+		<div className="flex h-full w-full bg-white dark:bg-zinc-950">
 			<aside
 				className={`flex h-full shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 ${treeCollapsed ? 'w-8' : 'w-[296px]'}`}
 			>

@@ -5,8 +5,9 @@ import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { isComposerSection, type ComposerSection } from '@/types/composer-section';
-import { Breadcrumbs, type BreadcrumbItem } from '@/components/Breadcrumbs';
+import type { BreadcrumbItem } from '@/components/Breadcrumbs';
 import { Icon, IconName } from '@/components/icons';
+import { useBreadcrumbs } from '@/contexts/BreadcrumbContext';
 import { NAV_PREV_PATH_KEY } from '@/components/NavRail';
 import { datasources } from '@/api/datasources';
 
@@ -216,6 +217,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
 		const isPDFView = pdfProps?.isPDFView ?? false;
 
+		const { setItems: setBreadcrumbs } = useBreadcrumbs();
+
 		const [parentCrumb] = useState<BreadcrumbItem>(() => {
 			if (typeof window === 'undefined') return { label: 'Chat', href: '/chat' };
 			const prev = sessionStorage.getItem(NAV_PREV_PATH_KEY);
@@ -225,6 +228,10 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			);
 			return match ? match[1] : { label: 'Chat', href: '/chat' };
 		});
+
+		useEffect(() => {
+			setBreadcrumbs([parentCrumb, { label: title }]);
+		}, [setBreadcrumbs, parentCrumb, title]);
 
 		const gridTemplate =
 			leftPanel && rightPanel
@@ -293,50 +300,51 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</div>
 				) : null}
 
-				<header className="flex h-[65px] shrink-0 items-center justify-between border-b border-zinc-200/80 px-4 sm:px-5 dark:border-zinc-700/80">
-					<Breadcrumbs items={[parentCrumb, { label: title }]} />
-					{hasEditableSections && entityId && !isEditingActive && (
-						<button
-							type="button"
-							onClick={() => {
-								pendingEditsRef.current = {};
-								setLocalIsEditing(true);
-							}}
-							className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
-						>
-							<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-							Edit
-						</button>
-					)}
-					{isEditingActive && (
-						<div className="flex items-center gap-2">
+				{(hasEditableSections && entityId && !isEditingActive) || isEditingActive ? (
+					<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
+						{hasEditableSections && entityId && !isEditingActive && (
 							<button
 								type="button"
 								onClick={() => {
-									setLocalIsEditing(false);
-									onCancel?.();
+									pendingEditsRef.current = {};
+									setLocalIsEditing(true);
 								}}
-								className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+								className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
 							>
-								Cancel
+								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+								Edit
 							</button>
-							<button
-								type="button"
-								onClick={async () => {
-									const edits = pendingEditsRef.current;
-									if (entityId && Object.keys(edits).length > 0) {
-										await datasources.updateNode(entityId, edits);
-									}
-									setLocalIsEditing(false);
-									onSave?.(edits);
-								}}
-								className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600"
-							>
-								Save
-							</button>
-						</div>
-					)}
-				</header>
+						)}
+						{isEditingActive && (
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									onClick={() => {
+										setLocalIsEditing(false);
+										onCancel?.();
+									}}
+									className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+								>
+									Cancel
+								</button>
+								<button
+									type="button"
+									onClick={async () => {
+										const edits = pendingEditsRef.current;
+										if (entityId && Object.keys(edits).length > 0) {
+											await datasources.updateNode(entityId, edits);
+										}
+										setLocalIsEditing(false);
+										onSave?.(edits);
+									}}
+									className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+								>
+									Save
+								</button>
+							</div>
+						)}
+					</div>
+				) : null}
 
 				<div
 					className="grid min-h-0 w-full min-w-0 flex-1 gap-0 overflow-hidden"
