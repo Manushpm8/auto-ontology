@@ -1,13 +1,6 @@
 'use client';
 
-import {
-	createContext,
-	useCallback,
-	useContext,
-	useMemo,
-	useState,
-	type ReactNode,
-} from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { BreadcrumbItem } from '@/components/Breadcrumbs';
 
 type BreadcrumbContextValue = {
