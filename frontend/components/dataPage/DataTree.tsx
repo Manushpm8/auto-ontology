@@ -61,6 +61,8 @@ export type DataTreeProps = {
 	selectedId?: string;
 	pathBase?: string;
 	className?: string;
+	collapsed?: boolean;
+	onToggleCollapse?: () => void;
 	onTreeDataUpdated?: (databases: Database[]) => void;
 };
 
@@ -458,6 +460,8 @@ export function DataTree({
 	selectedId,
 	pathBase = '/data',
 	className = '',
+	collapsed = false,
+	onToggleCollapse,
 	onTreeDataUpdated,
 }: DataTreeProps) {
 	const [databases, setDatabases] = useState<Database[]>(initialDatabases);
@@ -518,20 +522,93 @@ export function DataTree({
 		[databases],
 	);
 
+	if (collapsed) {
+		return (
+			<div
+				className={`flex h-full w-8 min-w-[32px] flex-col items-center bg-transparent pt-1 ${className}`}
+			>
+				<button
+					type="button"
+					className="flex h-6 w-6 cursor-pointer items-center justify-center text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+					onClick={onToggleCollapse}
+					aria-label="Expand explorer"
+				>
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 16 16"
+						fill="none"
+						xmlns="http://www.w3.org/2000/svg"
+					>
+						<path
+							d="M6 3L11 8L6 13"
+							stroke="currentColor"
+							strokeWidth="1.5"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+						/>
+						<line
+							x1="13.25"
+							y1="3"
+							x2="13.25"
+							y2="13"
+							stroke="currentColor"
+							strokeWidth="1.5"
+							strokeLinecap="round"
+						/>
+					</svg>
+				</button>
+			</div>
+		);
+	}
+
 	return (
 		<div
 			className={`flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ${className}`}
 		>
-			<div className="flex h-[65px] shrink-0 flex-col justify-center border-b border-zinc-200/80 bg-gradient-to-r from-emerald-50/80 to-transparent px-4 sm:px-5 dark:border-zinc-700 dark:from-emerald-950/40">
-				<p className="text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-800/90 dark:text-emerald-400/90">
-					Explorer
-				</p>
-				<p
-					className="mt-1 truncate text-xs leading-snug text-zinc-500 dark:text-zinc-400"
-					title={summary}
+			<div className="flex h-[65px] shrink-0 items-center border-b border-zinc-200/80 bg-gradient-to-r from-emerald-50/80 to-transparent px-4 sm:px-5 dark:border-zinc-700 dark:from-emerald-950/40">
+				<div className="flex min-w-0 flex-1 flex-col justify-center">
+					<p className="text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-800/90 dark:text-emerald-400/90">
+						Explorer
+					</p>
+					<p
+						className="mt-1 truncate text-xs leading-snug text-zinc-500 dark:text-zinc-400"
+						title={summary}
+					>
+						{summary}
+					</p>
+				</div>
+				<button
+					type="button"
+					className="ml-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+					onClick={onToggleCollapse}
+					aria-label="Collapse explorer"
 				>
-					{summary}
-				</p>
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 16 16"
+						fill="none"
+						xmlns="http://www.w3.org/2000/svg"
+					>
+						<path
+							d="M10 3L5 8L10 13"
+							stroke="currentColor"
+							strokeWidth="1.5"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+						/>
+						<line
+							x1="2.75"
+							y1="3"
+							x2="2.75"
+							y2="13"
+							stroke="currentColor"
+							strokeWidth="1.5"
+							strokeLinecap="round"
+						/>
+					</svg>
+				</button>
 			</div>
 			<nav
 				className="flex min-h-0 flex-1 flex-col gap-y-1 overflow-y-auto px-3 py-2 sm:px-4"

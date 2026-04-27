@@ -3,6 +3,8 @@
 # python
 .venv/
 **/__pycache__/
+pyproject.toml
+uv.lock
 
 # dependencies
 node_modules

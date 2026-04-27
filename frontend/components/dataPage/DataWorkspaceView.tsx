@@ -196,14 +196,21 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 		);
 	}
 
+	const [treeCollapsed, setTreeCollapsed] = useState(false);
+	const toggleTreeCollapsed = useCallback(() => setTreeCollapsed((c) => !c), []);
+
 	return (
 		<div className="flex h-screen w-full bg-white dark:bg-zinc-950">
-			<aside className="flex h-full w-[296px] shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+			<aside
+				className={`flex h-full shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 ${treeCollapsed ? 'w-8' : 'w-[296px]'}`}
+			>
 				<DataTree
 					key="data-catalog-tree"
 					initialDatabases={treeDatabases}
 					selectedId={treeFocusId ?? undefined}
 					pathBase="/data"
+					collapsed={treeCollapsed}
+					onToggleCollapse={toggleTreeCollapsed}
 					onTreeDataUpdated={handleTreeDataUpdated}
 				/>
 			</aside>
