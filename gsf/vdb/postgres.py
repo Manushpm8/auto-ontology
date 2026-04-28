@@ -69,7 +69,12 @@ class PostgresVDB(VDB):
         self.collection_name: str = kwargs.get(
             "collection_name", kwargs.get("index_name", "nv_ingest_tabular")
         )
-        self.recreate: bool = bool(kwargs.get("recreate", False))
+        self.recreate: bool = bool(kwargs.get("recreate", True))
+        if not self.recreate:
+            # In order to support without recreate:
+            # 1. The ingestion should return which tables/columns were added/updated/deleted
+            # 2. The implemtation should support be fault tolerant and support incremental ingestion, which is challenging.
+            raise ValueError("Recreate False is not supported")
         self.nvidia_api_key = kwargs.get("nvidia_api_key")
         # required for NVIDIAEmbedding call if the endpoint is Nvidia build api.
         self.embedding_base_url = kwargs.get("embedding_base_url")

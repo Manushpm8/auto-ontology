@@ -49,7 +49,7 @@ EMBED_PARAMS = EmbedParams(
 
 VDB_TABLE: str = "nv_ingest_tabular"
 
-DATABASE: str = "testdb"
+DATABASE: str = "pagila"
 
 
 def _conn_string(db: str) -> str:
@@ -70,7 +70,7 @@ def ingest(database: str = DATABASE) -> None:
     graph = (
         Graph()
         >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-        >> TabularFetchEmbeddingsOp()
+        >> TabularFetchEmbeddingsOp(database_name=DATABASE)
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
 
@@ -82,7 +82,7 @@ def ingest(database: str = DATABASE) -> None:
         vdb = PostgresVDB(
             connection_string=_conn_string("gsf"),
             index_name=VDB_TABLE,
-            recreate=True,
+            recreate=True, # Reset the vdb collection if it already exists
             nvidia_api_key=_NVIDIA_API_KEY,
             # embedding_base_url="https://integrate.api.nvidia.com/v1",
             embedding_model="nvidia/llama-nemotron-embed-1b-v2",

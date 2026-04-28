@@ -52,12 +52,17 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def get_tables(self) -> pd.DataFrame:
+        # Filter tables that are part of partitioned tables
         return self.execute("""
             SELECT
                 t.table_schema    AS table_schema,
-                t.table_name      AS table_name
+                t.table_name      AS table_name,
+                t.table_type      AS table_type
             FROM information_schema.tables t
+            JOIN pg_namespace n ON n.nspname = t.table_schema
+            JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
             WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
+              AND c.relispartition = false
             ORDER BY t.table_schema, t.table_name
         """)
 
@@ -71,21 +76,35 @@ class PostgresDatabase(SQLDatabase):
                 c.is_nullable        AS is_nullable,
                 c.ordinal_position   AS ordinal_position
             FROM information_schema.columns c
+            JOIN pg_namespace n ON n.nspname = c.table_schema
+            JOIN pg_class pc ON pc.relname = c.table_name AND pc.relnamespace = n.oid
             WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
+              AND pc.relispartition = false
             ORDER BY c.table_schema, c.table_name, c.ordinal_position
         """)
 
-    def get_queries(self) -> pd.DataFrame:
-        """Return recent queries from ``pg_stat_statements`` if available."""
+    def get_queries(self, hours: int = 24) -> pd.DataFrame:
+        """Return recent queries from ``pg_stat_activity``.
+
+        Uses ``state_change`` as ``end_time`` and filters to the last ``hours``
+        hours. Excludes the current backend and rows with no recorded query.
+        """
         try:
-            return self.execute("""
+            # Todo: Add filter of exclude information schema and pg_catalog tables
+            return self.execute(
+                """
                 SELECT
-                    now()      AS end_time,
-                    query      AS query_text
-                FROM pg_stat_statements
-                ORDER BY total_exec_time DESC
-                LIMIT 100
-            """)
+                    state_change AS end_time,
+                    query        AS query_text
+                FROM pg_stat_activity
+                WHERE pid != pg_backend_pid()
+                  AND query IS NOT NULL
+                  AND query <> ''
+                  AND state_change >= now() - make_interval(hours => %s)
+                ORDER BY state_change DESC
+                """,
+                [hours],
+            )
         except psycopg2.Error:
             self._conn.rollback()
             return pd.DataFrame(columns=["end_time", "query_text"])
