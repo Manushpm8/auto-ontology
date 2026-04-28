@@ -262,14 +262,33 @@ export function buildTreeFocusPageFormat(
 		case DataModels.COLUMN: {
 			const { table, column } = resolvedFocus;
 			sections.push(
-				...baseCardsForEntity(column.description ?? '', [
-					{ label: 'Column', value: column.column_name },
-					{ label: 'Data type', value: column.data_type.trim() ? column.data_type : '—' },
-					{ label: 'Table', value: column.table_name },
-					{ label: 'Schema', value: column.schema_name },
-					{ label: 'Database', value: column.db_name },
-					{ label: 'Position', value: String(column.ordinal_position) },
-				]),
+				{
+					type: ComposerSectionKind.TEXT_CARD,
+					id: 'description',
+					title: 'Description',
+					body: column.description ?? '',
+					editable: true,
+				},
+				{
+					type: ComposerSectionKind.TEXT_CARD,
+					id: 'sample_value',
+					title: 'Sample Value',
+					body: column.sample_value ?? '',
+					editable: true,
+				},
+				{
+					type: ComposerSectionKind.INFO_GRID,
+					id: 'information',
+					title: 'Information',
+					items: [
+						{ label: 'Column', value: column.column_name },
+						{ label: 'Data type', value: column.data_type.trim() ? column.data_type : '—' },
+						{ label: 'Table', value: column.table_name },
+						{ label: 'Schema', value: column.schema_name },
+						{ label: 'Database', value: column.db_name },
+						{ label: 'Position', value: String(column.ordinal_position) },
+					],
+				},
 			);
 			return {
 				sections,
