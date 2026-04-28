@@ -220,7 +220,7 @@ export function catalogStructureFingerprint(databases: Database[]): string {
 					const tablesPart = tables
 						.map((table) => {
 							const colDescs = (table.columns ?? [])
-								.map((c) => `${c.description ?? ''}~${c.sample_value ?? ''}`)
+								.map((c) => `${c.description ?? ''}~${c.sample_values ?? ''}`)
 								.join('/');
 							return `${table.id}:${(table.columns ?? []).length}:${table.description ?? ''}:${colDescs}`;
 						})

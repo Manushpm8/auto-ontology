@@ -7,7 +7,7 @@ export type Column = {
 	table_name: string;
 	ordinal_position: number;
 	description?: string;
-	sample_value?: string;
+	sample_values?: string;
 };
 
 export type Table = {
