@@ -21,7 +21,6 @@ from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
-from nemo_retriever.tabular_data.retrieval import generate_sql
 from nemo_retriever.params import (
     EmbedParams,
     TabularExtractParams,
