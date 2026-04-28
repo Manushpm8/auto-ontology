@@ -271,9 +271,9 @@ export function buildTreeFocusPageFormat(
 				},
 				{
 					type: ComposerSectionKind.TEXT_CARD,
-				id: 'sample_values',
-				title: 'Sample Values',
-				body: column.sample_values ?? '',
+					id: 'sample_values',
+					title: 'Sample Values',
+					body: column.sample_values ?? '',
 					editable: true,
 				},
 				{
@@ -282,7 +282,10 @@ export function buildTreeFocusPageFormat(
 					title: 'Information',
 					items: [
 						{ label: 'Column', value: column.column_name },
-						{ label: 'Data type', value: column.data_type.trim() ? column.data_type : '—' },
+						{
+							label: 'Data type',
+							value: column.data_type.trim() ? column.data_type : '—',
+						},
 						{ label: 'Table', value: column.table_name },
 						{ label: 'Schema', value: column.schema_name },
 						{ label: 'Database', value: column.db_name },
