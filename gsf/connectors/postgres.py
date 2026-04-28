@@ -5,14 +5,14 @@ from __future__ import annotations
 from typing import Optional
 
 import pandas as pd
-import psycopg2
-import psycopg2.extras
+import psycopg
+from psycopg.rows import dict_row
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 
 class PostgresDatabase(SQLDatabase):
-    """Concrete :class:`SQLDatabase` backed by ``psycopg2``.
+    """Concrete :class:`SQLDatabase` backed by ``psycopg`` (v3).
 
     Parameters
     ----------
@@ -23,7 +23,7 @@ class PostgresDatabase(SQLDatabase):
 
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
-        self._conn: psycopg2.extensions.connection = psycopg2.connect(connection_string)
+        self._conn: psycopg.Connection = psycopg.connect(connection_string)
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
 
     @property
@@ -39,7 +39,7 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        with self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with self._conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, parameters)
             if cur.description is None:
                 self._conn.commit()
@@ -105,7 +105,7 @@ class PostgresDatabase(SQLDatabase):
                 """,
                 [hours],
             )
-        except psycopg2.Error:
+        except psycopg.Error:
             self._conn.rollback()
             return pd.DataFrame(columns=["end_time", "query_text"])
 

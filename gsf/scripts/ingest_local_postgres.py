@@ -48,7 +48,8 @@ EMBED_PARAMS = EmbedParams(
 
 VDB_TABLE: str = "nv_ingest_tabular"
 
-DATABASE: str = "pagila"
+# DATABASE: str = "pagila"
+DATABASE: str = "testdb"
 
 
 def _conn_string(db: str) -> str:
@@ -81,10 +82,9 @@ def ingest(database: str = DATABASE) -> None:
         vdb = PostgresVDB(
             connection_string=_conn_string("gsf"),
             index_name=VDB_TABLE,
-            recreate=True,  # Reset the vdb collection if it already exists
             nvidia_api_key=_NVIDIA_API_KEY,
-            # embedding_base_url="https://integrate.api.nvidia.com/v1",
             embedding_model="nvidia/llama-nemotron-embed-1b-v2",
+            database_name=DATABASE,
         )
         try:
             inserted = vdb.run(records)
