@@ -16,7 +16,7 @@ dependencies = [
 package = false
 
 [tool.uv.sources]
-nemo-retriever = { git = "https://github.com/NVIDIA/NeMo-Retriever.git", subdirectory = "nemo_retriever" }
+nemo-retriever = { path = "../NeMo-Retriever/nemo_retriever", editable = true }
 
 [dependency-groups]
 dev = [

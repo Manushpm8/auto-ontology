@@ -5,6 +5,15 @@ import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { isComposerSection, type ComposerSection } from '@/types/composer-section';
+import type { BreadcrumbItem } from '@/components/Breadcrumbs';
+import { Icon, IconName } from '@/components/icons';
+import { useBreadcrumbs } from '@/contexts/BreadcrumbContext';
+import { NAV_PREV_PATH_KEY } from '@/components/NavRail';
+import { datasources } from '@/api/datasources';
+
+const PREV_PATH_LABELS: Record<string, { label: string; href: string }> = {
+	'/chat': { label: 'Chat', href: '/chat' },
+};
 
 export type SinglePageComposerProps = {
 	sections: unknown[];
@@ -20,15 +29,8 @@ export type SinglePageComposerProps = {
 	};
 	entityUpdatingProperties?: Record<string, string | string[]>;
 	isEditing?: boolean;
-	onSave?: (description: string) => void;
+	onSave?: (edits: Record<string, string>) => void;
 	onCancel?: () => void;
-};
-
-type EditHeaderProps = {
-	editMode?: boolean;
-	onBeginEdit?: () => void;
-	onFinishEdit?: (approve: boolean) => void;
-	isLoadingUpdate?: boolean;
 };
 
 function composerSectionHeading(section: ComposerSection): string {
@@ -40,12 +42,12 @@ function composerSectionHeading(section: ComposerSection): string {
 	}
 }
 
-const EditableDescriptionCard = ({
+const EditableTextCard = ({
 	section,
-	valueRef,
+	onChange,
 }: {
-	section: { title: string; body: string };
-	valueRef: React.MutableRefObject<string>;
+	section: { id: string; title: string; body: string };
+	onChange: (sectionId: string, value: string) => void;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const [value, setValue] = useState(section.body);
@@ -56,14 +58,11 @@ const EditableDescriptionCard = ({
 
 	const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 		setValue(e.target.value);
-		valueRef.current = e.target.value;
+		onChange(section.id, e.target.value);
 	};
 
 	return (
-		<div
-			id="description-section"
-			className="rounded-lg border-2 border-emerald-500 bg-white/90 p-5 shadow-sm ring-1 ring-emerald-500/20 dark:border-emerald-400 dark:bg-zinc-950/50 dark:ring-emerald-400/20"
-		>
+		<div className="rounded-lg border-2 border-emerald-500 bg-white/90 p-5 shadow-sm ring-1 ring-emerald-500/20 dark:border-emerald-400 dark:bg-zinc-950/50 dark:ring-emerald-400/20">
 			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 				{section.title}
 			</h2>
@@ -199,25 +198,40 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		} = props;
 		const hh = header?.header;
 		const title = (hh?.title as string) ?? 'Untitled';
-		const subtitle = hh?.subtitle as string | undefined;
-		const entityId = hh?.entityId as string | undefined;
-		const parentId = hh?.parentId as string | undefined;
-		const editProps = hh?.editProps as EditHeaderProps | undefined;
+		const entityId = (hh?.entityId as string) ?? '';
 		const pdfPageName = (hh?.pdfProps as { pageName?: string } | undefined)?.pageName;
 		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
 
-		const descriptionSection = sections.find(
+		const hasEditableSections = sections.some(
 			(s) =>
 				isComposerSection(s) &&
 				s.type === ComposerSectionKind.TEXT_CARD &&
-				s.id === 'description',
-		) as (ComposerSection & { body: string }) | undefined;
+				s.editable === true,
+		);
+		const [localIsEditing, setLocalIsEditing] = useState(false);
+		const isEditingActive = isEditing || localIsEditing;
 
-		const pendingDescriptionRef = useRef(descriptionSection?.body ?? '');
+		const pendingEditsRef = useRef<Record<string, string>>({});
 
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
 		const isPDFView = pdfProps?.isPDFView ?? false;
+
+		const { setItems: setBreadcrumbs } = useBreadcrumbs();
+
+		const [parentCrumb] = useState<BreadcrumbItem>(() => {
+			if (typeof window === 'undefined') return { label: 'Chat', href: '/chat' };
+			const prev = sessionStorage.getItem(NAV_PREV_PATH_KEY);
+			if (!prev) return { label: 'Chat', href: '/chat' };
+			const match = Object.entries(PREV_PATH_LABELS).find(([prefix]) =>
+				prev.startsWith(prefix),
+			);
+			return match ? match[1] : { label: 'Chat', href: '/chat' };
+		});
+
+		useEffect(() => {
+			setBreadcrumbs([parentCrumb, { label: title }]);
+		}, [setBreadcrumbs, parentCrumb, title]);
 
 		const gridTemplate =
 			leftPanel && rightPanel
@@ -278,99 +292,59 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		return (
 			<div
 				ref={ref}
-				className="box-border flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-0 overflow-hidden rounded-b-2xl rounded-t-none border border-zinc-200/90 bg-zinc-50/90 p-4 shadow-xl shadow-zinc-300/40 ring-1 ring-zinc-950/5 sm:p-5 md:p-6 dark:border-zinc-700/90 dark:bg-zinc-900/50 dark:shadow-2xl dark:shadow-black/40 dark:ring-white/5"
+				className="box-border flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-0 overflow-hidden bg-white dark:bg-zinc-950"
 			>
-				<div
-					className="h-1 shrink-0 rounded-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-600"
-					aria-hidden
-				/>
 				{header?.errorBanner ? (
 					<div className="border-b border-amber-200/90 bg-amber-50 px-7 py-4 text-sm text-amber-950 sm:px-10 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
 						{String(header.errorBanner)}
 					</div>
 				) : null}
 
-				<header className="border-b border-zinc-200/80 bg-gradient-to-b from-white to-zinc-50/90 px-7 py-6 sm:px-10 sm:py-7 dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
-					<div className="flex flex-wrap items-start justify-between gap-3">
-						<div className="min-w-0">
-							<h1 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 sm:text-2xl">
-								{title}
-							</h1>
-							{subtitle ? (
-								<p className="mt-1.5 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-									{subtitle}
-								</p>
-							) : null}
-							<dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-500">
-								{entityId ? (
-									<div>
-										<dt className="inline font-medium">Entity</dt>{' '}
-										<dd className="inline font-mono text-zinc-700 dark:text-zinc-300">
-											{entityId}
-										</dd>
-									</div>
-								) : null}
-								{parentId ? (
-									<div>
-										<dt className="inline font-medium">Parent</dt>{' '}
-										<dd className="inline font-mono text-zinc-700 dark:text-zinc-300">
-											{parentId}
-										</dd>
-									</div>
-								) : null}
-							</dl>
-						</div>
-						<div className="flex flex-wrap items-center gap-2">
-							{isEditing ? (
-								<>
-									<button
-										type="button"
-										className="inline-flex items-center rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 hover:border-emerald-700 active:scale-[0.97] dark:bg-emerald-500 dark:border-emerald-500 dark:hover:bg-emerald-600 dark:hover:border-emerald-600"
-										onClick={() => onSave?.(pendingDescriptionRef.current)}
-									>
-										Save
-									</button>
-									<button
-										type="button"
-										className="inline-flex items-center rounded-lg border border-zinc-300 bg-white px-4 py-1.5 text-sm font-medium text-zinc-700 shadow-sm transition-all hover:bg-zinc-50 active:scale-[0.97] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-										onClick={onCancel}
-									>
-										Cancel
-									</button>
-								</>
-							) : editProps && editProps.onBeginEdit && editProps.onFinishEdit ? (
-								editProps.editMode ? (
-									<>
-										<button
-											type="button"
-											disabled={editProps.isLoadingUpdate}
-											className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-											onClick={() => editProps.onFinishEdit?.(true)}
-										>
-											{editProps.isLoadingUpdate ? 'Saving…' : 'Save'}
-										</button>
-										<button
-											type="button"
-											disabled={editProps.isLoadingUpdate}
-											className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
-											onClick={() => editProps.onFinishEdit?.(false)}
-										>
-											Cancel
-										</button>
-									</>
-								) : (
-									<button
-										type="button"
-										className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-										onClick={() => editProps.onBeginEdit?.()}
-									>
-										Edit
-									</button>
-								)
-							) : null}
-						</div>
+				{(hasEditableSections && entityId && !isEditingActive) || isEditingActive ? (
+					<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
+						{hasEditableSections && entityId && !isEditingActive && (
+							<button
+								type="button"
+								onClick={() => {
+									pendingEditsRef.current = {};
+									setLocalIsEditing(true);
+								}}
+								className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
+							>
+								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+								Edit
+							</button>
+						)}
+						{isEditingActive && (
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									onClick={() => {
+										setLocalIsEditing(false);
+										onCancel?.();
+									}}
+									className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+								>
+									Cancel
+								</button>
+								<button
+									type="button"
+									onClick={async () => {
+										const edits = pendingEditsRef.current;
+										if (entityId && Object.keys(edits).length > 0) {
+											await datasources.updateNode(entityId, edits);
+										}
+										setLocalIsEditing(false);
+										onSave?.(edits);
+									}}
+									className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+								>
+									Save
+								</button>
+							</div>
+						)}
 					</div>
-				</header>
+				) : null}
 
 				<div
 					className="grid min-h-0 w-full min-w-0 flex-1 gap-0 overflow-hidden"
@@ -417,12 +391,14 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								{sections.map((section, i) =>
 									isComposerSection(section) ? (
 										<div key={section.id}>
-											{isEditing &&
+											{isEditingActive &&
 											section.type === ComposerSectionKind.TEXT_CARD &&
-											section.id === 'description' ? (
-												<EditableDescriptionCard
+											section.editable === true ? (
+												<EditableTextCard
 													section={section}
-													valueRef={pendingDescriptionRef}
+													onChange={(id, val) => {
+														pendingEditsRef.current[id] = val;
+													}}
 												/>
 											) : (
 												renderComposerSection(section)
