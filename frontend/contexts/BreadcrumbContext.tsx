@@ -1,13 +1,6 @@
 'use client';
 
-import {
-	createContext,
-	useCallback,
-	useContext,
-	useMemo,
-	useState,
-	type ReactNode,
-} from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import type { BreadcrumbItem } from '@/components/Breadcrumbs';
 
