@@ -22,7 +22,6 @@ from nv_ingest_client.util.vdb.adt_vdb import VDB
 logger = logging.getLogger(__name__)
 
 _DATABASE_METADATA_COLUMN = "database_name"
-_LABEL_METADATA_COLUMN = "label"
 
 
 class _UnusableEmbeddings(Embeddings):
@@ -168,7 +167,6 @@ class PostgresVDB(VDB):
                 vector_size=self.vector_size,
                 metadata_columns=[
                     Column(_DATABASE_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
-                    Column(_LABEL_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                 ],
             )
 
@@ -176,7 +174,7 @@ class PostgresVDB(VDB):
             engine=engine,
             embedding_service=self.embeddings,
             table_name=self.collection_name,
-            metadata_columns=[_DATABASE_METADATA_COLUMN, _LABEL_METADATA_COLUMN],
+            metadata_columns=[_DATABASE_METADATA_COLUMN],
         )
         return self._store
 
