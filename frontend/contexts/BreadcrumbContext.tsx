@@ -4,9 +4,7 @@ import {
 	createContext,
 	useCallback,
 	useContext,
-	useEffect,
 	useMemo,
-	useRef,
 	useState,
 	type ReactNode,
 } from 'react';
@@ -38,27 +36,24 @@ const BreadcrumbContext = createContext<BreadcrumbContextValue>({
 
 export const BreadcrumbProvider = ({ children }: { children: ReactNode }) => {
 	const pathname = usePathname();
-	const prevPathRef = useRef<string | null>(null);
+	const [prevPath, setPrevPath] = useState<string | null>(null);
 	const [items, setItems] = useState<BreadcrumbItem[]>([]);
 	const [rightSlot, setRightSlotRaw] = useState<ReactNode>(null);
 
 	const setRightSlot = useCallback((node: ReactNode) => setRightSlotRaw(node), []);
 
-	useEffect(() => {
+	if (pathname !== prevPath) {
 		const current = labelForPath(pathname);
-		if (!current) return;
-
-		const prev = prevPathRef.current;
-		const parentCrumb = prev ? labelForPath(prev) : null;
-
-		if (parentCrumb && parentCrumb.href !== current.href) {
-			setItems([parentCrumb, { label: current.label }]);
-		} else {
-			setItems([{ label: current.label }]);
+		if (current) {
+			const parentCrumb = prevPath ? labelForPath(prevPath) : null;
+			if (parentCrumb && parentCrumb.href !== current.href) {
+				setItems([parentCrumb, { label: current.label }]);
+			} else {
+				setItems([{ label: current.label }]);
+			}
 		}
-
-		prevPathRef.current = pathname;
-	}, [pathname]);
+		setPrevPath(pathname);
+	}
 
 	const value = useMemo(
 		() => ({ items, rightSlot, setRightSlot }),
