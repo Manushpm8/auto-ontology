@@ -10,6 +10,7 @@ from server.datasources import dal
 
 class NodeUpdate(BaseModel):
     description: str | None = None
+    sample_values: str | None = None
 
 
 router = APIRouter()
