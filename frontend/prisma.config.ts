@@ -6,6 +6,6 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 export default defineConfig({
 	datasource: {
-		url: process.env.DATABASE_URL ?? 'postgresql://localhost:5432/placeholder',
+		url: process.env.DATABASE_URL ?? 'postgresql://localhost:5432/gsf',
 	},
 });

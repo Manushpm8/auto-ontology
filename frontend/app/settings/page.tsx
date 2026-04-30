@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconName } from '@/components/icons';
-import { customPromptsApi, type CustomPrompt } from '@/api/settings';
+import { promptsApi, type Prompt } from '@/api/settings';
 
 type SettingsSectionProps = {
 	title: string;
 	subtitle: string;
-	prompts: CustomPrompt[];
+	prompts: Prompt[];
 	loading: boolean;
 	onCreate: (content: string) => Promise<void>;
 	onUpdate: (id: string, content: string) => Promise<void>;
@@ -151,14 +151,14 @@ const SettingsSection = ({
 };
 
 export default function SettingsPage() {
-	const [prompts, setPrompts] = useState<CustomPrompt[]>([]);
+	const [prompts, setPrompts] = useState<Prompt[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
 	const fetchPrompts = useCallback(async () => {
 		try {
 			setError(null);
-			const data = await customPromptsApi.get();
+			const data = await promptsApi.get();
 			setPrompts(data);
 		} catch {
 			setError('Failed to load custom prompts.');
@@ -174,7 +174,7 @@ export default function SettingsPage() {
 	const handleCreate = async (content: string) => {
 		try {
 			setError(null);
-			const created = await customPromptsApi.create({ content });
+			const created = await promptsApi.create({ content });
 			setPrompts((prev) => [created, ...prev]);
 		} catch {
 			setError('Failed to create custom prompt.');
@@ -184,7 +184,7 @@ export default function SettingsPage() {
 	const handleUpdate = async (id: string, content: string) => {
 		try {
 			setError(null);
-			const updated = await customPromptsApi.update(id, { content });
+			const updated = await promptsApi.update(id, { content });
 			setPrompts((prev) => prev.map((p) => (p.id === id ? updated : p)));
 		} catch {
 			setError('Failed to save custom prompt.');
@@ -194,7 +194,7 @@ export default function SettingsPage() {
 	const handleDelete = async (id: string) => {
 		try {
 			setError(null);
-			await customPromptsApi.delete(id);
+			await promptsApi.delete(id);
 			setPrompts((prev) => prev.filter((p) => p.id !== id));
 		} catch {
 			setError('Failed to delete custom prompt.');

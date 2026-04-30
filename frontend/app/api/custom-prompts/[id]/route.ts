@@ -4,7 +4,7 @@ import { getPrisma } from '@/lib/prisma';
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const prisma = getPrisma();
 	const { id } = await params;
-	const prompt = await prisma.customPrompt.findUnique({ where: { id } });
+	const prompt = await prisma.prompt.findUnique({ where: { id } });
 
 	if (!prompt) {
 		return NextResponse.json({ error: 'Custom prompt not found' }, { status: 404 });
@@ -21,7 +21,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 	const data: Record<string, string> = {};
 	if (typeof body.content === 'string') data.content = body.content;
 
-	const prompt = await prisma.customPrompt.update({
+	const prompt = await prisma.prompt.update({
 		where: { id },
 		data,
 	});
@@ -31,6 +31,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const prisma = getPrisma();
 	const { id } = await params;
-	await prisma.customPrompt.delete({ where: { id } });
+	await prisma.prompt.delete({ where: { id } });
 	return new Response(null, { status: 204 });
 }

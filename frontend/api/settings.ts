@@ -1,4 +1,4 @@
-export type CustomPrompt = {
+export type Prompt = {
 	id: string;
 	content: string;
 };
@@ -9,18 +9,18 @@ async function json<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 	return res.json() as Promise<T>;
 }
 
-export const customPromptsApi = {
-	get: () => json<CustomPrompt[]>('/api/custom-prompts'),
+export const promptsApi = {
+	get: () => json<Prompt[]>('/api/custom-prompts'),
 
 	create: (data: { content?: string } = {}) =>
-		json<CustomPrompt>('/api/custom-prompts', {
+		json<Prompt>('/api/custom-prompts', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(data),
 		}),
 
 	update: (id: string, data: { content?: string }) =>
-		json<CustomPrompt>(`/api/custom-prompts/${id}`, {
+		json<Prompt>(`/api/custom-prompts/${id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(data),
