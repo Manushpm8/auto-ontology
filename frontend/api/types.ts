@@ -23,6 +23,7 @@ export type SchemasResponse = {
 /** Payload accepted by PATCH /nodes/:id — all fields optional. */
 export type NodePatch = {
 	description?: string;
+	sample_values?: string;
 };
 
 /** Response from the node update endpoint. */
@@ -38,6 +39,6 @@ export type ColumnsEnvelope = {
 	columns_count: number;
 	columns: Pick<
 		Column,
-		'id' | 'ordinal_position' | 'column_name' | 'data_type' | 'description'
+		'id' | 'ordinal_position' | 'column_name' | 'data_type' | 'description' | 'sample_values'
 	>[];
 };

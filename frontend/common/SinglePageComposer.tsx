@@ -45,16 +45,18 @@ function composerSectionHeading(section: ComposerSection): string {
 const EditableTextCard = ({
 	section,
 	onChange,
+	autoFocus = false,
 }: {
 	section: { id: string; title: string; body: string };
 	onChange: (sectionId: string, value: string) => void;
+	autoFocus?: boolean;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const [value, setValue] = useState(section.body);
 
 	useEffect(() => {
-		textareaRef.current?.focus();
-	}, []);
+		if (autoFocus) textareaRef.current?.focus();
+	}, [autoFocus]);
 
 	const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 		setValue(e.target.value);
@@ -202,12 +204,14 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const pdfPageName = (hh?.pdfProps as { pageName?: string } | undefined)?.pageName;
 		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
 
-		const hasEditableSections = sections.some(
-			(s) =>
-				isComposerSection(s) &&
-				s.type === ComposerSectionKind.TEXT_CARD &&
-				s.editable === true,
-		);
+		const firstEditableId =
+			sections.find(
+				(s): s is ComposerSection =>
+					isComposerSection(s) &&
+					s.type === ComposerSectionKind.TEXT_CARD &&
+					s.editable === true,
+			)?.id ?? null;
+		const hasEditableSections = firstEditableId !== null;
 		const [localIsEditing, setLocalIsEditing] = useState(false);
 		const isEditingActive = isEditing || localIsEditing;
 
@@ -388,14 +392,40 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 							</div>
 						) : (
 							<div className="space-y-5">
-								{sections.map((section, i) =>
-									isComposerSection(section) ? (
+								{sections.map((section, i) => {
+									if (!isComposerSection(section)) {
+										return (
+											<section
+												key={i}
+												className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+											>
+												<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+													{typeof section === 'object' &&
+													section !== null &&
+													'title' in section &&
+													typeof (section as { title: unknown }).title ===
+														'string'
+														? (section as { title: string }).title
+														: 'Section'}
+												</h2>
+												<pre className="mt-2 max-h-40 overflow-auto rounded bg-zinc-100 p-2 text-xs text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+													{JSON.stringify(section, null, 2)}
+												</pre>
+											</section>
+										);
+									}
+
+									const isEditable =
+										isEditingActive &&
+										section.type === ComposerSectionKind.TEXT_CARD &&
+										section.editable === true;
+
+									return (
 										<div key={section.id}>
-											{isEditingActive &&
-											section.type === ComposerSectionKind.TEXT_CARD &&
-											section.editable === true ? (
+											{isEditable ? (
 												<EditableTextCard
 													section={section}
+													autoFocus={section.id === firstEditableId}
 													onChange={(id, val) => {
 														pendingEditsRef.current[id] = val;
 													}}
@@ -404,26 +434,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 												renderComposerSection(section)
 											)}
 										</div>
-									) : (
-										<section
-											key={i}
-											className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
-										>
-											<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-												{typeof section === 'object' &&
-												section !== null &&
-												'title' in section &&
-												typeof (section as { title: unknown }).title ===
-													'string'
-													? (section as { title: string }).title
-													: 'Section'}
-											</h2>
-											<pre className="mt-2 max-h-40 overflow-auto rounded bg-zinc-100 p-2 text-xs text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-												{JSON.stringify(section, null, 2)}
-											</pre>
-										</section>
-									),
-								)}
+									);
+								})}
 							</div>
 						)}
 
