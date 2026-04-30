@@ -10,7 +10,7 @@
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "python": "${workspaceFolder}/.venv/bin/python",
-            "module": "gsf.scripts.ingest_local_postgres",
+            "module": "dev-tools.ingest_local_postgres",
             "envFile": "${workspaceFolder}/.env",
             "console": "integratedTerminal"
         },
