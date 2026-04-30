@@ -36,3 +36,13 @@ model Prompt {
 
   @@map("prompts")
 }
+
+model Acronym {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String   @default("")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("acronyms")
+}
