@@ -117,7 +117,8 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
                  ordinal_position: c.ordinal_position,
                  column_name: c.name,
                  data_type: c.data_type,
-                 description: c.description
+                 description: c.description,
+                 sample_values: c.sample_values
              }}) AS columns
         RETURN t.name AS table_name,
                t.schema_name AS schema_name,
