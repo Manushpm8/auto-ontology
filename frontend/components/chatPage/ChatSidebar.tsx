@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
 import { Icon, IconName } from '@/components/icons';
 import { ConfirmModal } from '@/components/ConfirmModal';
+import { PopoverMenu } from '@/components/PopoverMenu';
 
 type ChatSidebarProps = {
 	conversations: Conversation[];
@@ -30,27 +31,14 @@ function ConversationItem({
 	onRename: (title: string) => void;
 	onDelete: () => void;
 }) {
-	const [menuOpen, setMenuOpen] = useState(false);
 	const [editing, setEditing] = useState(false);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const [editValue, setEditValue] = useState(conv.title);
 	const inputRef = useRef<HTMLInputElement>(null);
-	const menuRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		if (editing) inputRef.current?.focus();
 	}, [editing]);
-
-	useEffect(() => {
-		if (!menuOpen) return;
-		const handleClick = (e: MouseEvent) => {
-			if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-				setMenuOpen(false);
-			}
-		};
-		document.addEventListener('mousedown', handleClick);
-		return () => document.removeEventListener('mousedown', handleClick);
-	}, [menuOpen]);
 
 	const handleRenameSubmit = useCallback(() => {
 		const trimmed = editValue.trim();
@@ -105,47 +93,35 @@ function ConversationItem({
 				</span>
 			</button>
 
-			<div ref={menuRef} className="absolute right-1 top-1.5">
-				<button
-					type="button"
-					onClick={(e) => {
-						e.stopPropagation();
-						setMenuOpen((o) => !o);
-					}}
-					className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-200 hover:text-zinc-700 group-hover:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-					aria-label="Conversation options"
-				>
-					<Icon name={IconName.DotsVertical} className="h-4 w-4" />
-				</button>
-
-				{menuOpen && (
-					<div className="absolute right-0 top-7 z-30 w-32 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
-						<button
-							type="button"
-							onClick={() => {
-								setMenuOpen(false);
-								setEditValue(conv.title);
-								setEditing(true);
-							}}
-							className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
-						>
-							<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-							Rename
-						</button>
-						<button
-							type="button"
-							onClick={() => {
-								setMenuOpen(false);
-								setConfirmDelete(true);
-							}}
-							className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-						>
-							<Icon name={IconName.Trash} className="h-3.5 w-3.5" />
-							Delete
-						</button>
-					</div>
+			<PopoverMenu
+				className="absolute right-1 top-1.5"
+				items={[
+					{
+						label: 'Rename',
+						icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
+						onClick: () => {
+							setEditValue(conv.title);
+							setEditing(true);
+						},
+					},
+					{
+						label: 'Delete',
+						icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
+						onClick: () => setConfirmDelete(true),
+						danger: true,
+					},
+				]}
+				trigger={({ toggle }) => (
+					<button
+						type="button"
+						onClick={toggle}
+						className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-200 hover:text-zinc-700 group-hover:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+						aria-label="Conversation options"
+					>
+						<Icon name={IconName.DotsVertical} className="h-4 w-4" />
+					</button>
 				)}
-			</div>
+			/>
 
 			<ConfirmModal
 				open={confirmDelete}

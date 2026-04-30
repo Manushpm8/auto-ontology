@@ -29,7 +29,7 @@ export const ConfirmModal = ({
 	}, [open]);
 
 	return (
-		<Modal open={open} onClose={onCancel}>
+		<Modal open={open} onClose={onCancel} className="w-full max-w-sm">
 			<div className="p-6">
 				<h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
 					{title}
