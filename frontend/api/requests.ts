@@ -46,6 +46,15 @@ export const requests = {
 			.catch(errorHandler) as Promise<ResponseWithError<OutputType>>;
 	},
 
+	post: <OutputType>(url: string, data: unknown = {}, abortController?: AbortController) => {
+		return api
+			.post<OutputType>(url, data, {
+				signal: abortController?.signal,
+			})
+			.then(responseBody)
+			.catch(errorHandler) as Promise<ResponseWithError<OutputType>>;
+	},
+
 	patch: <OutputType>(url: string, body: Record<string, unknown> = {}) => {
 		return api.patch<OutputType>(url, body).then(responseBody).catch(errorHandler) as Promise<
 			ResponseWithError<OutputType>

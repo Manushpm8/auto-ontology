@@ -27,7 +27,7 @@ export const datasources = {
 		if (pending != null) return pending;
 
 		const promise = requests
-			.get<SchemasResponse>('schemas', { db_id: dbId })
+			.get<SchemasResponse>(`schemas/${dbId}`)
 			.then((res): ApiResponse<Schema[]> => {
 				if (res.error) return res as unknown as ApiResponse<Schema[]>;
 				const raw = res as unknown as SchemasResponse;
@@ -51,13 +51,13 @@ export const datasources = {
 		const pending = tablesBySchemaMap.get(key);
 		if (pending != null) return pending;
 
-		const params: Params = { schema_id: schemaId };
+		const params: Params = {};
 		if (opts.databaseName != null && opts.databaseName !== '') {
 			params.database_name = opts.databaseName;
 		}
 
 		const promise = requests
-			.get<ResponseWithCount<Omit<Table, 'columns'>[]>>('tables', params)
+			.get<ResponseWithCount<Omit<Table, 'columns'>[]>>(`tables/${schemaId}`, params)
 			.then((res): ApiResponse<Table[]> => {
 				if (res.error) return res as unknown as ApiResponse<Table[]>;
 				const tables: Table[] = res.data.map((t) => ({ ...t, columns: [] }));
@@ -77,7 +77,7 @@ export const datasources = {
 		if (pending != null) return pending;
 
 		const promise = requests
-			.get<ResponseWithCount<ColumnsEnvelope>>('columns', { table_id: tableId })
+			.get<ResponseWithCount<ColumnsEnvelope>>(`columns/${tableId}`)
 			.then((res): ApiResponse<Column[]> => {
 				if (res.error) return res as unknown as ApiResponse<Column[]>;
 				const envelope = res.data as unknown as ColumnsEnvelope;

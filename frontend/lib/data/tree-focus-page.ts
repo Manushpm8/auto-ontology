@@ -78,6 +78,7 @@ function baseCardsForEntity(
 			id: 'description',
 			title: 'Description',
 			body: description,
+			editable: true,
 		},
 		{
 			type: ComposerSectionKind.INFO_GRID,

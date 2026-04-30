@@ -1,6 +1,16 @@
 /* Load Tailwind. @nvidia/foundations-react-core ships no standalone base.css. */
 @import 'tailwindcss';
 
+@theme {
+	--color-foreground: #09090b;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--color-foreground: #fafafa;
+	}
+}
+
 /* Spinner layout tweaks (@nvidia/foundations-react-core Spinner). */
 .nv-spinner {
 	display: flex;
@@ -12,7 +22,7 @@
 	height: 4rem;
 }
 .nv-spinner-arrow {
-	fill: var(--foreground);
+	fill: var(--color-foreground);
 	animation: single-page-spinner-arrow 1s infinite;
 }
 @keyframes single-page-spinner-arrow {

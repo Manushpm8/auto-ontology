@@ -3,6 +3,8 @@
 # python
 .venv/
 **/__pycache__/
+pyproject.toml
+uv.lock
 
 # dependencies
 node_modules
@@ -39,8 +41,15 @@ yarn-error.log*
 # vercel
 .vercel
 
+# prisma
+frontend/generated/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 
 lancedb/*
+
+# DuckDB database files
+*.duckdb
+*.duckdb.wal

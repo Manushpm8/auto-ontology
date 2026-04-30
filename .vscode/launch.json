@@ -13,6 +13,25 @@
             "module": "gsf.scripts.ingest_local_postgres",
             "envFile": "${workspaceFolder}/.env",
             "console": "integratedTerminal"
-        }
-    ]
+        },
+       {
+      "name": "Debug API",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "server.main:app",
+        "--reload",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "3001"
+      ],
+      "cwd": "${workspaceFolder}/gsf",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/gsf"
+      },
+      "justMyCode": false
+    }
+  ]
 }
