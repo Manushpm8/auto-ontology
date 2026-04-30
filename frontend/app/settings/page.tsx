@@ -101,6 +101,45 @@ const SettingsSection = ({
 		setEditing(false);
 	};
 
+	const renderBody = () => {
+		if (editing) {
+			return (
+				<PromptEditor
+					initialValue={hasPrompts ? prompts[0].content : ''}
+					onSave={handleSave}
+					onCancel={handleCancel}
+				/>
+			);
+		}
+
+		if (hasPrompts) {
+			return (
+				<div className="space-y-3 p-4">
+					<div className="rounded-lg border border-zinc-200/90 bg-white p-4 dark:border-zinc-700/90 dark:bg-zinc-900/60">
+						<span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+							Prompt
+						</span>
+						<p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
+							{prompts[0].content}
+						</p>
+					</div>
+				</div>
+			);
+		}
+
+		if (loading) return null;
+
+		return (
+			<div className="flex flex-col items-center justify-center gap-2 rounded-b-lg bg-zinc-50/80 px-8 py-10 dark:bg-zinc-900/30">
+				<Icon
+					name={IconName.ChatBubble}
+					className="h-8 w-8 text-zinc-300 dark:text-zinc-600"
+				/>
+				<p className="text-sm text-zinc-400 dark:text-zinc-500">No Description</p>
+			</div>
+		);
+	};
+
 	return (
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
 			<div className="flex items-center justify-between border-b border-zinc-200/90 px-5 py-3.5 dark:border-zinc-700/90">
@@ -120,32 +159,7 @@ const SettingsSection = ({
 				</button>
 			</div>
 
-			{editing ? (
-				<PromptEditor
-					initialValue={hasPrompts ? prompts[0].content : ''}
-					onSave={handleSave}
-					onCancel={handleCancel}
-				/>
-			) : hasPrompts ? (
-				<div className="space-y-3 p-4">
-					<div className="rounded-lg border border-zinc-200/90 bg-white p-4 dark:border-zinc-700/90 dark:bg-zinc-900/60">
-						<span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
-							Prompt
-						</span>
-						<p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
-							{prompts[0].content}
-						</p>
-					</div>
-				</div>
-			) : !loading ? (
-				<div className="flex flex-col items-center justify-center gap-2 rounded-b-lg bg-zinc-50/80 px-8 py-10 dark:bg-zinc-900/30">
-					<Icon
-						name={IconName.ChatBubble}
-						className="h-8 w-8 text-zinc-300 dark:text-zinc-600"
-					/>
-					<p className="text-sm text-zinc-400 dark:text-zinc-500">No Description</p>
-				</div>
-			) : null}
+			{renderBody()}
 		</div>
 	);
 };
