@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import type { ChatMessage } from '@/types/chat';
+import { FormattedContent } from './FormattedContent';
 
 const CopyButton = ({ text }: { text: string }) => {
 	const [copied, setCopied] = useState(false);
@@ -40,7 +41,16 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 						: 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
 				}`}
 			>
-				<p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+				{isUser ? (
+					<p className="whitespace-pre-wrap text-sm leading-relaxed">
+						{message.content}
+					</p>
+				) : (
+					<FormattedContent
+						content={message.content}
+						className="text-sm leading-relaxed"
+					/>
+				)}
 
 				{message.sql && (
 					<div className="group relative mt-3 overflow-hidden rounded-lg bg-zinc-900 dark:bg-zinc-950">

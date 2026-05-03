@@ -3,8 +3,9 @@ name = "gsf-server"
 version = "0.1.0"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "duckdb>=1.5.2",
     "fastapi>=0.115.0",
-    "nemo-retriever",
+    "nemo-retriever[stores]",
     "neo4j>=6.1.0",
     "pandas>=2.0,<3",
     "psycopg2-binary>=2.9.11",
