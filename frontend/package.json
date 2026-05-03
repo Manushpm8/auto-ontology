@@ -4,15 +4,13 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"postinstall": "cd frontend && prisma generate",
-		"dev": "cd frontend && next dev -p 3000",
-		"dev:api": "cd gsf && uv run --project .. uvicorn server.main:app --reload --host 127.0.0.1 --port 3001",
-		"dev:all": "pnpm dev & pnpm dev:api & wait",
-		"build": "cd frontend && prisma generate && next build",
-		"start": "cd frontend && next start",
-		"lint": "cd frontend && eslint .",
-		"format": "cd frontend && prettier --write .",
-		"format:check": "cd frontend && prettier --check ."
+		"postinstall": "prisma generate",
+		"dev": "next dev -p 3000",
+		"build": "prisma generate && next build",
+		"start": "next start",
+		"lint": "eslint .",
+		"format": "prettier --write .",
+		"format:check": "prettier --check ."
 	},
 	"dependencies": {
 		"@nvidia/foundations-react-core": "^0.604.1",

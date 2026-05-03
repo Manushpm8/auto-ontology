@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Icon, IconName } from '@/components/icons';
@@ -14,22 +13,11 @@ type NavItem = {
 const navItems: NavItem[] = [
 	{ icon: IconName.ChatBubble, href: '/chat', label: 'Chat' },
 	{ icon: IconName.Database, href: '/data', label: 'Data Catalog' },
+	{ icon: IconName.Settings, href: '/settings', label: 'Settings' },
 ];
-
-export const NAV_PREV_PATH_KEY = 'gsf:prevPath';
-const NAV_CURRENT_PATH_KEY = 'gsf:currentPath';
 
 export const NavRail = () => {
 	const pathname = usePathname();
-	const prevPathnameRef = useRef(pathname);
-
-	useEffect(() => {
-		if (pathname !== prevPathnameRef.current) {
-			sessionStorage.setItem(NAV_PREV_PATH_KEY, prevPathnameRef.current);
-			prevPathnameRef.current = pathname;
-		}
-		sessionStorage.setItem(NAV_CURRENT_PATH_KEY, pathname);
-	}, [pathname]);
 
 	return (
 		<nav className="flex h-full w-12 shrink-0 flex-col items-center border-r border-zinc-200 bg-white py-3 dark:border-zinc-800 dark:bg-zinc-950">

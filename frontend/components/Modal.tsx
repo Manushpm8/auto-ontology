@@ -39,7 +39,7 @@ export const Modal = ({ open, onClose, children, className = '' }: ModalProps) =
 				aria-hidden
 			/>
 			<div
-				className={`relative w-full max-w-sm rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800 ${className}`}
+				className={`relative rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800 ${className}`}
 				role="dialog"
 				aria-modal="true"
 			>

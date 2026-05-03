@@ -5,21 +5,28 @@ Full-stack repo: Next.js frontend (`/frontend`) + FastAPI backend (`/gsf`).
 ## Structure
 
 ```
-/frontend/    # Next.js 16 app (React 19, TypeScript, Tailwind CSS 4)
-/gsf/         # FastAPI app (Python 3.11+, uv)
+/frontend/ # Next.js 16 app (React 19, TypeScript, Tailwind CSS 4)
+/gsf/      # FastAPI app (Python 3.11+, uv)
 ```
 
 ## Dev Commands
 
+Frontend commands run from `/frontend`:
+
 | Command | Description |
 |---|---|
 | `pnpm dev` | Start Next.js on :3000 |
-| `pnpm dev:api` | Start FastAPI on :3001 |
 | `pnpm build` | Build the frontend |
 | `pnpm lint` | ESLint the frontend |
 
+Backend command runs from `/gsf`:
+
+| Command | Description |
+|---|---|
+| `cd gsf && uv run --project .. uvicorn server.main:app --reload --host 127.0.0.1 --port 3001` | Start FastAPI on :3001 |
+
 To install dependencies:
-- Frontend: `pnpm install` from repo root
+- Frontend: `pnpm install` from `/frontend`
 - Backend: `uv sync` from repo root
 
 ## Frontend Rules
