@@ -16,8 +16,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
-from nv_ingest_client.util.vdb.adt_vdb import VDB
-
+from nemo_retriever.vdb import VDB
 
 logger = logging.getLogger(__name__)
 
@@ -88,26 +87,7 @@ class PostgresVDB(VDB):
         self.collection_name: str = kwargs.get(
             "collection_name", kwargs.get("index_name", "nv_ingest_tabular")
         )
-        self.nvidia_api_key = kwargs.get("nvidia_api_key")
-        # required for NVIDIAEmbedding call if the endpoint is Nvidia build api.
-        self.embedding_base_url = kwargs.get("embedding_base_url")
-        self.embedding_model = kwargs.get("embedding_model")
-        if self.nvidia_api_key:
-            # hosted on build.nvidia.com
-            self.embeddings = NVIDIAEmbeddings(
-                api_key=self.nvidia_api_key,
-                model_name=self.embedding_model,
-            )
-        elif self.embedding_base_url and self.embedding_model:
-            # self deployed nim
-            self.embeddings = NVIDIAEmbeddings(
-                base_url=self.embedding_base_url,
-                model_name=self.embedding_model,
-            )
-        else:
-            self.embeddings = _UnusableEmbeddings()
-
-        self.embeddings: Embeddings = kwargs.get("embeddings") or self.embeddings
+        self.embeddings: Embeddings = kwargs.get("embeddings") or _UnusableEmbeddings()
 
         self._engine: Optional[PGEngine] = None
         self._store: Optional[PGVectorStore] = None
@@ -201,6 +181,7 @@ class PostgresVDB(VDB):
         for record in _flatten(records):
             metadata = record.get("metadata") or {}
             embedding = metadata.get("embedding")
+            text = record.get("text") or record.get("content") or metadata.get("content")
             if not embedding:
                 skipped += 1
                 continue
@@ -210,7 +191,7 @@ class PostgresVDB(VDB):
                 **{k: v for k, v in metadata.items() if k != "embedding"},
             }
             documents.append(
-                Document(page_content=record["text"] or "", metadata=doc_metadata)
+                Document(page_content=text, metadata=doc_metadata)
             )
             embeddings.append([float(v) for v in embedding])
 
@@ -283,19 +264,24 @@ class PostgresVDB(VDB):
             return [[] for _ in queries]
         results: list[list[dict]] = []
         for query in queries:
-            hits = store.similarity_search_with_score(query, k=top_k)
-            # PGVectorStore returns distance here; convert to a similarity-style
-            # score where higher is better by applying (1 - distance).
-            results.append(
-                [
-                    {
-                        "text": doc.page_content,
-                        "metadata": doc.metadata,
-                        "score": float(1 - score),
-                    }
-                    for doc, score in hits
-                ]
-            )
+            try:
+                hits = store.similarity_search_with_score_by_vector(embedding=query, k=top_k)
+                # PGVectorStore returns distance here; convert to a similarity-style
+                # score where higher is better by applying (1 - distance).
+                results.append(
+                    [
+                        {
+                            "text": doc.page_content,
+                            "metadata": doc.metadata,
+                            # "score": float(1 - score),
+                            "score": float(score),
+                        }
+                        for doc, score in hits
+                    ]
+                )
+            except Exception as e:
+                logger.error(f"Error in retrieval: {e}")
+                return [[] for _ in queries]
         return results
 
     def run(self, records: list) -> int:
