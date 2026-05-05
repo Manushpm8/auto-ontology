@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
@@ -515,11 +515,6 @@ export function DataTree({
 			});
 		},
 		[onTreeDataUpdated],
-	);
-
-	const summary = useMemo(
-		() => `${databases.length} db · ${databases.map((d) => d.name).join(', ')}`,
-		[databases],
 	);
 
 	if (collapsed) {

@@ -9,37 +9,15 @@ import {
 	type ConversationSummary,
 	type ConversationDetail,
 } from '@/api/conversations';
-import type { BreadcrumbItem } from '@/components/Breadcrumbs';
-import { NAV_PREV_PATH_KEY } from '@/components/NavRail';
-import { useBreadcrumbs } from '@/contexts/BreadcrumbContext';
 import { ChatSidebar } from './ChatSidebar';
 import { MessageList } from './MessageList';
 import { StepIndicator } from './StepIndicator';
 import { ChatInput } from './ChatInput';
 
-const PREV_PATH_LABELS: Record<string, { label: string; href: string }> = {
-	'/data': { label: 'All Data', href: '/data' },
-};
-
-const DEFAULT_PARENT: BreadcrumbItem = { label: 'All Data', href: '/data' };
-
 export const ChatView = () => {
 	const [activeConvId, setActiveConvId] = useState<string | null>(null);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [conversations, setConversations] = useState<Conversation[]>([]);
-	const { setItems: setBreadcrumbs } = useBreadcrumbs();
-
-	const [parentCrumb] = useState<BreadcrumbItem>(() => {
-		if (typeof window === 'undefined') return DEFAULT_PARENT;
-		const prev = sessionStorage.getItem(NAV_PREV_PATH_KEY);
-		if (!prev) return DEFAULT_PARENT;
-		const match = Object.entries(PREV_PATH_LABELS).find(([prefix]) => prev.startsWith(prefix));
-		return match ? match[1] : DEFAULT_PARENT;
-	});
-
-	useEffect(() => {
-		setBreadcrumbs([parentCrumb, { label: 'Chat' }]);
-	}, [setBreadcrumbs, parentCrumb]);
 
 	const {
 		messages,

@@ -24,3 +24,5 @@ To learn more about Next.js, take a look at the following resources:
 - [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+run gsf from root - cd gsf && uv run --project .. uvicorn server.main:app --reload --host 127.0.0.1 --port 3001

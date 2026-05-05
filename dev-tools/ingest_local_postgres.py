@@ -12,19 +12,20 @@ from __future__ import annotations
 import logging
 import os
 
-from gsf.connectors.postgres import PostgresDatabase
-from gsf.vdb.postgres import PostgresVDB
-from gsf.server.env import load_server_env
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
-from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
-    TabularFetchEmbeddingsOp,
-)
+from nemo_retriever.graph.tabular_fetch_embeddings_operator import TabularFetchEmbeddingsOp
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
+from nemo_retriever.retriever import Retriever
+from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
+from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import (
     EmbedParams,
     TabularExtractParams,
+    VdbUploadParams,
 )
+from gsf.connectors.postgres import PostgresDatabase
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
@@ -46,11 +47,20 @@ EMBED_PARAMS = EmbedParams(
     embed_modality="text",
 )
 
-VDB_TABLE: str = "nv_ingest_tabular"
+VDB_PARAMS = VdbUploadParams(
+    vdb_op="lancedb",
+    vdb_kwargs={
+        "uri": "lancedb",
+        "table_name": "nv-ingest-tabular",
+        "overwrite": True,
+    },
+)
 
-# DATABASE: str = "pagila"
 DATABASE: str = "testdb"
 
+TABULAR_PARAMS = TabularExtractParams(
+    connector=PostgresDatabase(_conn_string(DATABASE)),
+)
 
 def _conn_string(db: str) -> str:
     host = "localhost"
@@ -60,17 +70,12 @@ def _conn_string(db: str) -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
-def ingest(database: str = DATABASE) -> None:
-    """Ingest each Postgres database in ``databases`` into Neo4j."""
-    load_server_env()
-
-    TABULAR_PARAMS = TabularExtractParams(
-        connector=PostgresDatabase(_conn_string(database)),
-    )
+def run_ingest() -> None:
+    """Build the tabular ingest graph, run it, and write embeddings to LanceDB."""
     graph = (
         Graph()
         >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-        >> TabularFetchEmbeddingsOp(database_name=DATABASE)
+        >> TabularFetchEmbeddingsOp(database_name=TABULAR_PARAMS.connector.database_name)
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
 
@@ -78,24 +83,43 @@ def ingest(database: str = DATABASE) -> None:
     result_df = results[0] if results else None
 
     if result_df is not None and not result_df.empty:
-        records = result_df.to_dict(orient="records")
-        vdb = PostgresVDB(
-            connection_string=_conn_string("gsf"),
-            index_name=VDB_TABLE,
-            nvidia_api_key=_NVIDIA_API_KEY,
-            embedding_model="nvidia/llama-nemotron-embed-1b-v2",
-            database_name=DATABASE,
+        ingest_op = IngestVdbOperator(
+            vdb_op=VDB_PARAMS.vdb_op,
+            vdb_kwargs=VDB_PARAMS.vdb_kwargs,
         )
-        try:
-            inserted = vdb.run(records)
-        finally:
-            vdb.close()
-        logger.info("Tabular ingest result: %d rows written to Postgres", inserted)
+        ingest_op(result_df.to_dict(orient="records"))
+        print("Tabular ingest result:", len(result_df), "rows written to LanceDB")
     else:
-        logger.info("Tabular ingest result: no rows produced")
+        print("Tabular ingest result: no rows produced")
 
-    # sql_result = generate_sql("How many customers exists?")
-    # logger.info("generate_sql result:", sql_result)
+
+def run_retrieve() -> None:
+    """Run the text-to-SQL agent against the previously ingested LanceDB."""
+    lancedb_kwargs = VDB_PARAMS.vdb_kwargs
+    retriever = Retriever(
+        vdb="lancedb",
+        vdb_kwargs={
+            "uri": lancedb_kwargs["uri"],
+            "table_name": lancedb_kwargs["table_name"],
+        },
+        top_k=15,
+        embedding_api_key=_NVIDIA_API_KEY,
+        embedding_http_endpoint=EMBED_PARAMS.embed_invoke_url,
+    )
+
+    question = "List aircraft codes"
+
+    payload: AgentPayload = {
+        "question": question,
+        "retriever": retriever,
+        "connector": TABULAR_PARAMS.connector,
+        "path_state": {},
+        "custom_prompts": "",
+        "acronyms": "",
+    }
+
+    agent_result = get_agent_response(payload)
+    print("get_agent_response result:", agent_result)
 
 
 if __name__ == "__main__":
@@ -103,4 +127,5 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    ingest()
+    run_ingest()
+    run_retrieve()

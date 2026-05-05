@@ -5,15 +5,8 @@ import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { isComposerSection, type ComposerSection } from '@/types/composer-section';
-import type { BreadcrumbItem } from '@/components/Breadcrumbs';
 import { Icon, IconName } from '@/components/icons';
-import { useBreadcrumbs } from '@/contexts/BreadcrumbContext';
-import { NAV_PREV_PATH_KEY } from '@/components/NavRail';
 import { datasources } from '@/api/datasources';
-
-const PREV_PATH_LABELS: Record<string, { label: string; href: string }> = {
-	'/chat': { label: 'Chat', href: '/chat' },
-};
 
 export type SinglePageComposerProps = {
 	sections: unknown[];
@@ -220,22 +213,6 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
 		const isPDFView = pdfProps?.isPDFView ?? false;
-
-		const { setItems: setBreadcrumbs } = useBreadcrumbs();
-
-		const [parentCrumb] = useState<BreadcrumbItem>(() => {
-			if (typeof window === 'undefined') return { label: 'Chat', href: '/chat' };
-			const prev = sessionStorage.getItem(NAV_PREV_PATH_KEY);
-			if (!prev) return { label: 'Chat', href: '/chat' };
-			const match = Object.entries(PREV_PATH_LABELS).find(([prefix]) =>
-				prev.startsWith(prefix),
-			);
-			return match ? match[1] : { label: 'Chat', href: '/chat' };
-		});
-
-		useEffect(() => {
-			setBreadcrumbs([parentCrumb, { label: title }]);
-		}, [setBreadcrumbs, parentCrumb, title]);
 
 		const gridTemplate =
 			leftPanel && rightPanel
