@@ -15,25 +15,9 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
 ]
 
-[tool.uv]
-package = false
-required-environments = [
-    "sys_platform == 'darwin' and platform_machine == 'arm64'",
-]
 
 [tool.uv.sources]
-nemo-retriever = { path = "../../nemo-project/NeMo-Retriever/nemo_retriever", editable = true }
-torch = [
-  { index = "torch-cpu", marker = "sys_platform == 'darwin'" },
-]
-torchvision = [
-  { index = "torch-cpu", marker = "sys_platform == 'darwin'" },
-]
-
-[[tool.uv.index]]
-name = "torch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
+nemo-retriever = { path = "../NeMo-Retriever/nemo_retriever", editable = true }
 
 [dependency-groups]
 dev = [

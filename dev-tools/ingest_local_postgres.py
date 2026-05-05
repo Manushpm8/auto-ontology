@@ -56,11 +56,7 @@ VDB_PARAMS = VdbUploadParams(
     },
 )
 
-DATABASE: str = "testdb"
-
-TABULAR_PARAMS = TabularExtractParams(
-    connector=PostgresDatabase(_conn_string(DATABASE)),
-)
+DATABASE: str = "pagila"
 
 def _conn_string(db: str) -> str:
     host = "localhost"
@@ -69,6 +65,9 @@ def _conn_string(db: str) -> str:
     password = os.environ["POSTGRES_PASSWORD"]
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
+TABULAR_PARAMS = TabularExtractParams(
+    connector=PostgresDatabase(_conn_string(DATABASE)),
+)
 
 def run_ingest() -> None:
     """Build the tabular ingest graph, run it, and write embeddings to LanceDB."""
@@ -107,7 +106,7 @@ def run_retrieve() -> None:
         embedding_http_endpoint=EMBED_PARAMS.embed_invoke_url,
     )
 
-    question = "List aircraft codes"
+    question = "List actors"
 
     payload: AgentPayload = {
         "question": question,
