@@ -1,4 +1,5 @@
 # Patterns to ignore when building packages.
+# .helmignore uses gitignore-style globs but does NOT support `!` negation.
 .DS_Store
 .git/
 .gitignore
@@ -9,6 +10,4 @@
 *.bak
 *.tgz
 .helmignore
-*.md
-!README.md
 ci/

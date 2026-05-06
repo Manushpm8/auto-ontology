@@ -15,6 +15,11 @@ point `backend.env.POSTGRES_HOST` / `backend.env.NEO4J_URI` at them.
 
 ```bash
 # 1. Build & push images
+#    By default the backend image uses the bundled nemo_retriever stub
+#    in ./vendor/nemo_retriever (lets the API start and serve /api/health
+#    but raises NotImplementedError on real chat/datasource calls).
+#    Pass --build-arg NEMO_RETRIEVER_SRC=path/to/real/source to use the
+#    real package.
 docker build -t <registry>/gsf-backend:0.1.0 .
 docker build -t <registry>/gsf-frontend:0.1.0 ./frontend
 docker push <registry>/gsf-backend:0.1.0

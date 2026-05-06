@@ -13,8 +13,8 @@
 # public files — node_modules from the build stage are intentionally excluded.
 # ---------------------------------------------------------------------------
 
-ARG NODE_VERSION=20.18-bookworm-slim
-ARG PNPM_VERSION=9.15.0
+ARG NODE_VERSION=22-bookworm-slim
+ARG PNPM_VERSION=10.10.0
 
 ############################
 # Stage 1: deps
@@ -26,7 +26,8 @@ ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     CI=1
 
-RUN corepack enable \
+RUN npm install -g --silent corepack@latest \
+ && corepack enable \
  && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 WORKDIR /app
@@ -50,7 +51,8 @@ ENV PNPM_HOME=/pnpm \
     NEXT_TELEMETRY_DISABLED=1 \
     NEXT_OUTPUT=standalone
 
-RUN corepack enable \
+RUN npm install -g --silent corepack@latest \
+ && corepack enable \
  && corepack prepare pnpm@${PNPM_VERSION} --activate
 
 WORKDIR /app
@@ -78,12 +80,12 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Standalone output is rooted at the monorepo root (outputFileTracingRoot).
-# It produces /app/.next/standalone/frontend/server.js plus a sibling
-# /app/.next/standalone/node_modules tree.
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./frontend/.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./frontend/public
+# Standalone output places the project under <traceRoot-relative path>/.
+# In this build the project is copied to /app, and outputFileTracingRoot
+# is the parent dir, so the bundle structure ends up rooted at /app/app/.
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone/ ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./app/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./app/public
 
 USER nextjs
 
@@ -93,4 +95,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||3000)+'/',(r)=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "frontend/server.js"]
+CMD ["node", "app/server.js"]

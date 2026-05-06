@@ -7,16 +7,17 @@
 # Run:     docker run --rm -p 3001:3001 --env-file .env gsf-backend:latest
 #
 # NOTE: pyproject.toml declares an editable local dependency on `nemo-retriever`
-# (../../nemo-project/NeMo-Retriever/nemo_retriever). That path is not available
-# inside the build context. Provide it through ONE of the following options:
+# at ./vendor/nemo-project/nemo_retriever. That package itself depends (via
+# editable path) on its sibling packages ./vendor/nemo-project/{api,client}, so
+# this image copies the entire nemo-project tri-folder layout into
+# /opt/nemo-project/ and leaves the relative paths intact.
 #
-#   1. Set NEMO_RETRIEVER_SRC to a path inside the build context (relative to
-#      the repo root) that contains the nemo_retriever package, e.g.
-#         docker build --build-arg NEMO_RETRIEVER_SRC=vendor/nemo_retriever .
-#   2. Replace the source in pyproject.toml with a private index / wheel.
+# To build with the lightweight stub instead (small image, /api/health works
+# but real chat/data calls raise NotImplementedError):
 #
-# By default the build will COPY the directory referenced by NEMO_RETRIEVER_SRC
-# into /opt/nemo_retriever before running `uv sync`.
+#   docker build \
+#       --build-arg NEMO_RETRIEVER_SRC=vendor/nemo_retriever_stub \
+#       --build-arg NEMO_RETRIEVER_DEST=/opt/nemo_retriever .
 # ---------------------------------------------------------------------------
 
 ARG PYTHON_VERSION=3.12
@@ -48,36 +49,95 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Bring in the local nemo_retriever source so the editable path dep resolves.
-# Defaults to ./vendor/nemo_retriever; override with --build-arg if needed.
-ARG NEMO_RETRIEVER_SRC=vendor/nemo_retriever
-COPY ${NEMO_RETRIEVER_SRC}/ /opt/nemo_retriever/
+# Bring in the local NeMo-Retriever source so the editable path dep resolves.
+# Defaults to vendor/nemo-project (full real source incl. nv-ingest-{api,client}).
+# Override NEMO_RETRIEVER_SRC + NEMO_RETRIEVER_DEST to swap to the stub.
+ARG NEMO_RETRIEVER_SRC=vendor/nemo-project
+ARG NEMO_RETRIEVER_DEST=/opt/nemo-project
+COPY ${NEMO_RETRIEVER_SRC}/ ${NEMO_RETRIEVER_DEST}/
 
 # Copy lock + project metadata first to maximise layer caching.
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock ./
 COPY gsf/ ./gsf/
 
-# Patch pyproject.toml so uv resolves nemo-retriever from the in-image path
-# and drop the macOS-only required-environments constraint for Linux builds.
+# Patch pyproject.toml for the in-image build:
+#   - rewrite the nemo-retriever editable path so it points at the in-image
+#     copy of the source (whichever NEMO_RETRIEVER_DEST resolved to)
+#   - drop the darwin/arm64-only required-environments marker
+#   - drop the darwin-only torch CPU index override; let torch resolve from
+#     the default index (PyPI) which has wheels for the build platform
+#   - delete uv.lock — the lock was generated against the original local path
+#     (and possibly a different dep closure). Re-resolve from scratch.
+ARG NEMO_RETRIEVER_DEST
+ENV NEMO_RETRIEVER_DEST=${NEMO_RETRIEVER_DEST}
 RUN python - <<'PY'
-import re, pathlib
-p = pathlib.Path("pyproject.toml")
-text = p.read_text()
-text = text.replace(
-    '../../nemo-project/NeMo-Retriever/nemo_retriever',
-    '/opt/nemo_retriever',
-)
-text = re.sub(
-    r"required-environments\s*=\s*\[[^\]]*\]\s*,?\s*",
-    "",
-    text,
-)
-p.write_text(text)
+import os, re, pathlib
+
+
+def patch(path: pathlib.Path) -> None:
+    """Strip torch/torchvision/vllm source overrides + custom indexes.
+
+    The vendored NeMo-Retriever pins torch to a CUDA-only PyTorch index that
+    has no arm64-linux wheels; gsf's own pyproject also pins torch to a
+    darwin-only CPU index. Removing all of these overrides lets uv resolve
+    torch from the default index (PyPI), which has wheels for every platform
+    we care about for image builds.
+    """
+    text = path.read_text()
+    text = re.sub(r"required-environments\s*=\s*\[[^\]]*\]\s*,?\s*", "", text)
+    # Drop torch, torchvision, vllm source overrides (whether list-form or
+    # single-table form).
+    text = re.sub(
+        r"^(torch|torchvision|vllm)\s*=\s*\[[\s\S]*?\]\s*$",
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
+    text = re.sub(
+        r"^(torch|torchvision|vllm)\s*=\s*\{[^\n]*\}\s*$",
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
+    # Drop any single-line source-table entry that references a custom index
+    # (e.g. `nemotron-* = { index = "test-pypi" }`). The matching index
+    # block is removed below, so the entry would otherwise fail to parse.
+    text = re.sub(
+        r'^[A-Za-z0-9_.\-]+\s*=\s*\{[^\n]*\bindex\s*=\s*"[^"]+"[^\n]*\}\s*$',
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
+    # Drop every [[tool.uv.index]] block (CPU + CUDA torch indexes etc.).
+    text = re.sub(
+        r"\[\[tool\.uv\.index\]\][^\[]*?(?=(\[|\Z))",
+        "",
+        text,
+        flags=re.DOTALL,
+    )
+    path.write_text(text)
+
+
+dest = os.environ["NEMO_RETRIEVER_DEST"].rstrip("/")
+gsf_pyproject = pathlib.Path("pyproject.toml")
+text = gsf_pyproject.read_text()
+# Rewrite both the "full" tri-folder path and the legacy single-folder path.
+text = text.replace("vendor/nemo-project/nemo_retriever", f"{dest}/nemo_retriever")
+text = text.replace("vendor/nemo_retriever_stub", dest)
+gsf_pyproject.write_text(text)
+
+patch(gsf_pyproject)
+# Patch the vendored nemo-retriever pyproject too (same torch/index issues).
+nr_pyproject = pathlib.Path(f"{dest}/nemo_retriever/pyproject.toml")
+if nr_pyproject.exists():
+    patch(nr_pyproject)
+
+pathlib.Path("uv.lock").unlink(missing_ok=True)
 PY
 
 # Resolve and install the dependency closure into /opt/venv.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --no-dev --no-install-project
 
 ############################
 # Stage 2: runtime
@@ -101,8 +161,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
+ARG NEMO_RETRIEVER_DEST=/opt/nemo-project
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /opt/nemo_retriever /opt/nemo_retriever
+COPY --from=builder ${NEMO_RETRIEVER_DEST} ${NEMO_RETRIEVER_DEST}
 COPY --chown=gsf:gsf gsf/ ./gsf/
 COPY --chown=gsf:gsf pyproject.toml ./
 

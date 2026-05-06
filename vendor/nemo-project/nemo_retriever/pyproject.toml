@@ -1,0 +1,132 @@
+[build-system]
+requires = ["setuptools>=78.1.1", "wheel>=0.46.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+managed = true
+package = true
+no-build-package = ["nemotron-ocr"]
+# fastparquet 2026.3.0 has no wheel for Linux x86_64 (manylinux); constrain to last version that does.
+override-dependencies = [
+  "fastparquet>=2024.11.0,<2026",
+]
+
+[project]
+name = "nemo-retriever"
+dynamic = ["version"]
+description = "A modern RAG ingestion pipeline from Nvidia"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+  { name = "Jeremy Dyer", email = "jdyer@nvidia.com" },
+]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "ray[data,serve]>=2.49.0",
+  "pypdfium2==4.30.0",
+  "pandas>=2.0,<3",
+  "sqlglot>=30.0.0",
+  "tqdm>=4.66.0",
+  "typer>=0.12.0",
+  "pyyaml>=6.0",
+  "lancedb",
+  "nv-ingest",
+  "nv-ingest-api",
+  "nv-ingest-client",
+  "fastapi>=0.114.0",
+  "uvicorn[standard]>=0.30.0",
+  "httpx>=0.27.0",
+  "requests>=2.32.5",
+  "pydantic>=2.8.0",
+  "typer>=0.12.0",
+  "rich>=13.7.0",
+  "pillow==12.1.1",
+  "universal-pathlib>=0.2.0",
+  "numpy>=1.26.0",
+  "nltk==3.9.3",
+  "urllib3==2.6.3",
+  "debugpy>=1.8.0",
+  "python-multipart>=0.0.9",
+  # transformers>=4.57 includes native nvidia/parakeet-ctc-1.1b support.
+  "transformers>=4.57.6,<5",
+  "tokenizers>=0.20.3",
+  "accelerate>=1.1.0",
+  "torch~=2.9.1",
+  "torchvision>=0.24,<0.25",
+  "einops",
+  "easydict",
+  "addict",
+  "nemotron-page-elements-v3>=0.dev0",
+  "nemotron-graphic-elements-v1>=0.dev0",
+  "nemotron-table-structure-v1>=0.dev0",
+  "nemotron-ocr>=0.dev0; sys_platform == 'linux'",
+  "markitdown",
+  "timm==1.0.22",
+  "tqdm",
+  "accelerate==1.12.0",
+  "albumentations==2.0.8",
+  "scikit-learn>=1.6.0",
+  "datasets>=4.8.2",
+  "open-clip-torch==3.2.0",
+  # Local ASR (Parakeet): read chunk files and resample to 16 kHz mono
+  "soundfile>=0.12.0",
+  "scipy>=1.11.0",
+  "nvidia-ml-py",
+  "vllm==0.16.0; sys_platform == 'linux'",
+  "duckdb>=1.2.0",
+  "duckdb-engine>=0.13.0",
+  "neo4j>=5.0",
+  "langchain-nvidia-ai-endpoints>=0.3.0",
+  "langchain-community>=0.4.0",
+  "langgraph>=1.1.0",
+]
+
+[project.optional-dependencies]
+svg = [
+  "cairosvg>=2.7.0",
+]
+dev = [
+  "build>=1.2.2",
+  "pytest>=8.0.2",
+]
+
+[project.scripts]
+retriever = "nemo_retriever.__main__:main"
+retriever-harness = "nemo_retriever.harness:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "nemo_retriever.version.get_build_version"}
+
+[tool.uv.sources]
+nv-ingest = { path = "../src/", editable = true }
+nv-ingest-api = { path = "../api/", editable = true }
+nv-ingest-client = { path = "../client/", editable = true }
+nemotron-page-elements-v3 = { index = "test-pypi" }
+nemotron-graphic-elements-v1 = { index = "test-pypi" }
+nemotron-table-structure-v1 = { index = "test-pypi" }
+nemotron-ocr = { index = "test-pypi" }
+torch = { index = "torch-cuda", marker = "sys_platform != 'darwin'" }
+torchvision = { index ="torch-cuda", marker = "sys_platform != 'darwin'" }
+vllm = [
+  { url = "https://github.com/vllm-project/vllm/releases/download/v0.16.0/vllm-0.16.0+cu130-cp38-abi3-manylinux_2_35_x86_64.whl", marker = "platform_machine == 'x86_64'" },
+  { url = "https://github.com/vllm-project/vllm/releases/download/v0.16.0/vllm-0.16.0+cu130-cp38-abi3-manylinux_2_35_aarch64.whl", marker = "platform_machine == 'aarch64'" },
+]
+
+[[tool.uv.index]]
+name = "test-pypi"
+url = "https://test.pypi.org/simple/"
+explicit = true
+
+[[tool.uv.index]]
+name = "torch-cuda"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
