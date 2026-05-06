@@ -1,0 +1,49 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "gsf.fullname" . -}}
+{{- $frontendSvc := include "gsf.componentFullname" (list . "frontend") -}}
+{{- $backendSvc  := include "gsf.componentFullname" (list . "backend")  -}}
+{{- $frontendPort := .Values.frontend.service.port -}}
+{{- $backendPort  := .Values.backend.service.port  -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "gsf.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- if $.Values.ingress.routeBackendDirectly }}
+          - path: {{ $.Values.ingress.backendPath }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendSvc }}
+                port:
+                  number: {{ $backendPort }}
+          {{- end }}
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ $frontendSvc }}
+                port:
+                  number: {{ $frontendPort }}
+          {{- end }}
+    {{- end }}
+{{- end -}}

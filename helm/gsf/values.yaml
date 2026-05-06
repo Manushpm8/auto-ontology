@@ -1,0 +1,223 @@
+# Default values for the gsf chart.
+# This is a YAML-formatted file. Override with `--values` or `--set` at install.
+
+# -- Override the chart name (defaults to .Chart.Name).
+nameOverride: ""
+# -- Override the full release name (defaults to <release>-<chart>).
+fullnameOverride: ""
+
+image:
+  # -- Image pull policy applied to every workload.
+  pullPolicy: IfNotPresent
+  # -- Image pull secrets shared by all workloads.
+  pullSecrets: []
+  # - name: regcred
+
+# -----------------------------------------------------------------------------
+# Backend (FastAPI / uvicorn) — built from the repo-root Dockerfile.
+# -----------------------------------------------------------------------------
+backend:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: gsf-backend
+    tag: ""        # defaults to .Chart.AppVersion when empty
+    pullPolicy: ""
+
+  service:
+    type: ClusterIP
+    port: 3001
+    annotations: {}
+
+  containerPort: 3001
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+
+  podAnnotations: {}
+  podLabels: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # -- Plain-text env vars rendered into a ConfigMap.
+  env:
+    NEO4J_URI: bolt://gsf-neo4j:7687
+    NEO4J_USERNAME: neo4j
+    POSTGRES_HOST: gsf-postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_USER: gsf
+    POSTGRES_DATABASE: gsf
+
+  # -- Sensitive env vars rendered into a Secret. Override at install time.
+  secrets:
+    NEO4J_PASSWORD: changeme123
+    POSTGRES_PASSWORD: gsf_dev
+
+  # -- Reference an existing Secret instead of letting the chart create one.
+  existingSecret: ""
+
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    initialDelaySeconds: 20
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: ""
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+# -----------------------------------------------------------------------------
+# Frontend (Next.js standalone) — built from frontend/Dockerfile.
+# -----------------------------------------------------------------------------
+frontend:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: gsf-frontend
+    tag: ""        # defaults to .Chart.AppVersion when empty
+    pullPolicy: ""
+
+  service:
+    type: ClusterIP
+    port: 3000
+    annotations: {}
+
+  containerPort: 3000
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  podAnnotations: {}
+  podLabels: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # -- Env vars rendered into the frontend ConfigMap.
+  env:
+    NODE_ENV: production
+    NEXT_TELEMETRY_DISABLED: "1"
+    # In-cluster URL the Next.js rewrites/proxy points at.
+    PYTHON_API_URL: http://gsf-backend:3001
+
+  # -- Reference an existing Secret to mount as additional envFrom (optional).
+  existingSecret: ""
+
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: ""
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+# -----------------------------------------------------------------------------
+# Single Ingress that fronts both apps. The frontend handles its own /api/*
+# rewrites to the backend, so by default we route everything to the frontend.
+# Set ingress.routeBackendDirectly=true to also expose /api/* directly to the
+# backend service (useful for non-browser clients).
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: gsf.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: gsf-tls
+    #   hosts:
+    #     - gsf.local
+  routeBackendDirectly: false
+  backendPath: /api
+
+# -----------------------------------------------------------------------------
+# PodDisruptionBudgets (apply to backend + frontend if enabled).
+# -----------------------------------------------------------------------------
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1

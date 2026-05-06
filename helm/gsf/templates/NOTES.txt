@@ -1,0 +1,33 @@
+{{- $fullName := include "gsf.fullname" . -}}
+{{- $frontendSvc := include "gsf.componentFullname" (list . "frontend") -}}
+{{- $backendSvc  := include "gsf.componentFullname" (list . "backend")  -}}
+
+GSF has been deployed.
+
+1. Backend  : {{ $backendSvc }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.backend.service.port }}
+   Frontend : {{ $frontendSvc }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.frontend.service.port }}
+
+{{- if .Values.ingress.enabled }}
+
+2. The ingress is enabled. Visit:
+{{- range .Values.ingress.hosts }}
+   {{ if $.Values.ingress.tls }}https{{ else }}http{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+
+2. To reach the frontend locally, port-forward:
+
+   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ $frontendSvc }} 3000:{{ .Values.frontend.service.port }}
+
+   Then open http://127.0.0.1:3000
+
+   Backend (optional, the frontend already proxies /api/* to it):
+
+   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ $backendSvc }} 3001:{{ .Values.backend.service.port }}
+{{- end }}
+
+3. Inspect the rollout:
+
+   kubectl --namespace {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+   kubectl --namespace {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=backend  --tail=200
+   kubectl --namespace {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=frontend --tail=200

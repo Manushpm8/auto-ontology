@@ -1,0 +1,21 @@
+apiVersion: v2
+name: gsf
+description: |
+  Generative Semantic Fabric — Next.js frontend + FastAPI backend with
+  optional PostgreSQL and Neo4j dependencies.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+keywords:
+  - gsf
+  - nvidia
+  - fastapi
+  - nextjs
+  - rag
+home: https://github.com/NVIDIA/gsf
+sources:
+  - https://github.com/NVIDIA/gsf
+maintainers:
+  - name: GSF Team
+icon: ""

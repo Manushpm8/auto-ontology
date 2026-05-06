@@ -1,0 +1,40 @@
+{{- if .Values.podDisruptionBudget.enabled -}}
+{{- if .Values.backend.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "gsf.componentFullname" (list . "backend") }}
+  labels:
+    {{- include "gsf.componentLabels" (list . "backend") | nindent 4 }}
+spec:
+  {{- with .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gsf.componentSelectorLabels" (list . "backend") | nindent 6 }}
+{{- end }}
+{{- if .Values.frontend.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "gsf.componentFullname" (list . "frontend") }}
+  labels:
+    {{- include "gsf.componentLabels" (list . "frontend") | nindent 4 }}
+spec:
+  {{- with .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gsf.componentSelectorLabels" (list . "frontend") | nindent 6 }}
+{{- end }}
+{{- end -}}
