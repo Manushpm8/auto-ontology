@@ -44,12 +44,18 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 ############################
 FROM node:${NODE_VERSION} AS builder
 
+# Backend URL baked into the Next.js rewrite manifest at build time
+# (Next.js evaluates rewrites() during `next build`, not at server startup).
+# Defaults to the in-cluster Service name used by the helm chart.
+ARG PYTHON_API_URL=http://gsf-backend:3001
+
 ARG PNPM_VERSION
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     CI=1 \
     NEXT_TELEMETRY_DISABLED=1 \
-    NEXT_OUTPUT=standalone
+    NEXT_OUTPUT=standalone \
+    PYTHON_API_URL=${PYTHON_API_URL}
 
 RUN npm install -g --silent corepack@latest \
  && corepack enable \
