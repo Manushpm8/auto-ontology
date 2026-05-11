@@ -19,14 +19,19 @@ package = false
 required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
-# Override nemo-retriever's transitive torch~=2.9.1 / torchvision<0.25
-# pins to pull in CVE-2026-24747 (weights_only unpickler) fix shipped in
-# torch 2.10.0. nemo-retriever upstream is blocked on the vLLM <-> torch
-# <-> transformers compatibility triangle (per Julio Perez,
-# 2026-05-11); they will bump once vLLM's torch anchor moves.
+# Override nemo-retriever's transitive pins to pick up upstream security
+# fixes that have not yet landed in a nemo-retriever release. Drop each
+# entry once nemo-retriever bumps the corresponding dependency.
+#   - torch / torchvision: CVE-2026-24747 (weights_only unpickler).
+#     nemo-retriever pins torch~=2.9.1 and is blocked on the
+#     vLLM <-> torch <-> transformers compatibility triangle
+#     (per Julio Perez, 2026-05-11).
+#   - nltk: BDSA-2026-4875 / CVE-2026-33236 (path traversal in
+#     Downloader). nemo-retriever hard-pins nltk==3.9.3.
 override-dependencies = [
     "torch~=2.10.0",
     "torchvision>=0.25,<0.26",
+    "nltk>=3.9.4,<4",
 ]
 
 [tool.uv.sources]
