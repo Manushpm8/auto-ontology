@@ -5,7 +5,7 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "fastapi>=0.115.0",
     "langchain-postgres>=0.0.17",
-    "nemo-retriever",
+    "nemo-retriever[tabular]",
     "neo4j>=6.1.0",
     "pandas>=2.0,<3",
     "psycopg[binary]>=3.3.3",
@@ -17,7 +17,7 @@ dependencies = [
 
 
 [tool.uv.sources]
-nemo-retriever = { path = "../NeMo-Retriever/nemo_retriever", editable = true }
+nemo-retriever = { path = "../../nemo-project/NeMo-Retriever/nemo_retriever", editable = true }
 
 [dependency-groups]
 dev = [

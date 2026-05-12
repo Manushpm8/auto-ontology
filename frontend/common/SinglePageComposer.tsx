@@ -7,6 +7,7 @@ import { ComposerSectionKind } from '@/enums/datasources';
 import { isComposerSection, type ComposerSection } from '@/types/composer-section';
 import { Icon, IconName } from '@/components/icons';
 import { datasources } from '@/api/datasources';
+import type { NodePatch } from '@/api/types';
 
 export type SinglePageComposerProps = {
 	sections: unknown[];
@@ -313,7 +314,15 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 									onClick={async () => {
 										const edits = pendingEditsRef.current;
 										if (entityId && Object.keys(edits).length > 0) {
-											await datasources.updateNode(entityId, edits);
+											const { sample_values: rawSamples, ...rest } = edits;
+											const patch: NodePatch = { ...rest };
+											if (rawSamples !== undefined) {
+												patch.sample_values = rawSamples
+													.split(',')
+													.map((s) => s.trim())
+													.filter(Boolean);
+											}
+											await datasources.updateNode(entityId, patch);
 										}
 										setLocalIsEditing(false);
 										onSave?.(edits);

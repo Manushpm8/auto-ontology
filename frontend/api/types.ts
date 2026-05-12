@@ -23,7 +23,7 @@ export type SchemasResponse = {
 /** Payload accepted by PATCH /nodes/:id — all fields optional. */
 export type NodePatch = {
 	description?: string;
-	sample_values?: string;
+	sample_values?: string[];
 };
 
 /** Response from the node update endpoint. */

@@ -273,7 +273,9 @@ export function buildTreeFocusPageFormat(
 					type: ComposerSectionKind.TEXT_CARD,
 					id: 'sample_values',
 					title: 'Sample Values',
-					body: column.sample_values ?? '',
+					body: Array.isArray(column.sample_values)
+						? column.sample_values.join(', ')
+						: (column.sample_values ?? ''),
 					editable: true,
 				},
 				{

@@ -6,11 +6,12 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from server.datasources import dal
+from server.datasources.vector_sync import sync_node_vectors
 
 
 class NodeUpdate(BaseModel):
     description: str | None = None
-    sample_values: str | None = None
+    sample_values: list[str] | None = None
 
 
 router = APIRouter()
@@ -74,7 +75,24 @@ def list_databases() -> dict:
 
 @router.patch("/nodes/{node_id}")
 def update_node(node_id: str, body: NodeUpdate) -> dict:
-    """Update mutable properties of any catalog node."""
+    """Update mutable properties of any catalog node and resync its vector.
+
+    The DAL reports which node ids were affected by the edit (this node,
+    plus the parent table when a column description changed). Those ids
+    are handed directly to :func:`sync_node_vectors`, which re-embeds and
+    merge-inserts only those rows into LanceDB — no full reindex, no
+    dirty-flag scan. The response includes a ``vector_sync`` field so the
+    frontend can tell whether retrieval will now reflect the edit.
+    """
     props = body.model_dump(exclude_none=True)
     result = dal.update_node_properties(node_id, props)
+    if result is None:
+        return {"id": node_id, "vector_sync": {"status": "skipped_not_found"}}
+
+    affected_ids = result.get("affected_ids") or []
+    database_name = result.get("database_name")
+    if affected_ids and database_name:
+        result["vector_sync"] = sync_node_vectors(database_name, affected_ids)
+    else:
+        result["vector_sync"] = {"status": "skipped_no_change"}
     return result

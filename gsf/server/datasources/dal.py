@@ -8,6 +8,21 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, La
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 
+def _coerce_sample_values(raw: Any) -> list[str] | None:
+    """Normalize ``Column.sample_values`` to ``list[str] | None`` on read.
+
+    Legacy rows stored ``sample_values`` as a plain string (the PATCH
+    endpoint previously accepted ``str``). The frontend now expects an
+    array, so wrap stragglers into a one-element list and stringify any
+    non-string list entries.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        return [str(v) for v in raw if v is not None]
+    return [str(raw)]
+
+
 # ---------------------------------------------------------------------------
 # Graph queries (public API for routers / services)
 # ---------------------------------------------------------------------------
@@ -106,6 +121,10 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
     Returns ``table_name``, ``schema_name``, ``db_name`` (all from the Table
     node), ``columns_count``, and ``columns`` — a list of
     ``{ordinal_position, column_name, data_type}`` dicts.
+
+    ``sample_values`` is normalized to ``list[str] | None`` via
+    :func:`_coerce_sample_values` so the frontend always receives an array
+    (legacy rows that hold a scalar string are wrapped here).
     """
     neo4j_conn = get_neo4j_conn()
     rows = neo4j_conn.query_read(
@@ -129,7 +148,15 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
         {"table_id": table_id},
     )
 
-    return rows[0]
+    if not rows:
+        return None
+
+    record = dict(rows[0])
+    record["columns"] = [
+        {**dict(col), "sample_values": _coerce_sample_values(col.get("sample_values"))}
+        for col in record["columns"]
+    ]
+    return record
 
 
 def update_node_properties(
@@ -138,7 +165,23 @@ def update_node_properties(
 ) -> dict[str, Any] | None:
     """Update properties on any catalog node matched by ``id``.
 
-    Returns ``{id, ...updated_fields}``
+    Returns ``{id, label, database_name, affected_ids, ...updated_fields}``.
+
+    ``affected_ids`` is the list of node ids whose embedding text changed
+    as a result of this PATCH — at most this node, plus its parent
+    ``Table`` when a ``Column.description`` changed. Cascade rule: the
+    table-level embedding text in
+    :func:`server.ingestion.embeddings.query_neo4j_tables_for_embedding`
+    interpolates every child column's description, so editing a column
+    description also invalidates the parent table's vector. An empty list
+    means no re-embed is required.
+
+    ``database_name`` is resolved by walking up the catalog graph so the
+    caller can hand both pieces directly to
+    :func:`server.datasources.vector_sync.sync_node_vectors` without a
+    second round trip.
+
+    Returns ``None`` if no node with that id exists.
     """
     if not properties:
         return None
@@ -147,13 +190,54 @@ def update_node_properties(
 
     rows = neo4j_conn.query_write(
         f"""
-        MATCH (n:{Labels.DB}|{Labels.SCHEMA}|{Labels.TABLE}|{Labels.COLUMN}
-              {{id: $node_id}})
+        MATCH (d:{Labels.DB})-[:{Edges.CONTAINS}*0..3]->(n {{id: $node_id}})
+        WHERE n:{Labels.DB} OR n:{Labels.SCHEMA} OR n:{Labels.TABLE} OR n:{Labels.COLUMN}
+        WITH d, n,
+             labels(n)[0] AS label,
+             coalesce(n.description, '') AS old_desc,
+             coalesce(n.sample_values, []) AS old_samples
         SET n += $props
-        RETURN n.id AS id, properties(n) AS props
+        WITH d, n, label, old_desc, old_samples,
+             coalesce(n.description, '') AS new_desc,
+             coalesce(n.sample_values, []) AS new_samples
+        WITH d, n, label,
+             CASE
+                 WHEN (label = '{Labels.TABLE}' OR label = '{Labels.COLUMN}')
+                      AND $props.description IS NOT NULL
+                      AND new_desc <> old_desc
+                 THEN true ELSE false
+             END AS desc_changed,
+             CASE
+                 WHEN label = '{Labels.COLUMN}'
+                      AND $props.sample_values IS NOT NULL
+                      AND new_samples <> old_samples
+                 THEN true ELSE false
+             END AS samples_changed
+        WITH d, n, label, desc_changed, samples_changed,
+             (desc_changed OR samples_changed) AS self_dirty
+        OPTIONAL MATCH (parent:{Labels.TABLE})-[:{Edges.CONTAINS}]->(n)
+        WHERE label = '{Labels.COLUMN}' AND desc_changed
+        WITH d, n, label,
+             CASE WHEN self_dirty THEN [n.id] ELSE [] END +
+             CASE WHEN parent IS NOT NULL THEN [parent.id] ELSE [] END AS affected_ids
+        RETURN n.id AS id,
+               label AS label,
+               d.name AS database_name,
+               properties(n) AS props,
+               affected_ids AS affected_ids
         """,
         {"node_id": node_id, "props": properties},
     )
 
-    node_props = dict(rows[0]["props"])
-    return {"id": rows[0]["id"], **{k: node_props.get(k) for k in properties}}
+    if not rows:
+        return None
+
+    record = rows[0]
+    node_props = dict(record["props"])
+    return {
+        "id": record["id"],
+        "label": record["label"],
+        "database_name": record["database_name"],
+        "affected_ids": list(record["affected_ids"] or []),
+        **{k: node_props.get(k) for k in properties},
+    }
