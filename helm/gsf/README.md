@@ -50,16 +50,26 @@ docker build -t gsf-backend:0.1.0  .
 docker build -t gsf-frontend:0.1.0 ./frontend
 ```
 
-The backend image vendors the real NeMo-Retriever source from
-`vendor/nemo-project/` (~5.5 MB, Apache-2.0). For a much smaller image that
-serves `/api/health` but raises `NotImplementedError` on real chat/data
-calls, build with the bundled stub:
+The backend image sources NeMo-Retriever from a BuildKit named context. By
+default that context falls back to the lightweight stub committed at
+`vendor/nemo_retriever_stub/` — the resulting image starts and serves
+`/api/health` but raises `NotImplementedError` on real chat/datasource
+calls.
+
+To build with the real NeMo-Retriever source, point a `--build-context` at
+any local clone of the upstream repo. Nothing is copied into this repo:
 
 ```bash
 docker build \
-    --build-arg NEMO_RETRIEVER_SRC=vendor/nemo_retriever_stub \
-    --build-arg NEMO_RETRIEVER_DEST=/opt/nemo_retriever \
-    -t gsf-backend:0.1.0-stub .
+    --build-context nemo=/Users/me/Projects/NeMo-Retriever \
+    -t gsf-backend:0.1.0 .
+```
+
+In CI, do a regular shallow clone first and pass the path:
+
+```bash
+git clone --depth 1 git@github.com:NVIDIA/NeMo-Retriever.git /tmp/nemo
+docker build --build-context nemo=/tmp/nemo -t gsf-backend:0.1.0 .
 ```
 
 The frontend image bakes the backend URL into its Next.js rewrites at build
@@ -225,13 +235,15 @@ the images aren't published anywhere — pass `--set image.pullPolicy=Never`
 (Docker Desktop) or run `kind load docker-image gsf-backend:0.1.0` (kind).
 
 ### Backend image build fails with `Distribution not found at: file:///opt/...`
-The vendored NeMo-Retriever needs all four sibling folders
-(`api/`, `client/`, `src/`, `nemo_retriever/`) under
-`vendor/nemo-project/`. If you swapped the source, make sure the build-arg
-points at a directory with the same tri-folder layout — or use the stub:
+Whatever directory you passed to `--build-context nemo=...` must contain a
+`nemo_retriever/pyproject.toml` (so the editable dep resolves). For the
+real upstream it's the repo root of NeMo-Retriever; for the bundled stub
+the Dockerfile already takes care of it. If you set up your own custom
+source, make sure that file exists at the expected path, or just fall back
+to the stub by omitting `--build-context nemo=...` entirely:
 
 ```bash
-docker build --build-arg NEMO_RETRIEVER_SRC=vendor/nemo_retriever_stub --build-arg NEMO_RETRIEVER_DEST=/opt/nemo_retriever -t gsf-backend:stub .
+docker build -t gsf-backend:0.1.0-stub .
 ```
 
 ### `helm lint` fails with `Chart.yaml file is missing`

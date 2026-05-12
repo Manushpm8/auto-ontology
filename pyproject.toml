@@ -21,7 +21,7 @@ required-environments = [
 ]
 
 [tool.uv.sources]
-nemo-retriever = { path = "vendor/nemo-project/nemo_retriever", editable = true }
+nemo-retriever = { path = "../../nemo-project/NeMo-Retriever/nemo_retriever", editable = true }
 torch = [
   { index = "torch-cpu", marker = "sys_platform == 'darwin'" },
 ]
