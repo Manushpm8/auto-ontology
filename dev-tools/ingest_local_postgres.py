@@ -63,12 +63,18 @@ EMBED_PARAMS = EmbedParams(
     embed_modality="text",
 )
 
-# Source database to ingest.
-SOURCE_DATABASE: str = "pagila"
-
 # Postgres database that hosts the pgvector embeddings table.
 VDB_DATABASE: str = os.environ.get("POSTGRES_DATABASE", "gsf")
 VDB_COLLECTION: str = "nv_ingest_tabular"
+
+# Remote source DB to extract tabular schema/embeddings from. Kept separate
+# from the local POSTGRES_* vars (which point at the pgvector store).
+_CONNECTOR_URL = os.environ.get("CONNECTOR_URL", "")
+if not _CONNECTOR_URL:
+    raise EnvironmentError(
+        "CONNECTOR_URL is not set. Add it to your .env, e.g.:\n\n"
+        "    CONNECTOR_URL=postgresql://user:password@host:5432/dbname"
+    )
 
 
 def _conn_string(db: str) -> str:
@@ -80,7 +86,7 @@ def _conn_string(db: str) -> str:
 
 
 TABULAR_PARAMS = TabularExtractParams(
-    connector=PostgresDatabase(_conn_string(SOURCE_DATABASE)),
+    connector=PostgresDatabase(_CONNECTOR_URL),
 )
 
 
@@ -169,4 +175,4 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     run_ingest()
-    run_retrieve()
+    # run_retrieve()
