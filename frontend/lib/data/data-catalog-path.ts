@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Catalog selection is stored in the `focus` query param: pipe-separated Neo4j element ids
  * from root to node (`dbId|schemaId|tableId|columnId`). Truncated prefixes address ancestors.

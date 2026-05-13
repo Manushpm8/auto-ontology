@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Seed the local docker-compose Postgres with the demo catalog.
 
 Creates the four demo databases if they don't exist, then applies each

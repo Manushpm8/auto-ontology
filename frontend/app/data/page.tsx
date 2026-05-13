@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { Suspense } from 'react';
 import { DataWorkspaceView } from '@/components/dataPage';
 import { datasources } from '@/api/datasources';

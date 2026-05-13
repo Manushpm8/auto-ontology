@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 export function capitalize(s: string): string {
 	if (!s) return s;
 	return s.charAt(0).toUpperCase() + s.slice(1);
