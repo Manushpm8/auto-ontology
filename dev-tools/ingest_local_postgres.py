@@ -24,6 +24,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_res
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import EmbedParams, TabularExtractParams
+from gsf.config import get_postgres_connection_string
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.vdb.postgres import PostgresVDB
 
@@ -44,16 +45,13 @@ if not _NVIDIA_API_KEY:
     )
 
 
-EMBED_MODEL = "nvidia/llama-nemotron-embed-1b-v2"
-EMBED_INVOKE_URL = "https://integrate.api.nvidia.com/v1"
-
 # Remote NIM embedding endpoint — no local GPU required.
 # Model hosted on build.nvidia.com; billed against your NVIDIA API key.
 # Configured via EMBED_ENDPOINT / EMBED_MODEL env vars so the API server
 # (gsf/server/chat/router.py) and this script always agree.
 EMBED_PARAMS = EmbedParams(
-    embed_invoke_url=EMBED_INVOKE_URL,
-    model_name=EMBED_MODEL,
+    embed_invoke_url=_EMBED_ENDPOINT,
+    model_name=_EMBED_MODEL,
     api_key=_NVIDIA_API_KEY,
     embed_modality="text",
 )
@@ -71,15 +69,6 @@ if not _CONNECTOR_URL:
         "    CONNECTOR_URL=postgresql://user:password@host:5432/dbname"
     )
 
-
-def _conn_string(db: str) -> str:
-    host = os.environ.get("POSTGRES_HOST", "localhost")
-    port = os.environ.get("POSTGRES_PORT", "5432")
-    user = os.environ["POSTGRES_USER"]
-    password = os.environ["POSTGRES_PASSWORD"]
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
-
-
 TABULAR_PARAMS = TabularExtractParams(
     connector=PostgresDatabase(_CONNECTOR_URL),
 )
@@ -95,7 +84,7 @@ def _build_vdb(
     are precomputed upstream by the NeMo Retriever pipeline.
     """
     kwargs: dict = {
-        "connection_string": _conn_string(VDB_DATABASE),
+        "connection_string": get_postgres_connection_string(VDB_DATABASE),
         "collection_name": VDB_COLLECTION,
     }
     if include_database_name:
@@ -103,8 +92,8 @@ def _build_vdb(
     if with_query_embedder:
         kwargs["embeddings"] = NVIDIAEmbeddings(
             api_key=_NVIDIA_API_KEY,
-            model=EMBED_MODEL,
-            base_url=EMBED_INVOKE_URL,
+            model=_EMBED_MODEL,
+            base_url=_EMBED_ENDPOINT,
         )
     return PostgresVDB(**kwargs)
 
