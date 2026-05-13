@@ -37,21 +37,28 @@ _CONNECTORS: list[ConnectorEntry] = [
     },
     {
         "name": "postgres",
-        "connection_string": "postgresql://gsf:gsf@localhost:5432/testdb",
+        "connection_string": "postgresql://gsf:gsf@localhost:5432/gsf",
     },
 ]
 
 _CONNECTORS_BY_NAME: dict[str, ConnectorEntry] = {c["name"]: c for c in _CONNECTORS}
 
 
-def get_connector(connector_name: str) -> SQLDatabase:
-    """Instantiate and return a ready-to-use connector by name."""
-    entry = _CONNECTORS_BY_NAME.get(connector_name)
-    if entry is None:
-        raise KeyError(
-            f"Connector '{connector_name}' not found. "
-            f"Available: {list(_CONNECTORS_BY_NAME)}"
-        )
+def get_connector(connector_name: str | None = None) -> SQLDatabase:
+    """Instantiate and return a ready-to-use connector by name.
+
+    Falls back to the first registered connector when ``connector_name`` is
+    ``None``.
+    """
+    if connector_name is None:
+        entry = _CONNECTORS[0]
+    else:
+        entry = _CONNECTORS_BY_NAME.get(connector_name)
+        if entry is None:
+            raise KeyError(
+                f"Connector '{connector_name}' not found. "
+                f"Available: {list(_CONNECTORS_BY_NAME)}"
+            )
 
     cls = _CONNECTOR_CLASSES.get(entry["name"])
     if cls is None:

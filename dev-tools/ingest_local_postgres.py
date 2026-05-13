@@ -30,7 +30,21 @@ from gsf.vdb.postgres import PostgresVDB
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
+# Load .env files before reading any env vars at module level so that
+# NVIDIA_API_KEY / LANCEDB_URI / LANCEDB_TABLE picked up below match what
+# the FastAPI server sees at runtime.
+load_server_env()
+
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+_EMBED_ENDPOINT = os.environ.get(
+    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
+)
+_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
+
+_LANCEDB_URI = os.environ.get("LANCEDB_URI", "lancedb")
+_LANCEDB_TABLE = os.environ.get("LANCEDB_TABLE", "nv-ingest-tabular")
+
+
 if not _NVIDIA_API_KEY:
     raise EnvironmentError(
         "NVIDIA_API_KEY is not set. "
@@ -45,6 +59,8 @@ EMBED_INVOKE_URL = "https://integrate.api.nvidia.com/v1"
 
 # Remote NIM embedding endpoint — no local GPU required.
 # Model hosted on build.nvidia.com; billed against your NVIDIA API key.
+# Configured via EMBED_ENDPOINT / EMBED_MODEL env vars so the API server
+# (gsf/server/chat/router.py) and this script always agree.
 EMBED_PARAMS = EmbedParams(
     embed_invoke_url=EMBED_INVOKE_URL,
     model_name=EMBED_MODEL,
@@ -102,6 +118,9 @@ def run_ingest() -> None:
     graph = (
         Graph()
         >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
+        >> TabularFetchEmbeddingsOp(
+            database_name=TABULAR_PARAMS.connector.database_name
+        )
         >> TabularFetchEmbeddingsOp(
             database_name=TABULAR_PARAMS.connector.database_name
         )

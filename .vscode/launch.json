@@ -19,9 +19,9 @@
             "type": "debugpy",
             "request": "launch",
             "module": "uvicorn",
+            "python": "${workspaceFolder}/.venv/bin/python",
             "args": [
                 "server.main:app",
-                "--reload",
                 "--host",
                 "127.0.0.1",
                 "--port",
