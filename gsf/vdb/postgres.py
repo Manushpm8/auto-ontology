@@ -15,12 +15,13 @@ import psycopg
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
-from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 from nemo_retriever.vdb import VDB
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 logger = logging.getLogger(__name__)
 
 _DATABASE_METADATA_COLUMN = "database_name"
+_LABEL_METADATA_COLUMN = "label"
 
 
 class _UnusableEmbeddings(Embeddings):
@@ -147,6 +148,7 @@ class PostgresVDB(VDB):
                 vector_size=self.vector_size,
                 metadata_columns=[
                     Column(_DATABASE_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
+                    Column(_LABEL_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                 ],
             )
 
@@ -154,7 +156,7 @@ class PostgresVDB(VDB):
             engine=engine,
             embedding_service=self.embeddings,
             table_name=self.collection_name,
-            metadata_columns=[_DATABASE_METADATA_COLUMN],
+            metadata_columns=[_DATABASE_METADATA_COLUMN, _LABEL_METADATA_COLUMN],
         )
         return self._store
 
@@ -181,7 +183,9 @@ class PostgresVDB(VDB):
         for record in _flatten(records):
             metadata = record.get("metadata") or {}
             embedding = metadata.get("embedding")
-            text = record.get("text") or record.get("content") or metadata.get("content")
+            text = (
+                record.get("text") or record.get("content") or metadata.get("content")
+            )
             if not embedding:
                 skipped += 1
                 continue
@@ -190,9 +194,7 @@ class PostgresVDB(VDB):
                 "document_type": record.get("document_type"),
                 **{k: v for k, v in metadata.items() if k != "embedding"},
             }
-            documents.append(
-                Document(page_content=text, metadata=doc_metadata)
-            )
+            documents.append(Document(page_content=text, metadata=doc_metadata))
             embeddings.append([float(v) for v in embedding])
 
         if not documents:
@@ -238,14 +240,20 @@ class PostgresVDB(VDB):
             )
             return []
 
+        filter = {
+            _DATABASE_METADATA_COLUMN: database_name,
+            _LABEL_METADATA_COLUMN: {"$ne": Labels.CUSTOM_ANALYSIS},
+        }
+
         existing = store.get(
-            where={_DATABASE_METADATA_COLUMN: database_name}, include=[]
+            where=filter,
+            include=[],
         )
         ids = list(existing.get("ids", []) or [])
         if not ids:
             return []
 
-        store.delete(filter={_DATABASE_METADATA_COLUMN: database_name})
+        store.delete(filter=filter)
         return ids
 
     def retrieval(
@@ -265,15 +273,14 @@ class PostgresVDB(VDB):
         results: list[list[dict]] = []
         for query in queries:
             try:
-                hits = store.similarity_search_with_score_by_vector(embedding=query, k=top_k)
-                # PGVectorStore returns distance here; convert to a similarity-style
-                # score where higher is better by applying (1 - distance).
+                hits = store.similarity_search_with_score_by_vector(
+                    embedding=query, k=top_k
+                )
                 results.append(
                     [
                         {
                             "text": doc.page_content,
                             "metadata": doc.metadata,
-                            # "score": float(1 - score),
                             "score": float(score),
                         }
                         for doc, score in hits
