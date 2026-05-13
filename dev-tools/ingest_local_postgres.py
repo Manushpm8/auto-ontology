@@ -33,7 +33,21 @@ from nemo_retriever.params import (
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
+# Load .env files before reading any env vars at module level so that
+# NVIDIA_API_KEY / LANCEDB_URI / LANCEDB_TABLE picked up below match what
+# the FastAPI server sees at runtime.
+load_server_env()
+
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+_EMBED_ENDPOINT = os.environ.get(
+    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
+)
+_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
+
+_LANCEDB_URI = os.environ.get("LANCEDB_URI", "lancedb")
+_LANCEDB_TABLE = os.environ.get("LANCEDB_TABLE", "nv-ingest-tabular")
+
+
 if not _NVIDIA_API_KEY:
     raise EnvironmentError(
         "NVIDIA_API_KEY is not set. "
@@ -44,16 +58,18 @@ if not _NVIDIA_API_KEY:
 
 # Remote NIM embedding endpoint — no local GPU required.
 # Model hosted on build.nvidia.com; billed against your NVIDIA API key.
+# Configured via EMBED_ENDPOINT / EMBED_MODEL env vars so the API server
+# (gsf/server/chat/router.py) and this script always agree.
 EMBED_PARAMS = EmbedParams(
-    embed_invoke_url="https://integrate.api.nvidia.com/v1",
-    model_name="nvidia/llama-nemotron-embed-1b-v2",
+    embed_invoke_url=_EMBED_ENDPOINT,
+    model_name=_EMBED_MODEL,
     api_key=_NVIDIA_API_KEY,
     embed_modality="text",
 )
 
 LANCEDB_CONFIG = LanceDBConfig(
-    uri="lancedb",
-    table_name="nv-ingest-tabular",
+    uri=_LANCEDB_URI,
+    table_name=_LANCEDB_TABLE,
     overwrite=True,
     create_index=False,  # local dev dataset is too small for IVF-PQ index
 )
@@ -71,8 +87,6 @@ def _conn_string(db: str) -> str:
 
 def ingest(database: str = DATABASE) -> None:
     """Ingest each Postgres database in ``databases`` into Neo4j."""
-    load_server_env()
-
     TABULAR_PARAMS = TabularExtractParams(
         connector=PostgresDatabase(_conn_string(database)),
     )
