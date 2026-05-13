@@ -10,13 +10,11 @@ from ``nemo_retriever`` (unchanged upstream).
 from .lancedb import LanceDB
 from .operators import (
     IngestVdbOperator,
-    RetrieveVdbOperator,
     UpsertVdbOperator,
 )
 
 __all__ = [
     "LanceDB",
     "IngestVdbOperator",
-    "RetrieveVdbOperator",
     "UpsertVdbOperator",
 ]

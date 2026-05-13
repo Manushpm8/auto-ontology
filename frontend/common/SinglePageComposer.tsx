@@ -4,7 +4,11 @@ import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
-import { isComposerSection, type ComposerSection } from '@/types/composer-section';
+import {
+	isComposerSection,
+	type ComposerSection,
+	type ComposerTextCardSection,
+} from '@/types/composer-section';
 import { Icon, IconName } from '@/components/icons';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
@@ -198,18 +202,22 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const pdfPageName = (hh?.pdfProps as { pageName?: string } | undefined)?.pageName;
 		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
 
-		const firstEditableId =
-			sections.find(
-				(s): s is ComposerSection =>
-					isComposerSection(s) &&
-					s.type === ComposerSectionKind.TEXT_CARD &&
-					s.editable === true,
-			)?.id ?? null;
+		const editableSections = sections.filter(
+			(s): s is ComposerTextCardSection =>
+				isComposerSection(s) &&
+				s.type === ComposerSectionKind.TEXT_CARD &&
+				s.editable === true,
+		);
+		const firstEditableId = editableSections[0]?.id ?? null;
 		const hasEditableSections = firstEditableId !== null;
 		const [localIsEditing, setLocalIsEditing] = useState(false);
 		const isEditingActive = isEditing || localIsEditing;
 
 		const pendingEditsRef = useRef<Record<string, string>>({});
+		// Snapshot of editable section bodies captured when the user enters
+		// edit mode. Used to filter out no-op fields before PATCH so the
+		// server never sees a value that did not actually change.
+		const initialEditsRef = useRef<Record<string, string>>({});
 
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
@@ -289,6 +297,9 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								type="button"
 								onClick={() => {
 									pendingEditsRef.current = {};
+									initialEditsRef.current = Object.fromEntries(
+										editableSections.map((s) => [s.id, s.body]),
+									);
 									setLocalIsEditing(true);
 								}}
 								className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
@@ -313,8 +324,17 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 									type="button"
 									onClick={async () => {
 										const edits = pendingEditsRef.current;
-										if (entityId && Object.keys(edits).length > 0) {
-											const { sample_values: rawSamples, ...rest } = edits;
+										const initial = initialEditsRef.current;
+										// Drop fields whose value matches the snapshot taken
+										// when edit mode was entered — the server-side PATCH
+										// re-embeds anything it receives, so sending unchanged
+										// values would trigger a needless vector resync.
+										const changed: Record<string, string> = {};
+										for (const [id, val] of Object.entries(edits)) {
+											if (val !== (initial[id] ?? '')) changed[id] = val;
+										}
+										if (entityId && Object.keys(changed).length > 0) {
+											const { sample_values: rawSamples, ...rest } = changed;
 											const patch: NodePatch = { ...rest };
 											if (rawSamples !== undefined) {
 												patch.sample_values = rawSamples
@@ -325,7 +345,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 											await datasources.updateNode(entityId, patch);
 										}
 										setLocalIsEditing(false);
-										onSave?.(edits);
+										onSave?.(changed);
 									}}
 									className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600"
 								>

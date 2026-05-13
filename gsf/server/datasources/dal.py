@@ -167,21 +167,33 @@ def update_node_properties(
 
     Returns ``{id, label, database_name, affected_ids, ...updated_fields}``.
 
-    ``affected_ids`` is the list of node ids whose embedding text changed
-    as a result of this PATCH — at most this node, plus its parent
-    ``Table`` when a ``Column.description`` changed. Cascade rule: the
-    table-level embedding text in
-    :func:`server.ingestion.embeddings.query_neo4j_tables_for_embedding`
-    interpolates every child column's description, so editing a column
-    description also invalidates the parent table's vector. An empty list
-    means no re-embed is required.
+    The caller (the frontend save button) is responsible for diffing the
+    user's edits against the originally-loaded values and only sending
+    fields that actually changed. The DAL therefore trusts the payload
+    and does no old-vs-new comparison of its own — every PATCH that
+    reaches this function is assumed to be a real change.
+
+    ``affected_ids`` is the list of node ids whose embedding text needs
+    to be re-computed:
+
+    * the node itself when it is a ``Table`` or ``Column`` (those are
+      the only labels that LanceDB indexes — see
+      :func:`server.ingestion.embeddings.fetch_tabular_embedding_dataframe`).
+      ``Database`` and ``Schema`` edits leave this list empty so the
+      caller skips the no-op re-embed; and
+    * its parent ``Table`` when this node is a ``Column``. Cascade
+      rule: the table-level embedding text in
+      :func:`server.ingestion.embeddings.query_neo4j_tables_for_embedding`
+      interpolates every child column's description and sample values,
+      so editing a column also invalidates the parent table's vector.
 
     ``database_name`` is resolved by walking up the catalog graph so the
     caller can hand both pieces directly to
     :func:`server.datasources.vector_sync.sync_node_vectors` without a
     second round trip.
 
-    Returns ``None`` if no node with that id exists.
+    Returns ``None`` if no node with that id exists or if ``properties``
+    is empty.
     """
     if not properties:
         return None
@@ -192,33 +204,15 @@ def update_node_properties(
         f"""
         MATCH (d:{Labels.DB})-[:{Edges.CONTAINS}*0..3]->(n {{id: $node_id}})
         WHERE n:{Labels.DB} OR n:{Labels.SCHEMA} OR n:{Labels.TABLE} OR n:{Labels.COLUMN}
-        WITH d, n,
-             labels(n)[0] AS label,
-             coalesce(n.description, '') AS old_desc,
-             coalesce(n.sample_values, []) AS old_samples
         SET n += $props
-        WITH d, n, label, old_desc, old_samples,
-             coalesce(n.description, '') AS new_desc,
-             coalesce(n.sample_values, []) AS new_samples
-        WITH d, n, label,
-             CASE
-                 WHEN (label = '{Labels.TABLE}' OR label = '{Labels.COLUMN}')
-                      AND $props.description IS NOT NULL
-                      AND new_desc <> old_desc
-                 THEN true ELSE false
-             END AS desc_changed,
-             CASE
-                 WHEN label = '{Labels.COLUMN}'
-                      AND $props.sample_values IS NOT NULL
-                      AND new_samples <> old_samples
-                 THEN true ELSE false
-             END AS samples_changed
-        WITH d, n, label, desc_changed, samples_changed,
-             (desc_changed OR samples_changed) AS self_dirty
+        WITH d, n, labels(n)[0] AS label
         OPTIONAL MATCH (parent:{Labels.TABLE})-[:{Edges.CONTAINS}]->(n)
-        WHERE label = '{Labels.COLUMN}' AND desc_changed
+        WHERE label = '{Labels.COLUMN}'
         WITH d, n, label,
-             CASE WHEN self_dirty THEN [n.id] ELSE [] END +
+             CASE
+                 WHEN label = '{Labels.TABLE}' OR label = '{Labels.COLUMN}'
+                 THEN [n.id] ELSE []
+             END +
              CASE WHEN parent IS NOT NULL THEN [parent.id] ELSE [] END AS affected_ids
         RETURN n.id AS id,
                label AS label,

@@ -77,10 +77,14 @@ def list_databases() -> dict:
 def update_node(node_id: str, body: NodeUpdate) -> dict:
     """Update mutable properties of any catalog node and resync its vector.
 
-    The DAL reports which node ids were affected by the edit (this node,
-    plus the parent table when a column description changed). Those ids
-    are handed directly to :func:`sync_node_vectors`, which re-embeds and
-    merge-inserts only those rows into LanceDB — no full reindex, no
+    The frontend is expected to diff edits against the originally loaded
+    values and only send fields that actually changed (an empty body is
+    a no-op). The DAL therefore treats every PATCH as a real change and
+    reports the ids that need re-embedding: the node itself, plus its
+    parent ``Table`` when the node is a ``Column`` (the table embedding
+    text concatenates child column descriptions, so it must follow). Those
+    ids are handed straight to :func:`sync_node_vectors`, which re-embeds
+    and merge-inserts only those rows into LanceDB — no full reindex, no
     dirty-flag scan. The response includes a ``vector_sync`` field so the
     frontend can tell whether retrieval will now reflect the edit.
     """

@@ -16,10 +16,7 @@ from typing import Any
 from nemo_retriever.graph.abstract_operator import AbstractOperator
 from nemo_retriever.vdb.adt_vdb import VDB
 from nemo_retriever.vdb.factory import get_vdb_op_cls
-from nemo_retriever.vdb.records import (
-    normalize_retrieval_results,
-    to_client_vdb_records,
-)
+from nemo_retriever.vdb.records import to_client_vdb_records
 from nemo_retriever.vdb.sidecar_metadata import (
     apply_sidecar_metadata_to_client_batches,
     build_sidecar_lookup,
@@ -167,36 +164,6 @@ class UpsertVdbOperator(AbstractOperator):
             )
         self._vdb.upsert(records, table_name=self._table_name, key=self._key)
         return data
-
-    def postprocess(self, data: Any, **kwargs: Any) -> Any:
-        return data
-
-
-class RetrieveVdbOperator(AbstractOperator):
-    """Retrieve hits from an nv-ingest-client VDB using precomputed query vectors."""
-
-    def __init__(
-        self,
-        *,
-        vdb: VDB | None = None,
-        vdb_op: str | None = None,
-        vdb_kwargs: dict[str, Any] | None = None,
-    ) -> None:
-        merged = dict(vdb_kwargs or {})
-        clean_kwargs, _sidecar = split_sidecar_from_vdb_kwargs(merged)
-        super().__init__(vdb=vdb, vdb_op=vdb_op, vdb_kwargs=clean_kwargs)
-        self._vdb_kwargs = clean_kwargs
-        self._retrieval_vdb_kwargs = clean_kwargs
-        self._vdb = _construct_vdb(vdb=vdb, vdb_op=vdb_op, vdb_kwargs=clean_kwargs)
-
-    def preprocess(self, data: Any, **kwargs: Any) -> Any:
-        return data
-
-    def process(self, data: Any, **kwargs: Any) -> list[list[dict[str, Any]]]:
-        retrieval_kwargs = {**self._retrieval_vdb_kwargs, **kwargs}
-        return normalize_retrieval_results(
-            self._vdb.retrieval(data, **retrieval_kwargs)
-        )
 
     def postprocess(self, data: Any, **kwargs: Any) -> Any:
         return data
