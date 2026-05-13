@@ -276,14 +276,11 @@ class PostgresVDB(VDB):
                 hits = store.similarity_search_with_score_by_vector(
                     embedding=query, k=top_k
                 )
-                # PGVectorStore returns distance here; convert to a similarity-style
-                # score where higher is better by applying (1 - distance).
                 results.append(
                     [
                         {
                             "text": doc.page_content,
                             "metadata": doc.metadata,
-                            # "score": float(1 - score),
                             "score": float(score),
                         }
                         for doc, score in hits
