@@ -29,11 +29,6 @@ from gsf.vdb.postgres import PostgresVDB
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
-# Load .env files before reading any env vars at module level so that
-# NVIDIA_API_KEY / LANCEDB_URI / LANCEDB_TABLE picked up below match what
-# the FastAPI server sees at runtime.
-# load_server_env()
-
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
@@ -145,13 +140,10 @@ def run_ingest() -> None:
 def run_retrieve() -> None:
     """Run the text-to-SQL agent against the previously ingested pgvector store."""
     retriever = Retriever(
-        # vdb=,_build_vdb(with_query_embedder=True, include_database_name=False)
         top_k=15,
         vdb_kwargs={
             "vdb": _build_vdb(with_query_embedder=False, include_database_name=False)
         },
-        # embedding_api_key=_NVIDIA_API_KEY,
-        # embedding_http_endpoint=EMBED_PARAMS.embed_invoke_url,
     )
 
     question = "List actors"
@@ -175,4 +167,4 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     run_ingest()
-    # run_retrieve()
+    run_retrieve()
