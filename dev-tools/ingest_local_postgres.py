@@ -15,7 +15,9 @@ import os
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
-from nemo_retriever.graph.tabular_fetch_embeddings_operator import TabularFetchEmbeddingsOp
+from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
+    TabularFetchEmbeddingsOp,
+)
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
 from nemo_retriever.retriever import Retriever
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
@@ -37,7 +39,7 @@ if not _NVIDIA_API_KEY:
         "Get your key at https://build.nvidia.com"
     )
 
-    
+
 EMBED_MODEL = "nvidia/llama-nemotron-embed-1b-v2"
 EMBED_INVOKE_URL = "https://integrate.api.nvidia.com/v1"
 
@@ -71,7 +73,9 @@ TABULAR_PARAMS = TabularExtractParams(
 )
 
 
-def _build_vdb(*, with_query_embedder: bool, include_database_name: bool = True) -> PostgresVDB:
+def _build_vdb(
+    *, with_query_embedder: bool, include_database_name: bool = True
+) -> PostgresVDB:
     """Build a PostgresVDB pointed at the local pgvector-enabled Postgres.
 
     ``with_query_embedder=True`` wires up an NVIDIA embedder for the read path
@@ -98,7 +102,9 @@ def run_ingest() -> None:
     graph = (
         Graph()
         >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-        >> TabularFetchEmbeddingsOp(database_name=TABULAR_PARAMS.connector.database_name)
+        >> TabularFetchEmbeddingsOp(
+            database_name=TABULAR_PARAMS.connector.database_name
+        )
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
 
@@ -106,7 +112,9 @@ def run_ingest() -> None:
     result_df = results[0] if results else None
 
     if result_df is not None and not result_df.empty:
-        ingest_op = IngestVdbOperator(vdb=_build_vdb(with_query_embedder=False, include_database_name=True))
+        ingest_op = IngestVdbOperator(
+            vdb=_build_vdb(with_query_embedder=False, include_database_name=True)
+        )
         ingest_op(result_df.to_dict(orient="records"))
         print(
             "Tabular ingest result:",
@@ -120,10 +128,13 @@ def run_ingest() -> None:
 def run_retrieve() -> None:
     """Run the text-to-SQL agent against the previously ingested pgvector store."""
     retriever = Retriever(
-        vdb=_build_vdb(with_query_embedder=True, include_database_name=False),
+        # vdb=,_build_vdb(with_query_embedder=True, include_database_name=False)
         top_k=15,
-        embedding_api_key=_NVIDIA_API_KEY,
-        embedding_http_endpoint=EMBED_PARAMS.embed_invoke_url,
+        vdb_kwargs={
+            "vdb": _build_vdb(with_query_embedder=False, include_database_name=False)
+        },
+        # embedding_api_key=_NVIDIA_API_KEY,
+        # embedding_http_endpoint=EMBED_PARAMS.embed_invoke_url,
     )
 
     question = "List actors"

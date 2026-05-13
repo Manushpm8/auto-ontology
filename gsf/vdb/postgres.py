@@ -15,7 +15,6 @@ import psycopg
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
-from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 from nemo_retriever.vdb import VDB
 
 logger = logging.getLogger(__name__)
@@ -181,7 +180,9 @@ class PostgresVDB(VDB):
         for record in _flatten(records):
             metadata = record.get("metadata") or {}
             embedding = metadata.get("embedding")
-            text = record.get("text") or record.get("content") or metadata.get("content")
+            text = (
+                record.get("text") or record.get("content") or metadata.get("content")
+            )
             if not embedding:
                 skipped += 1
                 continue
@@ -190,9 +191,7 @@ class PostgresVDB(VDB):
                 "document_type": record.get("document_type"),
                 **{k: v for k, v in metadata.items() if k != "embedding"},
             }
-            documents.append(
-                Document(page_content=text, metadata=doc_metadata)
-            )
+            documents.append(Document(page_content=text, metadata=doc_metadata))
             embeddings.append([float(v) for v in embedding])
 
         if not documents:
@@ -265,7 +264,9 @@ class PostgresVDB(VDB):
         results: list[list[dict]] = []
         for query in queries:
             try:
-                hits = store.similarity_search_with_score_by_vector(embedding=query, k=top_k)
+                hits = store.similarity_search_with_score_by_vector(
+                    embedding=query, k=top_k
+                )
                 # PGVectorStore returns distance here; convert to a similarity-style
                 # score where higher is better by applying (1 - distance).
                 results.append(
