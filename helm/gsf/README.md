@@ -149,27 +149,75 @@ kubectl delete namespace gsf
 
 ---
 
+## Publishing images to NGC (`nvcr.io`)
+
+The repo ships a `Makefile` at the root that wraps `docker buildx build`
+for both images and pushes them multi-arch (`linux/amd64,linux/arm64`)
+to NVIDIA's NGC container registry.
+
+One-time setup:
+
+1. Get an NGC API token at <https://ngc.nvidia.com/setup/api-key>.
+2. Decide on your `nvcr.io/<org>/<team>` path (whichever NGC org / team
+   owns GSF).
+3. Authenticate Docker:
+
+   ```bash
+   make login NGC_TOKEN=<your NGC API token>
+   # equivalent to:
+   #   docker login nvcr.io --username '$oauthtoken' --password-stdin
+   ```
+
+Publish both images for a release:
+
+```bash
+make publish \
+    REGISTRY=nvcr.io/<org>/<team> \
+    TAG=0.1.0
+```
+
+This builds the backend with the real NeMo-Retriever source from
+`../NeMo-Retriever` (override with `NEMO=/some/other/path` or
+`NEMO=stub` for a stub-only image), and the frontend with the in-cluster
+default `PYTHON_API_URL=http://gsf-backend:3001` (override per-build
+with `PYTHON_API_URL=...`).
+
+Individual targets are also available — `make publish-backend`,
+`make publish-frontend`, `make build` (local single-arch loads), etc.
+Run `make help` for the full list.
+
+CI-driven publish (release tags / nightly) is not wired up yet; the
+intent is to layer that on top of these targets once the manual flow is
+validated.
+
 ## Production deployments
 
 For anything beyond local testing:
 
 ```bash
-# Push images to a private registry first
-docker tag gsf-backend:0.1.0  registry.example.com/gsf/backend:0.1.0
-docker tag gsf-frontend:0.1.0 registry.example.com/gsf/frontend:0.1.0
-docker push  registry.example.com/gsf/backend:0.1.0
-docker push  registry.example.com/gsf/frontend:0.1.0
+# Push images first (see "Publishing images to NGC" above):
+make publish REGISTRY=nvcr.io/<org>/<team> TAG=0.1.0
 
 helm upgrade --install gsf ./helm/gsf \
     --namespace gsf --create-namespace \
     --values  prod-values.yaml \
-    --set     backend.image.repository=registry.example.com/gsf/backend \
+    --set     backend.image.repository=nvcr.io/<org>/<team>/gsf-backend \
     --set     backend.image.tag=0.1.0 \
-    --set     frontend.image.repository=registry.example.com/gsf/frontend \
+    --set     frontend.image.repository=nvcr.io/<org>/<team>/gsf-frontend \
     --set     frontend.image.tag=0.1.0 \
-    --set     image.pullSecrets[0].name=regcred \
+    --set     image.pullSecrets[0].name=ngc-imagepull \
     --set     backend.secrets.POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
     --set     backend.secrets.NEO4J_PASSWORD="$NEO4J_PASSWORD"
+```
+
+If your cluster doesn't have a `ngc-imagepull` Secret yet, create one
+with the same NGC token:
+
+```bash
+kubectl -n gsf create secret docker-registry ngc-imagepull \
+    --docker-server=nvcr.io \
+    --docker-username='$oauthtoken' \
+    --docker-password=<your NGC API token>
 ```
 
 ### Production checklist
