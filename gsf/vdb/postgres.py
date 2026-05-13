@@ -16,10 +16,12 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
 from nemo_retriever.vdb import VDB
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 logger = logging.getLogger(__name__)
 
 _DATABASE_METADATA_COLUMN = "database_name"
+_LABEL_METADATA_COLUMN = "label"
 
 
 class _UnusableEmbeddings(Embeddings):
@@ -146,6 +148,7 @@ class PostgresVDB(VDB):
                 vector_size=self.vector_size,
                 metadata_columns=[
                     Column(_DATABASE_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
+                    Column(_LABEL_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                 ],
             )
 
@@ -153,7 +156,7 @@ class PostgresVDB(VDB):
             engine=engine,
             embedding_service=self.embeddings,
             table_name=self.collection_name,
-            metadata_columns=[_DATABASE_METADATA_COLUMN],
+            metadata_columns=[_DATABASE_METADATA_COLUMN, _LABEL_METADATA_COLUMN],
         )
         return self._store
 
@@ -237,14 +240,20 @@ class PostgresVDB(VDB):
             )
             return []
 
+        filter = {
+            _DATABASE_METADATA_COLUMN: database_name,
+            _LABEL_METADATA_COLUMN: {"$ne": Labels.CUSTOM_ANALYSIS},
+        }
+
         existing = store.get(
-            where={_DATABASE_METADATA_COLUMN: database_name}, include=[]
+            where=filter,
+            include=[],
         )
         ids = list(existing.get("ids", []) or [])
         if not ids:
             return []
 
-        store.delete(filter={_DATABASE_METADATA_COLUMN: database_name})
+        store.delete(filter=filter)
         return ids
 
     def retrieval(

@@ -24,7 +24,6 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_res
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import EmbedParams, TabularExtractParams
-from gsf.server.env import load_server_env
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.vdb.postgres import PostgresVDB
 
@@ -114,9 +113,6 @@ def run_ingest() -> None:
     graph = (
         Graph()
         >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-        >> TabularFetchEmbeddingsOp(
-            database_name=TABULAR_PARAMS.connector.database_name
-        )
         >> TabularFetchEmbeddingsOp(
             database_name=TABULAR_PARAMS.connector.database_name
         )
