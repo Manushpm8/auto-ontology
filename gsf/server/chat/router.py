@@ -10,7 +10,6 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import stream_agent_response
-from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 
 from server.chat.helpers import (
     NODE_LABELS,
