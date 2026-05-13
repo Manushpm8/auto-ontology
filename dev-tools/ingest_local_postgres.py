@@ -21,14 +21,11 @@ from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
 )
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
 from nemo_retriever.tabular_data.retrieval import generate_sql
-from nemo_retriever.vector_store.lancedb_store import (
-    LanceDBConfig,
-    _build_lancedb_rows_from_df,
-    _write_rows_to_lancedb,
-)
+from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import (
     EmbedParams,
     TabularExtractParams,
+    VdbUploadParams,
 )
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
@@ -67,14 +64,15 @@ EMBED_PARAMS = EmbedParams(
     embed_modality="text",
 )
 
-LANCEDB_CONFIG = LanceDBConfig(
-    uri=_LANCEDB_URI,
-    table_name=_LANCEDB_TABLE,
-    overwrite=True,
-    create_index=False,  # local dev dataset is too small for IVF-PQ index
+# vdb_kwargs are forwarded straight to ``nemo_retriever.vdb.lancedb.LanceDB``.
+VDB_PARAMS = VdbUploadParams(
+    vdb_op="lancedb",
+    vdb_kwargs={
+        "uri": _LANCEDB_URI,
+        "table_name": _LANCEDB_TABLE,
+        "overwrite": True,
+    },
 )
-
-DATABASE: str = "testdb"
 
 
 def _conn_string(db: str) -> str:
@@ -85,15 +83,20 @@ def _conn_string(db: str) -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
+DATABASE: str = "testdb"
+TABULAR_PARAMS = TabularExtractParams(
+    connector=PostgresDatabase(_conn_string(DATABASE)),
+)
+
+
 def ingest(database: str = DATABASE) -> None:
     """Ingest each Postgres database in ``databases`` into Neo4j."""
-    TABULAR_PARAMS = TabularExtractParams(
-        connector=PostgresDatabase(_conn_string(database)),
-    )
     graph = (
         Graph()
         >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-        >> TabularFetchEmbeddingsOp()
+        >> TabularFetchEmbeddingsOp(
+            database_name=TABULAR_PARAMS.connector.database_name
+        )
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
 
@@ -101,9 +104,11 @@ def ingest(database: str = DATABASE) -> None:
     result_df = results[0] if results else None
 
     if result_df is not None and not result_df.empty:
-        rows = _build_lancedb_rows_from_df(result_df.to_dict(orient="records"))
-        if rows:
-            _write_rows_to_lancedb(rows, cfg=LANCEDB_CONFIG)
+        ingest_op = IngestVdbOperator(
+            vdb_op=VDB_PARAMS.vdb_op,
+            vdb_kwargs=VDB_PARAMS.vdb_kwargs,
+        )
+        ingest_op(result_df.to_dict(orient="records"))
         logger.info("Tabular ingest result: %d rows written to LanceDB", len(result_df))
     else:
         logger.info("Tabular ingest result: no rows produced")

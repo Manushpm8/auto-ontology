@@ -5,7 +5,7 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "duckdb>=1.5.2",
     "fastapi>=0.115.0",
-    "nemo-retriever[stores]",
+    "nemo-retriever[tabular]",
     "neo4j>=6.1.0",
     "pandas>=2.0,<3",
     "psycopg2-binary>=2.9.11",
@@ -15,36 +15,9 @@ dependencies = [
 
 [tool.uv]
 package = false
-required-environments = [
-    "sys_platform == 'darwin' and platform_machine == 'arm64'",
-]
-# Override nemo-retriever's transitive pins to pick up upstream security
-# fixes that have not yet landed in a nemo-retriever release. Drop each
-# entry once nemo-retriever bumps the corresponding dependency.
-#   - nltk: BDSA-2026-4875 / CVE-2026-33236 (path traversal in
-#     Downloader). nemo-retriever hard-pins nltk==3.9.3.
-#   - pillow: BDSA-2026-9047 (OOB write via PSD tile extents, the
-#     incomplete-fix follow-up to CVE-2026-25990 / BDSA-2026-1883).
-#     nemo-retriever hard-pins pillow==12.1.1; 12.2.0 contains the
-#     integer-overflow-aware boundary checks.
-override-dependencies = [
-    "nltk>=3.9.4,<4",
-    "pillow>=12.2.0,<13",
-]
 
 [tool.uv.sources]
-nemo-retriever = { path = "../../nemo-project/NeMo-Retriever/nemo_retriever", editable = true }
-torch = [
-  { index = "torch-cpu", marker = "sys_platform == 'darwin'" },
-]
-torchvision = [
-  { index = "torch-cpu", marker = "sys_platform == 'darwin'" },
-]
-
-[[tool.uv.index]]
-name = "torch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
+nemo-retriever = { git = "https://github.com/NVIDIA/NeMo-Retriever.git", subdirectory = "nemo_retriever" }
 
 [dependency-groups]
 dev = [
