@@ -24,7 +24,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_res
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import EmbedParams, TabularExtractParams
-
+from gsf.server.env import load_server_env
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.vdb.postgres import PostgresVDB
 
@@ -33,17 +33,13 @@ logger = logging.getLogger("scripts.ingest_local_postgres")
 # Load .env files before reading any env vars at module level so that
 # NVIDIA_API_KEY / LANCEDB_URI / LANCEDB_TABLE picked up below match what
 # the FastAPI server sees at runtime.
-load_server_env()
+# load_server_env()
 
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
 )
 _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
-
-_LANCEDB_URI = os.environ.get("LANCEDB_URI", "lancedb")
-_LANCEDB_TABLE = os.environ.get("LANCEDB_TABLE", "nv-ingest-tabular")
-
 
 if not _NVIDIA_API_KEY:
     raise EnvironmentError(
