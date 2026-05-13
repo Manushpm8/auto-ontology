@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     container_name: postgres
     restart: unless-stopped
     ports:
@@ -36,7 +36,7 @@ services:
       - "7687:7687"
     environment:
       NEO4J_AUTH: ${NEO4J_USERNAME}/${NEO4J_PASSWORD}
-      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_PLUGINS: '["apoc"]'
       NEO4J_server_config_strict__validation_enabled: "false"
       NEO4J_apoc_export_file_enabled: "true"
       NEO4J_dbms_security_auth__minimum__password__length: "3"
