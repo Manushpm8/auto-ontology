@@ -57,8 +57,7 @@ export const formatAndModifyContent = (input: string): ContentSegment[] => {
 					});
 				}
 
-				const isWrappedInStars =
-					match[0].startsWith('*') && match[0].endsWith('*');
+				const isWrappedInStars = match[0].startsWith('*') && match[0].endsWith('*');
 
 				if (isWrappedInStars && !match[0].includes('<')) {
 					parts.push({

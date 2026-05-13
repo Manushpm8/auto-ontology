@@ -54,7 +54,11 @@ class DuckDBDatabase(SQLDatabase):
     def __init__(self, connection_string: str, *, read_only: bool = True) -> None:
         self.conn = duckdb.connect(database=connection_string, read_only=read_only)
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
-        logger.debug("DuckDB connected (database=%r, read_only=%s).", self._database_name, read_only)
+        logger.debug(
+            "DuckDB connected (database=%r, read_only=%s).",
+            self._database_name,
+            read_only,
+        )
 
     @property
     def dialect(self) -> str:
@@ -119,9 +123,17 @@ class DuckDBDatabase(SQLDatabase):
 
     def get_queries(self) -> pd.DataFrame:
         """DuckDB has no built-in query history — loads sample queries from a CSV."""
-        csv_path = Path(__file__).parent / "benchmarks" / self._database_name / "sample_queries.csv"
+        csv_path = (
+            Path(__file__).parent
+            / "benchmarks"
+            / self._database_name
+            / "sample_queries.csv"
+        )
         if not csv_path.exists():
-            logger.warning("No sample queries CSV found at %s; returning empty DataFrame.", csv_path)
+            logger.warning(
+                "No sample queries CSV found at %s; returning empty DataFrame.",
+                csv_path,
+            )
             return pd.DataFrame(columns=["query_text", "end_time"])
         df = pd.read_csv(csv_path)
         df["end_time"] = datetime.today()

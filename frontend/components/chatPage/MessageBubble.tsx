@@ -42,9 +42,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 				}`}
 			>
 				{isUser ? (
-					<p className="whitespace-pre-wrap text-sm leading-relaxed">
-						{message.content}
-					</p>
+					<p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
 				) : (
 					<FormattedContent
 						content={message.content}

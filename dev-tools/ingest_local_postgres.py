@@ -39,7 +39,9 @@ logger = logging.getLogger("scripts.ingest_local_postgres")
 load_server_env()
 
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
-_EMBED_ENDPOINT = os.environ.get("EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1")
+_EMBED_ENDPOINT = os.environ.get(
+    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
+)
 _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
 
 _LANCEDB_URI = os.environ.get("LANCEDB_URI", "lancedb")
