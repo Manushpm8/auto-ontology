@@ -12,12 +12,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from nemo_retriever.tabular_data.neo4j import neo4j_connection
 
-from server.env import load_server_env
+from gsf.server.env import load_server_env
 
 load_server_env()
 
-from server.chat.router import router as chat_router  # noqa: E402
-from server.datasources.router import router as datasources_router  # noqa: E402
+from gsf.server.chat.router import router as chat_router  # noqa: E402
+from gsf.server.datasources.router import router as datasources_router  # noqa: E402
 
 
 @asynccontextmanager

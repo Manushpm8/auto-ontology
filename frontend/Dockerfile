@@ -15,11 +15,12 @@
 
 ARG NODE_VERSION=22-bookworm-slim
 ARG PNPM_VERSION=10.10.0
-
+ARG BASE_IMG=nvcr.io/nvidia/base/ubuntu
+ARG BASE_IMG_TAG=jammy-20250619
 ############################
 # Stage 1: deps
 ############################
-FROM node:${NODE_VERSION} AS deps
+FROM $BASE_IMG:$BASE_IMG_TAG AS deps
 
 ARG PNPM_VERSION
 ENV PNPM_HOME=/pnpm \
@@ -42,7 +43,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 ############################
 # Stage 2: builder
 ############################
-FROM node:${NODE_VERSION} AS builder
+FROM $BASE_IMG:$BASE_IMG_TAG AS builder
 
 # Backend URL baked into the Next.js rewrite manifest at build time
 # (Next.js evaluates rewrites() during `next build`, not at server startup).
@@ -71,7 +72,7 @@ RUN pnpm build
 ############################
 # Stage 3: runner
 ############################
-FROM node:${NODE_VERSION} AS runner
+FROM $BASE_IMG:$BASE_IMG_TAG AS runner
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

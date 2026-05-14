@@ -9,7 +9,7 @@ time (anchored to startup) — independent of how long each run takes.
 
 Usage::
 
-    PYTHONPATH=gsf uv run --no-sync python gsf/ingestion-service/main.py
+    uv run --no-sync python gsf/ingestion-service/main.py
 """
 
 from __future__ import annotations

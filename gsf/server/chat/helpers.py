@@ -12,9 +12,9 @@ import os
 from pydantic import BaseModel, Field
 
 from nemo_retriever.retriever import Retriever
-from config import get_postgres_connection_string
-from connectors.postgres import PostgresDatabase
-from vdb.postgres import PostgresVDB
+from gsf.vdb.config import get_postgres_connection_string
+from gsf.connectors.postgres import PostgresDatabase
+from gsf.vdb.postgres import PostgresVDB
 
 logger = logging.getLogger(__name__)
 

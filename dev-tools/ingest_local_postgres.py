@@ -28,7 +28,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_res
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import EmbedParams, TabularExtractParams
-from gsf.config import get_postgres_connection_string
+from gsf.vdb.config import get_postgres_connection_string
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.vdb.postgres import PostgresVDB
 

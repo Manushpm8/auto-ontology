@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import stream_agent_response
 
-from server.chat.helpers import (
+from gsf.server.chat.helpers import (
     NODE_LABELS,
     ChatRequest,
     get_connector,
