@@ -91,7 +91,7 @@ COPY --chown=gsf:gsf pyproject.toml ./
 COPY --chmod=0755 <<'EOF' /usr/local/bin/entrypoint.sh
 #!/bin/sh
 set -e
-mode="${1:-gsf.server}"
+mode="${1:-server}"
 case "$mode" in
   server)
     exec uvicorn gsf.server.main:app --host 0.0.0.0 --port "${PORT:-3001}" --app-dir /app
@@ -115,4 +115,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{__import__(\"os\").environ.get(\"PORT\",\"3001\")}/api/health', timeout=3).status == 200 else 1)"
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
-CMD ["gsf.server"]
+CMD ["server"]
