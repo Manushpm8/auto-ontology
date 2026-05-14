@@ -94,10 +94,10 @@ set -e
 mode="${1:-server}"
 case "$mode" in
   server)
-    exec uvicorn gsf.server.main:app --host 0.0.0.0 --port "${PORT:-3001}" --app-dir /app
+    exec python -m gsf.server
     ;;
   ingestion_service)
-    exec python -m gsf.ingestion_service.main
+    exec python -m gsf.ingestion_service
     ;;
   *)
     echo "Unknown mode: $mode" >&2
