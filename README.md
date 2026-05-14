@@ -49,7 +49,6 @@ See [scripts/README.md](scripts/README.md) for all available flags.
 
 - Override the API URL: set **`PYTHON_API_URL`** (used by Next rewrites and server-side API calls).
 
-<<<<<<< HEAD
 ## Container & Kubernetes deployment
 
 This repo ships Dockerfiles and a Helm chart for running the stack in
@@ -81,7 +80,6 @@ helm install gsf ./helm/gsf -n gsf \
     --set frontend.image.tag=0.1.0
 kubectl -n gsf port-forward svc/gsf-frontend 3000:3000
 ```
-=======
 ## License
 
 GSF is licensed under the [Apache License, Version 2.0](./LICENSE).
@@ -106,4 +104,3 @@ upstream licenses and project URLs, in
 requests, and patches submitted from outside the GSF maintainer team will
 not be reviewed or merged. Security-relevant reports should follow the
 process described in [`SECURITY.md`](./SECURITY.md).
->>>>>>> origin
