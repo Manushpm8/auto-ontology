@@ -29,3 +29,6 @@ npm-debug.log*
 *.duckdb.wal
 
 lancedb/*
+
+# temp
+helm/*
