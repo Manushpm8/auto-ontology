@@ -2,15 +2,22 @@
 
 The PATCH handler already knows exactly which ``Table``/``Column`` ids were
 affected by an edit (the node itself plus, for column-description changes,
-its parent table). This module takes that list straight to the embedding +
-upsert pipeline:
+its parent table). This module takes that list, pulls the matching rows out
+of Neo4j, hands the resulting ``(tables_df, columns_df)`` pair to the
+embedding pipeline, and merge-inserts the result into LanceDB:
 
-    Neo4j (by id)  →  TabularFetchEmbeddingsOp(node_ids=...)
-                   →  _BatchEmbedActor
-                   →  UpsertVdbOperator (merge_insert on ``id``)
+    Neo4j (by id)  →  (tables_df, columns_df)
+                   →  TabularFetchEmbeddingsOp  (build embed-ready rows)
+                   →  filter rows by affected_ids
+                   →  _BatchEmbedActor          (embed only those rows)
+                   →  UpsertVdbOperator         (merge_insert on ``id``)
 
-No ``needs_embed`` flag, no full-database dirty scan — every row the
-pipeline touches is one the caller explicitly listed.
+The table-level embedding text concatenates every child column, so a
+column edit must pull *all* sibling columns of the parent table to
+rebuild that text correctly. The post-fetch ``id`` filter is what keeps
+the actual embedding + upsert work limited to the rows the caller
+listed; siblings only participate in text assembly and are dropped
+before the embedding endpoint is called.
 """
 
 from __future__ import annotations
@@ -18,14 +25,107 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable
 
-from nemo_retriever.graph import Graph
+import pandas as pd
+from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
+    TabularFetchEmbeddingsOp,
+)
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
+from nemo_retriever.vdb.operators import UpsertVdbOperator
 
-from server.graph.tabular_fetch_embeddings_operator import TabularFetchEmbeddingsOp
 from server.ingestion.params import get_embed_params, get_vdb_params
-from vdb.operators import UpsertVdbOperator
 
 logger = logging.getLogger(__name__)
+
+
+_TABLES_COLUMNS = ["id", "table_name", "table_schema", "description"]
+_COLUMNS_COLUMNS = [
+    "id",
+    "table_name",
+    "column_name",
+    "data_type",
+    "description",
+    "sample_values",
+]
+
+
+def _load_tables_and_columns(ids: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fetch ``(tables_df, columns_df)`` for every Table that ``ids`` touches.
+
+    A Table is "touched" when either its own id is in ``ids`` or one of
+    its child Columns is. For each such Table we return its row plus
+    *every* child column — even unaffected ones — because the table
+    embedding text in :class:`TabularFetchEmbeddingsOp` concatenates the
+    full column list. Downstream :func:`sync_node_vectors` filters the
+    embed-ready DataFrame by ``affected_ids`` so the sibling columns
+    only participate in text assembly.
+    """
+    neo4j_conn = get_neo4j_conn()
+
+    rows = neo4j_conn.query_read(
+        f"""
+        MATCH (t:{Labels.TABLE})
+        WHERE t.id IN $ids
+           OR EXISTS {{ (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+                       WHERE c.id IN $ids }}
+        OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+        RETURN t.id AS table_id,
+               t.name AS table_name,
+               t.schema_name AS table_schema,
+               t.description AS table_description,
+               c.id AS column_id,
+               c.name AS column_name,
+               c.data_type AS column_data_type,
+               c.description AS column_description,
+               c.sample_values AS column_sample_values
+        """,
+        {"ids": ids},
+    )
+
+    table_records: dict[str, dict[str, Any]] = {}
+    column_records: list[dict[str, Any]] = []
+    for r in rows:
+        table_id = r["table_id"]
+        table_name = r["table_name"]
+        if table_id not in table_records:
+            table_records[table_id] = {
+                "id": table_id,
+                "table_name": table_name,
+                "table_schema": r["table_schema"],
+                "description": r["table_description"],
+            }
+        if r["column_id"] is not None:
+            column_records.append(
+                {
+                    "id": r["column_id"],
+                    "table_name": table_name,
+                    "column_name": r["column_name"],
+                    "data_type": r["column_data_type"],
+                    "description": r["column_description"],
+                    "sample_values": r["column_sample_values"],
+                }
+            )
+
+    tables_df = pd.DataFrame(list(table_records.values()), columns=_TABLES_COLUMNS)
+    columns_df = pd.DataFrame(column_records, columns=_COLUMNS_COLUMNS)
+    return tables_df, columns_df
+
+
+def _filter_embed_rows(embed_df: pd.DataFrame, keep_ids: set[str]) -> pd.DataFrame:
+    """Drop embed-ready rows whose ``metadata.id`` is not in ``keep_ids``."""
+    if embed_df.empty:
+        return embed_df
+
+    def _row_id(meta: Any) -> str | None:
+        if isinstance(meta, dict):
+            value = meta.get("id")
+            if value is not None:
+                return str(value)
+        return None
+
+    mask = embed_df["metadata"].apply(lambda m: _row_id(m) in keep_ids)
+    return embed_df.loc[mask].reset_index(drop=True)
 
 
 def sync_node_vectors(
@@ -77,12 +177,53 @@ def sync_node_vectors(
         }
 
     try:
-        embed_graph = (
-            Graph()
-            >> TabularFetchEmbeddingsOp(database_name=database_name, node_ids=ids)
-            >> _BatchEmbedActor(params=embed_params)
+        tables_df, columns_df = _load_tables_and_columns(ids)
+    except Exception as exc:  # noqa: BLE001 — surface Neo4j fetch failures
+        logger.exception(
+            "sync_node_vectors: Neo4j fetch failed for db=%s ids=%s",
+            database_name,
+            ids,
         )
-        results = embed_graph.execute(None)
+        return {
+            "database_name": database_name,
+            "node_ids": ids,
+            "status": "error",
+            "upserted": 0,
+            "error": f"neo4j fetch failed: {exc}",
+        }
+
+    if tables_df.empty:
+        logger.info(
+            "sync_node_vectors: no tabular rows for %s ids=%s; nothing to upsert.",
+            database_name,
+            ids,
+        )
+        return {
+            "database_name": database_name,
+            "node_ids": ids,
+            "status": "skipped_no_rows",
+            "upserted": 0,
+        }
+
+    try:
+        fetch_op = TabularFetchEmbeddingsOp(database_name=database_name)
+        embed_rows_df = fetch_op.run((tables_df, columns_df))
+        embed_rows_df = _filter_embed_rows(embed_rows_df, set(ids))
+        if embed_rows_df.empty:
+            logger.info(
+                "sync_node_vectors: no embeddable rows for %s ids=%s; nothing to upsert.",
+                database_name,
+                ids,
+            )
+            return {
+                "database_name": database_name,
+                "node_ids": ids,
+                "status": "skipped_no_rows",
+                "upserted": 0,
+            }
+
+        embed_actor = _BatchEmbedActor(params=embed_params)
+        result_df = embed_actor.run(embed_rows_df)
     except Exception as exc:  # noqa: BLE001 — surface any embed failure to the API caller
         logger.exception(
             "sync_node_vectors: embed step failed for db=%s ids=%s", database_name, ids
@@ -95,10 +236,9 @@ def sync_node_vectors(
             "error": f"embed failed: {exc}",
         }
 
-    result_df = results[0] if results else None
     if result_df is None or result_df.empty:
         logger.info(
-            "sync_node_vectors: no embeddable rows for %s ids=%s; nothing to upsert.",
+            "sync_node_vectors: embed step produced no rows for %s ids=%s.",
             database_name,
             ids,
         )

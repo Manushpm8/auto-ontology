@@ -7,6 +7,16 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+# Column properties that appear inside the parent Table's embedding text
+# (see ``_create_table_text`` in
+# ``nemo_retriever.graph.tabular_fetch_embeddings_operator``). Editing any of
+# these on a Column invalidates the Table vector and triggers a cascade
+# re-embed. ``sample_values`` is deliberately excluded — it only appears in
+# the Column-level embedding text, not the Table-level one.
+_COLUMN_FIELDS_AFFECTING_TABLE_TEXT: frozenset[str] = frozenset(
+    {"name", "description", "data_type"}
+)
+
 
 def _coerce_sample_values(raw: Any) -> list[str] | None:
     """Normalize ``Column.sample_values`` to ``list[str] | None`` on read.
@@ -174,18 +184,24 @@ def update_node_properties(
     reaches this function is assumed to be a real change.
 
     ``affected_ids`` is the list of node ids whose embedding text needs
-    to be re-computed:
+    to be re-computed. The rules are derived from what each level's
+    embedding text actually contains (see ``_create_table_text`` /
+    ``_create_column_text`` in
+    ``nemo_retriever.graph.tabular_fetch_embeddings_operator``):
 
-    * the node itself when it is a ``Table`` or ``Column`` (those are
-      the only labels that LanceDB indexes — see
-      :func:`server.ingestion.embeddings.fetch_tabular_embedding_dataframe`).
-      ``Database`` and ``Schema`` edits leave this list empty so the
-      caller skips the no-op re-embed; and
-    * its parent ``Table`` when this node is a ``Column``. Cascade
-      rule: the table-level embedding text in
-      :func:`server.ingestion.embeddings.query_neo4j_tables_for_embedding`
-      interpolates every child column's description and sample values,
-      so editing a column also invalidates the parent table's vector.
+    * For a ``Table`` edit — ``[table.id]``. The table text uses
+      ``table_name``, ``table_schema``, ``description`` plus a
+      compact rendering of its columns; no column row needs to be
+      touched when the table's own properties change.
+    * For a ``Column`` edit — always ``[column.id]``, plus
+      ``[parent_table.id]`` *only* when the edited property feeds into
+      the parent table's text. That set is
+      :data:`_COLUMN_FIELDS_AFFECTING_TABLE_TEXT` (``name``,
+      ``description``, ``data_type``). ``sample_values`` is **not** in
+      that set — it appears only inside the Column-level text, so
+      editing it leaves the Table vector untouched.
+    * For ``Database`` / ``Schema`` edits — empty: those labels are
+      not indexed in LanceDB, so the caller skips the no-op re-embed.
 
     ``database_name`` is resolved by walking up the catalog graph so the
     caller can hand both pieces directly to
@@ -208,17 +224,11 @@ def update_node_properties(
         WITH d, n, labels(n)[0] AS label
         OPTIONAL MATCH (parent:{Labels.TABLE})-[:{Edges.CONTAINS}]->(n)
         WHERE label = '{Labels.COLUMN}'
-        WITH d, n, label,
-             CASE
-                 WHEN label = '{Labels.TABLE}' OR label = '{Labels.COLUMN}'
-                 THEN [n.id] ELSE []
-             END +
-             CASE WHEN parent IS NOT NULL THEN [parent.id] ELSE [] END AS affected_ids
         RETURN n.id AS id,
                label AS label,
                d.name AS database_name,
                properties(n) AS props,
-               affected_ids AS affected_ids
+               parent.id AS parent_id
         """,
         {"node_id": node_id, "props": properties},
     )
@@ -227,11 +237,24 @@ def update_node_properties(
         return None
 
     record = rows[0]
+    label = record["label"]
     node_props = dict(record["props"])
+    parent_id = record["parent_id"]
+
+    affected_ids: list[str] = []
+    if label in (Labels.TABLE, Labels.COLUMN):
+        affected_ids.append(record["id"])
+    if (
+        label == Labels.COLUMN
+        and parent_id is not None
+        and _COLUMN_FIELDS_AFFECTING_TABLE_TEXT.intersection(properties)
+    ):
+        affected_ids.append(parent_id)
+
     return {
         "id": record["id"],
-        "label": record["label"],
+        "label": label,
         "database_name": record["database_name"],
-        "affected_ids": list(record["affected_ids"] or []),
+        "affected_ids": affected_ids,
         **{k: node_props.get(k) for k in properties},
     }

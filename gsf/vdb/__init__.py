@@ -1,20 +1,9 @@
-"""Local copy of nemo_retriever's VDB layer with incremental-upsert support.
+"""GSF VDB layer.
 
-Mirrors :mod:`nemo_retriever.vdb` so the GSF server can drive
-``LanceDB.upsert`` and :class:`UpsertVdbOperator` without depending on a
-specific fork of ``nemo_retriever``. The base ``VDB`` interface,
-``get_vdb_op_cls`` factory and sidecar/records helpers are still imported
-from ``nemo_retriever`` (unchanged upstream).
+Hosts :class:`vdb.postgres.PostgresVDB` — a Postgres + pgvector
+implementation of the NV-Ingest ``VDB`` operator.
 """
 
-from .lancedb import LanceDB
-from .operators import (
-    IngestVdbOperator,
-    UpsertVdbOperator,
-)
+from .postgres import PostgresVDB
 
-__all__ = [
-    "LanceDB",
-    "IngestVdbOperator",
-    "UpsertVdbOperator",
-]
+__all__ = ["PostgresVDB"]
