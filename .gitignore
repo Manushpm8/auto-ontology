@@ -32,3 +32,5 @@ lancedb/*
 
 # temp
 helm/*
+
+.env.docker
