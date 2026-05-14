@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import type {
 	ChatRequest,
 	ChatStreamEvent,
@@ -25,7 +29,6 @@ export const streamChat = (
 
 	const body = JSON.stringify({
 		question: payload.question,
-		connector_name: payload.connectorName ?? null,
 		acronyms: payload.acronyms ?? null,
 		custom_prompts: payload.customPrompts ?? null,
 	});

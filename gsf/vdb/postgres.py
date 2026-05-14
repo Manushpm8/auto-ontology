@@ -1,0 +1,317 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Postgres + pgvector implementation of the NV-Ingest ``VDB`` operator.
+
+Backed by :class:`langchain_postgres.PGVectorStore` (the v2 vector store API).
+Records are carried as :class:`langchain_core.documents.Document` objects
+throughout. Per-database identification is stored in a real ``database_name``
+column so it can be used as a delete/search filter.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Iterable, Optional
+
+import psycopg
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_postgres import Column, PGEngine, PGVectorStore
+from nemo_retriever.vdb import VDB
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+
+logger = logging.getLogger(__name__)
+
+_DATABASE_METADATA_COLUMN = "database_name"
+_LABEL_METADATA_COLUMN = "label"
+
+
+class _UnusableEmbeddings(Embeddings):
+    """Placeholder used when no query-side embedder is supplied.
+
+    Ingestion via :meth:`PGVectorStore.add_embeddings` does not call this — it
+    only fires if someone tries to run :meth:`PostgresVDB.retrieval` without
+    passing an ``embeddings`` instance to the constructor.
+    """
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        raise RuntimeError(
+            "PostgresVDB has no embeddings function configured. "
+            "Pass `embeddings=<Embeddings>` to the constructor to enable retrieval."
+        )
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_documents([text])[0]
+
+
+def _flatten(records: Iterable) -> Iterable[dict]:
+    """Yield record dicts from possibly-nested NV-Ingest output."""
+    for item in records:
+        if isinstance(item, dict):
+            yield item
+        elif isinstance(item, list):
+            yield from _flatten(item)
+
+
+def _to_async_url(url: str) -> str:
+    """Convert a libpq-style URL to an async-SQLAlchemy URL for ``PGEngine``."""
+    if "+asyncpg" in url or "+psycopg" in url:
+        return url
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    return url
+
+
+class PostgresVDB(VDB):
+    """Concrete :class:`VDB` backed by Postgres + pgvector via LangChain v2.
+
+    Each NV-Ingest record becomes a :class:`Document` whose ``page_content`` is
+    the searchable text and whose ``metadata`` carries the original record
+    metadata plus ``document_type``. Embeddings produced upstream by the NIM
+    pipeline are bulk-loaded into PGVectorStore via ``add_embeddings`` so we
+    don't re-run the embedder on the write path.
+
+    The metadata field ``database_name`` is promoted to a real column on the
+    underlying table so it can be used as a filter for bulk deletes and
+    similarity searches.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        connection_string = kwargs.get("connection_string")
+        if not connection_string:
+            raise ValueError(
+                "PostgresVDB requires a 'connection_string' kwarg "
+                "(e.g. postgresql://user:pass@host:5432/dbname)."
+            )
+        self.connection_string: str = connection_string
+
+        self.collection_name: str = kwargs.get(
+            "collection_name", kwargs.get("index_name", "nv_ingest_tabular")
+        )
+        self.embeddings: Embeddings = kwargs.get("embeddings") or _UnusableEmbeddings()
+
+        self._engine: Optional[PGEngine] = None
+        self._store: Optional[PGVectorStore] = None
+        self.vector_size: Optional[int] = kwargs.get("vector_size", 2048)
+        # Resetting the database embeddings prior to ingestion
+        # In order to support without recreate:
+        # 1. The ingestion should return which tables/columns were added/updated/deleted
+        # 2. The implemtation should support be fault tolerant and support incremental ingestion, which is challenging.
+        self.database_name = kwargs.get("database_name")
+        if self.database_name:
+            ids = self.delete_by_database(self.database_name)
+            logger.info(
+                "PostgresVDB.delete_by_database: deleted %d rows for database %s",
+                len(ids),
+                self.database_name,
+            )
+
+        super().__init__(**kwargs)
+
+    # ------------------------------------------------------------------
+    # Engine / store lifecycle
+    # ------------------------------------------------------------------
+
+    def _get_engine(self) -> PGEngine:
+        if self._engine is None:
+            self._engine = PGEngine.from_connection_string(
+                _to_async_url(self.connection_string)
+            )
+        return self._engine
+
+    def _table_exists(self) -> bool:
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = %s
+                    """,
+                    (self.collection_name,),
+                )
+                return cur.fetchone() is not None
+
+    def _get_store(self) -> Optional[PGVectorStore]:
+        """Return the vector store, creating the table on first write.
+
+        If the table doesn't exist and ``vector_size`` is not provided (e.g.
+        on read paths), returns ``None`` so callers can short-circuit.
+        """
+        if self._store is not None:
+            return self._store
+
+        engine = self._get_engine()
+        if not self._table_exists():
+            engine.init_vectorstore_table(
+                table_name=self.collection_name,
+                vector_size=self.vector_size,
+                metadata_columns=[
+                    Column(_DATABASE_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
+                    Column(_LABEL_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
+                ],
+            )
+
+        self._store = PGVectorStore.create_sync(
+            engine=engine,
+            embedding_service=self.embeddings,
+            table_name=self.collection_name,
+            metadata_columns=[_DATABASE_METADATA_COLUMN, _LABEL_METADATA_COLUMN],
+        )
+        return self._store
+
+    def create_index(self, **kwargs: Any) -> str:
+        """Ensure the pgvector extension and underlying table exist."""
+        self._get_store()
+        return self.collection_name
+
+    # ------------------------------------------------------------------
+    # Read / write
+    # ------------------------------------------------------------------
+
+    def write_to_index(
+        self,
+        records: list,
+        batch_size: int = 500,
+        **kwargs: Any,
+    ) -> int:
+        """Bulk-insert NV-Ingest records, returning the number of rows written."""
+        documents: list[Document] = []
+        embeddings: list[list[float]] = []
+        skipped = 0
+
+        for record in _flatten(records):
+            metadata = record.get("metadata") or {}
+            embedding = metadata.get("embedding")
+            text = (
+                record.get("text") or record.get("content") or metadata.get("content")
+            )
+            if not embedding:
+                skipped += 1
+                continue
+
+            doc_metadata = {
+                "document_type": record.get("document_type"),
+                **{k: v for k, v in metadata.items() if k != "embedding"},
+            }
+            documents.append(Document(page_content=text, metadata=doc_metadata))
+            embeddings.append([float(v) for v in embedding])
+
+        if not documents:
+            logger.info(
+                "PostgresVDB.write_to_index: no rows to insert (skipped %d)", skipped
+            )
+            return 0
+
+        store = self._get_store()
+        assert store is not None  # vector_size was provided
+
+        inserted = 0
+        for start in range(0, len(documents), batch_size):
+            chunk_docs = documents[start : start + batch_size]
+            chunk_embs = embeddings[start : start + batch_size]
+            store.add_embeddings(
+                texts=[d.page_content for d in chunk_docs],
+                embeddings=chunk_embs,
+                metadatas=[d.metadata for d in chunk_docs],
+            )
+            inserted += len(chunk_docs)
+
+        logger.info(
+            "PostgresVDB.write_to_index: inserted %d rows into %s (skipped %d)",
+            inserted,
+            self.collection_name,
+            skipped,
+        )
+        return inserted
+
+    def delete_by_database(self, database_name: str) -> list[str]:
+        """Delete all rows whose ``database_name`` column matches ``database_name``.
+
+        Returns the list of deleted row IDs (empty if the table doesn't exist
+        or no rows match).
+        """
+        store = self._get_store()
+        if store is None:
+            logger.info(
+                "PostgresVDB.delete_by_database: collection %s not found, "
+                "nothing to delete",
+                self.collection_name,
+            )
+            return []
+
+        filter = {
+            _DATABASE_METADATA_COLUMN: database_name,
+            _LABEL_METADATA_COLUMN: {"$ne": Labels.CUSTOM_ANALYSIS},
+        }
+
+        existing = store.get(
+            where=filter,
+            include=[],
+        )
+        ids = list(existing.get("ids", []) or [])
+        if not ids:
+            return []
+
+        store.delete(filter=filter)
+        return ids
+
+    def retrieval(
+        self,
+        queries: list,
+        top_k: int = 10,
+        **kwargs: Any,
+    ) -> list[list[dict]]:
+        """Cosine-similarity k-NN search for each query string.
+
+        Requires the constructor to have been given an ``embeddings`` instance;
+        the placeholder will raise otherwise.
+        """
+        store = self._get_store()
+        if store is None:
+            return [[] for _ in queries]
+        results: list[list[dict]] = []
+        for query in queries:
+            try:
+                hits = store.similarity_search_with_score_by_vector(
+                    embedding=query, k=top_k
+                )
+                results.append(
+                    [
+                        {
+                            "text": doc.page_content,
+                            "metadata": doc.metadata,
+                            "score": float(score),
+                        }
+                        for doc, score in hits
+                    ]
+                )
+            except Exception as e:
+                logger.error(f"Error in retrieval: {e}")
+                return [[] for _ in queries]
+        return results
+
+    def run(self, records: list) -> int:
+        """Create the collection if needed, then write records to it."""
+        self.create_index()
+        return self.write_to_index(records)
+
+    def close(self) -> None:
+        # Drop the store reference; the engine's pool is managed by PGEngine.
+        self._store = None
+        if self._engine is not None:
+            try:
+                self._engine._run_as_sync(self._engine._pool.dispose())
+            except Exception:
+                pass
+            self._engine = None
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass

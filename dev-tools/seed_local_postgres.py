@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Seed the local docker-compose Postgres with the demo catalog.
 
 Creates the four demo databases if they don't exist, then applies each
@@ -15,7 +19,7 @@ import logging
 import os
 from pathlib import Path
 
-import psycopg2
+import psycopg
 
 logger = logging.getLogger("scripts.seed_local_postgres")
 
@@ -38,7 +42,7 @@ def _conn_params(db: str) -> dict[str, str]:
     }
 
 
-def _ensure_database(admin_conn: psycopg2.extensions.connection, db: str) -> None:
+def _ensure_database(admin_conn: psycopg.Connection, db: str) -> None:
     with admin_conn.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db,))
         if cur.fetchone():
@@ -55,7 +59,7 @@ def _apply_ddl(db: str) -> None:
 
     sql = ddl_path.read_text()
     logger.info("Applying DDL to %s from %s", db, ddl_path.name)
-    with psycopg2.connect(**_conn_params(db)) as conn:
+    with psycopg.connect(**_conn_params(db)) as conn:
         with conn.cursor() as cur:
             cur.execute(sql)
 
@@ -64,7 +68,7 @@ def seed() -> None:
     admin_params = _conn_params(
         os.environ.get("POSTGRES_ADMIN_DB", DEFAULT_POSTGRES_ADMIN_DB),
     )
-    admin_conn = psycopg2.connect(**admin_params)
+    admin_conn = psycopg.connect(**admin_params)
     admin_conn.autocommit = True
     try:
         for db in DATABASES:
