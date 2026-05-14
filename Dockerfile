@@ -97,7 +97,7 @@ case "$mode" in
     exec uvicorn gsf.server.main:app --host 0.0.0.0 --port "${PORT:-3001}" --app-dir /app
     ;;
   ingestion_service)
-    exec python /app/gsf/ingestion-service/main.py
+    exec python -m gsf.ingestion_service.main
     ;;
   *)
     echo "Unknown mode: $mode" >&2

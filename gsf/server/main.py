@@ -14,6 +14,12 @@ from nemo_retriever.tabular_data.neo4j import neo4j_connection
 
 from gsf.server.env import load_server_env
 
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 load_server_env()
 
 from gsf.server.chat.router import router as chat_router  # noqa: E402

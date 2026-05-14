@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 import os
 
-from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
 from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
@@ -28,9 +27,8 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_res
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import EmbedParams, TabularExtractParams
-from gsf.vdb.config import get_postgres_connection_string
+from gsf.vdb import get_vdb
 from gsf.connectors.postgres import PostgresDatabase
-from gsf.vdb.postgres import PostgresVDB
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
@@ -60,10 +58,6 @@ EMBED_PARAMS = EmbedParams(
     embed_modality="text",
 )
 
-# Postgres database that hosts the pgvector embeddings table.
-VDB_DATABASE: str = os.environ.get("POSTGRES_DATABASE", "gsf")
-VDB_COLLECTION: str = "nv_ingest_tabular"
-
 # Remote source DB to extract tabular schema/embeddings from. Kept separate
 # from the local POSTGRES_* vars (which point at the pgvector store).
 _CONNECTOR_URL = os.environ.get("CONNECTOR_URL", "")
@@ -76,30 +70,6 @@ if not _CONNECTOR_URL:
 TABULAR_PARAMS = TabularExtractParams(
     connector=PostgresDatabase(_CONNECTOR_URL),
 )
-
-
-def _build_vdb(
-    *, with_query_embedder: bool, include_database_name: bool = True
-) -> PostgresVDB:
-    """Build a PostgresVDB pointed at the local pgvector-enabled Postgres.
-
-    ``with_query_embedder=True`` wires up an NVIDIA embedder for the read path
-    (similarity search). On the ingest path we don't need it because vectors
-    are precomputed upstream by the NeMo Retriever pipeline.
-    """
-    kwargs: dict = {
-        "connection_string": get_postgres_connection_string(VDB_DATABASE),
-        "collection_name": VDB_COLLECTION,
-    }
-    if include_database_name:
-        kwargs["database_name"] = TABULAR_PARAMS.connector.database_name
-    if with_query_embedder:
-        kwargs["embeddings"] = NVIDIAEmbeddings(
-            api_key=_NVIDIA_API_KEY,
-            model=_EMBED_MODEL,
-            base_url=_EMBED_ENDPOINT,
-        )
-    return PostgresVDB(**kwargs)
 
 
 def run_ingest() -> None:
@@ -118,13 +88,13 @@ def run_ingest() -> None:
 
     if result_df is not None and not result_df.empty:
         ingest_op = IngestVdbOperator(
-            vdb=_build_vdb(with_query_embedder=False, include_database_name=True)
+            vdb=get_vdb(database_name=TABULAR_PARAMS.connector.database_name)
         )
         ingest_op(result_df.to_dict(orient="records"))
         print(
             "Tabular ingest result:",
             len(result_df),
-            f"rows written to pgvector ({VDB_DATABASE}.{VDB_COLLECTION})",
+            f"rows written to pgvector)",
         )
     else:
         print("Tabular ingest result: no rows produced")
@@ -134,8 +104,11 @@ def run_retrieve() -> None:
     """Run the text-to-SQL agent against the previously ingested pgvector store."""
     retriever = Retriever(
         top_k=15,
-        vdb_kwargs={
-            "vdb": _build_vdb(with_query_embedder=False, include_database_name=False)
+        vdb_kwargs={"vdb": get_vdb()},
+        embed_kwargs={
+            "model_name": _EMBED_MODEL,
+            "embed_invoke_url": _EMBED_ENDPOINT,
+            "api_key": _NVIDIA_API_KEY,
         },
     )
 

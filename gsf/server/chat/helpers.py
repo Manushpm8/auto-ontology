@@ -12,9 +12,8 @@ import os
 from pydantic import BaseModel, Field
 
 from nemo_retriever.retriever import Retriever
-from gsf.vdb.config import get_postgres_connection_string
 from gsf.connectors.postgres import PostgresDatabase
-from gsf.vdb.postgres import PostgresVDB
+from gsf.vdb import get_vdb
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +41,6 @@ NODE_LABELS: dict[str, str] = {
     "unconstructable_sql_response": "Query could not be constructed",
 }
 
-
-# pgvector store containing tabular embeddings produced by
-# dev-tools/ingest_local_postgres.py. Read-side: the Retriever embeds the
-# query string itself (see EMBED_* below), then PostgresVDB.retrieval runs
-# a similarity search by vector — so we don't pass an `embeddings` instance
-# to the VDB on this path.
-_VDB_COLLECTION = os.environ.get("VDB_COLLECTION", "nv_ingest_tabular")
-
 # Remote NIM embedding endpoint — no local GPU required.
 # MUST match the model used at ingest time (see EMBED_PARAMS in
 # dev-tools/ingest_local_postgres.py); a mismatch produces garbage results
@@ -73,23 +64,23 @@ def get_connector() -> PostgresDatabase:
     """
     global _connector
     if _connector is None:
-        url = os.environ.get("CONNECTOR_URL", "")
-        if not url:
-            raise EnvironmentError(
-                "CONNECTOR_URL is not set. Add it to your .env, e.g.:\n\n"
-                "    CONNECTOR_URL=postgresql://user:password@host:5432/dbname"
+        connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
+        if len(connection_strings) > 0:
+            _connector = PostgresDatabase(connection_strings[0])
+        elif len(connection_strings) == 0:
+            logger.warning(
+                "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
             )
-        _connector = PostgresDatabase(url)
+        else:
+            logger.warning("Multiple connection is not supported yet.")
+
     return _connector
 
 
 def get_retriever() -> Retriever:
     global _retriever
     if _retriever is None:
-        vdb = PostgresVDB(
-            connection_string=get_postgres_connection_string(),
-            collection_name=_VDB_COLLECTION,
-        )
+        vdb = get_vdb()
         _retriever = Retriever(
             vdb_kwargs={"vdb": vdb},
             embed_kwargs={
