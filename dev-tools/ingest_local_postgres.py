@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Ingest the local docker-compose Postgres into the pgvector embeddings store.
 
 Run after ``docker compose up -d`` and ``scripts.seed_local_postgres``.

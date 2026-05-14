@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Chat-route helpers: request models, connector registry, retriever factory."""
 
 from __future__ import annotations

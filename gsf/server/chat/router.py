@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Chat streaming endpoint — wraps the LangGraph text-to-SQL pipeline."""
 
 from __future__ import annotations
