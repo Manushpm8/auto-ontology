@@ -15,6 +15,7 @@ import uvicorn
 from gsf.server.env import load_server_env
 
 import logging
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -33,6 +34,7 @@ async def lifespan(_app: FastAPI):
     if neo4j_connection._conn is not None:
         neo4j_connection._conn.close()
         neo4j_connection._conn = None
+
 
 def main() -> None:
     app = FastAPI(title="GSF API", lifespan=lifespan)

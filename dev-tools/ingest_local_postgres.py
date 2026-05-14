@@ -94,7 +94,7 @@ def run_ingest() -> None:
         print(
             "Tabular ingest result:",
             len(result_df),
-            f"rows written to pgvector)",
+            "rows written to pgvector)",
         )
     else:
         print("Tabular ingest result: no rows produced")
