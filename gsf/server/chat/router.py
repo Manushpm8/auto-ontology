@@ -52,6 +52,22 @@ def _stream_chat(request: ChatRequest) -> Generator[str, None, None]:
                 node_name = event.get("node", "")
                 event = {**event, "label": NODE_LABELS.get(node_name, node_name)}
             yield _sse(event)
+    except KeyError as exc:
+        # langgraph raises ``KeyError('')`` when a router node returns an
+        # empty branch — this happens when retrieval produces zero candidates
+        # (e.g. pgvector extension missing, or ingest never ran). Surface a
+        # human-friendly message instead of the raw repr.
+        logger.exception("Agent stream failed")
+        if exc.args == ("",):
+            message = (
+                "Agent couldn't find any relevant tables for this question. "
+                "Check that (1) the pgvector extension is enabled in your "
+                "local Postgres and (2) ingest has been run "
+                "(`uv run --no-sync python dev-tools/ingest_local_postgres.py`)."
+            )
+        else:
+            message = f"Agent stream failed: {exc!r}"
+        yield _sse({"type": "error", "message": message})
     except Exception as exc:
         logger.exception("Agent stream failed")
         yield _sse({"type": "error", "message": f"Agent stream failed: {exc}"})

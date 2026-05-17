@@ -10,9 +10,16 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 const pythonApiUrl = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
+const isStandalone = process.env.NEXT_OUTPUT === 'standalone';
+
 const nextConfig: NextConfig = {
-	output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
-	outputFileTracingRoot: path.resolve(__dirname, '..'),
+	output: isStandalone ? 'standalone' : undefined,
+	// Only widen the file-tracing root when building the standalone Docker image,
+	// where we need to pull in files from the monorepo root. In dev/regular builds
+	// this would push Turbopack's resolver context to the repo root (which has no
+	// node_modules) and break CSS module resolution (e.g. `@import 'tailwindcss'`
+	// pulled in via `transpilePackages`).
+	outputFileTracingRoot: isStandalone ? path.resolve(__dirname, '..') : undefined,
 	transpilePackages: ['@nvidia/foundations-react-core'],
 	turbopack: {
 		rules: {

@@ -6,15 +6,16 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import asynccontextmanager
 
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from nemo_retriever.tabular_data.neo4j import neo4j_connection
-import uvicorn
-from gsf.server.env import load_server_env
 
-import logging
+from gsf.server.env import load_server_env
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +37,13 @@ async def lifespan(_app: FastAPI):
         neo4j_connection._conn = None
 
 
-def main() -> None:
+def create_app() -> FastAPI:
+    """Build and return the FastAPI application.
+
+    Exposed as a factory so uvicorn can re-create the app on each reload
+    (``uvicorn ... --factory``) without us holding a module-level instance
+    that would run all bootstrap side-effects on plain imports.
+    """
     app = FastAPI(title="GSF API", lifespan=lifespan)
 
     app.add_middleware(
@@ -56,12 +63,34 @@ def main() -> None:
     app.include_router(chat_router, prefix="/api", tags=["chat"])
     app.include_router(health_router, prefix="/api", tags=["health"])
 
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=3001,
-        log_config=None,
-    )
+    return app
+
+
+def _reload_enabled() -> bool:
+    return os.environ.get("UVICORN_RELOAD", "").lower() in {"1", "true", "yes", "on"}
+
+
+def main() -> None:
+    host = os.environ.get("UVICORN_HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", os.environ.get("UVICORN_PORT", "3001")))
+
+    if _reload_enabled():
+        uvicorn.run(
+            "gsf.server.__main__:create_app",
+            factory=True,
+            host=host,
+            port=port,
+            reload=True,
+            reload_dirs=["gsf"],
+            log_config=None,
+        )
+    else:
+        uvicorn.run(
+            create_app(),
+            host=host,
+            port=port,
+            log_config=None,
+        )
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from typing import Optional
 
 import pandas as pd
 import psycopg
+from psycopg import sql
 from psycopg.rows import dict_row
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
@@ -23,12 +24,35 @@ class PostgresDatabase(SQLDatabase):
     connection_string:
         A ``libpq``-style connection URI, e.g.
         ``postgresql://user:pass@host:5432/dbname``.
+    search_path:
+        Optional comma-separated list of schemas to set as the session
+        ``search_path`` (e.g. ``"sales,public"``). When provided, the LLM
+        can emit unqualified table names and Postgres will resolve them
+        against these schemas in order.
     """
 
-    def __init__(self, connection_string: str) -> None:
+    def __init__(
+        self,
+        connection_string: str,
+        search_path: Optional[str] = None,
+    ) -> None:
         self._connection_string = connection_string
+        self._search_path = search_path
         self._conn: psycopg.Connection = psycopg.connect(connection_string)
+        if search_path:
+            self._apply_search_path(search_path)
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
+
+    def _apply_search_path(self, search_path: str) -> None:
+        schemas = [s.strip() for s in search_path.split(",") if s.strip()]
+        if not schemas:
+            return
+        stmt = sql.SQL("SET search_path TO {}").format(
+            sql.SQL(", ").join(sql.Identifier(s) for s in schemas)
+        )
+        with self._conn.cursor() as cur:
+            cur.execute(stmt)
+        self._conn.commit()
 
     @property
     def dialect(self) -> str:
@@ -43,13 +67,21 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        with self._conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(sql, parameters)
-            if cur.description is None:
-                self._conn.commit()
-                return pd.DataFrame()
-            rows = cur.fetchall()
-        return pd.DataFrame(rows)
+        try:
+            with self._conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(sql, parameters)
+                if cur.description is None:
+                    self._conn.commit()
+                    return pd.DataFrame()
+                rows = cur.fetchall()
+            return pd.DataFrame(rows)
+        except psycopg.Error:
+            # Postgres poisons the current transaction on any failure: every
+            # subsequent statement raises InFailedSqlTransaction until ROLLBACK.
+            # The text-to-SQL agent retries with a corrected query, so we must
+            # leave the connection in a clean state for the next attempt.
+            self._conn.rollback()
+            raise
 
     # ------------------------------------------------------------------
     # Schema introspection

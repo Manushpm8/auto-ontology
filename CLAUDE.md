@@ -19,11 +19,14 @@ Frontend commands run from `/frontend`:
 | `pnpm build` | Build the frontend |
 | `pnpm lint` | ESLint the frontend |
 
-Backend command runs from the repo root:
+Backend commands run from the repo root:
 
 | Command | Description |
 |---|---|
-| `uv run uvicorn gsf.server.main:app --reload --host 127.0.0.1 --port 3001 --app-dir .` | Start FastAPI on :3001 |
+| `uv run python -m gsf.server` | Start FastAPI on :3001 (entry-point: `gsf/server/__main__.py`) |
+| `UVICORN_RELOAD=1 uv run python -m gsf.server` | Same, with hot-reload on `gsf/` changes (dev) |
+
+Optional env knobs: `PORT` / `UVICORN_PORT` (default `3001`), `UVICORN_HOST` (default `0.0.0.0`).
 
 To install dependencies:
 - Frontend: `pnpm install` from `/frontend`

@@ -65,14 +65,18 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
-    if len(connection_strings) > 0:
-        try:
-            asyncio.run(_run_forever(connection_strings))
-        except KeyboardInterrupt:
-            logger.info("ingestion_service: shutting down")
-    else:
-        logger.warning("No connection strings provided")
+    raw = os.environ.get("CONNECTOR_URL") or os.environ.get("CONNECTION_STRINGS", "")
+    connection_strings = [s.strip() for s in raw.split(",") if s.strip()]
+    if not connection_strings:
+        logger.warning(
+            "No connection strings provided. Set CONNECTOR_URL in your .env."
+        )
+        return
+
+    try:
+        asyncio.run(_run_forever(connection_strings))
+    except KeyboardInterrupt:
+        logger.info("ingestion_service: shutting down")
 
 
 if __name__ == "__main__":
