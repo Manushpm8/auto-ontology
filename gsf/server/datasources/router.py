@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from server.datasources import dal
+from gsf.server.datasources import dal
 
 
 class NodeUpdate(BaseModel):

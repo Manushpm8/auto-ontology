@@ -32,7 +32,7 @@ services:
       - postgres
 
   neo4j:
-    image: neo4j:2025.09.0
+    image: neo4j:latest
     container_name: neo4j
     restart: unless-stopped
     ports:
