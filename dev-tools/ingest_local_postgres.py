@@ -60,15 +60,15 @@ EMBED_PARAMS = EmbedParams(
 
 # Remote source DB to extract tabular schema/embeddings from. Kept separate
 # from the local POSTGRES_* vars (which point at the pgvector store).
-_CONNECTOR_URL = os.environ.get("CONNECTOR_URL", "")
-if not _CONNECTOR_URL:
+_CONNECTION_STRINGS = os.environ.get("CONNECTION_STRINGS", "")
+if not _CONNECTION_STRINGS:
     raise EnvironmentError(
-        "CONNECTOR_URL is not set. Add it to your .env, e.g.:\n\n"
-        "    CONNECTOR_URL=postgresql://user:password@host:5432/dbname"
+        "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
+        "    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
     )
 
 TABULAR_PARAMS = TabularExtractParams(
-    connector=PostgresDatabase(_CONNECTOR_URL),
+    connector=PostgresDatabase(_CONNECTION_STRINGS),
 )
 
 
