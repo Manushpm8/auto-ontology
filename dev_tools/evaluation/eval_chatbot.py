@@ -21,7 +21,7 @@ result)), this script:
 
 Usage::
 
-    uv run python -m dev-tools.evaluation.eval_chatbot \
+    uv run python -m dev_tools.evaluation.eval_chatbot \
         [--input PATH] [--output PATH]
 """
 

@@ -47,4 +47,4 @@ README.md
 SECURITY.md
 *.md
 !gsf/**/*.md
-dev-tools/
+dev_tools/
