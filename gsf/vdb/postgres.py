@@ -13,6 +13,7 @@ column so it can be used as a delete/search filter.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Iterable, Optional
 
 import psycopg
@@ -26,6 +27,68 @@ logger = logging.getLogger(__name__)
 
 _DATABASE_METADATA_COLUMN = "database_name"
 _LABEL_METADATA_COLUMN = "label"
+
+# nemo_retriever's retrieval/data_access/semantic_search.py builds LanceDB-style
+# WHERE clauses against a stringified JSON `metadata` column, e.g.
+#   metadata LIKE '%"label":"CustomAnalysis"%' ESCAPE '\'
+#   AND metadata LIKE '%"database_name":"dor_prod"%' ESCAPE '\'
+# That syntax doesn't apply to pgvector — we promote `label` and `database_name`
+# to real columns. Parse the known LIKE shapes out and translate them into the
+# filter-dict that PGVectorStore.similarity_search_with_score_by_vector accepts.
+_LIKE_LABEL_RE = re.compile(r'"label"\s*:\s*"([^"]+)"')
+_LIKE_DB_RE = re.compile(r'"database_name"\s*:\s*"([^"]+)"')
+
+
+def _unescape_like(value: str) -> str:
+    """Reverse nemo_retriever's ``_escape_like`` (with ``ESCAPE '\\'``).
+
+    Upstream escapes ``\\`` → ``\\\\``, ``%`` → ``\\%``, ``_`` → ``\\_``, and
+    ``'`` → ``''`` to keep wildcards literal inside a LIKE pattern. For an
+    equality filter on a real column we want the original characters back, so
+    undo each transformation in reverse order.
+    """
+    return (
+        value.replace("''", "'")
+        .replace("\\_", "_")
+        .replace("\\%", "%")
+        .replace("\\\\", "\\")
+    )
+
+
+def _where_to_filter(where: Any) -> dict | None:
+    """Translate a retriever ``where`` arg into a PGVectorStore filter dict.
+
+    Accepts dicts (passed straight through) or the LIKE-pattern strings emitted
+    by nemo_retriever's semantic search. Unknown string shapes are dropped with
+    a warning so we never silently apply a half-translated filter.
+    """
+    if where is None:
+        return None
+    if isinstance(where, dict):
+        return where or None
+    if not isinstance(where, str):
+        logger.warning(
+            "PostgresVDB.retrieval: ignoring unsupported `where` of type %s",
+            type(where).__name__,
+        )
+        return None
+
+    filt: dict[str, Any] = {}
+    labels = list(dict.fromkeys(_unescape_like(m) for m in _LIKE_LABEL_RE.findall(where)))
+    if labels:
+        filt[_LABEL_METADATA_COLUMN] = labels[0] if len(labels) == 1 else {"$in": labels}
+    dbs = _LIKE_DB_RE.findall(where)
+    if dbs:
+        filt[_DATABASE_METADATA_COLUMN] = _unescape_like(dbs[0])
+
+    if not filt:
+        logger.warning(
+            "PostgresVDB.retrieval: could not translate `where`=%r into a "
+            "PGVectorStore filter; running unfiltered search",
+            where,
+        )
+        return None
+    return filt
 
 
 class _UnusableEmbeddings(Embeddings):
@@ -264,9 +327,18 @@ class PostgresVDB(VDB):
         self,
         queries: list,
         top_k: int = 10,
+        where: Any = None,
         **kwargs: Any,
     ) -> list[list[dict]]:
         """Cosine-similarity k-NN search for each query string.
+
+        Accepts a ``where`` kwarg in either form:
+
+        * a PGVectorStore filter dict (e.g. ``{"label": "CustomAnalysis"}``)
+        * a LanceDB-style ``metadata LIKE '%"label":"X"%'`` string emitted by
+          ``nemo_retriever.tabular_data.retrieval.data_access.semantic_search``;
+          we translate the supported substrings (``label`` and
+          ``database_name``) into the filter-dict shape PGVectorStore expects.
 
         Requires the constructor to have been given an ``embeddings`` instance;
         the placeholder will raise otherwise.
@@ -274,11 +346,12 @@ class PostgresVDB(VDB):
         store = self._get_store()
         if store is None:
             return [[] for _ in queries]
+        filter_dict = _where_to_filter(where)
         results: list[list[dict]] = []
         for query in queries:
             try:
                 hits = store.similarity_search_with_score_by_vector(
-                    embedding=query, k=top_k
+                    embedding=query, k=top_k, filter=filter_dict
                 )
                 results.append(
                     [
