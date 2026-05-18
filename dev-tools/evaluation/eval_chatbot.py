@@ -72,9 +72,7 @@ if not _NVIDIA_API_KEY:
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
 )
-_EMBED_MODEL = os.environ.get(
-    "EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2"
-)
+_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
 
 EMBED_PARAMS = EmbedParams(
     embed_invoke_url=_EMBED_ENDPOINT,
@@ -163,7 +161,9 @@ def _canonical(value: Any) -> Any:
     return str(value).strip().lower()
 
 
-def _execute_sql(connector: PostgresDatabase, sql: str) -> Tuple[Optional[pd.DataFrame], str]:
+def _execute_sql(
+    connector: PostgresDatabase, sql: str
+) -> Tuple[Optional[pd.DataFrame], str]:
     if not sql or not sql.strip():
         return None, "empty SQL"
     try:
@@ -175,7 +175,9 @@ def _execute_sql(connector: PostgresDatabase, sql: str) -> Tuple[Optional[pd.Dat
         return None, f"{type(exc).__name__}: {exc}"
 
 
-def _score_sql(connector: PostgresDatabase, expected: str, actual: str) -> Dict[str, Any]:
+def _score_sql(
+    connector: PostgresDatabase, expected: str, actual: str
+) -> Dict[str, Any]:
     text_sim = _sql_text_similarity(expected, actual)
     expected_df, expected_err = _execute_sql(connector, expected)
     actual_df, actual_err = _execute_sql(connector, actual)
@@ -187,7 +189,9 @@ def _score_sql(connector: PostgresDatabase, expected: str, actual: str) -> Dict[
         "sql_exec_match": exec_match,
         "expected_sql_error": expected_err,
         "returned_sql_error": actual_err,
-        "expected_sql_result": _stringify_db_result(expected_df) if expected_df is not None else "",
+        "expected_sql_result": _stringify_db_result(expected_df)
+        if expected_df is not None
+        else "",
     }
 
 
@@ -237,7 +241,11 @@ def _db_result_to_df(value: str) -> Optional[pd.DataFrame]:
     if text.startswith("[") and text.endswith("]"):
         try:
             outer = json.loads(text)
-            if isinstance(outer, list) and len(outer) == 1 and isinstance(outer[0], str):
+            if (
+                isinstance(outer, list)
+                and len(outer) == 1
+                and isinstance(outer[0], str)
+            ):
                 text = outer[0]
         except (json.JSONDecodeError, TypeError):
             pass
@@ -289,7 +297,9 @@ def _score_answer(expected_raw: str, returned_db_str: str) -> Dict[str, Any]:
         nums_match = 1 if expected_nums and expected_nums == actual_nums else 0
 
     sim = (
-        difflib.SequenceMatcher(None, _normalize_text(expected_raw), _normalize_text(haystack)).ratio()
+        difflib.SequenceMatcher(
+            None, _normalize_text(expected_raw), _normalize_text(haystack)
+        ).ratio()
         if expected_raw and haystack
         else 0.0
     )
@@ -313,7 +323,9 @@ def _load_questions(path: Path) -> List[Dict[str, Any]]:
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, list):
-        raise ValueError(f"Expected a JSON array of questions, got {type(data).__name__}")
+        raise ValueError(
+            f"Expected a JSON array of questions, got {type(data).__name__}"
+        )
     return data
 
 
@@ -354,7 +366,9 @@ CSV_FIELDS = [
 ]
 
 
-def _print_agent_result(qid: Any, question: str, agent_result: Dict[str, Any] | None, expected_sql: str = "") -> None:
+def _print_agent_result(
+    qid: Any, question: str, agent_result: Dict[str, Any] | None, expected_sql: str = ""
+) -> None:
     """Pretty-print the agent result to stdout for quick visual inspection."""
     sep = "=" * 80
     print(f"\n{sep}")
@@ -375,7 +389,11 @@ def _print_agent_result(qid: Any, question: str, agent_result: Dict[str, Any] | 
         print(f"\n  [{key}]")
         for line in str(val).splitlines():
             print(f"    {line}")
-    remaining = {k: v for k, v in agent_result.items() if k not in ("sql_code", "response", "sql_response_from_db")}
+    remaining = {
+        k: v
+        for k, v in agent_result.items()
+        if k not in ("sql_code", "response", "sql_response_from_db")
+    }
     if remaining:
         print("\n  [other keys]")
         for k, v in remaining.items():
@@ -464,7 +482,9 @@ def evaluate(
                 logger.exception("Question %s failed", qid)
                 row["error"] = f"{type(exc).__name__}: {exc}"
                 # Truncate traceback into the cell to keep the CSV diff-friendly.
-                row["error"] += " | " + traceback.format_exc().replace("\n", " | ")[:1000]
+                row["error"] += (
+                    " | " + traceback.format_exc().replace("\n", " | ")[:1000]
+                )
             finally:
                 row["runtime_seconds"] = round(time.perf_counter() - t0, 2)
                 writer.writerow(row)
@@ -542,7 +562,9 @@ def _write_consistency_csv(
                     row[f"sql_run_{run_num}"] = sql_val
 
                 if ans_val in first_answer:
-                    row[f"answer_run_{run_num}"] = f"same as run {first_answer[ans_val]}"
+                    row[f"answer_run_{run_num}"] = (
+                        f"same as run {first_answer[ans_val]}"
+                    )
                 else:
                     first_answer[ans_val] = run_num
                     row[f"answer_run_{run_num}"] = ans_val
@@ -552,8 +574,14 @@ def _write_consistency_csv(
             for r in run_results:
                 sql_counts[r["sql"]] = sql_counts.get(r["sql"], 0) + 1
                 answer_counts[r["answer"]] = answer_counts.get(r["answer"], 0) + 1
-            row["sql_consistency"] = f"{max(sql_counts.values())}/{completed_runs}" if sql_counts else ""
-            row["answer_consistency"] = f"{max(answer_counts.values())}/{completed_runs}" if answer_counts else ""
+            row["sql_consistency"] = (
+                f"{max(sql_counts.values())}/{completed_runs}" if sql_counts else ""
+            )
+            row["answer_consistency"] = (
+                f"{max(answer_counts.values())}/{completed_runs}"
+                if answer_counts
+                else ""
+            )
 
             writer.writerow(row)
 
@@ -581,9 +609,9 @@ def evaluate_consistency(
     results: Dict[int, list] = {i: [] for i in range(len(questions))}
 
     for run_num in range(1, runs + 1):
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  RUN {run_num}/{runs}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         for q_idx, item in enumerate(questions):
             qid = item.get("question_id", start_index + q_idx)
@@ -600,7 +628,9 @@ def evaluate_consistency(
                     "acronyms": [],
                 }
                 agent_result = get_agent_response(payload)
-                returned_sql = _normalize_text((agent_result or {}).get("sql_code", "") or "")
+                returned_sql = _normalize_text(
+                    (agent_result or {}).get("sql_code", "") or ""
+                )
                 returned_db = (agent_result or {}).get(_DB_RESULT_KEY)
                 returned_db_str = _stringify_db_result(returned_db)
             except Exception as exc:
@@ -625,9 +655,9 @@ def evaluate_consistency(
         _write_consistency_csv(output_path, questions, results, run_num, start_index)
         logger.info("Updated consistency CSV: %s (after run %d)", output_path, run_num)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  CONSISTENCY SUMMARY ({runs} runs)")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     for q_idx, item in enumerate(questions):
         qid = item.get("question_id", start_index + q_idx)
@@ -644,7 +674,7 @@ def evaluate_consistency(
             sql_to_answer[r["sql"]] = r["answer"]
 
         print(f"\n  q{qid}: {question}")
-        print(f"  {'─'*50}")
+        print(f"  {'─' * 50}")
         for sql, count in sorted(sql_counts.items(), key=lambda x: -x[1]):
             print(f"    SQL ({count}/{runs}): {sql[:500]}")
             print(f"    Answer: {sql_to_answer[sql][:500]}")

@@ -74,9 +74,13 @@ def _where_to_filter(where: Any) -> dict | None:
         return None
 
     filt: dict[str, Any] = {}
-    labels = list(dict.fromkeys(_unescape_like(m) for m in _LIKE_LABEL_RE.findall(where)))
+    labels = list(
+        dict.fromkeys(_unescape_like(m) for m in _LIKE_LABEL_RE.findall(where))
+    )
     if labels:
-        filt[_LABEL_METADATA_COLUMN] = labels[0] if len(labels) == 1 else {"$in": labels}
+        filt[_LABEL_METADATA_COLUMN] = (
+            labels[0] if len(labels) == 1 else {"$in": labels}
+        )
     dbs = _LIKE_DB_RE.findall(where)
     if dbs:
         filt[_DATABASE_METADATA_COLUMN] = _unescape_like(dbs[0])

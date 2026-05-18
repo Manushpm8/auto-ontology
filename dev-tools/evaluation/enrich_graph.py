@@ -97,7 +97,9 @@ def apply_metadata(database_name: str) -> None:
             col_desc = col.get("description")
             value_examples = col.get("value_examples")
             sample_values: list[str] | None = (
-                [str(v) for v in value_examples] if isinstance(value_examples, list) and value_examples else None
+                [str(v) for v in value_examples]
+                if isinstance(value_examples, list) and value_examples
+                else None
             )
             if not col_desc and sample_values is None:
                 continue
@@ -139,7 +141,8 @@ def apply_metadata(database_name: str) -> None:
         )
 
     logger.info(
-        "Applied metadata: %d table description(s), %d column description(s), " "%d column sample_values from %s",
+        "Applied metadata: %d table description(s), %d column description(s), "
+        "%d column sample_values from %s",
         len(table_rows),
         sum(1 for r in column_rows if r.get("description")),
         samples_count,
@@ -177,7 +180,9 @@ def add_custom_analyses(
     from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
     from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
     from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels, Props
-    from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
+    from nemo_retriever.tabular_data.ingestion.services.queries import (
+        parse_query_single,
+    )
     from nemo_retriever.tabular_data.retrieval.data_access.graph_schemas import (
         get_all_schemas_ids,
         get_schemas_by_ids,
@@ -200,7 +205,9 @@ def add_custom_analyses(
     schemas = get_schemas_by_ids(schemas_ids)
 
     before = time.time()
-    logger.info("Starting to ingest %d custom analyses from %s.", len(analyses), analyses_path)
+    logger.info(
+        "Starting to ingest %d custom analyses from %s.", len(analyses), analyses_path
+    )
 
     ingested = 0
     for entry in analyses:
@@ -254,7 +261,9 @@ def add_custom_analyses(
         return
 
     if embed_params is None or vdb is None:
-        logger.info("Skipping custom-analysis embedding: embed_params/vdb not provided.")
+        logger.info(
+            "Skipping custom-analysis embedding: embed_params/vdb not provided."
+        )
         return
 
     _embed_custom_analyses(database_name, embed_params, vdb)
@@ -307,10 +316,14 @@ def _embed_custom_analyses(
             id: ca.id
         }}) AS docs
     """
-    result = get_neo4j_conn().query_read(query, parameters={"database_name": database_name})
+    result = get_neo4j_conn().query_read(
+        query, parameters={"database_name": database_name}
+    )
     docs = result[0].get("docs") if result else None
     if not docs:
-        logger.info("No CustomAnalysis rows found for %r; skipping VDB upsert.", database_name)
+        logger.info(
+            "No CustomAnalysis rows found for %r; skipping VDB upsert.", database_name
+        )
         return
 
     rows = []
@@ -330,7 +343,10 @@ def _embed_custom_analyses(
                 "_embed_modality": "text",
                 "path": path,
                 "page_number": -1,
-                "metadata": {**tabular_fields, "content_metadata": dict(tabular_fields)},
+                "metadata": {
+                    **tabular_fields,
+                    "content_metadata": dict(tabular_fields),
+                },
             }
         )
     df = pd.DataFrame(rows)
