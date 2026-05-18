@@ -18,51 +18,72 @@ import {
 } from '@/lib/data/datasource-tree-merge';
 import { datasources } from '@/api/datasources';
 
-export type DataWorkspaceViewProps = {
-	databases: Database[];
-	loadError: string | null;
-};
+export type DataWorkspaceViewProps = Record<string, never>;
 
-export function DataWorkspaceView({ databases: propDatabases, loadError }: DataWorkspaceViewProps) {
+export function DataWorkspaceView() {
 	const searchParams = useSearchParams();
 	const rawFocus = searchParams.get('focus');
 	const treeFocusId = rawFocus != null && rawFocus.trim() !== '' ? rawFocus.trim() : null;
 
-	const workspaceDb = propDatabases[0];
-	const workspaceDataId = workspaceDb?.id ?? '';
-	const workspaceTitle = workspaceDb?.name ?? 'Data';
+	const [databases, setDatabases] = useState<Database[]>([]);
+	const [loadError, setLoadError] = useState<string | null>(null);
+	const [loading, setLoading] = useState(true);
 
-	const databasesRef = useRef<Database[]>(propDatabases);
-	const [treeDatabases, setTreeDatabases] = useState<Database[]>(propDatabases);
-	const [prevPropDbs, setPrevPropDbs] = useState(propDatabases);
+	const databasesRef = useRef<Database[]>([]);
+	const [treeDatabases, setTreeDatabases] = useState<Database[]>([]);
 	const [treeDataEpoch, setTreeDataEpoch] = useState(0);
 	const [treeCollapsed, setTreeCollapsed] = useState(false);
 	const treeEpochFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const inFlightRef = useRef(false);
 
 	const toggleTreeCollapsed = useCallback(() => setTreeCollapsed((c) => !c), []);
 
-	if (propDatabases !== prevPropDbs) {
-		setPrevPropDbs(propDatabases);
-		const nextRootIds = new Set(propDatabases.map((d) => d.id));
-		const prevRootIds = new Set(prevPropDbs.map((d) => d.id));
-		const sameWorkspace =
-			nextRootIds.size === prevRootIds.size &&
-			[...nextRootIds].every((id) => prevRootIds.has(id));
-		if (!sameWorkspace) {
-			setTreeDatabases(propDatabases);
+	const workspaceDb = databases[0];
+	const workspaceDataId = workspaceDb?.id ?? '';
+	const workspaceTitle = workspaceDb?.name ?? 'Data';
+
+	const fetchDatabases = useCallback(async () => {
+		if (inFlightRef.current) return;
+		inFlightRef.current = true;
+		setLoading(true);
+		try {
+			const res = await datasources.getDBs();
+			if (res.error === true) {
+				setLoadError(res.message ?? 'Failed to load databases');
+				return;
+			}
+			const next = res.data ?? [];
+			setLoadError(null);
+			const prevIds = new Set(databasesRef.current.map((d) => d.id));
+			const nextIds = new Set(next.map((d) => d.id));
+			const sameWorkspace =
+				prevIds.size === nextIds.size && [...nextIds].every((id) => prevIds.has(id));
+			databasesRef.current = next;
+			setDatabases(next);
+			if (!sameWorkspace) {
+				setTreeDatabases(next);
+				setTreeDataEpoch((n) => n + 1);
+			}
+		} finally {
+			inFlightRef.current = false;
+			setLoading(false);
 		}
-	}
+	}, []);
 
 	useEffect(() => {
-		const nextRootIds = new Set(propDatabases.map((d) => d.id));
-		const prevRootIds = new Set(databasesRef.current.map((d) => d.id));
-		const sameWorkspace =
-			nextRootIds.size === prevRootIds.size &&
-			[...nextRootIds].every((id) => prevRootIds.has(id));
-		if (!sameWorkspace) {
-			databasesRef.current = propDatabases;
-		}
-	}, [propDatabases]);
+		void fetchDatabases();
+	}, [fetchDatabases]);
+
+	// Auto-retry whenever the tab regains focus while we're in an error state
+	// (typical case: backend was briefly down on a different terminal).
+	useEffect(() => {
+		if (loadError == null) return undefined;
+		const onFocus = () => {
+			void fetchDatabases();
+		};
+		window.addEventListener('focus', onFocus);
+		return () => window.removeEventListener('focus', onFocus);
+	}, [loadError, fetchDatabases]);
 
 	useEffect(
 		() => () => {
@@ -189,6 +210,18 @@ export function DataWorkspaceView({ databases: propDatabases, loadError }: DataW
 						{loadError}
 					</pre>
 				</div>
+			</div>
+		);
+	}
+
+	if (loading && databases.length === 0) {
+		return (
+			<div className="flex h-full flex-1 items-center justify-center">
+				<div
+					className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-emerald-600 dark:border-zinc-700 dark:border-t-emerald-400"
+					role="status"
+					aria-label="Loading databases"
+				/>
 			</div>
 		);
 	}

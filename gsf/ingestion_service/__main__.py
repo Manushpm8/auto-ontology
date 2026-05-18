@@ -66,13 +66,17 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
-    if len(connection_strings) > 0:
+    if len(connection_strings) == 1:
         try:
             asyncio.run(_run_forever(connection_strings))
         except KeyboardInterrupt:
             logger.info("ingestion_service: shutting down")
+    elif len(connection_strings) == 0:
+        logger.warning(
+            "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
+        )
     else:
-        logger.warning("No connection strings provided")
+        logger.warning("Multiple connection is not supported yet.")
 
 
 if __name__ == "__main__":

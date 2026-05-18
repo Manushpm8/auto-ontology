@@ -50,11 +50,59 @@ services:
       - neo4j_plugins:/plugins
       - neo4j_import:/var/lib/neo4j/import
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
+      test:
+        [
+          "CMD",
+          "cypher-shell",
+          "-u",
+          "neo4j",
+          "-p",
+          "${NEO4J_PASSWORD}",
+          "RETURN 1",
+        ]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
+
+  gsf-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gsf-backend:latest
+    container_name: gsf-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      NEO4J_URI: bolt://neo4j:7687
+    depends_on:
+      postgres:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
+
+  gsf-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        PYTHON_API_URL: ${PYTHON_API_URL:-http://gsf-backend:3001}
+    image: gsf-frontend:latest
+    container_name: gsf-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      PYTHON_API_URL: ${PYTHON_API_URL:-http://gsf-backend:3001}
+      POSTGRES_HOST: postgres
+    depends_on:
+      - gsf-backend
 
 volumes:
   postgres_data:
