@@ -6,14 +6,17 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import pandas as pd
 import psycopg
-from psycopg import sql
+import sqlglot
 from psycopg.rows import dict_row
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
+
+logger = logging.getLogger(__name__)
 
 
 class PostgresDatabase(SQLDatabase):
@@ -24,35 +27,25 @@ class PostgresDatabase(SQLDatabase):
     connection_string:
         A ``libpq``-style connection URI, e.g.
         ``postgresql://user:pass@host:5432/dbname``.
-    search_path:
-        Optional comma-separated list of schemas to set as the session
-        ``search_path`` (e.g. ``"sales,public"``). When provided, the LLM
-        can emit unqualified table names and Postgres will resolve them
-        against these schemas in order.
+
+    Notes
+    -----
+    ``execute`` auto-qualifies unqualified table refs against the live
+    Postgres catalog (``pg_class``/``pg_namespace``) using ``sqlglot``: if
+    the SQL says ``FROM orders`` and ``orders`` exists in exactly one user
+    schema (say, ``sales``), the query is rewritten to ``FROM sales.orders``
+    before execution. This lets the text-to-SQL agent produce unqualified
+    names (which is what it tends to do when the prompt's ``TABLE:`` lines
+    arrive without a schema) without depending on Postgres ``search_path``.
+    Ambiguous names (same table in multiple schemas) and already-qualified
+    refs are left untouched.
     """
 
-    def __init__(
-        self,
-        connection_string: str,
-        search_path: Optional[str] = None,
-    ) -> None:
+    def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
-        self._search_path = search_path
+        self._table_schemas: dict[str, list[str]] | None = None
         self._conn: psycopg.Connection = psycopg.connect(connection_string)
-        if search_path:
-            self._apply_search_path(search_path)
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
-
-    def _apply_search_path(self, search_path: str) -> None:
-        schemas = [s.strip() for s in search_path.split(",") if s.strip()]
-        if not schemas:
-            return
-        stmt = sql.SQL("SET search_path TO {}").format(
-            sql.SQL(", ").join(sql.Identifier(s) for s in schemas)
-        )
-        with self._conn.cursor() as cur:
-            cur.execute(stmt)
-        self._conn.commit()
 
     @property
     def dialect(self) -> str:
@@ -67,6 +60,11 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+        # Parameterised queries are always emitted by us (introspection,
+        # ingest); only LLM-generated SQL arrives without parameters and
+        # benefits from schema-qualification.
+        if parameters is None and sql:
+            sql = self._qualify_unqualified_tables(sql)
         try:
             with self._conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(sql, parameters)
@@ -82,6 +80,75 @@ class PostgresDatabase(SQLDatabase):
             # leave the connection in a clean state for the next attempt.
             self._conn.rollback()
             raise
+
+    # ------------------------------------------------------------------
+    # Table-name qualification
+    # ------------------------------------------------------------------
+
+    def _load_table_catalog(self) -> dict[str, list[str]]:
+        """Map lowercased table name → list of schemas that contain it.
+
+        Uses ``pg_class``/``pg_namespace`` directly via a raw cursor (not
+        ``self.execute``) to avoid recursing through ``_qualify_*`` while
+        the catalog is being built.
+        """
+        catalog: dict[str, list[str]] = {}
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT n.nspname AS table_schema, c.relname AS table_name
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relkind IN ('r', 'v', 'm', 'p', 'f')
+                  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                  AND c.relispartition = false
+                """
+            )
+            for schema, table in cur.fetchall():
+                catalog.setdefault(table.lower(), []).append(schema)
+        return catalog
+
+    def _qualify_unqualified_tables(self, sql: str) -> str:
+        """Rewrite ``FROM orders`` to ``FROM sales.orders`` when unambiguous.
+
+        Already-qualified refs (``public.orders``, ``sales.orders``) are
+        left untouched, as are bare names that exist in multiple schemas
+        (where guessing would silently pick the wrong table) and names
+        absent from the catalog entirely (Postgres will raise a clear
+        ``UndefinedTable`` and the agent loop will retry).
+        """
+        if self._table_schemas is None:
+            try:
+                self._table_schemas = self._load_table_catalog()
+            except psycopg.Error:
+                logger.exception(
+                    "Failed to load Postgres table catalog; "
+                    "skipping auto-qualification for this session"
+                )
+                self._conn.rollback()
+                self._table_schemas = {}
+        if not self._table_schemas:
+            return sql
+
+        try:
+            tree = sqlglot.parse_one(sql, dialect="postgres")
+        except sqlglot.errors.ParseError:
+            return sql
+        if tree is None:
+            return sql
+
+        rewrote = False
+        for table_expr in tree.find_all(sqlglot.exp.Table):
+            if table_expr.db:
+                continue
+            bare = table_expr.name
+            if not bare:
+                continue
+            candidates = self._table_schemas.get(bare.lower(), [])
+            if len(candidates) == 1:
+                table_expr.set("db", sqlglot.exp.to_identifier(candidates[0]))
+                rewrote = True
+        return tree.sql(dialect="postgres") if rewrote else sql
 
     # ------------------------------------------------------------------
     # Schema introspection

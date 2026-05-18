@@ -61,40 +61,19 @@ def get_connector() -> PostgresDatabase:
     Reads ``CONNECTOR_URL`` from the environment (set in ``.env``); the same
     URL is used by ``dev-tools/ingest_local_postgres.py`` so chat queries
     target the database whose schema/embeddings were ingested.
-
-    Falls back to ``DATABASE_URL`` (the local pgvector store) for convenience
-    in dev setups where ingest and query target the same database.
-
-    Raises
-    ------
-    RuntimeError
-        If neither ``CONNECTOR_URL`` nor ``DATABASE_URL`` is set. We refuse to
-        let psycopg fall back to the default unix socket
-        (``/tmp/.s.PGSQL.5432``), which produces a confusing error on macOS.
     """
     global _connector
-    if _connector is not None:
-        return _connector
+    if _connector is None:
+        connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
+        if len(connection_strings) > 0:
+            _connector = PostgresDatabase(connection_strings[0])
+        elif len(connection_strings) == 0:
+            logger.warning(
+                "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
+            )
+        else:
+            logger.warning("Multiple connection is not supported yet.")
 
-    url = os.environ.get("CONNECTOR_URL", "").strip()
-    if not url:
-        url = os.environ.get("DATABASE_URL", "").strip()
-    if not url:
-        raise RuntimeError(
-            "CONNECTOR_URL is not set. Add it to your .env, e.g.:\n\n"
-            "    CONNECTOR_URL=postgresql://user:password@host:5432/dbname\n\n"
-            "Alternatively, set DATABASE_URL to point the chat agent at the "
-            "local pgvector store."
-        )
-
-    if "," in url:
-        logger.warning(
-            "Multiple connection strings are not supported yet; using the first."
-        )
-        url = url.split(",", 1)[0].strip()
-
-    search_path = os.environ.get("CONNECTOR_SEARCH_PATH", "").strip() or None
-    _connector = PostgresDatabase(url, search_path=search_path)
     return _connector
 
 
