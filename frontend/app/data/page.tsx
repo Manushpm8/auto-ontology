@@ -4,13 +4,8 @@
 
 import { Suspense } from 'react';
 import { DataWorkspaceView } from '@/components/dataPage';
-import { datasources } from '@/api/datasources';
 
-export default async function DataPage() {
-	const res = await datasources.getDBs();
-	const databases = res.error === true ? [] : res.data;
-	const error = res.error === true ? (res.message ?? null) : null;
-
+export default function DataPage() {
 	return (
 		<Suspense
 			fallback={
@@ -23,7 +18,7 @@ export default async function DataPage() {
 				</div>
 			}
 		>
-			<DataWorkspaceView databases={databases} loadError={error} />
+			<DataWorkspaceView />
 		</Suspense>
 	);
 }

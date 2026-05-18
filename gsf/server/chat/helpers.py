@@ -58,14 +58,14 @@ _connector: PostgresDatabase | None = None
 def get_connector() -> PostgresDatabase:
     """Return the source-DB connector for the chat agent.
 
-    Reads ``CONNECTOR_URL`` from the environment (set in ``.env``); the same
-    URL is used by ``dev-tools/ingest_local_postgres.py`` so chat queries
+    Reads ``CONNECTION_STRINGS`` from the environment (set in ``.env``); the
+    same URL is used by ``dev-tools/ingest_local_postgres.py`` so chat queries
     target the database whose schema/embeddings were ingested.
     """
     global _connector
     if _connector is None:
         connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
-        if len(connection_strings) > 0:
+        if len(connection_strings) == 1:
             _connector = PostgresDatabase(connection_strings[0])
         elif len(connection_strings) == 0:
             logger.warning(
