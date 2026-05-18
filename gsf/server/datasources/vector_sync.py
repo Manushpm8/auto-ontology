@@ -43,6 +43,7 @@ _TABLES_COLUMNS = ["id", "table_name", "table_schema", "description"]
 _COLUMNS_COLUMNS = [
     "id",
     "table_name",
+    "table_schema",
     "column_name",
     "data_type",
     "description",
@@ -88,11 +89,15 @@ def _load_tables_and_columns(ids: list[str]) -> tuple[pd.DataFrame, pd.DataFrame
     for r in rows:
         table_id = r["table_id"]
         table_name = r["table_name"]
+        # Coerce a missing schema to "" so the (schema, table) key the embed
+        # operator builds matches on both the tables_df and columns_df sides
+        # (str(None).lower() == "none" would silently break the join).
+        table_schema = r["table_schema"] or ""
         if table_id not in table_records:
             table_records[table_id] = {
                 "id": table_id,
                 "table_name": table_name,
-                "table_schema": r["table_schema"],
+                "table_schema": table_schema,
                 "description": r["table_description"],
             }
         if r["column_id"] is not None:
@@ -100,6 +105,7 @@ def _load_tables_and_columns(ids: list[str]) -> tuple[pd.DataFrame, pd.DataFrame
                 {
                     "id": r["column_id"],
                     "table_name": table_name,
+                    "table_schema": table_schema,
                     "column_name": r["column_name"],
                     "data_type": r["column_data_type"],
                     "description": r["column_description"],
