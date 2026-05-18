@@ -320,6 +320,12 @@ def _score_answer(expected_raw: str, returned_db_str: str) -> Dict[str, Any]:
 
 
 def _load_questions(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        raise SystemExit(
+            f"Evaluation file not found: {path}\n"
+            f"Pass --input <path> or create the default file at "
+            f"{_DEFAULT_INPUT}."
+        )
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, list):
