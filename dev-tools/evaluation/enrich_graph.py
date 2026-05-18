@@ -78,8 +78,10 @@ def apply_metadata(database_name: str) -> None:
     metadata_path = DEFAULT_DIR / f"{database_name}.json"
 
     if not metadata_path.exists():
-        raise FileNotFoundError(
-            f"metadata file not found at {metadata_path} for database {database_name!r}"
+        raise SystemExit(
+            f"Metadata file not found: {metadata_path}\n"
+            f"Expected a JSON file describing tables/columns for database "
+            f"{database_name!r}."
         )
 
     with metadata_path.open() as f:

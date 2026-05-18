@@ -38,3 +38,4 @@ helm/*
 
 # Evaluation data files
 dev-tools/evaluation/*csv
+dev-tools/evaluation/*.json
