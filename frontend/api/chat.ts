@@ -53,6 +53,7 @@ export const streamChat = (
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = '';
+			let streamCompleted = false;
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -67,7 +68,10 @@ export const streamChat = (
 					if (!trimmed.startsWith('data: ')) continue;
 
 					const data = trimmed.slice(6);
-					if (data === '[DONE]') return;
+					if (data === '[DONE]') {
+						streamCompleted = true;
+						return;
+					}
 
 					try {
 						const event: ChatStreamEvent = JSON.parse(data);
@@ -76,9 +80,11 @@ export const streamChat = (
 								callbacks.onStep(event);
 								break;
 							case 'result':
+								streamCompleted = true;
 								callbacks.onResult(event);
 								break;
 							case 'error':
+								streamCompleted = true;
 								callbacks.onError(event);
 								break;
 						}
@@ -86,6 +92,15 @@ export const streamChat = (
 						// skip malformed lines
 					}
 				}
+			}
+
+			// Stream closed without [DONE]/result/error — surface as an error
+			// so the UI can drop out of loading instead of hanging forever.
+			if (!streamCompleted) {
+				callbacks.onError({
+					type: 'error',
+					message: 'Connection closed before the agent finished.',
+				});
 			}
 		} catch (err: unknown) {
 			if (err instanceof DOMException && err.name === 'AbortError') return;

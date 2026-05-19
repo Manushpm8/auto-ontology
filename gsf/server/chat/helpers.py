@@ -27,18 +27,23 @@ class ChatRequest(BaseModel):
     custom_prompts: str | None = None
 
 
+# Maps LangGraph node names from
+# nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph
+# to a single user-facing label per agent (1-to-1 with the agent classes
+# instantiated inside ``create_graph``). Unknown nodes fall through to the
+# raw node_name in the router so we never display a blank thinking step.
 NODE_LABELS: dict[str, str] = {
-    "entities_extraction": "Extracting entities…",
-    "retrieve_candidates": "Searching relevant data…",
-    "prepare_candidates": "Searching relevant data…",
-    "construct_sql_from_candidates": "Constructing SQL query…",
-    "construct_sql_not_from_snippets": "Constructing SQL query…",
-    "validate_sql_query": "Validating SQL…",
-    "validate_intent": "Validating SQL…",
-    "reconstruct_sql": "Reconstructing SQL…",
-    "execute_sql_query": "Executing query…",
-    "format_and_respond": "Formatting response…",
-    "unconstructable_sql_response": "Query could not be constructed",
+    "entities_extraction": "Extracting entities",
+    "retrieve_candidates": "Retrieving candidates",
+    "prepare_candidates": "Preparing candidates",
+    "construct_sql_from_candidates": "Constructing SQL from candidates",
+    "construct_sql_not_from_snippets": "Constructing SQL from tables",
+    "reconstruct_sql": "Reconstructing SQL",
+    "validate_sql_query": "Validating SQL",
+    "validate_intent": "Validating intent",
+    "execute_sql_query": "Executing SQL",
+    "format_and_respond": "Formatting response",
+    "unconstructable_sql_response": "SQL could not be constructed",
 }
 
 # Remote NIM embedding endpoint — no local GPU required.
