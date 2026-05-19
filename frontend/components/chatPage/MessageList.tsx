@@ -5,22 +5,25 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import type { ChatMessage } from '@/types/chat';
+import type { ChatMessage, GraphStep } from '@/types/chat';
 import { Icon, IconName } from '@/components/icons';
 import { MessageBubble } from './MessageBubble';
+import { ThinkingMessage } from './ThinkingMessage';
 
 type MessageListProps = {
 	messages: ChatMessage[];
+	isLoading: boolean;
+	steps: GraphStep[];
 };
 
-export const MessageList = ({ messages }: MessageListProps) => {
+export const MessageList = ({ messages, isLoading, steps }: MessageListProps) => {
 	const bottomRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-	}, [messages.length]);
+	}, [messages.length, isLoading, steps.length]);
 
-	if (messages.length === 0) {
+	if (messages.length === 0 && !isLoading) {
 		return (
 			<div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
 				<div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-900/30">
@@ -46,6 +49,7 @@ export const MessageList = ({ messages }: MessageListProps) => {
 				{messages.map((msg) => (
 					<MessageBubble key={msg.id} message={msg} />
 				))}
+				{isLoading && <ThinkingMessage steps={steps} />}
 				<div ref={bottomRef} />
 			</div>
 		</div>

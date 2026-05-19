@@ -15,7 +15,6 @@ import {
 } from '@/api/conversations';
 import { ChatSidebar } from './ChatSidebar';
 import { MessageList } from './MessageList';
-import { StepIndicator } from './StepIndicator';
 import { ChatInput } from './ChatInput';
 
 export const ChatView = () => {
@@ -158,11 +157,7 @@ export const ChatView = () => {
 			/>
 
 			<main className="flex min-w-0 flex-1 flex-col">
-				<MessageList messages={messages} />
-
-				<div className="mx-auto w-full max-w-3xl">
-					<StepIndicator steps={steps} visible={isLoading} />
-				</div>
+				<MessageList messages={messages} isLoading={isLoading} steps={steps} />
 
 				{error && (
 					<div className="mx-auto w-full max-w-3xl px-4 py-2">
