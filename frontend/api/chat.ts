@@ -53,7 +53,7 @@ export const streamChat = (
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = '';
-			let sawTerminal = false;
+			let streamCompleted = false;
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -69,7 +69,7 @@ export const streamChat = (
 
 					const data = trimmed.slice(6);
 					if (data === '[DONE]') {
-						sawTerminal = true;
+						streamCompleted = true;
 						return;
 					}
 
@@ -80,11 +80,11 @@ export const streamChat = (
 								callbacks.onStep(event);
 								break;
 							case 'result':
-								sawTerminal = true;
+								streamCompleted = true;
 								callbacks.onResult(event);
 								break;
 							case 'error':
-								sawTerminal = true;
+								streamCompleted = true;
 								callbacks.onError(event);
 								break;
 						}
@@ -96,7 +96,7 @@ export const streamChat = (
 
 			// Stream closed without [DONE]/result/error — surface as an error
 			// so the UI can drop out of loading instead of hanging forever.
-			if (!sawTerminal) {
+			if (!streamCompleted) {
 				callbacks.onError({
 					type: 'error',
 					message: 'Connection closed before the agent finished.',
