@@ -525,6 +525,12 @@ def _parse_args() -> argparse.Namespace:
         default=10,
         help="Number of runs for consistency evaluation (default: 10).",
     )
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        default=False,
+        help="Run a single hardcoded query (edit SINGLE_QUERY in the script).",
+    )
     return parser.parse_args()
 
 
@@ -694,6 +700,29 @@ def evaluate_consistency(
     logger.info("Final consistency CSV: %s", output_path)
 
 
+def run_single_query(question: str) -> None:
+    """Run a single question through the agent and print the result."""
+    connector = _build_connector()
+    retriever = _build_retriever()
+
+    payload: AgentPayload = {
+        "question": question,
+        "retriever": retriever,
+        "connector": connector,
+        "path_state": {},
+        "custom_prompts": "",
+        "acronyms": [],
+    }
+    t0 = time.perf_counter()
+    agent_result = get_agent_response(payload)
+    elapsed = round(time.perf_counter() - t0, 2)
+
+    _print_agent_result("single", question, agent_result)
+    print(f"\n  Runtime: {elapsed}s")
+
+
+SINGLE_QUERY = "list all actors"
+
 START_INDEX = 0
 END_INDEX = None  # None = run to the end
 CONSISTENCY_RUNS = 10
@@ -705,7 +734,9 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = _parse_args()
-    if RUN_CONSISTENCY or args.consistency:
+    if args.single:
+        run_single_query(SINGLE_QUERY)
+    elif RUN_CONSISTENCY or args.consistency:
         num_runs = args.runs if args.consistency else CONSISTENCY_RUNS
         consistency_output = Path(__file__).parent / "chatbot_consistency_scores.csv"
         evaluate_consistency(

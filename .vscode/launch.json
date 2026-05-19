@@ -48,6 +48,19 @@
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
+    },
+    {
+      "name": "Eval Chatbot (single query)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": ["--single"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
+
   ]
 }
