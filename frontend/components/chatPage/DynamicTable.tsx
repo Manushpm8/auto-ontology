@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ParsedTable } from '@/lib/parseSqlResponse';
 
 const PAGE_SIZE = 10;
@@ -16,6 +16,14 @@ type DynamicTableProps = {
 export const DynamicTable = ({ table }: DynamicTableProps) => {
 	const { columns, rows } = table;
 	const [pageIndex, setPageIndex] = useState(0);
+	const [prevRows, setPrevRows] = useState(rows);
+
+	// Reset pagination during render when the rows reference changes,
+	// per React guidance on adjusting state in response to prop changes.
+	if (rows !== prevRows) {
+		setPrevRows(rows);
+		setPageIndex(0);
+	}
 
 	const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
 
@@ -23,10 +31,6 @@ export const DynamicTable = ({ table }: DynamicTableProps) => {
 		const start = pageIndex * PAGE_SIZE;
 		return rows.slice(start, start + PAGE_SIZE);
 	}, [rows, pageIndex]);
-
-	useEffect(() => {
-		setPageIndex(0);
-	}, [rows]);
 
 	if (columns.length === 0 || rows.length === 0) {
 		return <p className="text-xs text-zinc-400">No data available</p>;
