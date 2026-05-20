@@ -293,10 +293,14 @@ class PostgresVDB(VDB):
         top_k: int = 10,
         **kwargs: Any,
     ) -> list[list[dict]]:
-        """Cosine-similarity k-NN search for each query string.
+        """Cosine-similarity k-NN search for each query vector.
 
-        Requires the constructor to have been given an ``embeddings`` instance;
-        the placeholder will raise otherwise.
+        ``kwargs["where"]`` is a langchain-postgres filter dict
+        (e.g. ``{"label": "CustomAnalysis", "database_name": "dor_prod"}``)
+        applied to the declared metadata columns; passed straight through to
+        ``PGVectorStore.similarity_search_with_score_by_vector``.
+
+        Requires an ``embeddings`` instance from the constructor.
         """
         store = self._get_store()
         if store is None:
