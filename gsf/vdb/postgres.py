@@ -28,72 +28,6 @@ logger = logging.getLogger(__name__)
 _DATABASE_METADATA_COLUMN = "database_name"
 _LABEL_METADATA_COLUMN = "label"
 
-# nemo_retriever's retrieval/data_access/semantic_search.py builds LanceDB-style
-# WHERE clauses against a stringified JSON `metadata` column, e.g.
-#   metadata LIKE '%"label":"CustomAnalysis"%' ESCAPE '\'
-#   AND metadata LIKE '%"database_name":"dor_prod"%' ESCAPE '\'
-# That syntax doesn't apply to pgvector — we promote `label` and `database_name`
-# to real columns. Parse the known LIKE shapes out and translate them into the
-# filter-dict that PGVectorStore.similarity_search_with_score_by_vector accepts.
-_LIKE_LABEL_RE = re.compile(r'"label"\s*:\s*"([^"]+)"')
-_LIKE_DB_RE = re.compile(r'"database_name"\s*:\s*"([^"]+)"')
-
-
-def _unescape_like(value: str) -> str:
-    """Reverse nemo_retriever's ``_escape_like`` (with ``ESCAPE '\\'``).
-
-    Upstream escapes ``\\`` → ``\\\\``, ``%`` → ``\\%``, ``_`` → ``\\_``, and
-    ``'`` → ``''`` to keep wildcards literal inside a LIKE pattern. For an
-    equality filter on a real column we want the original characters back, so
-    undo each transformation in reverse order.
-    """
-    return (
-        value.replace("''", "'")
-        .replace("\\_", "_")
-        .replace("\\%", "%")
-        .replace("\\\\", "\\")
-    )
-
-
-def _where_to_filter(where: Any) -> dict | None:
-    """Translate a retriever ``where`` arg into a PGVectorStore filter dict.
-
-    Accepts dicts (passed straight through) or the LIKE-pattern strings emitted
-    by nemo_retriever's semantic search. Unknown string shapes are dropped with
-    a warning so we never silently apply a half-translated filter.
-    """
-    if where is None:
-        return None
-    if isinstance(where, dict):
-        return where or None
-    if not isinstance(where, str):
-        logger.warning(
-            "PostgresVDB.retrieval: ignoring unsupported `where` of type %s",
-            type(where).__name__,
-        )
-        return None
-
-    filt: dict[str, Any] = {}
-    labels = list(
-        dict.fromkeys(_unescape_like(m) for m in _LIKE_LABEL_RE.findall(where))
-    )
-    if labels:
-        filt[_LABEL_METADATA_COLUMN] = (
-            labels[0] if len(labels) == 1 else {"$in": labels}
-        )
-    dbs = _LIKE_DB_RE.findall(where)
-    if dbs:
-        filt[_DATABASE_METADATA_COLUMN] = _unescape_like(dbs[0])
-
-    if not filt:
-        logger.warning(
-            "PostgresVDB.retrieval: could not translate `where`=%r into a "
-            "PGVectorStore filter; running unfiltered search",
-            where,
-        )
-        return None
-    return filt
-
 
 class _UnusableEmbeddings(Embeddings):
     """Placeholder used when no query-side embedder is supplied.
@@ -122,6 +56,26 @@ def _flatten(records: Iterable) -> Iterable[dict]:
             yield from _flatten(item)
 
 
+_WHERE_TERM_RE = re.compile(r"\s*(?P<col>\w+)\s*=\s*'(?P<val>[^']*)'\s*")
+
+
+def _where_string_to_filter(where: str) -> dict[str, str]:
+    """Translate the narrow ``col = 'val' [AND col = 'val' ...]`` shape used by
+    upstream ``_build_metadata_where_clause`` into a ``langchain_postgres``
+    filter dict (implicit-AND equality at the top level).
+
+    Raises :class:`ValueError` for anything outside that shape so we fail loudly
+    rather than silently mis-translating.
+    """
+    out: dict[str, str] = {}
+    for part in re.split(r"\bAND\b", where, flags=re.IGNORECASE):
+        match = _WHERE_TERM_RE.fullmatch(part)
+        if not match:
+            raise ValueError(f"Unsupported where clause: {where!r}")
+        out[match["col"]] = match["val"]
+    return out
+
+
 def _to_async_url(url: str) -> str:
     """Convert a libpq-style URL to an async-SQLAlchemy URL for ``PGEngine``."""
     if "+asyncpg" in url or "+psycopg" in url:
@@ -146,6 +100,12 @@ class PostgresVDB(VDB):
     underlying table so it can be used as a filter for bulk deletes and
     similarity searches.
     """
+
+    # Tells upstream ``search_semantic_index`` to build per-query metadata
+    # filters as a flat ``{column: value | [values]}`` mapping instead of a
+    # SQL ``LIKE`` predicate over the JSON metadata column. The dict is fed
+    # straight into ``PGVectorStore.similarity_search_with_score_by_vector``.
+    metadata_filter_format = "dict"
 
     def __init__(self, **kwargs: Any) -> None:
         connection_string = kwargs.get("connection_string")
@@ -331,18 +291,9 @@ class PostgresVDB(VDB):
         self,
         queries: list,
         top_k: int = 10,
-        where: Any = None,
         **kwargs: Any,
     ) -> list[list[dict]]:
         """Cosine-similarity k-NN search for each query string.
-
-        Accepts a ``where`` kwarg in either form:
-
-        * a PGVectorStore filter dict (e.g. ``{"label": "CustomAnalysis"}``)
-        * a LanceDB-style ``metadata LIKE '%"label":"X"%'`` string emitted by
-          ``nemo_retriever.tabular_data.retrieval.data_access.semantic_search``;
-          we translate the supported substrings (``label`` and
-          ``database_name``) into the filter-dict shape PGVectorStore expects.
 
         Requires the constructor to have been given an ``embeddings`` instance;
         the placeholder will raise otherwise.
@@ -350,12 +301,14 @@ class PostgresVDB(VDB):
         store = self._get_store()
         if store is None:
             return [[] for _ in queries]
-        filter_dict = _where_to_filter(where)
+
         results: list[list[dict]] = []
         for query in queries:
             try:
                 hits = store.similarity_search_with_score_by_vector(
-                    embedding=query, k=top_k, filter=filter_dict
+                    embedding=query,
+                    filter=kwargs.get("where", None),
+                    k=top_k,
                 )
                 results.append(
                     [
