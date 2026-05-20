@@ -7,6 +7,7 @@ export type ChatMessage = {
 	role: 'user' | 'assistant';
 	content: string;
 	sql?: string;
+	sqlResponse?: string;
 	timestamp: number;
 };
 

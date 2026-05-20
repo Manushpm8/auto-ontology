@@ -18,6 +18,7 @@ export type ConversationDetail = ConversationSummary & {
 		role: 'user' | 'assistant';
 		content: string;
 		sqlCode: string | null;
+		sqlResponse: string | null;
 		createdAt: string;
 	}>;
 };
@@ -51,7 +52,12 @@ export const conversationsApi = {
 
 	addMessage: (
 		conversationId: string,
-		msg: { role: string; content: string; sqlCode?: string | null },
+		msg: {
+			role: string;
+			content: string;
+			sqlCode?: string | null;
+			sqlResponse?: string | null;
+		},
 	) =>
 		json<unknown>(`/api/conversations/${conversationId}/messages`, {
 			method: 'POST',
@@ -75,6 +81,7 @@ export function toMessage(msg: ConversationDetail['messages'][number]): ChatMess
 		role: msg.role,
 		content: msg.content,
 		sql: msg.sqlCode ?? undefined,
+		sqlResponse: msg.sqlResponse ?? undefined,
 		timestamp: new Date(msg.createdAt).getTime(),
 	};
 }
