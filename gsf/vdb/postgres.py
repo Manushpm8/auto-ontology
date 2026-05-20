@@ -13,7 +13,6 @@ column so it can be used as a delete/search filter.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Iterable, Optional
 
 import psycopg
@@ -54,26 +53,6 @@ def _flatten(records: Iterable) -> Iterable[dict]:
             yield item
         elif isinstance(item, list):
             yield from _flatten(item)
-
-
-_WHERE_TERM_RE = re.compile(r"\s*(?P<col>\w+)\s*=\s*'(?P<val>[^']*)'\s*")
-
-
-def _where_string_to_filter(where: str) -> dict[str, str]:
-    """Translate the narrow ``col = 'val' [AND col = 'val' ...]`` shape used by
-    upstream ``_build_metadata_where_clause`` into a ``langchain_postgres``
-    filter dict (implicit-AND equality at the top level).
-
-    Raises :class:`ValueError` for anything outside that shape so we fail loudly
-    rather than silently mis-translating.
-    """
-    out: dict[str, str] = {}
-    for part in re.split(r"\bAND\b", where, flags=re.IGNORECASE):
-        match = _WHERE_TERM_RE.fullmatch(part)
-        if not match:
-            raise ValueError(f"Unsupported where clause: {where!r}")
-        out[match["col"]] = match["val"]
-    return out
 
 
 def _to_async_url(url: str) -> str:
