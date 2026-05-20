@@ -16,14 +16,6 @@ type DynamicTableProps = {
 export const DynamicTable = ({ table }: DynamicTableProps) => {
 	const { columns, rows } = table;
 	const [pageIndex, setPageIndex] = useState(0);
-	const [prevRows, setPrevRows] = useState(rows);
-
-	// Reset pagination during render when the rows reference changes,
-	// per React guidance on adjusting state in response to prop changes.
-	if (rows !== prevRows) {
-		setPrevRows(rows);
-		setPageIndex(0);
-	}
 
 	const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
 
