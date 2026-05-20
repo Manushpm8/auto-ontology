@@ -296,7 +296,7 @@ class PostgresVDB(VDB):
         """Cosine-similarity k-NN search for each query vector.
 
         ``kwargs["where"]`` is a langchain-postgres filter dict
-        (e.g. ``{"label": "CustomAnalysis", "database_name": "dor_prod"}``)
+        (e.g. ``{"label": "CustomAnalysis", "database_name": "prod"}``)
         applied to the declared metadata columns; passed straight through to
         ``PGVectorStore.similarity_search_with_score_by_vector``.
 
