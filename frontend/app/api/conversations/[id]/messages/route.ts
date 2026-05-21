@@ -16,6 +16,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 			role: body.role,
 			content: body.content ?? '',
 			sqlCode: body.sqlCode ?? null,
+			sqlResponse: body.sqlResponse ?? null,
 		},
 	});
 

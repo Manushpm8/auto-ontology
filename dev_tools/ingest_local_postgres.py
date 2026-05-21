@@ -30,6 +30,8 @@ from nemo_retriever.params import EmbedParams, TabularExtractParams
 from gsf.vdb import get_vdb
 from gsf.connectors.postgres import PostgresDatabase
 
+from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
+
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
@@ -60,7 +62,7 @@ EMBED_PARAMS = EmbedParams(
 
 # Remote source DB to extract tabular schema/embeddings from. Kept separate
 # from the local POSTGRES_* vars (which point at the pgvector store).
-_CONNECTION_STRINGS = os.environ.get("CONNECTION_STRINGS", "")
+_CONNECTION_STRINGS = os.environ.get("CONNECTION_STRINGS", "").split(",")
 if not _CONNECTION_STRINGS:
     raise EnvironmentError(
         "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
@@ -68,28 +70,36 @@ if not _CONNECTION_STRINGS:
     )
 
 TABULAR_PARAMS = TabularExtractParams(
-    connector=PostgresDatabase(_CONNECTION_STRINGS),
+    connector=PostgresDatabase(_CONNECTION_STRINGS[0]),
 )
 
 
 def run_ingest() -> None:
     """Build the tabular ingest graph, run it, and write embeddings to pgvector."""
-    graph = (
+    connector = TABULAR_PARAMS.connector
+    database_name = connector.database_name
+
+    extract_graph = Graph() >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
+    extract_graph.execute(None)
+
+    apply_metadata(database_name)
+
+    embed_graph = (
         Graph()
-        >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-        >> TabularFetchEmbeddingsOp(
-            database_name=TABULAR_PARAMS.connector.database_name
-        )
+        >> TabularFetchEmbeddingsOp(database_name=database_name)
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
-
-    results = graph.execute(None)
+    results = embed_graph.execute(None)
     result_df = results[0] if results else None
 
+    # Build the pgvector VDB once. PostgresVDB.__init__ wipes existing rows
+    # for `database_name`, so reuse the same instance for the custom-analysis
+    # append below — calling get_vdb(database_name=...) again would re-delete
+    # everything we just wrote.
+    vdb = get_vdb(database_name=database_name)
+
     if result_df is not None and not result_df.empty:
-        ingest_op = IngestVdbOperator(
-            vdb=get_vdb(database_name=TABULAR_PARAMS.connector.database_name)
-        )
+        ingest_op = IngestVdbOperator(vdb=vdb)
         ingest_op(result_df.to_dict(orient="records"))
         print(
             "Tabular ingest result:",
@@ -98,6 +108,13 @@ def run_ingest() -> None:
         )
     else:
         print("Tabular ingest result: no rows produced")
+
+    add_custom_analyses(
+        connector.database_name,
+        connector.dialect,
+        embed_params=EMBED_PARAMS,
+        vdb=vdb,
+    )
 
 
 def run_retrieve() -> None:
@@ -133,4 +150,3 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     run_ingest()
-    run_retrieve()

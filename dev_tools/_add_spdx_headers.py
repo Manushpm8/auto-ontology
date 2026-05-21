@@ -7,7 +7,7 @@ source files. Re-runnable; skips files that already carry an SPDX header.
 
 Run from the repo root:
 
-    uv run --project . python dev-tools/_add_spdx_headers.py
+    uv run --project . python dev_tools/_add_spdx_headers.py
 
 This file is ignored by linters and tests; it only exists so the OSRB
 header insertion is reviewable / reproducible.

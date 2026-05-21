@@ -48,7 +48,7 @@ NODE_LABELS: dict[str, str] = {
 
 # Remote NIM embedding endpoint — no local GPU required.
 # MUST match the model used at ingest time (see EMBED_PARAMS in
-# dev-tools/ingest_local_postgres.py); a mismatch produces garbage results
+# dev_tools/ingest_local_postgres.py); a mismatch produces garbage results
 # or a dimension error from pgvector.
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
@@ -64,7 +64,7 @@ def get_connector() -> PostgresDatabase:
     """Return the source-DB connector for the chat agent.
 
     Reads ``CONNECTION_STRINGS`` from the environment (set in ``.env``); the
-    same URL is used by ``dev-tools/ingest_local_postgres.py`` so chat queries
+    same URL is used by ``dev_tools/ingest_local_postgres.py`` so chat queries
     target the database whose schema/embeddings were ingested.
     """
     global _connector

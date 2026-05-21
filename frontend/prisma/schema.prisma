@@ -23,6 +23,7 @@ model Message {
   role           String
   content        String       @default("")
   sqlCode        String?      @map("sql_code")
+  sqlResponse    String?      @map("sql_response")
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 

@@ -5,14 +5,15 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Ingest Script Debug",
+      "name": "Debug Ingest",
       "type": "debugpy",
       "request": "launch",
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
-      "module": "dev-tools.ingest_local_postgres",
+      "module": "dev_tools.ingest_local_postgres",
       "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal"
+      "console": "integratedTerminal",
+      "justMyCode": false
     },
     {
       "name": "Debug API",
@@ -24,6 +25,42 @@
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
+    },
+    {
+      "name": "Eval Chatbot",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Eval Chatbot (consistency)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": ["--consistency", "--runs", "10"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Eval Chatbot (single query)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": ["--single"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
+
   ]
 }

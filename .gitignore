@@ -34,3 +34,8 @@ lancedb/*
 helm/*
 
 .env.docker
+
+
+# Evaluation data files
+dev_tools/evaluation/*csv
+dev_tools/evaluation/*.json

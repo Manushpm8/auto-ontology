@@ -80,6 +80,12 @@ class PostgresVDB(VDB):
     similarity searches.
     """
 
+    # Tells upstream ``search_semantic_index`` to build per-query metadata
+    # filters as a flat ``{column: value | [values]}`` mapping instead of a
+    # SQL ``LIKE`` predicate over the JSON metadata column. The dict is fed
+    # straight into ``PGVectorStore.similarity_search_with_score_by_vector``.
+    metadata_filter_format = "dict"
+
     def __init__(self, **kwargs: Any) -> None:
         connection_string = kwargs.get("connection_string")
         if not connection_string:
@@ -266,19 +272,26 @@ class PostgresVDB(VDB):
         top_k: int = 10,
         **kwargs: Any,
     ) -> list[list[dict]]:
-        """Cosine-similarity k-NN search for each query string.
+        """Cosine-similarity k-NN search for each query vector.
 
-        Requires the constructor to have been given an ``embeddings`` instance;
-        the placeholder will raise otherwise.
+        ``kwargs["where"]`` is a langchain-postgres filter dict
+        (e.g. ``{"label": "CustomAnalysis", "database_name": "prod"}``)
+        applied to the declared metadata columns; passed straight through to
+        ``PGVectorStore.similarity_search_with_score_by_vector``.
+
+        Requires an ``embeddings`` instance from the constructor.
         """
         store = self._get_store()
         if store is None:
             return [[] for _ in queries]
+
         results: list[list[dict]] = []
         for query in queries:
             try:
                 hits = store.similarity_search_with_score_by_vector(
-                    embedding=query, k=top_k
+                    embedding=query,
+                    filter=kwargs.get("where", None),
+                    k=top_k,
                 )
                 results.append(
                     [

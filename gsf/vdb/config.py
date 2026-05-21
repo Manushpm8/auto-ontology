@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Env-derived configuration helpers shared across server and dev-tools."""
+"""Env-derived configuration helpers shared across server and dev_tools."""
 
 from __future__ import annotations
 
