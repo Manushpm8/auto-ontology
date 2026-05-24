@@ -10,11 +10,11 @@ imagePullPolicy: IfNotPresent
 # ------------------------------------------------------------------
 # Postgres
 postgresUser: gsf
-postgresPassword: gsf
+postgresPassword: ""
 postgresDatabase: gsf
 # Neo4j
 neo4jUsername: neo4j
-neo4jPassword: changeme123
+neo4jPassword: ""
 # pgAdmin
 pgadminEmail: admin@example.com
 pgadminPassword: admin
