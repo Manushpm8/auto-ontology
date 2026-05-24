@@ -23,6 +23,8 @@ export const AnalysisView = () => {
 	const [name, setName] = useState('');
 	const [description, setDescription] = useState('');
 	const [sql, setSql] = useState('');
+	const [submitting, setSubmitting] = useState(false);
+	const [submitError, setSubmitError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -50,20 +52,46 @@ export const AnalysisView = () => {
 		setName('');
 		setDescription('');
 		setSql('');
+		setSubmitError(null);
 		setModalOpen(true);
 	};
 
 	const handleClose = () => {
+		if (submitting) return;
 		setModalOpen(false);
+		setSubmitError(null);
 	};
 
-	const canSubmit = name.trim().length > 0 && sql.trim().length > 0;
+	const canSubmit =
+		!submitting &&
+		name.trim().length > 0 &&
+		description.trim().length > 0 &&
+		sql.trim().length > 0;
 
 	const handleSubmit = async () => {
 		if (!canSubmit) return;
-		// TODO(custom-analyses): call POST /api/custom-analyses once the
-		// backend create endpoint exists; for now just close the modal.
-		handleClose();
+		setSubmitting(true);
+		setSubmitError(null);
+
+		const res = await analyses.create({
+			name: name.trim(),
+			description: description.trim(),
+			sql: sql.trim(),
+		});
+
+		setSubmitting(false);
+
+		if (res.error === true) {
+			setSubmitError(res.message ?? 'Failed to create custom analysis');
+			return;
+		}
+
+		const created = res.data;
+		setItems((prev) => {
+			const without = prev.filter((a) => a.id !== created.id);
+			return [created, ...without];
+		});
+		setModalOpen(false);
 	};
 
 	return (
@@ -146,7 +174,7 @@ export const AnalysisView = () => {
 				open={modalOpen}
 				onClose={handleClose}
 				title="Custom Analysis"
-				submitLabel="Create"
+				submitLabel={submitting ? 'Creating…' : 'Create'}
 				onSubmit={handleSubmit}
 				canSubmit={canSubmit}
 			>
@@ -175,6 +203,11 @@ export const AnalysisView = () => {
 					/>
 				</div>
 				<SqlEditor value={sql} onChange={setSql} />
+				{submitError != null && (
+					<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+						{submitError}
+					</p>
+				)}
 			</ModalCreateNewItem>
 		</div>
 	);

@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from gsf.server.custom_analyses import dal as custom_analyses_dal
 from gsf.server.datasources import dal
@@ -16,6 +16,12 @@ from gsf.server.datasources import dal
 class NodeUpdate(BaseModel):
     description: str | None = None
     sample_values: str | None = None
+
+
+class CustomAnalysisCreate(BaseModel):
+    name: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
+    sql: str = Field(..., min_length=1)
 
 
 router = APIRouter()
@@ -82,6 +88,33 @@ def list_custom_analyses() -> dict:
     """All CustomAnalysis nodes joined with their HAS_SQL neighbour."""
     rows = custom_analyses_dal.list_custom_analyses()
     return _count_payload(rows)
+
+
+@router.post("/custom-analyses", status_code=201)
+def create_custom_analysis(body: CustomAnalysisCreate) -> dict:
+    """Create (or upsert by ``name``) a CustomAnalysis with its Sql node.
+
+    ``name``, ``description`` and ``sql`` are all required and must be
+    non-empty after trimming — a blank SQL would leave the analysis
+    orphaned, and a blank name/description would produce an unidentifiable
+    catalog entry.
+    """
+    name = body.name.strip()
+    description = body.description.strip()
+    sql = body.sql.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name must not be blank")
+    if not description:
+        raise HTTPException(status_code=422, detail="description must not be blank")
+    if not sql:
+        raise HTTPException(status_code=422, detail="sql must not be blank")
+
+    row = custom_analyses_dal.create_custom_analysis(
+        name=name,
+        description=description,
+        sql=sql,
+    )
+    return {"data": row}
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,14 @@ import type { ResponseWithCount, ResponseWithError } from './types';
 
 type ListResponse = ResponseWithError<ResponseWithCount<CustomAnalysis[]>>;
 
+export type CustomAnalysisCreatePayload = {
+	name: string;
+	description: string;
+	sql: string;
+};
+
+type CreateResponse = ResponseWithError<{ data: CustomAnalysis }>;
+
 let pendingList: Promise<ListResponse> | null = null;
 
 export const analyses = {
@@ -24,4 +32,8 @@ export const analyses = {
 		pendingList = promise;
 		return promise;
 	},
+
+	/** Create (or upsert by name) a CustomAnalysis on the backend. */
+	create: (payload: CustomAnalysisCreatePayload): Promise<CreateResponse> =>
+		requests.post<{ data: CustomAnalysis }>('custom-analyses', payload),
 };
