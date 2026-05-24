@@ -7,12 +7,13 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { ChatMessage } from '@/types/chat';
 import { parseSqlResponse, type ParsedTable } from '@/lib/parseSqlResponse';
+import { SqlBlock } from '@/components/SqlBlock';
 import { DynamicTable } from './DynamicTable';
 import { FormattedContent } from './FormattedContent';
 
 type SingleCellResult = { column: string; value: string };
 
-const CopyButton = ({ text }: { text: string }) => {
+const RawCopyButton = ({ text }: { text: string }) => {
 	const [copied, setCopied] = useState(false);
 
 	const handleCopy = useCallback(() => {
@@ -64,7 +65,7 @@ const QueryResultsSection = ({
 			<div className="group relative overflow-hidden rounded-lg bg-zinc-900 dark:bg-zinc-950">
 				<div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1.5">
 					<span className="text-xs font-medium text-zinc-400">Raw</span>
-					<CopyButton text={sqlResponse} />
+					<RawCopyButton text={sqlResponse} />
 				</div>
 				<pre className="overflow-x-auto p-3 text-xs leading-relaxed text-zinc-100">
 					<code>{sqlResponse}</code>
@@ -109,17 +110,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 					/>
 				)}
 
-				{message.sql && (
-					<div className="group relative mt-3 overflow-hidden rounded-lg bg-zinc-900 dark:bg-zinc-950">
-						<div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1.5">
-							<span className="text-xs font-medium text-zinc-400">SQL</span>
-							<CopyButton text={message.sql} />
-						</div>
-						<pre className="overflow-x-auto p-3 text-xs leading-relaxed text-emerald-400">
-							<code>{message.sql}</code>
-						</pre>
-					</div>
-				)}
+				{message.sql && <SqlBlock sql={message.sql} className="mt-3" />}
 
 				{showQueryResults && (
 					<QueryResultsSection

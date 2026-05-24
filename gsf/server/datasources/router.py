@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from gsf.server.custom_analyses import dal as custom_analyses_dal
 from gsf.server.datasources import dal
 
 
@@ -68,6 +69,18 @@ def list_columns_by_table(table_id: str) -> dict:
 @router.get("/datasources/dbs")
 def list_databases() -> dict:
     rows = dal.list_databases()
+    return _count_payload(rows)
+
+
+# ---------------------------------------------------------------------------
+# Custom analyses (/api/custom-analyses)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/custom-analyses")
+def list_custom_analyses() -> dict:
+    """All CustomAnalysis nodes joined with their HAS_SQL neighbour."""
+    rows = custom_analyses_dal.list_custom_analyses()
     return _count_payload(rows)
 
 
