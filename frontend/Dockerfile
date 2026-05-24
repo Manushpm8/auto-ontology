@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------
 # Build (from /frontend):  docker build -t gsf-frontend:latest .
 # Run:                     docker run --rm -p 3000:3000 \
-#                              -e PYTHON_API_URL=http://gsf-backend:3001 \
+#                              -e PYTHON_API_URL=http://gsf:3001 \
 #                              gsf-frontend:latest
 #
 # Uses Next.js standalone output (NEXT_OUTPUT=standalone) for a small image.
@@ -63,7 +63,7 @@ FROM base-node AS builder
 # Backend URL baked into the Next.js rewrite manifest at build time
 # (Next.js evaluates rewrites() during `next build`, not at server startup).
 # Defaults to the in-cluster Service name used by the helm chart.
-ARG PYTHON_API_URL=http://gsf-backend:3001
+ARG PYTHON_API_URL=http://gsf:3001
 
 ARG PNPM_VERSION
 ENV PNPM_HOME=/pnpm \

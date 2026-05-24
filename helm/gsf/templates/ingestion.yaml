@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gsf.fullname" . }}-ingestion
+  labels:
+    {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "ingestion") | nindent 4 }}
+spec:
+  replicas: {{ .Values.ingestion.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "ingestion") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "ingestion") | nindent 8 }}
+    spec:
+      containers:
+        - name: ingestion
+          image: "{{ .Values.ingestion.image.repository }}:{{ .Values.ingestion.image.tag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["ingestion_service"]
+          envFrom:
+            - secretRef:
+                name: {{ include "gsf.secretName" . }}
+          resources:
+            {{- toYaml .Values.ingestion.resources | nindent 12 }}

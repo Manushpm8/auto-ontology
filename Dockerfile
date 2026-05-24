@@ -6,18 +6,18 @@
 # Build (default — uses the committed nemo-retriever stub; image starts and
 # serves /api/health but real chat/datasource calls raise NotImplementedError):
 #
-#   docker build -t gsf-backend:latest .
+#   docker build -t gsf:latest .
 #
 # Build with the real NeMo-Retriever source — point a BuildKit named context
 # at any local clone of the upstream repo (no copy into this repo):
 #
 #   docker build \
 #       --build-context nemo=/path/to/NeMo-Retriever \
-#       -t gsf-backend:latest .
+#       -t gsf:latest .
 #
 # Run:
 #
-#   docker run --rm -p 3001:3001 --env-file .env gsf-backend:latest
+#   docker run --rm -p 3001:3001 --env-file .env gsf:latest
 #
 # ---------------------------------------------------------------------------
 

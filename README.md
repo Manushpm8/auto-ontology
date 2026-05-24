@@ -66,10 +66,7 @@ Kubernetes cluster:
 
 ```bash
 # Stub backend (small, /api/health works, real chat/data calls are no-ops):
-docker build -t gsf-backend:0.1.0 .
-
-# Real backend (point at any local NeMo-Retriever clone):
-docker build --build-context nemo=/path/to/NeMo-Retriever -t gsf-backend:0.1.0 .
+docker build -t gsf:0.1.0 .
 
 docker build -t gsf-frontend:0.1.0 ./frontend
 kubectl create namespace gsf
