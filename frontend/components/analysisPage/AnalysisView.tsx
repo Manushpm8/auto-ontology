@@ -7,7 +7,8 @@
 import { useEffect, useState } from 'react';
 
 import { Icon, IconName } from '@/components/icons';
-import { SqlBlock } from '@/components/SqlBlock';
+import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
+import { SqlBlock, SqlEditor } from '@/components/SqlBlock';
 import { analyses } from '@/api/analyses';
 import type { CustomAnalysis } from '@/types/analysis';
 
@@ -17,6 +18,11 @@ export const AnalysisView = () => {
 	const [items, setItems] = useState<CustomAnalysis[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+
+	const [modalOpen, setModalOpen] = useState(false);
+	const [name, setName] = useState('');
+	const [description, setDescription] = useState('');
+	const [sql, setSql] = useState('');
 
 	useEffect(() => {
 		let cancelled = false;
@@ -40,6 +46,26 @@ export const AnalysisView = () => {
 		};
 	}, []);
 
+	const openCreateModal = () => {
+		setName('');
+		setDescription('');
+		setSql('');
+		setModalOpen(true);
+	};
+
+	const handleClose = () => {
+		setModalOpen(false);
+	};
+
+	const canSubmit = name.trim().length > 0 && sql.trim().length > 0;
+
+	const handleSubmit = async () => {
+		if (!canSubmit) return;
+		// TODO(custom-analyses): call POST /api/custom-analyses once the
+		// backend create endpoint exists; for now just close the modal.
+		handleClose();
+	};
+
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
@@ -50,11 +76,16 @@ export const AnalysisView = () => {
 				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
 					Custom analyses
 				</h1>
-				{!loading && error == null && (
-					<span className="ml-auto text-xs text-zinc-500 dark:text-zinc-400">
-						{items.length} {items.length === 1 ? 'item' : 'items'}
-					</span>
-				)}
+				<button
+					type="button"
+					onClick={openCreateModal}
+					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+				>
+					<svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+						<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
+					</svg>
+					Create new
+				</button>
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
@@ -110,6 +141,41 @@ export const AnalysisView = () => {
 					</ul>
 				)}
 			</div>
+
+			<ModalCreateNewItem
+				open={modalOpen}
+				onClose={handleClose}
+				title="Custom Analysis"
+				submitLabel="Create"
+				onSubmit={handleSubmit}
+				canSubmit={canSubmit}
+			>
+				<div>
+					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+						Name
+					</label>
+					<input
+						type="text"
+						value={name}
+						onChange={(e) => setName(e.target.value)}
+						placeholder="Custom Analysis Name"
+						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-emerald-400 dark:focus:ring-emerald-400/30"
+					/>
+				</div>
+				<div>
+					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+						Description
+					</label>
+					<textarea
+						value={description}
+						onChange={(e) => setDescription(e.target.value)}
+						placeholder="Add Short Description"
+						rows={3}
+						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-emerald-400 dark:focus:ring-emerald-400/30"
+					/>
+				</div>
+				<SqlEditor value={sql} onChange={setSql} />
+			</ModalCreateNewItem>
 		</div>
 	);
 };
