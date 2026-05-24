@@ -33,3 +33,33 @@ app.kubernetes.io/component: {{ .component }}
 {{- define "gsf.secretName" -}}
 {{ include "gsf.fullname" . }}-secrets
 {{- end -}}
+
+{{/*
+Init containers that block until Postgres and Neo4j are reachable.
+A Service routes only to Ready endpoints, so `nc -z` succeeds only after
+each datastore's readiness probe has passed.
+*/}}
+{{- define "gsf.waitForDeps" -}}
+- name: wait-for-postgres
+  image: busybox:1.36
+  imagePullPolicy: {{ .Values.imagePullPolicy }}
+  command:
+    - sh
+    - -c
+    - |
+      until nc -z postgres {{ .Values.postgres.service.port }}; do
+        echo "waiting for postgres..."
+        sleep 2
+      done
+- name: wait-for-neo4j
+  image: busybox:1.36
+  imagePullPolicy: {{ .Values.imagePullPolicy }}
+  command:
+    - sh
+    - -c
+    - |
+      until nc -z neo4j {{ .Values.neo4j.service.boltPort }}; do
+        echo "waiting for neo4j..."
+        sleep 2
+      done
+{{- end -}}

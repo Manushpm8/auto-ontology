@@ -31,6 +31,8 @@ spec:
       labels:
         {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "backend") | nindent 8 }}
     spec:
+      initContainers:
+        {{- include "gsf.waitForDeps" . | nindent 8 }}
       containers:
         - name: backend
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"

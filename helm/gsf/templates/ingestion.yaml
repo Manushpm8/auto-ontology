@@ -14,6 +14,8 @@ spec:
       labels:
         {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "ingestion") | nindent 8 }}
     spec:
+      initContainers:
+        {{- include "gsf.waitForDeps" . | nindent 8 }}
       containers:
         - name: ingestion
           image: "{{ .Values.ingestion.image.repository }}:{{ .Values.ingestion.image.tag }}"
