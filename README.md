@@ -8,75 +8,50 @@ Generative semantic fabric.
 > [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). **This project
 > is currently not accepting external contributions.**
 
-## Running locally
+## Deployment From NVStaging
 
-The **frontend** (`frontend/`) and the **Python API** (`gsf/`) must both be running.
+1. Fetch the chart from NGC:
 
-### One-time setup
+   ```bash
+   helm fetch https://helm.ngc.nvidia.com/nvstaging/charts/gsf-0.0.1.tgz \
+     --username='$oauthtoken' \
+     --password=<API-KEY>
+   ```
 
+2. Create the nvcr.io image-pull secret:
+
+   ```bash
+   kubectl create secret docker-registry nvcr-creds \
+     --docker-server=nvcr.io \
+     --docker-username='$oauthtoken' \
+     --docker-password=<API-KEY>
+   ```
+
+3. Attach the pull secret to the default ServiceAccount so pods inherit it:
+
+   ```bash
+   kubectl patch serviceaccount default \
+     -p '{"imagePullSecrets":[{"name":"nvcr-creds"}]}'
+   ```
+
+4. Install the chart:
+
+   ```bash
+   helm install gsf gsf-0.0.1.tgz \
+     --set nvidiaApiKey=<API-KEY> \
+     --set neo4jPassword=<NEO4J-PASSWORD> \
+     --set postgresPassword=<POSTGRES-PASSWORD> \
+     --set connectionStrings=<CONNECTION-STRINGS>
+   ```
+
+5. Expose the UI:
 ```bash
-cp .env.example .env   # then edit credentials as needed
-pnpm install
-uv sync
+kubectl port-forward frontend 3000:3000
 ```
-
-### Start development
-
-Full stack (infrastructure + Next.js + FastAPI):
-
-```bash
-./scripts/setup_env.sh
-```
-
-Or infrastructure only (Postgres, pgAdmin, Neo4j):
-
-```bash
-./scripts/setup_env.sh --dev
-```
-
-Then start the app manually:
-
-```bash
-pnpm dev        # Next.js on port 3000
-pnpm dev:api    # FastAPI on port 3001
-```
-
-Open **http://localhost:3000**.
-
-See [scripts/README.md](scripts/README.md) for all available flags.
-
-### Optional
-
-- Override the API URL: set **`PYTHON_API_URL`** (used by Next rewrites and server-side API calls).
-
-## Container & Kubernetes deployment
-
-This repo ships Dockerfiles and a Helm chart for running the stack in
-Kubernetes:
-
-- `Dockerfile` — backend (FastAPI / uvicorn). Sources NeMo-Retriever from a
-  BuildKit named context, defaulting to a small committed stub.
-- `frontend/Dockerfile` — frontend (Next.js standalone)
-- `helm/gsf/` — Helm chart with deployments, services, optional Ingress,
-  HPA, PDB and a sample Postgres+Neo4j manifest
-
 End-to-end build, install and verification steps live in
 [`helm/gsf/README.md`](helm/gsf/README.md). TL;DR for a local Docker Desktop
 Kubernetes cluster:
 
-```bash
-# Stub backend (small, /api/health works, real chat/data calls are no-ops):
-docker build -t gsf:0.1.0 .
-
-docker build -t gsf-frontend:0.1.0 ./frontend
-kubectl create namespace gsf
-kubectl -n gsf apply -f helm/gsf/examples/postgres-neo4j.yaml
-helm install gsf ./helm/gsf -n gsf \
-    --set image.pullPolicy=Never \
-    --set backend.image.tag=0.1.0 \
-    --set frontend.image.tag=0.1.0
-kubectl -n gsf port-forward svc/gsf-frontend 3000:3000
-```
 ## License
 
 GSF is licensed under the [Apache License, Version 2.0](./LICENSE).
