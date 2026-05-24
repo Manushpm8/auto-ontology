@@ -1,6 +1,6 @@
 # GSF
 
-Generative semantic fabric.
+Generative Semantic Fabric adds the structured-data ontology layer to any partner or NVidia agent harness  interface, like NVIDIA AI-Q Claws, etc
 
 > **Licensing & contributions.** GSF is distributed under the
 > [Apache License 2.0](./LICENSE). Third-party open-source components
