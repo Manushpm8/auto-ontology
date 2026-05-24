@@ -8,7 +8,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "gsf.fullname" $ }}-neo4j-{{ $pvc.name }}
+  name: neo4j-{{ $pvc.name }}
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" $.Chart "Release" $.Release "Values" $.Values "component" "neo4j") | nindent 4 }}
 spec:
@@ -21,7 +21,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "gsf.fullname" . }}-neo4j
+  name: neo4j
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "neo4j") | nindent 4 }}
 spec:
@@ -39,11 +39,11 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "gsf.fullname" . }}-neo4j
+  name: neo4j
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "neo4j") | nindent 4 }}
 spec:
-  serviceName: {{ include "gsf.fullname" . }}-neo4j
+  serviceName: neo4j
   replicas: 1
   selector:
     matchLabels:
@@ -103,10 +103,10 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "gsf.fullname" . }}-neo4j-data
+            claimName: neo4j-data
         - name: logs
           persistentVolumeClaim:
-            claimName: {{ include "gsf.fullname" . }}-neo4j-logs
+            claimName: neo4j-logs
         - name: plugins
           persistentVolumeClaim:
-            claimName: {{ include "gsf.fullname" . }}-neo4j-plugins
+            claimName: neo4j-plugins

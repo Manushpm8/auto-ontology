@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "gsf.fullname" . }}-postgres-data
+  name: postgres-data
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "postgres") | nindent 4 }}
 spec:
@@ -13,7 +13,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "gsf.fullname" . }}-postgres
+  name: postgres
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "postgres") | nindent 4 }}
 spec:
@@ -28,11 +28,11 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "gsf.fullname" . }}-postgres
+  name: postgres
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "postgres") | nindent 4 }}
 spec:
-  serviceName: {{ include "gsf.fullname" . }}-postgres
+  serviceName: postgres
   replicas: 1
   selector:
     matchLabels:
@@ -85,4 +85,4 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "gsf.fullname" . }}-postgres-data
+            claimName: postgres-data

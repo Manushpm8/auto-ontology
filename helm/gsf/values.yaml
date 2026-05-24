@@ -5,28 +5,27 @@
 imagePullPolicy: IfNotPresent
 
 # ------------------------------------------------------------------
-# Secrets / shared credentials
+# Shared credentials — populate a single k8s Secret (<release>-secrets)
+# consumed by all GSF workloads.
 # ------------------------------------------------------------------
-# Values here populate a single Secret consumed by all GSF workloads.
-secrets:
-  # Postgres
-  postgresUser: gsf
-  postgresPassword: gsf
-  postgresDatabase: gsf
-  # Neo4j
-  neo4jUsername: neo4j
-  neo4jPassword: changeme123
-  # pgAdmin
-  pgadminEmail: admin@example.com
-  pgadminPassword: admin
-  # NVIDIA NIM
-  nvidiaApiKey: ""
-  baseUrl: "https://integrate.api.nvidia.com/v1"
-  modelName: "nvidia/nemotron-3-nano-30b-a3b"
-  embedEndpoint: "https://integrate.api.nvidia.com/v1"
-  embedModel: "nvidia/llama-nemotron-embed-1b-v2"
-  # Ingestion targets - comma-separated list of PG URLs the worker reads from.
-  connectionStrings: ""
+# Postgres
+postgresUser: gsf
+postgresPassword: gsf
+postgresDatabase: gsf
+# Neo4j
+neo4jUsername: neo4j
+neo4jPassword: changeme123
+# pgAdmin
+pgadminEmail: admin@example.com
+pgadminPassword: admin
+# NVIDIA NIM
+nvidiaApiKey: ""
+baseUrl: "https://integrate.api.nvidia.com/v1"
+modelName: "nvidia/nemotron-3-nano-30b-a3b"
+embedEndpoint: "https://integrate.api.nvidia.com/v1"
+embedModel: "nvidia/llama-nemotron-embed-1b-v2"
+# Ingestion targets - comma-separated list of PG URLs the worker reads from.
+connectionStrings: ""
 
 # ------------------------------------------------------------------
 # Postgres (pgvector)

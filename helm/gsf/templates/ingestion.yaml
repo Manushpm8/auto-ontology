@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "gsf.fullname" . }}-ingestion
+  name: ingestion
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "ingestion") | nindent 4 }}
 spec:
