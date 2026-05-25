@@ -20,11 +20,14 @@ export const AnalysisView = () => {
 	const [error, setError] = useState<string | null>(null);
 
 	const [modalOpen, setModalOpen] = useState(false);
+	const [editingId, setEditingId] = useState<string | null>(null);
 	const [name, setName] = useState('');
 	const [description, setDescription] = useState('');
 	const [sql, setSql] = useState('');
 	const [submitting, setSubmitting] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
+
+	const isEditing = editingId !== null;
 
 	useEffect(() => {
 		let cancelled = false;
@@ -49,9 +52,19 @@ export const AnalysisView = () => {
 	}, []);
 
 	const openCreateModal = () => {
+		setEditingId(null);
 		setName('');
 		setDescription('');
 		setSql('');
+		setSubmitError(null);
+		setModalOpen(true);
+	};
+
+	const openEditModal = (item: CustomAnalysis) => {
+		setEditingId(item.id);
+		setName(item.name);
+		setDescription(item.description ?? '');
+		setSql(item.sql ?? '');
 		setSubmitError(null);
 		setModalOpen(true);
 	};
@@ -62,34 +75,51 @@ export const AnalysisView = () => {
 		setSubmitError(null);
 	};
 
+	const trimmedName = name.trim();
+	const trimmedDescription = description.trim();
+	const trimmedSql = sql.trim();
+
 	const canSubmit =
 		!submitting &&
-		name.trim().length > 0 &&
-		description.trim().length > 0 &&
-		sql.trim().length > 0;
+		trimmedName.length > 0 &&
+		trimmedDescription.length > 0 &&
+		trimmedSql.length > 0;
 
 	const handleSubmit = async () => {
 		if (!canSubmit) return;
 		setSubmitting(true);
 		setSubmitError(null);
 
-		const res = await analyses.create({
-			name: name.trim(),
-			description: description.trim(),
-			sql: sql.trim(),
-		});
+		const payload = {
+			name: trimmedName,
+			description: trimmedDescription,
+			sql: trimmedSql,
+		};
+
+		const res =
+			editingId !== null
+				? await analyses.update(editingId, payload)
+				: await analyses.create(payload);
 
 		setSubmitting(false);
 
 		if (res.error === true) {
-			setSubmitError(res.message ?? 'Failed to create custom analysis');
+			setSubmitError(
+				res.message ??
+					(editingId !== null
+						? 'Failed to update custom analysis'
+						: 'Failed to create custom analysis'),
+			);
 			return;
 		}
 
-		const created = res.data;
+		const saved = res.data;
 		setItems((prev) => {
-			const without = prev.filter((a) => a.id !== created.id);
-			return [created, ...without];
+			if (editingId !== null) {
+				return prev.map((a) => (a.id === editingId ? saved : a));
+			}
+			const without = prev.filter((a) => a.id !== saved.id);
+			return [saved, ...without];
 		});
 		setModalOpen(false);
 	};
@@ -153,9 +183,20 @@ export const AnalysisView = () => {
 								key={a.id}
 								className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
 							>
-								<h2 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-									{a.name}
-								</h2>
+								<div className="flex items-start justify-between gap-3">
+									<h2 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+										{a.name}
+									</h2>
+									<button
+										type="button"
+										onClick={() => openEditModal(a)}
+										aria-label={`Edit ${a.name}`}
+										title="Edit"
+										className="shrink-0 cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-emerald-600 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-emerald-400"
+									>
+										<Icon name={IconName.Pencil} className="h-4 w-4" />
+									</button>
+								</div>
 								{a.description != null && a.description.trim() !== '' && (
 									<p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
 										{a.description}
@@ -173,8 +214,16 @@ export const AnalysisView = () => {
 			<ModalCreateNewItem
 				open={modalOpen}
 				onClose={handleClose}
-				title="Custom Analysis"
-				submitLabel={submitting ? 'Creating…' : 'Create'}
+				title={isEditing ? 'Edit Custom Analysis' : 'Custom Analysis'}
+				submitLabel={
+					submitting
+						? isEditing
+							? 'Saving…'
+							: 'Creating…'
+						: isEditing
+							? 'Save'
+							: 'Create'
+				}
 				onSubmit={handleSubmit}
 				canSubmit={canSubmit}
 			>

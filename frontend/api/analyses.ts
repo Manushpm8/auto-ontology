@@ -15,6 +15,7 @@ export type CustomAnalysisCreatePayload = {
 };
 
 type CreateResponse = ResponseWithError<{ data: CustomAnalysis }>;
+type UpdateResponse = ResponseWithError<{ data: CustomAnalysis }>;
 
 let pendingList: Promise<ListResponse> | null = null;
 
@@ -33,7 +34,13 @@ export const analyses = {
 		return promise;
 	},
 
-	/** Create (or upsert by name) a CustomAnalysis on the backend. */
 	create: (payload: CustomAnalysisCreatePayload): Promise<CreateResponse> =>
 		requests.post<{ data: CustomAnalysis }>('custom-analyses', payload),
+
+	/** Replace an existing CustomAnalysis (matched by id) with `payload`. */
+	update: (id: string, payload: CustomAnalysisCreatePayload): Promise<UpdateResponse> =>
+		requests.put<{ data: CustomAnalysis }>(
+			`custom-analyses/${encodeURIComponent(id)}`,
+			payload,
+		),
 };

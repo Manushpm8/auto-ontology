@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from gsf.server.custom_analyses import dal as custom_analyses_dal
 from gsf.server.datasources import dal
@@ -19,9 +19,9 @@ class NodeUpdate(BaseModel):
 
 
 class CustomAnalysisCreate(BaseModel):
-    name: str = Field(..., min_length=1)
-    description: str = Field(..., min_length=1)
-    sql: str = Field(..., min_length=1)
+    name: str
+    description: str
+    sql: str
 
 
 router = APIRouter()
@@ -92,28 +92,65 @@ def list_custom_analyses() -> dict:
 
 @router.post("/custom-analyses", status_code=201)
 def create_custom_analysis(body: CustomAnalysisCreate) -> dict:
-    """Create (or upsert by ``name``) a CustomAnalysis with its Sql node.
+    """Create a new CustomAnalysis with its Sql node.
 
-    ``name``, ``description`` and ``sql`` are all required and must be
-    non-empty after trimming — a blank SQL would leave the analysis
-    orphaned, and a blank name/description would produce an unidentifiable
-    catalog entry.
+    Strict insert: input shape is enforced by :class:`CustomAnalysisCreate`
+    and the frontend is responsible for trimming and rejecting blank
+    values before sending. Updating an existing analysis goes through
+    ``PUT /custom-analyses/{analysis_id}``.
+
+    Returns 409 when ``name`` or ``sql`` is already used by another
+    CustomAnalysis (both are unique natural keys), and 422 when the SQL
+    can't be parsed against the current catalog (no recognised tables) —
+    without those references the analysis would be invisible to
+    retrieval.
     """
-    name = body.name.strip()
-    description = body.description.strip()
-    sql = body.sql.strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name must not be blank")
-    if not description:
-        raise HTTPException(status_code=422, detail="description must not be blank")
-    if not sql:
-        raise HTTPException(status_code=422, detail="sql must not be blank")
+    try:
+        row = custom_analyses_dal.create_custom_analysis(
+            name=body.name,
+            description=body.description,
+            sql=body.sql,
+        )
+    except (
+        custom_analyses_dal.CustomAnalysisNameConflict,
+        custom_analyses_dal.CustomAnalysisSqlConflict,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except custom_analyses_dal.CustomAnalysisSqlError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": row}
 
-    row = custom_analyses_dal.create_custom_analysis(
-        name=name,
-        description=description,
-        sql=sql,
-    )
+
+@router.put("/custom-analyses/{analysis_id}")
+def update_custom_analysis(analysis_id: str, body: CustomAnalysisCreate) -> dict:
+    """Replace a CustomAnalysis (matched by id) and re-link its Sql node.
+
+    Returns 404 when no CustomAnalysis with ``analysis_id`` exists, 409
+    when ``name`` or ``sql`` is already taken by a different
+    CustomAnalysis, and 422 when the SQL can't be parsed against the
+    current catalog — all surface the failure to the UI without
+    producing an inconsistent graph.
+    """
+    try:
+        row = custom_analyses_dal.update_custom_analysis(
+            analysis_id=analysis_id,
+            name=body.name,
+            description=body.description,
+            sql=body.sql,
+        )
+    except (
+        custom_analyses_dal.CustomAnalysisNameConflict,
+        custom_analyses_dal.CustomAnalysisSqlConflict,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except custom_analyses_dal.CustomAnalysisSqlError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"CustomAnalysis {analysis_id!r} not found",
+        )
     return {"data": row}
 
 
