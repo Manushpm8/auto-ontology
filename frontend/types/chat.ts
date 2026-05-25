@@ -13,9 +13,6 @@ export type ChatMessage = {
 
 export type ChatRequest = {
 	question: string;
-	connectorName?: string;
-	acronyms?: string;
-	customPrompts?: string;
 };
 
 export type StepEvent = {
