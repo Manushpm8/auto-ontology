@@ -109,6 +109,16 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone/ ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./app/.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./app/public
 
+# Prisma CLI + schema + config, used by the Helm `frontend-migrate` Job
+# to run `prisma db push` against Postgres. Lives in /app/migrate so it
+# doesn't perturb the Next.js standalone node_modules at /app/app.
+COPY --from=builder --chown=nextjs:nodejs /app/prisma /app/migrate/prisma
+COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts /app/migrate/prisma.config.ts
+RUN cd /app/migrate \
+ && echo '{"name":"gsf-migrate","version":"0.0.1","private":true,"dependencies":{"prisma":"7.7.0","dotenv":"17.4.2"}}' > package.json \
+ && npm install --omit=dev --no-audit --no-fund --no-package-lock \
+ && chown -R nextjs:nodejs /app/migrate
+
 USER nextjs
 
 EXPOSE 3000

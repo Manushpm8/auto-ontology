@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { NextResponse } from 'next/server';
+import { getPrisma } from '@/lib/prisma';
+
+export const dynamic = 'force-dynamic';
+
+type CheckResult = { status: 'ok' } | { status: 'error'; detail: string };
+
+async function checkPostgres(): Promise<CheckResult> {
+	try {
+		await getPrisma().$queryRaw`SELECT 1`;
+		return { status: 'ok' };
+	} catch (err) {
+		const detail = err instanceof Error ? err.message : String(err);
+		return { status: 'error', detail: detail.slice(0, 200) };
+	}
+}
+
+export async function GET() {
+	const postgres = await checkPostgres();
+	const healthy = postgres.status === 'ok';
+	return NextResponse.json(
+		{ status: healthy ? 'ok' : 'degraded', postgres },
+		{ status: healthy ? 200 : 503 },
+	);
+}
