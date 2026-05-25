@@ -65,12 +65,12 @@ services:
       retries: 5
       start_period: 30s
 
-  gsf-backend:
+  gsf:
     build:
       context: .
       dockerfile: Dockerfile
-    image: gsf-backend:latest
-    container_name: gsf-backend
+    image: gsf:latest
+    container_name: gsf
     restart: unless-stopped
     ports:
       - "3001:3001"
@@ -90,7 +90,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        PYTHON_API_URL: ${PYTHON_API_URL:-http://gsf-backend:3001}
+        PYTHON_API_URL: ${PYTHON_API_URL:-http://gsf:3001}
     image: gsf-frontend:latest
     container_name: gsf-frontend
     restart: unless-stopped
@@ -99,10 +99,10 @@ services:
     env_file:
       - .env
     environment:
-      PYTHON_API_URL: ${PYTHON_API_URL:-http://gsf-backend:3001}
+      PYTHON_API_URL: ${PYTHON_API_URL:-http://gsf:3001}
       POSTGRES_HOST: postgres
     depends_on:
-      - gsf-backend
+      - gsf
 
 volumes:
   postgres_data:

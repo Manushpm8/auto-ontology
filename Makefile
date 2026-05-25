@@ -23,7 +23,7 @@
 #                   serves /api/health but raises NotImplementedError on
 #                   real chat/data calls).
 #   PYTHON_API_URL  Backend URL baked into the frontend's Next.js rewrites
-#                   at build time. Defaults to http://gsf-backend:3001
+#                   at build time. Defaults to http://gsf:3001
 #                   (matches the in-cluster service the helm chart creates).
 #   PLATFORMS       Comma-separated platforms for multi-arch publish.
 #                   Defaults to linux/amd64,linux/arm64.
@@ -32,10 +32,10 @@
 REGISTRY       ?=
 TAG            ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 NEMO           ?= ../NeMo-Retriever
-PYTHON_API_URL ?= http://gsf-backend:3001
+PYTHON_API_URL ?= http://gsf:3001
 PLATFORMS      ?= linux/amd64,linux/arm64
 
-BACKEND_IMAGE  := gsf-backend
+BACKEND_IMAGE  := gsf
 FRONTEND_IMAGE := gsf-frontend
 
 # --build-context for NeMo-Retriever: pass `NEMO=stub` to skip and use the
@@ -56,16 +56,16 @@ else
   FRONTEND_REF := $(REGISTRY)/$(FRONTEND_IMAGE):$(TAG)
 endif
 
-.PHONY: help login builder build build-backend build-frontend \
-        publish publish-backend publish-frontend
+.PHONY: help login builder build build build-frontend \
+        publish publish publish-frontend
 
 help:
 	@echo "GSF image targets:"
 	@echo "  make build               Build both images locally (host arch only)"
-	@echo "  make build-backend       Build backend image locally"
+	@echo "  make build       Build backend image locally"
 	@echo "  make build-frontend      Build frontend image locally"
 	@echo "  make publish             Build + push both images (multi-arch)"
-	@echo "  make publish-backend     Build + push backend image"
+	@echo "  make publish     Build + push backend image"
 	@echo "  make publish-frontend    Build + push frontend image"
 	@echo "  make login NGC_TOKEN=... docker login nvcr.io via NGC API token"
 	@echo
@@ -86,16 +86,16 @@ builder:
 	  || docker buildx create --name gsf-builder --driver docker-container --use
 	@docker buildx use gsf-builder
 
-build-backend:
+build:
 	docker buildx build $(NEMO_CTX_ARG) -t $(BACKEND_REF) --load .
 
 build-frontend:
 	docker buildx build --build-arg PYTHON_API_URL=$(PYTHON_API_URL) \
 	    -t $(FRONTEND_REF) --load ./frontend
 
-build: build-backend build-frontend
+build: build build-frontend
 
-publish-backend: require-registry builder
+publish: require-registry builder
 	docker buildx build --platform $(PLATFORMS) $(NEMO_CTX_ARG) \
 	    -t $(BACKEND_REF) --push .
 
@@ -104,7 +104,7 @@ publish-frontend: require-registry builder
 	    --build-arg PYTHON_API_URL=$(PYTHON_API_URL) \
 	    -t $(FRONTEND_REF) --push ./frontend
 
-publish: publish-backend publish-frontend
+publish: publish publish-frontend
 
 # Internal: fail fast if REGISTRY is missing on a publish target.
 .PHONY: require-registry
