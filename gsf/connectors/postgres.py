@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
@@ -27,7 +28,21 @@ class PostgresDatabase(SQLDatabase):
 
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
-        self._conn: psycopg.Connection = psycopg.connect(connection_string)
+        # Pool transparently replaces connections killed by server timeouts or
+        # network middleboxes. `check_connection` runs a quick liveness probe
+        # before handing a connection out; `max_idle`/`max_lifetime` cap how
+        # long a connection can live, so stale ones are recycled before any
+        # plausible firewall idle timeout fires.
+        self._pool: ConnectionPool = ConnectionPool(
+            connection_string,
+            kwargs={"autocommit": True},
+            min_size=1,
+            max_size=4,
+            max_idle=300.0,
+            max_lifetime=1800.0,
+            check=ConnectionPool.check_connection,
+            open=True,
+        )
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
 
     @property
@@ -43,21 +58,13 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        try:
-            with self._conn.cursor(row_factory=dict_row) as cur:
+        with self._pool.connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(sql, parameters)
                 if cur.description is None:
-                    self._conn.commit()
                     return pd.DataFrame()
                 rows = cur.fetchall()
             return pd.DataFrame(rows)
-        except Exception:
-            # A failed query leaves the Postgres transaction in "aborted"
-            # state; without rollback every subsequent query on this
-            # connection fails with InFailedSqlTransaction — breaking the
-            # text-to-SQL reconstruction loop that retries with fixed SQL.
-            self._conn.rollback()
-            raise
 
     # ------------------------------------------------------------------
     # Schema introspection
@@ -118,7 +125,6 @@ class PostgresDatabase(SQLDatabase):
                 [hours],
             )
         except psycopg.Error:
-            self._conn.rollback()
             return pd.DataFrame(columns=["end_time", "query_text"])
 
     def get_views(self) -> pd.DataFrame:
@@ -174,5 +180,5 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        if self._pool and not self._pool.closed:
+            self._pool.close()
