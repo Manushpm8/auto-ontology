@@ -63,8 +63,8 @@ export const AnalysisView = () => {
 	const openEditModal = (item: CustomAnalysis) => {
 		setEditingId(item.id);
 		setName(item.name);
-		setDescription(item.description ?? '');
-		setSql(item.sql ?? '');
+		setDescription(item.description);
+		setSql(item.sql);
 		setSubmitError(null);
 		setModalOpen(true);
 	};
@@ -197,14 +197,12 @@ export const AnalysisView = () => {
 										<Icon name={IconName.Pencil} className="h-4 w-4" />
 									</button>
 								</div>
-								{a.description != null && a.description.trim() !== '' && (
+								{a.description.trim() !== '' && (
 									<p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
 										{a.description}
 									</p>
 								)}
-								{a.sql != null && a.sql.trim() !== '' && (
-									<SqlBlock sql={a.sql} className="mt-4" />
-								)}
+								{a.sql.trim() !== '' && <SqlBlock sql={a.sql} className="mt-4" />}
 							</li>
 						))}
 					</ul>

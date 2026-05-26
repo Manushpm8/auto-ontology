@@ -17,22 +17,9 @@ export type CustomAnalysisCreatePayload = {
 type CreateResponse = ResponseWithError<{ data: CustomAnalysis }>;
 type UpdateResponse = ResponseWithError<{ data: CustomAnalysis }>;
 
-let pendingList: Promise<ListResponse> | null = null;
-
 export const analyses = {
-	/** All custom analyses; parallel callers share a single HTTP request. */
-	list: (): Promise<ListResponse> => {
-		if (pendingList != null) return pendingList;
-
-		const promise = requests
-			.get<ResponseWithCount<CustomAnalysis[]>>('custom-analyses')
-			.finally(() => {
-				pendingList = null;
-			});
-
-		pendingList = promise;
-		return promise;
-	},
+	list: (): Promise<ListResponse> =>
+		requests.get<ResponseWithCount<CustomAnalysis[]>>('custom-analyses'),
 
 	create: (payload: CustomAnalysisCreatePayload): Promise<CreateResponse> =>
 		requests.post<{ data: CustomAnalysis }>('custom-analyses', payload),

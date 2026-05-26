@@ -91,45 +91,46 @@ class CustomAnalysisSqlError(Exception):
 
 
 def list_custom_analyses() -> list[dict[str, Any]]:
-    """Return all ``CustomAnalysis`` nodes with their attached SQL.
+    """Return every ``CustomAnalysis`` that has a linked ``Sql`` node.
 
     Each row contains ``id``, ``name``, ``description`` and ``sql`` — the
     ``sql_full_query`` of the related :class:`Sql` node reached via
-    ``CustomAnalysis -[:HAS_SQL]-> Sql``. When a ``CustomAnalysis`` has no
-    ``Sql`` neighbour the ``sql`` field is ``None`` (the node is still
-    returned, so a partially ingested catalog stays visible in the UI).
+    ``CustomAnalysis -[:HAS_SQL]-> Sql``.
+
+    The ``HAS_SQL`` join is mandatory: a ``CustomAnalysis`` without an
+    attached ``Sql`` node is unusable (retrieval can't surface it, the UI
+    can't render it) and would leak ``sql: null`` to the API. Our own
+    write path (:func:`create_custom_analysis` / :func:`update_custom_analysis`)
+    only commits a record after the SQL parses, so dangling records can
+    only come from external writers — NeMo-Retriever's ``enrich_graph``,
+    which only warns on parse ``None``, or direct Cypher. Hiding those
+    here keeps the API contract simple (``sql`` is always a string) at
+    the cost of needing direct DB access to inspect or clean them up.
 
     NeMo-Retriever exposes ``fetch_custom_analyses`` for a similar read,
-    but it (a) drops the ``id`` we need to address rows from the UI, (b)
-    folds ``description`` and ``sql`` into a single string aimed at the
-    LLM prompt, and (c) uses a non-optional ``HAS_SQL`` join so half-
-    ingested analyses disappear. We keep this dedicated read instead of
-    forcing those choices on every consumer.
+    but it (a) drops the ``id`` we need to address rows from the UI and
+    (b) folds ``description`` and ``sql`` into a single string aimed at
+    the LLM prompt. We keep this dedicated read instead of forcing
+    those choices on every consumer.
     """
     neo4j_conn = get_neo4j_conn()
 
     rows = neo4j_conn.query_read(
         f"""
-        MATCH (ca:{Labels.CUSTOM_ANALYSIS})
-        OPTIONAL MATCH (ca)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
         WITH ca, sql
         ORDER BY ca.name
-        RETURN ca.id AS id,
-               ca.name AS name,
-               ca.description AS description,
-               sql.sql_full_query AS sql
+
+        RETURN collect({{
+            id: ca.id,
+            name: ca.name,
+            description: ca.description,
+            sql: sql.sql_full_query
+        }}) AS analyses
         """,
     )
 
-    return [
-        {
-            "id": r["id"],
-            "name": r["name"],
-            "description": r["description"],
-            "sql": r["sql"],
-        }
-        for r in rows
-    ]
+    return rows[0]["analyses"]
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +153,61 @@ def _get_dialect_and_schemas() -> tuple[str, dict]:
     schemas_ids = get_all_schemas_ids()
     schemas = get_schemas_by_ids(schemas_ids)
     return connector.dialect, schemas
+
+
+def _parse_sql_or_raise(sql: str) -> Any:
+    """Validate ``sql`` against the current catalog, returning a query object.
+
+    Pure validation step: no graph writes happen here. Callers MUST run
+    this before any mutating call (``_detach_existing_sql_edges``,
+    ``_persist_analysis_with_sql``) so a parse failure can't leave the
+    graph in a half-updated state — e.g. ``update_custom_analysis`` used
+    to detach the old ``HAS_SQL`` edge first, then parse the new SQL, so
+    a 422 would orphan the ``CustomAnalysis`` from any ``Sql`` node.
+
+    ``parse_query_single`` can fail in two ways:
+
+    * raise (sqlglot syntax error, unsupported dialect construct, ...) —
+      mirrored from ``SQLValidationAgent._sql_parse_validation`` in
+      NeMo-Retriever, which wraps the same call in ``try/except`` and
+      returns ``{"error": str(error)}``;
+    * return ``None`` when the SQL parses but doesn't resolve to any
+      table the graph already knows about (typos, missing ingestion,
+      ...).
+
+    ``enrich_graph`` lets the raise propagate and only warns on
+    ``None``; the API path can't do either — a 500 leaks the parser's
+    internals to the UI, and a silently dropped write would leave the
+    UI thinking the analysis was saved. Both cases are converted to
+    :class:`CustomAnalysisSqlError` so the caller gets a 422 with a
+    message it can render.
+
+    Note: this leaves a gap NeMo-Retriever is expected to close
+    upstream — sqlglot silently parses garbage like ``"fghcghv"`` as
+    a bare ``Column`` expression, so ``parse_query_single`` returns
+    ``None`` and the 422 reads "doesn't reference any table" rather
+    than "not valid SQL". Once the parser surfaces that distinction
+    we can map it to a clearer message here without changing the API.
+    """
+    dialect, schemas = _get_dialect_and_schemas()
+
+    try:
+        query_obj = parse_query_single(sql=sql, dialect=dialect, schemas=schemas)
+    except Exception as exc:
+        # `parse_query_single` -> sqlglot can raise a variety of
+        # exception types for syntax / dialect issues; NeMo-Retriever's
+        # own validation agent uses the same broad `except Exception`.
+        raise CustomAnalysisSqlError(
+            f"SQL parse error (dialect={dialect!r}): {exc}",
+        ) from exc
+
+    if query_obj is None:
+        raise CustomAnalysisSqlError(
+            "SQL doesn't reference any table known to the catalog "
+            f"(dialect={dialect!r}); ingest the schema first or check the query",
+        )
+
+    return query_obj
 
 
 def _find_analysis_with_name(
@@ -237,8 +293,9 @@ def _detach_existing_sql_edges(analysis_id: str) -> None:
 def _persist_analysis_with_sql(
     analysis_node: Neo4jNode,
     sql: str,
+    query_obj: Any,
 ) -> dict[str, Any]:
-    """Parse ``sql``, link it to ``analysis_node`` via HAS_SQL, write to graph.
+    """Link a pre-parsed ``query_obj`` to ``analysis_node`` via HAS_SQL.
 
     Mirrors the inner loop of
     :func:`nemo_retriever.tabular_data.dev_tools.enrich_graph.add_custom_analyses`
@@ -249,54 +306,18 @@ def _persist_analysis_with_sql(
     ``Sql -[:SQL]-> Table/Column`` fan-out used by retrieval). We can't
     call ``add_custom_analyses`` directly because it reads JSON from disk,
     embeds into LanceDB, and doesn't return per-entry results, so we
-    reproduce its parse → match_props → append HAS_SQL edge → ``add_query``
+    reproduce its match_props → append HAS_SQL edge → ``add_query``
     sequence verbatim.
 
-    ``parse_query_single`` is itself the validation step. It can fail
-    in two ways:
-
-    * raise (sqlglot syntax error, unsupported dialect construct, ...);
-    * return ``None`` when the SQL parses but doesn't resolve to any
-      known table.
-
-    ``enrich_graph`` lets the raise propagate and only warns on
-    ``None``; the API path can't do either — a 500 leaks the parser's
-    internals to the UI, and a silently dropped write would leave the
-    UI thinking the analysis was saved. Both cases are converted to
-    :class:`CustomAnalysisSqlError` so the caller gets a 422 with a
-    message it can render. The try/except mirrors
-    ``SQLValidationAgent._sql_parse_validation`` in NeMo-Retriever
-    (``…/text_to_sql/agents/sql_parse_validation.py``).
+    ``query_obj`` must already be the result of :func:`_parse_sql_or_raise`
+    — that split lets callers validate the SQL before doing any graph
+    writes (so a parse failure on update doesn't strand the analysis
+    without a ``HAS_SQL`` edge).
 
     The ``Sql`` node is matched by ``sql_full_query`` (same as
     ``add_custom_analyses``) so two analyses pointing at the same text
     reuse the same node instead of creating a duplicate.
-
-    Note: this leaves a gap NeMo-Retriever is expected to close
-    upstream — sqlglot silently parses garbage like ``"fghcghv"`` as
-    a bare ``Column`` expression, so ``parse_query_single`` returns
-    ``None`` and the 422 reads "doesn't reference any table" rather
-    than "not valid SQL". Once the parser surfaces that distinction
-    we can map it to a clearer message here without changing the API.
     """
-    dialect, schemas = _get_dialect_and_schemas()
-
-    try:
-        query_obj = parse_query_single(sql=sql, dialect=dialect, schemas=schemas)
-    except Exception as exc:
-        # `parse_query_single` -> sqlglot can raise a variety of
-        # exception types for syntax / dialect issues; NeMo-Retriever's
-        # own validation agent uses the same broad `except Exception`.
-        raise CustomAnalysisSqlError(
-            f"SQL parse error (dialect={dialect!r}): {exc}",
-        ) from exc
-
-    if query_obj is None:
-        raise CustomAnalysisSqlError(
-            "SQL doesn't reference any table known to the catalog "
-            f"(dialect={dialect!r}); ingest the schema first or check the query",
-        )
-
     query_obj.sql_node.match_props = {"sql_full_query": sql}
 
     edge_props = {Props.ANALYSIS_ID: analysis_node.get_id()}
@@ -357,6 +378,8 @@ def create_custom_analysis(
             f"(id={sql_owner['id']!r})",
         )
 
+    query_obj = _parse_sql_or_raise(sql)
+
     analysis_node = Neo4jNode(
         name=name,
         label=Labels.CUSTOM_ANALYSIS,
@@ -364,7 +387,7 @@ def create_custom_analysis(
         match_props={"name": name},
     )
 
-    return _persist_analysis_with_sql(analysis_node, sql)
+    return _persist_analysis_with_sql(analysis_node, sql, query_obj)
 
 
 def update_custom_analysis(
@@ -421,6 +444,12 @@ def update_custom_analysis(
             f"(id={sql_owner['id']!r})",
         )
 
+    # Validate the new SQL BEFORE touching the graph: a parse failure
+    # here used to land after `_detach_existing_sql_edges`, orphaning
+    # the analysis from any `Sql` node and leaving the read endpoint
+    # to return `sql: null` for an otherwise valid-looking record.
+    query_obj = _parse_sql_or_raise(sql)
+
     _detach_existing_sql_edges(analysis_id)
 
     analysis_node = Neo4jNode(
@@ -432,4 +461,4 @@ def update_custom_analysis(
         override_existing_props={"name": name, "description": description},
     )
 
-    return _persist_analysis_with_sql(analysis_node, sql)
+    return _persist_analysis_with_sql(analysis_node, sql, query_obj)

@@ -5,6 +5,6 @@
 export type CustomAnalysis = {
 	id: string;
 	name: string;
-	description: string | null;
-	sql: string | null;
+	description: string;
+	sql: string;
 };

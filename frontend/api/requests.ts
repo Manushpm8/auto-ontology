@@ -19,25 +19,8 @@ const responseBody = <DataType>({ data }: AxiosResponse<DataType>): DataType => 
 
 const extractServerMessage = (data: unknown): string | undefined => {
 	if (data == null || typeof data !== 'object') return undefined;
-	const body = data as { detail?: unknown; message?: unknown };
-
-	// FastAPI puts validation/HTTPException errors in `detail`. It's either a
-	// plain string (manual HTTPException) or an array of {loc, msg, ...} for
-	// Pydantic errors — flatten the array into a single readable line.
-	if (typeof body.detail === 'string') return body.detail;
-	if (Array.isArray(body.detail)) {
-		const parts = body.detail
-			.map((item) => {
-				if (item == null || typeof item !== 'object') return null;
-				const msg = (item as { msg?: unknown }).msg;
-				return typeof msg === 'string' ? msg : null;
-			})
-			.filter((msg): msg is string => msg != null);
-		if (parts.length > 0) return parts.join('; ');
-	}
-
-	if (typeof body.message === 'string') return body.message;
-	return undefined;
+	const { detail } = data as { detail?: unknown };
+	return typeof detail === 'string' ? detail : undefined;
 };
 
 const errorHandler = (err: AxiosError): ApiError => {
