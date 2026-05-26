@@ -17,12 +17,15 @@ const api = axios.create({
 
 const responseBody = <DataType>({ data }: AxiosResponse<DataType>): DataType => data;
 
+const extractServerMessage = (data: unknown): string | undefined => {
+	if (data == null || typeof data !== 'object') return undefined;
+	const { detail } = data as { detail?: unknown };
+	return typeof detail === 'string' ? detail : undefined;
+};
+
 const errorHandler = (err: AxiosError): ApiError => {
 	return {
-		message:
-			typeof err.response !== 'undefined'
-				? (err.response.data as { message: string }).message
-				: err.message,
+		message: (err.response != null && extractServerMessage(err.response.data)) || err.message,
 		error: true,
 	};
 };
@@ -53,6 +56,15 @@ export const requests = {
 	post: <OutputType>(url: string, data: unknown = {}, abortController?: AbortController) => {
 		return api
 			.post<OutputType>(url, data, {
+				signal: abortController?.signal,
+			})
+			.then(responseBody)
+			.catch(errorHandler) as Promise<ResponseWithError<OutputType>>;
+	},
+
+	put: <OutputType>(url: string, data: unknown = {}, abortController?: AbortController) => {
+		return api
+			.put<OutputType>(url, data, {
 				signal: abortController?.signal,
 			})
 			.then(responseBody)

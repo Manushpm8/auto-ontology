@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconName } from '@/components/icons';
-import { Modal } from '@/components/Modal';
+import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { PopoverMenu } from '@/components/PopoverMenu';
 import { acronymsApi, promptsApi, type Acronym, type Prompt } from '@/api/settings';
@@ -278,24 +278,36 @@ const AcronymsSection = () => {
 				</div>
 			)}
 
-			<Modal
+			<ModalCreateNewItem
 				open={modalOpen}
 				onClose={handleClose}
-				className="min-h-[400px] w-[800px] max-w-full"
+				title="Acronyms Definition"
+				submitLabel={isEditing ? 'Edit Definition' : 'Add Definition'}
+				onSubmit={handleSubmit}
+				canSubmit={Boolean(canSubmit)}
+				accent="teal"
 			>
-				<div className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
-					<h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-						Acronyms Definition
-					</h3>
-					<button
-						type="button"
-						onClick={handleClose}
-						className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
-					>
-						<svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-							<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-						</svg>
-					</button>
+				<div>
+					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+						Acronyms Definition Name
+					</label>
+					<input
+						type="text"
+						value={name}
+						onChange={(e) => setName(e.target.value)}
+						placeholder="Acronyms Definition Name"
+						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 dark:border-zinc-600 dark:focus:border-teal-400 dark:focus:ring-teal-400/30'}`}
+					/>
+					{nameExists && (
+						<p className="mt-1 text-xs text-red-500 dark:text-red-400">
+							An acronym with this name already exists
+						</p>
+					)}
+					{checkingName && name.trim() && (
+						<p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+							Checking name…
+						</p>
+					)}
 				</div>
 				<div className="space-y-4 p-6">
 					<div>
@@ -343,7 +355,7 @@ const AcronymsSection = () => {
 						</button>
 					</div>
 				</div>
-			</Modal>
+			</ModalCreateNewItem>
 
 			<ConfirmModal
 				open={confirmDelete !== null}
