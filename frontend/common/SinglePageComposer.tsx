@@ -10,7 +10,10 @@ import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { isComposerSection, type ComposerSection } from '@/types/composer-section';
 import { Icon, IconName } from '@/components/icons';
+import { TagInput } from '@/components/TagInput';
 import { datasources } from '@/api/datasources';
+
+export type ComposerEditValue = string | string[];
 
 export type SinglePageComposerProps = {
 	sections: unknown[];
@@ -26,7 +29,7 @@ export type SinglePageComposerProps = {
 	};
 	entityUpdatingProperties?: Record<string, string | string[]>;
 	isEditing?: boolean;
-	onSave?: (edits: Record<string, string>) => void;
+	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
 };
 
@@ -76,6 +79,77 @@ const EditableTextCard = ({
 	);
 };
 
+const EditableTagListCard = ({
+	section,
+	onChange,
+	autoFocus = false,
+}: {
+	section: { id: string; title: string; values: string[]; hint?: string };
+	onChange: (sectionId: string, value: string[]) => void;
+	autoFocus?: boolean;
+}) => {
+	const [tags, setTags] = useState<string[]>(section.values);
+
+	const handleChange = (next: string[]) => {
+		setTags(next);
+		onChange(section.id, next);
+	};
+
+	return (
+		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 shadow-sm ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
+			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+				{section.title}
+			</h2>
+			<div className="mt-3">
+				<TagInput
+					value={tags}
+					onChange={handleChange}
+					autoFocus={autoFocus}
+					placeholder="Type a value and press Enter"
+					ariaLabel={section.title}
+				/>
+			</div>
+			<p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+				{section.hint ??
+					'Press Enter or comma to add. Backspace to remove the last tag. Paste comma-separated values to add many at once.'}
+			</p>
+		</div>
+	);
+};
+
+const ReadOnlyTagList = ({
+	title,
+	values,
+	sectionId,
+}: {
+	title: string;
+	values: string[];
+	sectionId: string;
+}) => (
+	<div
+		id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
+		className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+	>
+		<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
+		{values.length === 0 ? (
+			<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+		) : (
+			<ul className="mt-3 flex flex-wrap gap-1.5">
+				{values.map((v, i) => (
+					<li
+						key={`${v}-${i}`}
+						className="inline-flex max-w-full items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
+					>
+						<span className="max-w-[24rem] truncate" title={v}>
+							{v}
+						</span>
+					</li>
+				))}
+			</ul>
+		)}
+	</div>
+);
+
 function renderComposerSection(section: ComposerSection): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
@@ -91,6 +165,14 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 						{section.body}
 					</p>
 				</div>
+			);
+		case ComposerSectionKind.TAG_LIST:
+			return (
+				<ReadOnlyTagList
+					title={section.title}
+					values={section.values}
+					sectionId={section.id}
+				/>
 			);
 		case ComposerSectionKind.INFO_GRID:
 			return (
@@ -205,14 +287,15 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			sections.find(
 				(s): s is ComposerSection =>
 					isComposerSection(s) &&
-					s.type === ComposerSectionKind.TEXT_CARD &&
+					(s.type === ComposerSectionKind.TEXT_CARD ||
+						s.type === ComposerSectionKind.TAG_LIST) &&
 					s.editable === true,
 			)?.id ?? null;
 		const hasEditableSections = firstEditableId !== null;
 		const [localIsEditing, setLocalIsEditing] = useState(false);
 		const isEditingActive = isEditing || localIsEditing;
 
-		const pendingEditsRef = useRef<Record<string, string>>({});
+		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
 
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
@@ -317,7 +400,9 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 									onClick={async () => {
 										const edits = pendingEditsRef.current;
 										if (entityId && Object.keys(edits).length > 0) {
-											await datasources.updateNode(entityId, edits);
+											// NodePatch only accepts the known fields; pass through
+											// known string/array shapes.
+											await datasources.updateNode(entityId, edits as never);
 										}
 										setLocalIsEditing(false);
 										onSave?.(edits);
@@ -396,15 +481,27 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										);
 									}
 
-									const isEditable =
+									const isEditableTextCard =
 										isEditingActive &&
 										section.type === ComposerSectionKind.TEXT_CARD &&
+										section.editable === true;
+									const isEditableTagList =
+										isEditingActive &&
+										section.type === ComposerSectionKind.TAG_LIST &&
 										section.editable === true;
 
 									return (
 										<div key={section.id}>
-											{isEditable ? (
+											{isEditableTextCard ? (
 												<EditableTextCard
+													section={section}
+													autoFocus={section.id === firstEditableId}
+													onChange={(id, val) => {
+														pendingEditsRef.current[id] = val;
+													}}
+												/>
+											) : isEditableTagList ? (
+												<EditableTagListCard
 													section={section}
 													autoFocus={section.id === firstEditableId}
 													onChange={(id, val) => {

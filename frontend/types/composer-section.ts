@@ -12,6 +12,16 @@ export type ComposerTextCardSection = {
 	editable?: boolean;
 };
 
+export type ComposerTagListSection = {
+	type: ComposerSectionKind.TAG_LIST;
+	id: string;
+	title: string;
+	values: string[];
+	editable?: boolean;
+	/** Optional hint shown under the input while editing. */
+	hint?: string;
+};
+
 export type ComposerInfoGridSection = {
 	type: ComposerSectionKind.INFO_GRID;
 	id: string;
@@ -36,12 +46,14 @@ export type ComposerLoadingPanelSection = {
 
 export type ComposerSection =
 	| ComposerTextCardSection
+	| ComposerTagListSection
 	| ComposerInfoGridSection
 	| ComposerDataTableSection
 	| ComposerLoadingPanelSection;
 
 const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.TEXT_CARD,
+	ComposerSectionKind.TAG_LIST,
 	ComposerSectionKind.INFO_GRID,
 	ComposerSectionKind.DATA_TABLE,
 	ComposerSectionKind.LOADING_PANEL,

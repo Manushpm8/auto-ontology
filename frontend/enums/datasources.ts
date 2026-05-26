@@ -19,6 +19,7 @@ export enum TreeFocusState {
 /** Block type in SinglePageComposer sections. */
 export enum ComposerSectionKind {
 	TEXT_CARD = 'textCard',
+	TAG_LIST = 'tagList',
 	INFO_GRID = 'infoGrid',
 	DATA_TABLE = 'dataTable',
 	LOADING_PANEL = 'loadingPanel',

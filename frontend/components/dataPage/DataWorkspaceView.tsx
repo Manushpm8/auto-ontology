@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from './SinglePageView';
+import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import type { Database } from '@/types/datasources';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
 import { WORKSPACE_ROOT_PARENT_ID, buildTreeFocusPageFormat } from '@/lib/data/tree-focus-page';
@@ -157,7 +158,7 @@ export function DataWorkspaceView() {
 	);
 
 	const syncEdits = useCallback(
-		(edits: Record<string, string>) => {
+		(edits: Record<string, ComposerEditValue>) => {
 			if (!treeFocusId || Object.keys(edits).length === 0) return;
 			const segments = treeFocusId.split('|').filter((s) => s.length > 0);
 			const entityId = segments[segments.length - 1];
