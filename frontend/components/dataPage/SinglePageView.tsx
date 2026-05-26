@@ -6,7 +6,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
-import { SinglePageComposer, type SinglePageComposerProps } from '@/common/SinglePageComposer';
+import {
+	SinglePageComposer,
+	type ComposerEditValue,
+	type SinglePageComposerProps,
+} from '@/common/SinglePageComposer';
 
 export type SinglePageFormat = SinglePageComposerProps;
 
@@ -19,7 +23,7 @@ export type SinglePageViewProps = {
 	treeDataEpoch?: number;
 	parentId?: string;
 	isEditing?: boolean;
-	onSave?: (edits: Record<string, string>) => void;
+	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
 };
 

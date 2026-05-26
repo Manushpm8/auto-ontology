@@ -274,10 +274,10 @@ export function buildTreeFocusPageFormat(
 					editable: true,
 				},
 				{
-					type: ComposerSectionKind.TEXT_CARD,
+					type: ComposerSectionKind.TAG_LIST,
 					id: 'sample_values',
 					title: 'Sample Values',
-					body: column.sample_values ?? '',
+					values: column.sample_values ?? [],
 					editable: true,
 				},
 				{
