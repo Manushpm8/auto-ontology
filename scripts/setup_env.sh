@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 INFRA_SERVICES="postgres pgadmin neo4j"
-GSF_SERVICES="gsf-backend gsf-frontend"
+GSF_SERVICES="gsf gsf-frontend"
 
 neo4j_running() {
 	docker inspect --format='{{.State.Running}}' neo4j 2>/dev/null | grep -q true
@@ -52,7 +52,7 @@ if [[ " $* " =~ \ --ds\  ]]; then
 	export PYTHON_API_URL="http://host.docker.internal:3001"
 	echo "Starting infrastructure + gsf-frontend: $SERVICES gsf-frontend"
 	echo "(backend will run locally on the host)"
-	# --no-deps skips the gsf-backend dependency declared on gsf-frontend.
+	# --no-deps skips the gsf dependency declared on gsf-frontend.
 	docker compose up -d --build --no-deps $SERVICES gsf-frontend
 
 	echo ""
@@ -70,7 +70,7 @@ if [[ " $* " =~ \ --ds\  ]]; then
 	exit 0
 fi
 
-# Default: full docker stack (infra + gsf-backend + gsf-frontend)
+# Default: full docker stack (infra + gsf + gsf-frontend)
 SERVICES="$(resolve_infra_services) $GSF_SERVICES"
 echo "Starting full stack: $SERVICES"
 docker compose up -d --build $SERVICES

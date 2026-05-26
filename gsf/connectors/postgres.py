@@ -52,6 +52,10 @@ class PostgresDatabase(SQLDatabase):
                 rows = cur.fetchall()
             return pd.DataFrame(rows)
         except Exception:
+            # A failed query leaves the Postgres transaction in "aborted"
+            # state; without rollback every subsequent query on this
+            # connection fails with InFailedSqlTransaction — breaking the
+            # text-to-SQL reconstruction loop that retries with fixed SQL.
             self._conn.rollback()
             raise
 

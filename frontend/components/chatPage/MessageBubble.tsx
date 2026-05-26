@@ -97,7 +97,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 			<div
 				className={`max-w-[80%] rounded-2xl px-4 py-3 ${
 					isUser
-						? 'bg-emerald-600 text-white dark:bg-emerald-500'
+						? 'bg-[#76b900] text-white'
 						: 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
 				}`}
 			>

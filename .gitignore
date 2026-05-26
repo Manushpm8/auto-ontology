@@ -30,9 +30,6 @@ npm-debug.log*
 
 lancedb/*
 
-# temp
-helm/*
-
 .env.docker
 
 

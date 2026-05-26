@@ -65,18 +65,19 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
-    if len(connection_strings) == 1:
-        try:
-            asyncio.run(_run_forever(connection_strings))
-        except KeyboardInterrupt:
-            logger.info("ingestion_service: shutting down")
-    elif len(connection_strings) == 0:
+    if not os.environ.get("CONNECTION_STRINGS"):
         logger.warning(
-            "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
+            "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
         )
     else:
-        logger.warning("Multiple connection is not supported yet.")
+        connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
+        if len(connection_strings) == 1:
+            try:
+                asyncio.run(_run_forever(connection_strings))
+            except KeyboardInterrupt:
+                logger.info("ingestion_service: shutting down")
+        else:
+            logger.warning("Multiple connection is not supported yet.")
 
 
 if __name__ == "__main__":
