@@ -22,9 +22,6 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
-    connector_name: str | None = None
-    acronyms: str | None = None
-    custom_prompts: str | None = None
 
 
 # Maps LangGraph node names from

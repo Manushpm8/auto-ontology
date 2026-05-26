@@ -21,6 +21,7 @@ from gsf.server.chat.helpers import (
     get_connector,
     get_retriever,
 )
+from gsf.server.chat.settings_dal import fetch_acronyms, fetch_custom_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,8 @@ def _stream_chat(request: ChatRequest) -> Generator[str, None, None]:
             "question": request.question,
             "retriever": get_retriever(),
             "connector": get_connector(),
-            "acronyms": request.acronyms or "",
-            "custom_prompts": request.custom_prompts or "",
+            "acronyms": fetch_acronyms(),
+            "custom_prompts": fetch_custom_prompts(),
         }
     except Exception as exc:
         logger.exception("Failed to build chat payload")
