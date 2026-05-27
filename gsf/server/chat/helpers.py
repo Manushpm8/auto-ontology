@@ -22,12 +22,6 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
-    # Optional — when present the backend registers the stream so that a
-    # subsequent request for the same conversation can supersede (cancel)
-    # the in-flight one. Without it, requests run independently.
-    conversation_id: str | None = Field(default=None, alias="conversationId")
-
-    model_config = {"populate_by_name": True}
 
 
 # Maps LangGraph node names from

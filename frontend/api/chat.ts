@@ -29,7 +29,6 @@ export const streamChat = (
 
 	const body = JSON.stringify({
 		question: payload.question,
-		conversationId: payload.conversationId ?? null,
 	});
 
 	(async () => {
