@@ -562,26 +562,24 @@ def _embed_custom_analyses(
 ) -> None:
     """Fetch ``CustomAnalysis`` docs from Neo4j, embed them, and append to *vdb*.
 
-    The target database is resolved from the active connector
-    (:func:`gsf.server.chat.helpers.get_connector`, built from
-    ``CONNECTION_STRINGS``) — every caller in the codebase already
-    operates against that same DB, so taking it as a parameter just
-    forced each caller to do the lookup itself.
-
-    Filters to analyses whose SQL references at least one table belonging
-    to the active database via the path
-    ``CustomAnalysis -[:HAS_SQL]-> Sql -[:SQL]-> Table <-[:CONTAINS]- Schema <-[:CONTAINS]- Database``,
-    shapes the result into the same 5-column DataFrame the main pipeline
-    produces, then uses the same embedder
+    Shapes every matched ``CustomAnalysis`` into the same 5-column
+    DataFrame the main pipeline produces, then uses the same embedder
     (:func:`nemo_retriever.text_embed.runtime.embed_text_main_text_embed`) and
     writes the embedded rows through *vdb* in append mode, so existing
     ``Table``/``Column`` rows are preserved.
 
-    When *analysis_id* is given, the Cypher match is narrowed to that one
-    ``CustomAnalysis`` — used by the create/update paths to embed only
-    the row just written instead of re-embedding every analysis for the
-    database. ``None`` (the default) embeds every analysis for the
-    active database, used for full ingests. Because writes are
+    ``CustomAnalysis`` is treated as a single global pool — the graph
+    isn't sliced per database here because nothing downstream reads
+    the row back by database name: ``PostgresVDB.delete_by_database``
+    explicitly excludes the ``CustomAnalysis`` label (see
+    ``gsf/vdb/postgres.py``), and retrieval matches on label + vector
+    similarity, not on database.
+
+    When *analysis_id* is given, the Cypher match is narrowed to that
+    one ``CustomAnalysis`` — used by the create/update paths to embed
+    only the row just written instead of re-embedding every analysis.
+    ``None`` (the default) embeds every ``CustomAnalysis`` linked to
+    an ``Sql`` node, used for full ingests. Because writes are
     append-only (see operator note above), passing *analysis_id* for
     an analysis already present in the VDB would duplicate its row;
     callers updating an existing analysis must delete the stale VDB
@@ -592,12 +590,8 @@ def _embed_custom_analyses(
     from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
     from nemo_retriever.vdb import IngestVdbOperator
 
-    database_name = get_connector().database_name
-
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-              -[:{Edges.SQL}]->(t:{Labels.TABLE})<-[:{Edges.CONTAINS}]-(s:{Labels.SCHEMA})
-              <-[:{Edges.CONTAINS}]-(d:{Labels.DB}{{name: $database_name}})
         WHERE $analysis_id IS NULL OR ca.id = $analysis_id
         WITH DISTINCT ca, sql,
              CASE
@@ -621,14 +615,12 @@ def _embed_custom_analyses(
     """
     result = get_neo4j_conn().query_read(
         query,
-        parameters={"database_name": database_name, "analysis_id": analysis_id},
+        parameters={"analysis_id": analysis_id},
     )
     docs = result[0].get("docs") if result else None
     if not docs:
         logger.info(
-            "No CustomAnalysis rows found for database=%r analysis_id=%r; "
-            "skipping VDB upsert.",
-            database_name,
+            "No CustomAnalysis rows found for analysis_id=%r; skipping VDB upsert.",
             analysis_id,
         )
         return
@@ -642,7 +634,6 @@ def _embed_custom_analyses(
             "label": item.get("label", ""),
             "name": item.get("name", ""),
             "source_path": path,
-            "database_name": database_name,
         }
         rows.append(
             {
