@@ -90,7 +90,7 @@ const AcronymRow = ({
 			<PopoverMenu
 				items={[
 					{
-						label: 'Rename',
+						label: 'Edit',
 						icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
 						onClick: () => onEdit(acronym),
 					},
@@ -218,20 +218,20 @@ const AcronymsSection = () => {
 			<div className="flex items-center justify-between">
 				<div className="flex items-baseline gap-2">
 					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-						Custom Acronyms
+						Glossary
 					</h2>
 					<span className="text-sm text-zinc-500 dark:text-zinc-400">
-						Define custom acronyms for your account, department, or database context
+						Define definitions for your account, department, or database context
 					</span>
 				</div>
 				{hasAcronyms && (
 					<button
 						type="button"
 						onClick={openAddModal}
-						className="flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#6aa500]"
+						className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#76b900]/40 px-3 py-1.5 text-sm font-medium text-[#76b900] transition-colors hover:bg-[#76b900]/10"
 					>
-						<Icon name={IconName.ChatBubble} className="h-4 w-4" />
-						Add Definition
+						<Icon name={IconName.ChatBubble} className="h-3.5 w-3.5" />
+						Add
 					</button>
 				)}
 			</div>
@@ -265,7 +265,7 @@ const AcronymsSection = () => {
 			) : (
 				<div className="mt-4 flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-8 py-10 dark:border-zinc-600 dark:bg-zinc-900/30">
 					<p className="text-sm text-zinc-400 dark:text-zinc-500">
-						No Custom Acronyms definitions created yet
+						No Glossary definitions created yet
 					</p>
 					<button
 						type="button"
@@ -281,21 +281,21 @@ const AcronymsSection = () => {
 			<ModalCreateNewItem
 				open={modalOpen}
 				onClose={handleClose}
-				title="Acronyms Definition"
-				submitLabel={isEditing ? 'Edit Definition' : 'Add Definition'}
+				title={isEditing ? 'Edit Glossary Definition' : 'Add Glossary Definition'}
+				submitLabel="Save"
 				onSubmit={handleSubmit}
 				canSubmit={Boolean(canSubmit)}
 				accent="teal"
 			>
 				<div>
 					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-						Acronyms Definition Name
+						Name
 					</label>
 					<input
 						type="text"
 						value={name}
 						onChange={(e) => setName(e.target.value)}
-						placeholder="Acronyms Definition Name"
+						placeholder="Name"
 						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 dark:border-zinc-600 dark:focus:border-teal-400 dark:focus:ring-teal-400/30'}`}
 					/>
 					{nameExists && (
@@ -309,51 +309,17 @@ const AcronymsSection = () => {
 						</p>
 					)}
 				</div>
-				<div className="space-y-4 p-6">
-					<div>
-						<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-							Acronyms Definition Name
-						</label>
-						<input
-							type="text"
-							value={name}
-							onChange={(e) => setName(e.target.value)}
-							placeholder="Acronyms Definition Name"
-							className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600'}`}
-						/>
-						{nameExists && (
-							<p className="mt-1 text-xs text-red-500 dark:text-red-400">
-								An acronym with this name already exists
-							</p>
-						)}
-						{checkingName && name.trim() && (
-							<p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-								Checking name…
-							</p>
-						)}
-					</div>
-					<div>
-						<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-							Description
-						</label>
-						<textarea
-							value={description}
-							onChange={(e) => setDescription(e.target.value)}
-							placeholder="Add Short Description"
-							rows={4}
-							className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
-						/>
-					</div>
-					<div className="flex justify-end">
-						<button
-							type="button"
-							onClick={handleSubmit}
-							disabled={!canSubmit}
-							className={`cursor-pointer rounded-lg px-4 py-2 text-sm font-medium transition-colors ${canSubmit ? 'bg-[#76b900] text-white hover:bg-[#6aa500]' : 'cursor-default bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400'}`}
-						>
-							{isEditing ? 'Edit Definition' : 'Add Definition'}
-						</button>
-					</div>
+				<div>
+					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+						Description
+					</label>
+					<textarea
+						value={description}
+						onChange={(e) => setDescription(e.target.value)}
+						placeholder="Add Short Description"
+						rows={4}
+						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-teal-400 dark:focus:ring-teal-400/30"
+					/>
 				</div>
 			</ModalCreateNewItem>
 
@@ -417,7 +383,7 @@ const SettingsSection = ({
 					className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#76b900]/40 px-3 py-1.5 text-sm font-medium text-[#76b900] transition-colors hover:bg-[#76b900]/10"
 				>
 					<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-					{hasPrompts ? 'Edit Description' : 'Add Description'}
+					{hasPrompts ? 'Edit' : 'Add'}
 				</button>
 			</div>
 
@@ -444,7 +410,7 @@ const SettingsSection = ({
 						name={IconName.ChatBubble}
 						className="h-8 w-8 text-zinc-300 dark:text-zinc-600"
 					/>
-					<p className="text-sm text-zinc-400 dark:text-zinc-500">No Description</p>
+					<p className="text-sm text-zinc-400 dark:text-zinc-500">No Prompt</p>
 				</div>
 			) : null}
 		</div>

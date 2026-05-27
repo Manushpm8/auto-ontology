@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 
 import { Icon, IconName } from '@/components/icons';
+import { ModalConfirm } from '@/components/ModalConfirm';
 import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { SqlBlock, SqlEditor } from '@/components/SqlBlock';
 import { analyses } from '@/api/analyses';
@@ -26,6 +27,10 @@ export const AnalysisView = () => {
 	const [sql, setSql] = useState('');
 	const [submitting, setSubmitting] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
+
+	const [deletingItem, setDeletingItem] = useState<CustomAnalysis | null>(null);
+	const [deleting, setDeleting] = useState(false);
+	const [deleteError, setDeleteError] = useState<string | null>(null);
 
 	const isEditing = editingId !== null;
 
@@ -73,6 +78,30 @@ export const AnalysisView = () => {
 		if (submitting) return;
 		setModalOpen(false);
 		setSubmitError(null);
+	};
+
+	const openDeleteModal = (item: CustomAnalysis) => {
+		setDeletingItem(item);
+		setDeleteError(null);
+	};
+
+	const handleDeleteClose = () => {
+		if (deleting) return;
+		setDeletingItem(null);
+		setDeleteError(null);
+	};
+
+	const handleDeleteConfirm = async () => {
+		if (deletingItem == null) return;
+		setDeleting(true);
+		const res = await analyses.delete(deletingItem.id);
+		setDeleting(false);
+		if (res.error === true) {
+			setDeleteError(res.message ?? 'Failed to delete custom analysis');
+			return;
+		}
+		setItems((prev) => prev.filter((a) => a.id !== deletingItem.id));
+		setDeletingItem(null);
 	};
 
 	const trimmedName = name.trim();
@@ -139,7 +168,7 @@ export const AnalysisView = () => {
 					<svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
 						<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
 					</svg>
-					Create new
+					Create new nalysis
 				</button>
 			</header>
 
@@ -184,15 +213,26 @@ export const AnalysisView = () => {
 									<h2 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
 										{a.name}
 									</h2>
-									<button
-										type="button"
-										onClick={() => openEditModal(a)}
-										aria-label={`Edit ${a.name}`}
-										title="Edit"
-										className="shrink-0 cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
-									>
-										<Icon name={IconName.Pencil} className="h-4 w-4" />
-									</button>
+									<div className="flex shrink-0 items-center gap-1">
+										<button
+											type="button"
+											onClick={() => openEditModal(a)}
+											aria-label={`Edit ${a.name}`}
+											title="Edit"
+											className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+										>
+											<Icon name={IconName.Pencil} className="h-4 w-4" />
+										</button>
+										<button
+											type="button"
+											onClick={() => openDeleteModal(a)}
+											aria-label={`Delete ${a.name}`}
+											title="Delete"
+											className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+										>
+											<Icon name={IconName.Trash} className="h-4 w-4" />
+										</button>
+									</div>
 								</div>
 								{a.description.trim() !== '' && (
 									<p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
@@ -209,16 +249,8 @@ export const AnalysisView = () => {
 			<ModalCreateNewItem
 				open={modalOpen}
 				onClose={handleClose}
-				title={isEditing ? 'Edit Custom Analysis' : 'Custom Analysis'}
-				submitLabel={
-					submitting
-						? isEditing
-							? 'Saving…'
-							: 'Creating…'
-						: isEditing
-							? 'Save'
-							: 'Create'
-				}
+				title={isEditing ? 'Edit Custom Analysis' : 'Add Custom Analysis'}
+				submitLabel={submitting ? 'Saving…' : 'Save'}
 				onSubmit={handleSubmit}
 				canSubmit={canSubmit}
 			>
@@ -253,6 +285,21 @@ export const AnalysisView = () => {
 					</p>
 				)}
 			</ModalCreateNewItem>
+
+			<ModalConfirm
+				open={deletingItem !== null}
+				onClose={handleDeleteClose}
+				onConfirm={handleDeleteConfirm}
+				title="Delete custom analysis"
+				message={
+					<>
+						Are you sure you want to delete <strong>{deletingItem?.name}</strong>? This
+						action cannot be undone.
+					</>
+				}
+				confirming={deleting}
+				error={deleteError}
+			/>
 		</div>
 	);
 };
