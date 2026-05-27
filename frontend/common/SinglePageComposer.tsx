@@ -5,8 +5,8 @@
 'use client';
 
 import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
+import { Loading } from '@/components/Loading';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { isComposerSection, type ComposerSection } from '@/types/composer-section';
 import { Icon, IconName } from '@/components/icons';
@@ -240,14 +240,8 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 			);
 		case ComposerSectionKind.LOADING_PANEL:
 			return (
-				<div
-					className="flex min-h-[min(50dvh,420px)] flex-col items-center justify-center gap-4 rounded-lg border border-zinc-200/80 bg-white/70 px-8 py-12 dark:border-zinc-700/80 dark:bg-zinc-950/40"
-					role="status"
-				>
-					<Spinner aria-label="Loading" />
-					<p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-						{section.message}
-					</p>
+				<div className="flex min-h-[min(50dvh,420px)] items-center justify-center rounded-lg border border-zinc-200/80 bg-white/70 px-8 py-12 dark:border-zinc-700/80 dark:bg-zinc-950/40">
+					<Loading variant="inline" caption={section.message} />
 				</div>
 			);
 		default:

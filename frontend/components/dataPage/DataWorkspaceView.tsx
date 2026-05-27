@@ -18,6 +18,7 @@ import {
 	mergeTablesIntoSchema,
 } from '@/lib/data/datasource-tree-merge';
 import { datasources } from '@/api/datasources';
+import { Loading } from '@/components/Loading';
 
 export type DataWorkspaceViewProps = Record<string, never>;
 
@@ -216,15 +217,7 @@ export function DataWorkspaceView() {
 	}
 
 	if (loading && databases.length === 0) {
-		return (
-			<div className="flex h-full flex-1 items-center justify-center">
-				<div
-					className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-					role="status"
-					aria-label="Loading databases"
-				/>
-			</div>
-		);
+		return <Loading label="Loading databases" />;
 	}
 
 	if (!workspaceDb) {

@@ -7,6 +7,7 @@
 import { useEffect, useRef } from 'react';
 import type { ChatMessage, GraphStep } from '@/types/chat';
 import { Icon, IconName } from '@/components/icons';
+import { Loading } from '@/components/Loading';
 import { MessageBubble } from './MessageBubble';
 import { ThinkingMessage } from './ThinkingMessage';
 
@@ -14,14 +15,24 @@ type MessageListProps = {
 	messages: ChatMessage[];
 	isLoading: boolean;
 	steps: GraphStep[];
+	isLoadingConversation?: boolean;
 };
 
-export const MessageList = ({ messages, isLoading, steps }: MessageListProps) => {
+export const MessageList = ({
+	messages,
+	isLoading,
+	steps,
+	isLoadingConversation = false,
+}: MessageListProps) => {
 	const bottomRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
 	}, [messages.length, isLoading, steps.length]);
+
+	if (isLoadingConversation && messages.length === 0) {
+		return <Loading label="Loading conversation" />;
+	}
 
 	if (messages.length === 0 && !isLoading) {
 		return (

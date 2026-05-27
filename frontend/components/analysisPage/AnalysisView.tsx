@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 
 import { Icon, IconName } from '@/components/icons';
+import { Loading } from '@/components/Loading';
 import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { SqlBlock, SqlEditor } from '@/components/SqlBlock';
 import { analyses } from '@/api/analyses';
@@ -144,15 +145,7 @@ export const AnalysisView = () => {
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
-				{loading && (
-					<div className="flex h-full items-center justify-center">
-						<div
-							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-							role="status"
-							aria-label="Loading custom analyses"
-						/>
-					</div>
-				)}
+				{loading && <Loading label="Loading custom analyses" />}
 
 				{!loading && error != null && (
 					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">

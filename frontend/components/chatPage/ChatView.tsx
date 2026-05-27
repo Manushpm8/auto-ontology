@@ -4,7 +4,8 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useChat } from '@/lib/useChat';
 import type { Conversation } from '@/types/chat';
 import {
@@ -18,9 +19,20 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 
 export const ChatView = () => {
-	const [activeConvId, setActiveConvId] = useState<string | null>(null);
+	const router = useRouter();
+	const pathname = usePathname();
+	const searchParams = useSearchParams();
+	const rawFocus = searchParams.get('focus');
+	const focusId = rawFocus != null && rawFocus.trim() !== '' ? rawFocus.trim() : null;
+
+	const [activeConvId, setActiveConvId] = useState<string | null>(focusId);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [conversations, setConversations] = useState<Conversation[]>([]);
+	const [conversationsLoading, setConversationsLoading] = useState(true);
+	const [activeConversationLoading, setActiveConversationLoading] = useState<boolean>(
+		focusId !== null,
+	);
+	const loadedFocusRef = useRef<string | null>(null);
 
 	const {
 		messages,
@@ -32,6 +44,20 @@ export const ChatView = () => {
 		stopGeneration,
 		clearMessages,
 	} = useChat();
+
+	const updateFocusInUrl = useCallback(
+		(id: string | null) => {
+			const params = new URLSearchParams(searchParams.toString());
+			if (id) {
+				params.set('focus', id);
+			} else {
+				params.delete('focus');
+			}
+			const query = params.toString();
+			router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+		},
+		[router, pathname, searchParams],
+	);
 
 	const refreshConversations = useCallback(async () => {
 		try {
@@ -51,6 +77,7 @@ export const ChatView = () => {
 
 	useEffect(() => {
 		let active = true;
+		setConversationsLoading(true);
 		conversationsApi
 			.list()
 			.then((summaries: ConversationSummary[]) => {
@@ -64,36 +91,80 @@ export const ChatView = () => {
 					})),
 				);
 			})
-			.catch(() => {});
+			.catch(() => {})
+			.finally(() => {
+				if (active) setConversationsLoading(false);
+			});
 		return () => {
 			active = false;
 		};
 	}, []);
 
+	useEffect(() => {
+		if (!focusId) {
+			loadedFocusRef.current = null;
+			setActiveConversationLoading(false);
+			return;
+		}
+		if (loadedFocusRef.current === focusId) return;
+		loadedFocusRef.current = focusId;
+		let active = true;
+		setActiveConversationLoading(true);
+		conversationsApi
+			.get(focusId)
+			.then((detail: ConversationDetail) => {
+				if (!active) return;
+				const conv = toConversation(detail);
+				setActiveConvId(detail.id);
+				setMessages(conv.messages);
+			})
+			.catch(() => {
+				if (!active) return;
+				loadedFocusRef.current = null;
+				updateFocusInUrl(null);
+			})
+			.finally(() => {
+				if (active) setActiveConversationLoading(false);
+			});
+		return () => {
+			active = false;
+		};
+	}, [focusId, setMessages, updateFocusInUrl]);
+
 	const handleNewChat = useCallback(async () => {
 		clearMessages();
 		setActiveConvId(null);
 		setSidebarOpen(false);
+		loadedFocusRef.current = null;
+		updateFocusInUrl(null);
 		await refreshConversations();
-	}, [clearMessages, refreshConversations]);
+	}, [clearMessages, refreshConversations, updateFocusInUrl]);
 
 	const handleSelectConversation = useCallback(
 		async (id: string) => {
 			if (id === activeConvId) {
 				setSidebarOpen(false);
+				updateFocusInUrl(id);
 				return;
 			}
+			setActiveConversationLoading(true);
+			setMessages([]);
+			setActiveConvId(id);
+			setSidebarOpen(false);
+			updateFocusInUrl(id);
 			try {
 				const detail: ConversationDetail = await conversationsApi.get(id);
 				const conv = toConversation(detail);
-				setActiveConvId(id);
+				loadedFocusRef.current = id;
+				setActiveConvId(detail.id);
 				setMessages(conv.messages);
-				setSidebarOpen(false);
 			} catch {
 				// ignore fetch errors
+			} finally {
+				setActiveConversationLoading(false);
 			}
 		},
-		[activeConvId, setMessages],
+		[activeConvId, setMessages, updateFocusInUrl],
 	);
 
 	const handleRename = useCallback(
@@ -115,13 +186,15 @@ export const ChatView = () => {
 				if (activeConvId === id) {
 					clearMessages();
 					setActiveConvId(null);
+					loadedFocusRef.current = null;
+					updateFocusInUrl(null);
 				}
 				await refreshConversations();
 			} catch {
 				// ignore
 			}
 		},
-		[activeConvId, clearMessages, refreshConversations],
+		[activeConvId, clearMessages, refreshConversations, updateFocusInUrl],
 	);
 
 	const handleSend = useCallback(
@@ -132,7 +205,9 @@ export const ChatView = () => {
 					const title = text.slice(0, 50) || 'New conversation';
 					const created = await conversationsApi.create(title);
 					convId = created.id;
+					loadedFocusRef.current = convId;
 					setActiveConvId(convId);
+					updateFocusInUrl(convId);
 					refreshConversations();
 				} catch {
 					return;
@@ -140,7 +215,7 @@ export const ChatView = () => {
 			}
 			sendMessage(text, convId);
 		},
-		[activeConvId, sendMessage, refreshConversations],
+		[activeConvId, sendMessage, refreshConversations, updateFocusInUrl],
 	);
 
 	return (
@@ -154,10 +229,16 @@ export const ChatView = () => {
 				onDelete={handleDelete}
 				isOpen={sidebarOpen}
 				onToggle={() => setSidebarOpen((o) => !o)}
+				isLoading={conversationsLoading}
 			/>
 
 			<main className="flex min-w-0 flex-1 flex-col">
-				<MessageList messages={messages} isLoading={isLoading} steps={steps} />
+				<MessageList
+					messages={messages}
+					isLoading={isLoading}
+					steps={steps}
+					isLoadingConversation={activeConversationLoading}
+				/>
 
 				{error && (
 					<div className="mx-auto w-full max-w-3xl px-4 py-2">

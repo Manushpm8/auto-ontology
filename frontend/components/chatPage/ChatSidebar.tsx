@@ -9,6 +9,7 @@ import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
 import { Icon, IconName } from '@/components/icons';
 import { ConfirmModal } from '@/components/ConfirmModal';
+import { Loading } from '@/components/Loading';
 import { PopoverMenu } from '@/components/PopoverMenu';
 
 type ChatSidebarProps = {
@@ -20,6 +21,7 @@ type ChatSidebarProps = {
 	onDelete: (id: string) => void;
 	isOpen: boolean;
 	onToggle: () => void;
+	isLoading?: boolean;
 };
 
 function ConversationItem({
@@ -150,6 +152,7 @@ export const ChatSidebar = ({
 	onDelete,
 	isOpen,
 	onToggle,
+	isLoading = false,
 }: ChatSidebarProps) => {
 	return (
 		<>
@@ -199,7 +202,9 @@ export const ChatSidebar = ({
 				</div>
 
 				<nav className="flex-1 overflow-y-auto px-2 pb-2">
-					{conversations.length === 0 ? (
+					{isLoading && conversations.length === 0 ? (
+						<Loading size="small" variant="block" label="Loading conversations" />
+					) : conversations.length === 0 ? (
 						<p className="px-2 py-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
 							No conversations yet
 						</p>
