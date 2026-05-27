@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 
 import { Icon, IconName } from '@/components/icons';
-import { ModalConfirm } from '@/components/ModalConfirm';
+import { ConfirmModal } from '@/components/ConfirmModal';
 import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { SqlBlock, SqlEditor } from '@/components/SqlBlock';
 import { analyses } from '@/api/analyses';
@@ -286,9 +286,9 @@ export const AnalysisView = () => {
 				)}
 			</ModalCreateNewItem>
 
-			<ModalConfirm
+			<ConfirmModal
 				open={deletingItem !== null}
-				onClose={handleDeleteClose}
+				onCancel={handleDeleteClose}
 				onConfirm={handleDeleteConfirm}
 				title="Delete custom analysis"
 				message={
