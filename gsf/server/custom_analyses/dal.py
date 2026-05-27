@@ -400,12 +400,10 @@ def create_custom_analysis(
     from gsf.ingestion_service.ingest import EMBED_PARAMS
     from gsf.vdb import get_vdb
 
-    connector = get_connector()
-
+    vdb = get_vdb()
     _embed_custom_analyses(
-        database_name=connector.database_name,
         embed_params=EMBED_PARAMS,
-        vdb=get_vdb(),
+        vdb=vdb,
         analysis_id=row["id"],
     )
 
@@ -491,11 +489,9 @@ def update_custom_analysis(
     from gsf.ingestion_service.ingest import EMBED_PARAMS
     from gsf.vdb import get_vdb
 
-    connector = get_connector()
     vdb = get_vdb()
     vdb.delete_by_id(analysis_id)
     _embed_custom_analyses(
-        database_name=connector.database_name,
         embed_params=EMBED_PARAMS,
         vdb=vdb,
         analysis_id=analysis_id,
@@ -560,15 +556,20 @@ def delete_custom_analysis(analysis_id: str) -> dict[str, str] | None:
 
 
 def _embed_custom_analyses(
-    database_name: str,
     embed_params: "EmbedParams",
     vdb: "VDB",
     analysis_id: str | None = None,
 ) -> None:
     """Fetch ``CustomAnalysis`` docs from Neo4j, embed them, and append to *vdb*.
 
-    Filters to analyses whose SQL references at least one table belonging to
-    *database_name* via the path
+    The target database is resolved from the active connector
+    (:func:`gsf.server.chat.helpers.get_connector`, built from
+    ``CONNECTION_STRINGS``) — every caller in the codebase already
+    operates against that same DB, so taking it as a parameter just
+    forced each caller to do the lookup itself.
+
+    Filters to analyses whose SQL references at least one table belonging
+    to the active database via the path
     ``CustomAnalysis -[:HAS_SQL]-> Sql -[:SQL]-> Table <-[:CONTAINS]- Schema <-[:CONTAINS]- Database``,
     shapes the result into the same 5-column DataFrame the main pipeline
     produces, then uses the same embedder
@@ -577,19 +578,21 @@ def _embed_custom_analyses(
     ``Table``/``Column`` rows are preserved.
 
     When *analysis_id* is given, the Cypher match is narrowed to that one
-    ``CustomAnalysis`` — used by the create path to embed only the row
-    just written instead of re-embedding the whole database on every
-    save. ``None`` (the default) preserves the original "embed every
-    analysis for *database_name*" behaviour, used for full ingests.
-    Because writes are append-only (see operator note above), passing
-    *analysis_id* for an analysis already present in the VDB would
-    duplicate its row; callers updating an existing analysis must
-    delete the stale VDB row first.
+    ``CustomAnalysis`` — used by the create/update paths to embed only
+    the row just written instead of re-embedding every analysis for the
+    database. ``None`` (the default) embeds every analysis for the
+    active database, used for full ingests. Because writes are
+    append-only (see operator note above), passing *analysis_id* for
+    an analysis already present in the VDB would duplicate its row;
+    callers updating an existing analysis must delete the stale VDB
+    row first.
     """
     import pandas as pd
 
     from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
     from nemo_retriever.vdb import IngestVdbOperator
+
+    database_name = get_connector().database_name
 
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
