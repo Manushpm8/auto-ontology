@@ -28,6 +28,8 @@ export const ChatView = () => {
 	const [activeConvId, setActiveConvId] = useState<string | null>(focusId);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [conversations, setConversations] = useState<Conversation[]>([]);
+	const [conversationsLoading, setConversationsLoading] = useState(true);
+	const [conversationLoading, setConversationLoading] = useState<boolean>(focusId != null);
 	const loadedFocusRef = useRef<string | null>(null);
 
 	const {
@@ -73,6 +75,7 @@ export const ChatView = () => {
 
 	useEffect(() => {
 		let active = true;
+		setConversationsLoading(true);
 		conversationsApi
 			.list()
 			.then((summaries: ConversationSummary[]) => {
@@ -86,7 +89,10 @@ export const ChatView = () => {
 					})),
 				);
 			})
-			.catch(() => {});
+			.catch(() => {})
+			.finally(() => {
+				if (active) setConversationsLoading(false);
+			});
 		return () => {
 			active = false;
 		};
@@ -95,11 +101,13 @@ export const ChatView = () => {
 	useEffect(() => {
 		if (!focusId) {
 			loadedFocusRef.current = null;
+			setConversationLoading(false);
 			return;
 		}
 		if (loadedFocusRef.current === focusId) return;
 		loadedFocusRef.current = focusId;
 		let active = true;
+		setConversationLoading(true);
 		conversationsApi
 			.get(focusId)
 			.then((detail: ConversationDetail) => {
@@ -112,6 +120,9 @@ export const ChatView = () => {
 				if (!active) return;
 				loadedFocusRef.current = null;
 				updateFocusInUrl(null);
+			})
+			.finally(() => {
+				if (active) setConversationLoading(false);
 			});
 		return () => {
 			active = false;
@@ -134,6 +145,7 @@ export const ChatView = () => {
 				updateFocusInUrl(id);
 				return;
 			}
+			setConversationLoading(true);
 			try {
 				const detail: ConversationDetail = await conversationsApi.get(id);
 				const conv = toConversation(detail);
@@ -144,6 +156,8 @@ export const ChatView = () => {
 				updateFocusInUrl(id);
 			} catch {
 				// ignore fetch errors
+			} finally {
+				setConversationLoading(false);
 			}
 		},
 		[activeConvId, setMessages, updateFocusInUrl],
@@ -211,10 +225,16 @@ export const ChatView = () => {
 				onDelete={handleDelete}
 				isOpen={sidebarOpen}
 				onToggle={() => setSidebarOpen((o) => !o)}
+				loading={conversationsLoading}
 			/>
 
 			<main className="flex min-w-0 flex-1 flex-col">
-				<MessageList messages={messages} isLoading={isLoading} steps={steps} />
+				<MessageList
+					messages={messages}
+					isLoading={isLoading}
+					steps={steps}
+					conversationLoading={conversationLoading}
+				/>
 
 				{error && (
 					<div className="mx-auto w-full max-w-3xl px-4 py-2">
