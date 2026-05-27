@@ -5,17 +5,15 @@
 """GSF Ontology construction pipeline.
 
 Subpackages:
-    domain_prereading — Phase 0: map-reduce summarization of the corpus
+    domain_prereading — Phase 0: iterative knowledge graph construction
 """
 
 from gsf.ontology.domain_prereading import (
-    ChunkSignals,
     DomainSummary,
     run_domain_prereading,
 )
 
 __all__ = [
-    "ChunkSignals",
     "DomainSummary",
     "run_domain_prereading",
 ]

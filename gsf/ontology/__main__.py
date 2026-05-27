@@ -9,12 +9,14 @@ Executes all phases of ontology construction in sequence:
   Phase 1: (future) Attribute extraction per table
   ...
 
+Reads schemas and SQL queries from the Neo4j graph (populated by a prior
+ingest run).
+
 Usage::
 
     uv run python -m gsf.ontology
 
 Environment:
-    CONNECTION_STRINGS  — comma-separated Postgres URIs (first used)
     NVIDIA_API_KEY      — required for LLM calls
     BASE_URL            — NIM endpoint (default: https://integrate.api.nvidia.com/v1)
     MODEL_NAME          — chat model (default: nvidia/nemotron-3-nano-30b-a3b)
@@ -28,7 +30,6 @@ import os
 import sys
 from pathlib import Path
 
-from gsf.connectors.postgres import PostgresDatabase
 from gsf.ontology.domain_prereading import DomainSummary, run_domain_prereading
 
 
@@ -40,19 +41,6 @@ def _load_env() -> None:
     load_dotenv(repo_root / ".env", override=True)
     gsf_dir = repo_root / "gsf"
     load_dotenv(gsf_dir / ".env", override=True)
-
-
-def _get_connection_string() -> str:
-    raw = os.environ.get("CONNECTION_STRINGS", "")
-    if not raw:
-        print(
-            "ERROR: CONNECTION_STRINGS is not set. "
-            "Add it to your .env, e.g.:\n"
-            "  CONNECTION_STRINGS=postgresql://user:pass@host:5432/dbname",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    return raw.split(",")[0]
 
 
 def _save_summary(summary: DomainSummary, output_path: Path) -> None:
@@ -70,7 +58,6 @@ def main() -> None:
     logger = logging.getLogger("gsf.ontology")
 
     _load_env()
-    connection_string = _get_connection_string()
 
     api_key = os.environ.get("NVIDIA_API_KEY", "")
     if not api_key:
@@ -82,18 +69,14 @@ def main() -> None:
     logger.info("PHASE 0 — Domain Pre-Reading")
     logger.info("=" * 60)
 
-    connector = PostgresDatabase(connection_string)
-    try:
-        summary = run_domain_prereading(connector)
-    finally:
-        connector.close()
+    summary = run_domain_prereading()
 
     output_dir = Path(__file__).resolve().parent / "output"
     output_path = output_dir / "domain_summary.json"
     _save_summary(summary, output_path)
 
     logger.info("Domain Summary saved to %s", output_path)
-    logger.info("  domain: %s", summary.domain)
+    logger.info("  domains: %s", summary.domains)
     logger.info("  entities: %s", summary.core_entities)
     logger.info("  metrics: %s", summary.core_metrics)
     logger.info("  rules: %d", len(summary.business_rules))

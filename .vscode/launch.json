@@ -1,16 +1,35 @@
 {
-  // Use IntelliSense to learn about possible attributes.
-  // Hover to view descriptions of existing attributes.
-  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug Ingest",
+      "name": "Debug Ingest Postgres",
       "type": "debugpy",
       "request": "launch",
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "module": "dev_tools.ingest_local_postgres",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Debug Ingest DuckDB",
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "module": "dev_tools.ingest_local_duckdb",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Debug Ontology",
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "module": "gsf.ontology",
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
@@ -72,6 +91,5 @@
       "console": "integratedTerminal",
       "justMyCode": false
     }
-
   ]
 }
