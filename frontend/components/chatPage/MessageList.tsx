@@ -5,25 +5,18 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import type { ChatMessage, GraphStep } from '@/types/chat';
 import { Icon, IconName } from '@/components/icons';
+import { useActiveChat } from '@/stores/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { ThinkingMessage } from './ThinkingMessage';
 
 type MessageListProps = {
-	messages: ChatMessage[];
-	isLoading: boolean;
-	steps: GraphStep[];
 	conversationLoading?: boolean;
 };
 
-export const MessageList = ({
-	messages,
-	isLoading,
-	steps,
-	conversationLoading = false,
-}: MessageListProps) => {
+export const MessageList = ({ conversationLoading = false }: MessageListProps) => {
 	const bottomRef = useRef<HTMLDivElement>(null);
+	const { messages, steps, isLoading } = useActiveChat();
 
 	useEffect(() => {
 		bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

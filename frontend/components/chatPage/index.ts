@@ -5,6 +5,7 @@
 export { ChatView } from './ChatView';
 export { ChatSidebar } from './ChatSidebar';
 export { ChatInput } from './ChatInput';
+export { ChatError } from './ChatError';
 export { MessageList } from './MessageList';
 export { MessageBubble } from './MessageBubble';
 export { ThinkingMessage } from './ThinkingMessage';

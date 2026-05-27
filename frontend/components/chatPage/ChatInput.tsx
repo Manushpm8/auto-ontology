@@ -6,14 +6,15 @@
 
 import { useCallback, useRef, type KeyboardEvent, type FormEvent } from 'react';
 import { Icon, IconName } from '@/components/icons';
+import { useActiveChat } from '@/stores/chatStore';
 
 type ChatInputProps = {
 	onSend: (text: string) => void;
 	onStop: () => void;
-	isLoading: boolean;
 };
 
-export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
+export const ChatInput = ({ onSend, onStop }: ChatInputProps) => {
+	const { isLoading } = useActiveChat();
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 	const resetHeight = () => {

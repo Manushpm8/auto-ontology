@@ -4,19 +4,26 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useChat } from '@/lib/useChat';
-import type { Conversation } from '@/types/chat';
+import { useChatStore } from '@/stores/chatStore';
+import { toConversation } from '@/api/conversations';
 import {
-	conversationsApi,
-	toConversation,
-	type ConversationSummary,
-	type ConversationDetail,
-} from '@/api/conversations';
+	useConversationDetail,
+	useConversationsList,
+	useCreateConversation,
+	useDeleteConversation,
+	useRenameConversation,
+} from '@/lib/conversationsQueries';
+import type { Conversation } from '@/types/chat';
+// Import the sibling files directly instead of via the ``./index`` barrel:
+// ``./index`` re-exports this very component, which would set up a circular
+// import that only works as long as nothing in this module is used at
+// initialisation time. Direct file imports keep the graph acyclic.
+import { ChatError } from './ChatError';
+import { ChatInput } from './ChatInput';
 import { ChatSidebar } from './ChatSidebar';
 import { MessageList } from './MessageList';
-import { ChatInput } from './ChatInput';
 
 export const ChatView = () => {
 	const router = useRouter();
@@ -25,23 +32,38 @@ export const ChatView = () => {
 	const rawFocus = searchParams.get('focus');
 	const focusId = rawFocus != null && rawFocus.trim() !== '' ? rawFocus.trim() : null;
 
-	const [activeConvId, setActiveConvId] = useState<string | null>(focusId);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
-	const [conversations, setConversations] = useState<Conversation[]>([]);
-	const [conversationsLoading, setConversationsLoading] = useState(true);
-	const [conversationLoading, setConversationLoading] = useState<boolean>(focusId != null);
-	const loadedFocusRef = useRef<string | null>(null);
 
-	const {
-		messages,
-		setMessages,
-		steps,
-		isLoading,
-		error,
-		sendMessage,
-		stopGeneration,
-		clearMessages,
-	} = useChat();
+	// Chat-stream state lives in the global store so navigating away from the
+	// /chat route and back does not abort the in-flight stream or wipe the
+	// visible progress. Each field is subscribed to individually so unrelated
+	// store updates do not re-render this component.
+	const activeConvId = useChatStore((s) => s.activeConvId);
+	const sendMessage = useChatStore((s) => s.sendMessage);
+	const stopGeneration = useChatStore((s) => s.stopGeneration);
+	const clearActive = useChatStore((s) => s.clearActive);
+	const setActiveConvId = useChatStore((s) => s.setActiveConvId);
+	const dropConversation = useChatStore((s) => s.dropConversation);
+
+	// Conversations list, detail, and mutations are managed by React Query.
+	// The list cache is invalidated by mutations and by the chat store after
+	// it persists a streamed message — no manual ``refreshConversations``.
+	const { data: summaries, isLoading: conversationsLoading } = useConversationsList();
+	const { data: detailData, isLoading: detailLoading } = useConversationDetail(focusId);
+	const createConvMut = useCreateConversation();
+	const renameConvMut = useRenameConversation();
+	const deleteConvMut = useDeleteConversation();
+
+	const conversations = useMemo<Conversation[]>(
+		() =>
+			(summaries ?? []).map((s) => ({
+				id: s.id,
+				title: s.title || 'New conversation',
+				messages: [],
+				createdAt: new Date(s.createdAt).getTime(),
+			})),
+		[summaries],
+	);
 
 	const updateFocusInUrl = useCallback(
 		(id: string | null) => {
@@ -57,162 +79,112 @@ export const ChatView = () => {
 		[router, pathname, searchParams],
 	);
 
-	const refreshConversations = useCallback(async () => {
-		try {
-			const summaries = await conversationsApi.list();
-			setConversations(
-				summaries.map((s: ConversationSummary) => ({
-					id: s.id,
-					title: s.title || 'New conversation',
-					messages: [],
-					createdAt: new Date(s.createdAt).getTime(),
-				})),
-			);
-		} catch {
-			// ignore fetch errors
-		}
-	}, []);
-
+	// Keep ``activeConvId`` in lock-step with the focus query param so the
+	// MessageList swaps to the new conversation immediately, without first
+	// rendering the old one's messages while ``useConversationDetail`` is
+	// still in flight. If the cache already has data for this conv we'll
+	// show it straight away; otherwise the spinner takes over until the
+	// detail effect below seeds messages.
 	useEffect(() => {
-		let active = true;
-		setConversationsLoading(true);
-		conversationsApi
-			.list()
-			.then((summaries: ConversationSummary[]) => {
-				if (!active) return;
-				setConversations(
-					summaries.map((s) => ({
-						id: s.id,
-						title: s.title || 'New conversation',
-						messages: [],
-						createdAt: new Date(s.createdAt).getTime(),
-					})),
-				);
-			})
-			.catch(() => {})
-			.finally(() => {
-				if (active) setConversationsLoading(false);
-			});
-		return () => {
-			active = false;
-		};
-	}, []);
-
-	useEffect(() => {
-		if (!focusId) {
-			loadedFocusRef.current = null;
-			setConversationLoading(false);
-			return;
+		if (activeConvId !== focusId) {
+			setActiveConvId(focusId);
 		}
-		if (loadedFocusRef.current === focusId) return;
-		loadedFocusRef.current = focusId;
-		let active = true;
-		setConversationLoading(true);
-		conversationsApi
-			.get(focusId)
-			.then((detail: ConversationDetail) => {
-				if (!active) return;
-				const conv = toConversation(detail);
-				setActiveConvId(detail.id);
-				setMessages(conv.messages);
-			})
-			.catch(() => {
-				if (!active) return;
-				loadedFocusRef.current = null;
-				updateFocusInUrl(null);
-			})
-			.finally(() => {
-				if (active) setConversationLoading(false);
-			});
-		return () => {
-			active = false;
-		};
-	}, [focusId, setMessages, updateFocusInUrl]);
+	}, [focusId, activeConvId, setActiveConvId]);
 
-	const handleNewChat = useCallback(async () => {
-		clearMessages();
+	// When the detail query resolves, seed the chat store. ``getState`` is
+	// used to read live store fields without subscribing — we must not
+	// re-render this component on every messagesByConv change.
+	useEffect(() => {
+		if (!detailData) return;
+		const { streamingConvId, messagesByConv, setMessagesForConv } = useChatStore.getState();
+		// Never clobber the messages of a conversation that is actively
+		// streaming — its in-progress state lives in the store.
+		if (streamingConvId === detailData.id) return;
+		// If we already have a non-empty cache for this conv, keep it (the
+		// detail snapshot may be stale relative to what just streamed in).
+		if (messagesByConv[detailData.id]?.length) return;
+		const conv = toConversation(detailData);
+		setMessagesForConv(detailData.id, conv.messages);
+	}, [detailData]);
+
+	const handleNewChat = useCallback(() => {
+		clearActive();
 		setActiveConvId(null);
 		setSidebarOpen(false);
-		loadedFocusRef.current = null;
 		updateFocusInUrl(null);
-		await refreshConversations();
-	}, [clearMessages, refreshConversations, updateFocusInUrl]);
+	}, [clearActive, setActiveConvId, updateFocusInUrl]);
 
 	const handleSelectConversation = useCallback(
-		async (id: string) => {
+		(id: string) => {
+			setSidebarOpen(false);
 			if (id === activeConvId) {
-				setSidebarOpen(false);
 				updateFocusInUrl(id);
 				return;
 			}
-			setConversationLoading(true);
-			try {
-				const detail: ConversationDetail = await conversationsApi.get(id);
-				const conv = toConversation(detail);
-				loadedFocusRef.current = id;
-				setActiveConvId(id);
-				setMessages(conv.messages);
-				setSidebarOpen(false);
-				updateFocusInUrl(id);
-			} catch {
-				// ignore fetch errors
-			} finally {
-				setConversationLoading(false);
-			}
+			// Detail will be fetched (or read from cache) by
+			// ``useConversationDetail`` once focusId updates.
+			updateFocusInUrl(id);
 		},
-		[activeConvId, setMessages, updateFocusInUrl],
+		[activeConvId, updateFocusInUrl],
 	);
 
 	const handleRename = useCallback(
-		async (id: string, title: string) => {
-			try {
-				await conversationsApi.rename(id, title);
-				await refreshConversations();
-			} catch {
-				// ignore
-			}
+		(id: string, title: string) => {
+			renameConvMut.mutate({ id, title });
 		},
-		[refreshConversations],
+		[renameConvMut],
 	);
 
 	const handleDelete = useCallback(
-		async (id: string) => {
-			try {
-				await conversationsApi.delete(id);
-				if (activeConvId === id) {
-					clearMessages();
-					setActiveConvId(null);
-					loadedFocusRef.current = null;
-					updateFocusInUrl(null);
-				}
-				await refreshConversations();
-			} catch {
-				// ignore
-			}
+		(id: string) => {
+			deleteConvMut.mutate(id, {
+				onSuccess: () => {
+					dropConversation(id);
+					if (focusId === id) updateFocusInUrl(null);
+				},
+			});
 		},
-		[activeConvId, clearMessages, refreshConversations, updateFocusInUrl],
+		[deleteConvMut, dropConversation, focusId, updateFocusInUrl],
 	);
 
 	const handleSend = useCallback(
 		async (text: string) => {
 			let convId = activeConvId;
+			const isNew = !convId;
 			if (!convId) {
 				try {
 					const title = text.slice(0, 50) || 'New conversation';
-					const created = await conversationsApi.create(title);
+					const created = await createConvMut.mutateAsync(title);
 					convId = created.id;
-					loadedFocusRef.current = convId;
-					setActiveConvId(convId);
-					updateFocusInUrl(convId);
-					refreshConversations();
 				} catch {
 					return;
 				}
 			}
+			// Push the user message into the store *before* swapping the
+			// focus so the freshly-created conversation already has its
+			// first message by the time ``focusId`` changes. Otherwise the
+			// spinner would briefly show against an empty MessageList.
 			sendMessage(text, convId);
+			if (isNew) {
+				setActiveConvId(convId);
+				updateFocusInUrl(convId);
+			}
 		},
-		[activeConvId, sendMessage, refreshConversations, updateFocusInUrl],
+		[activeConvId, createConvMut, sendMessage, setActiveConvId, updateFocusInUrl],
 	);
+
+	// Spinner stays on until the store actually has messages for ``focusId``.
+	// Relying on ``activeConvId !== focusId`` alone caused a flash of an
+	// empty MessageList: ``setActiveConvId`` runs in an effect *after* the
+	// first render, so on render N+1 the equality already held while the
+	// detail query was still in flight and ``messagesByConv[focusId]``
+	// was still empty. Subscribing to the message count for the *focus*
+	// conv keeps the spinner up until either the store seeds it (from
+	// detailData) or ``sendMessage`` adds the first user message.
+	const focusMessageCount = useChatStore((s) =>
+		focusId ? (s.messagesByConv[focusId]?.length ?? 0) : 0,
+	);
+	const conversationLoading = !!focusId && detailLoading && focusMessageCount === 0;
 
 	return (
 		<div className="flex h-full bg-white dark:bg-zinc-950">
@@ -229,22 +201,9 @@ export const ChatView = () => {
 			/>
 
 			<main className="flex min-w-0 flex-1 flex-col">
-				<MessageList
-					messages={messages}
-					isLoading={isLoading}
-					steps={steps}
-					conversationLoading={conversationLoading}
-				/>
-
-				{error && (
-					<div className="mx-auto w-full max-w-3xl px-4 py-2">
-						<p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-							{error}
-						</p>
-					</div>
-				)}
-
-				<ChatInput onSend={handleSend} onStop={stopGeneration} isLoading={isLoading} />
+				<MessageList conversationLoading={conversationLoading} />
+				<ChatError />
+				<ChatInput onSend={handleSend} onStop={stopGeneration} />
 			</main>
 		</div>
 	);
