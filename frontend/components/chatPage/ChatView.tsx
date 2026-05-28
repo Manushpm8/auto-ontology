@@ -14,6 +14,7 @@ import {
 	type ConversationSummary,
 	type ConversationDetail,
 } from '@/api/conversations';
+import { Toast } from '@/components/Toast';
 import { ChatSidebar } from './ChatSidebar';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -41,6 +42,7 @@ export const ChatView = () => {
 		sendMessage,
 		stopGeneration,
 		clearMessages,
+		clearError,
 	} = useChat();
 
 	const updateFocusInUrl = useCallback(
@@ -236,16 +238,15 @@ export const ChatView = () => {
 					conversationLoading={conversationLoading}
 				/>
 
-				{error && (
-					<div className="mx-auto w-full max-w-3xl px-4 py-2">
-						<p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-							{error}
-						</p>
-					</div>
-				)}
-
 				<ChatInput onSend={handleSend} onStop={stopGeneration} isLoading={isLoading} />
 			</main>
+
+			<Toast
+				open={error != null}
+				message={error ?? ''}
+				variant="error"
+				onClose={clearError}
+			/>
 		</div>
 	);
 };

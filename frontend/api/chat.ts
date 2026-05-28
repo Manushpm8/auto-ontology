@@ -11,6 +11,14 @@ import type {
 } from '@/types/chat';
 
 export type StreamChatCallbacks = {
+	/**
+	 * Fires once the backend has accepted the request (HTTP 200 + body ready
+	 * to stream). Useful for committing optimistic state — e.g. the user
+	 * message — only after the server agreed to process it, so failures
+	 * before the stream starts (e.g. 409 "Conversation in progress") don't
+	 * leave orphan messages in the conversation.
+	 */
+	onStart?: () => void;
 	onStep: (event: StepEvent) => void;
 	onResult: (event: ResultEvent) => void;
 	onError: (event: ErrorEvent) => void;
@@ -41,12 +49,29 @@ export const streamChat = (
 			});
 
 			if (!res.ok || !res.body) {
-				callbacks.onError({
-					type: 'error',
-					message: `Server responded with ${res.status}`,
-				});
+				let message = `Server responded with ${res.status}`;
+				try {
+					const text = await res.text();
+					if (text) {
+						try {
+							const parsed = JSON.parse(text) as { detail?: unknown };
+							if (typeof parsed.detail === 'string' && parsed.detail.trim()) {
+								message = parsed.detail;
+							} else {
+								message = text;
+							}
+						} catch {
+							message = text;
+						}
+					}
+				} catch {
+					// keep default message
+				}
+				callbacks.onError({ type: 'error', message });
 				return;
 			}
+
+			callbacks.onStart?.();
 
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
