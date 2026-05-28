@@ -59,6 +59,19 @@ def _worker_loop(
 ) -> None:
     """Subprocess entry: import once, then process ``ask`` messages forever."""
 
+    # `multiprocessing` with the `spawn` start method does NOT inherit the
+    # parent's logging configuration — the child runs straight into this
+    # function, never executing the parent's `logging.basicConfig` call in
+    # `gsf.server.__main__`. Without re-applying it here, INFO-level logs
+    # from the agent ("Final answer (Xs):", per-step traces, etc.) are
+    # silently dropped because Python's default root level is WARNING.
+    # Subprocess stdout/stderr are inherited from the parent, so once
+    # configured, log lines flow into the same terminal as everything else.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     try:
         from nemo_retriever.tabular_data.retrieval.text_to_sql.main import (
             stream_agent_response,
