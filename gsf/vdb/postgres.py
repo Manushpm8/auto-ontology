@@ -266,6 +266,49 @@ class PostgresVDB(VDB):
         store.delete(filter=filter)
         return ids
 
+    def delete_by_id(self, node_id: str) -> int:
+        """Delete every row whose metadata ``id`` matches ``node_id``.
+
+        ``id`` lives in the JSONB ``langchain_metadata`` column (it is not
+        a promoted real column — only ``database_name`` and ``label`` are),
+        so the match goes through ``langchain_metadata ->> 'id'`` rather
+        than the typed-filter path used by :meth:`delete_by_database`.
+        Going through ``PGVectorStore.delete(filter=...)`` would be a
+        no-op for this case because the dict-format filter only resolves
+        declared metadata columns.
+
+        Returns the number of rows deleted (``0`` when the collection
+        table doesn't exist yet or nothing matched).
+        """
+        if not self._table_exists():
+            logger.info(
+                "PostgresVDB.delete_by_id: collection %s not found, nothing to delete",
+                self.collection_name,
+            )
+            return 0
+
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                # `collection_name` is internal config (defaults to
+                # 'nv_ingest_tabular'); psycopg can't parameterise table
+                # identifiers, so it's interpolated here. Not user input.
+                cur.execute(
+                    f"""
+                    DELETE FROM {self.collection_name}
+                    WHERE langchain_metadata ->> 'id' = %s
+                    """,
+                    (node_id,),
+                )
+                deleted = cur.rowcount
+
+        logger.info(
+            "PostgresVDB.delete_by_id: deleted %d rows from %s for id=%s",
+            deleted,
+            self.collection_name,
+            node_id,
+        )
+        return deleted
+
     def retrieval(
         self,
         queries: list,

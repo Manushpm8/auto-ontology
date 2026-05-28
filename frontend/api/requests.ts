@@ -76,4 +76,13 @@ export const requests = {
 			ResponseWithError<OutputType>
 		>;
 	},
+
+	delete: <OutputType>(url: string, abortController?: AbortController) => {
+		return api
+			.delete<OutputType>(url, {
+				signal: abortController?.signal,
+			})
+			.then(responseBody)
+			.catch(errorHandler) as Promise<ResponseWithError<OutputType>>;
+	},
 };

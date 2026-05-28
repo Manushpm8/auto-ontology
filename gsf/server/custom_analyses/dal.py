@@ -400,12 +400,11 @@ def create_custom_analysis(
     from gsf.ingestion_service.ingest import EMBED_PARAMS
     from gsf.vdb import get_vdb
 
-    connector = get_connector()
-
+    vdb = get_vdb()
     _embed_custom_analyses(
-        database_name=connector.database_name,
         embed_params=EMBED_PARAMS,
-        vdb=get_vdb(),
+        vdb=vdb,
+        analysis_id=row["id"],
     )
 
     return row
@@ -482,7 +481,73 @@ def update_custom_analysis(
         override_existing_props={"name": name, "description": description},
     )
 
-    return _persist_analysis_with_sql(analysis_node, sql, query_obj)
+    row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
+
+    # `IngestVdbOperator` appends, so re-embedding without first dropping
+    # the stale row would leave two VDB entries for this analysis_id and
+    # double-weight it at retrieval time.
+    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    from gsf.vdb import get_vdb
+
+    vdb = get_vdb()
+    vdb.delete_by_id(analysis_id)
+    _embed_custom_analyses(
+        embed_params=EMBED_PARAMS,
+        vdb=vdb,
+        analysis_id=analysis_id,
+    )
+
+    return row
+
+
+def delete_custom_analysis(analysis_id: str) -> dict[str, str] | None:
+    """Remove a CustomAnalysis, its Sql node, and its VDB embedding.
+
+    Returns ``{"id": analysis_id}`` on success, or ``None`` when no
+    ``CustomAnalysis`` with ``analysis_id`` exists (caller maps to 404).
+
+    Cypher uses ``DETACH DELETE ca, sql`` so both nodes and every edge
+    they participate in vanish in one statement — including the
+    ``Sql -[:SQL]-> Table/Column`` edges that retrieval walks.
+    ``Table`` / ``Column`` nodes themselves are kept (they belong to the
+    schema, not the analysis). Sharing of an ``Sql`` node across
+    analyses is already prevented at write time by
+    :class:`CustomAnalysisSqlConflict` (see
+    :func:`_find_analysis_owning_sql`), so this never strands another
+    analysis.
+
+    Graph delete happens before the VDB delete so a Neo4j failure
+    leaves both stores pointing at the same (still-present) record;
+    if Neo4j succeeds and the VDB delete throws, the orphan VDB row
+    will be cleaned up on the next ingest of *database_name*
+    (``PostgresVDB.__init__`` calls ``delete_by_database`` at startup,
+    see ``gsf/vdb/postgres.py``).
+    """
+    existing = get_neo4j_conn().query_read(
+        f"""
+        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
+        RETURN ca.id AS id
+        LIMIT 1
+        """,
+        {"analysis_id": analysis_id},
+    )
+    if not existing:
+        return None
+
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
+              -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        DETACH DELETE ca, sql
+        """,
+        {"analysis_id": analysis_id},
+    )
+
+    from gsf.vdb import get_vdb
+
+    get_vdb().delete_by_id(analysis_id)
+
+    return {"id": analysis_id}
 
 
 # ---------------------------------------------------------------------------
@@ -491,20 +556,34 @@ def update_custom_analysis(
 
 
 def _embed_custom_analyses(
-    database_name: str,
     embed_params: "EmbedParams",
     vdb: "VDB",
+    analysis_id: str | None = None,
 ) -> None:
     """Fetch ``CustomAnalysis`` docs from Neo4j, embed them, and append to *vdb*.
 
-    Filters to analyses whose SQL references at least one table belonging to
-    *database_name* via the path
-    ``CustomAnalysis -[:HAS_SQL]-> Sql -[:SQL]-> Table <-[:CONTAINS]- Schema <-[:CONTAINS]- Database``,
-    shapes the result into the same 5-column DataFrame the main pipeline
-    produces, then uses the same embedder
+    Shapes every matched ``CustomAnalysis`` into the same 5-column
+    DataFrame the main pipeline produces, then uses the same embedder
     (:func:`nemo_retriever.text_embed.runtime.embed_text_main_text_embed`) and
     writes the embedded rows through *vdb* in append mode, so existing
     ``Table``/``Column`` rows are preserved.
+
+    ``CustomAnalysis`` is treated as a single global pool — the graph
+    isn't sliced per database here because nothing downstream reads
+    the row back by database name: ``PostgresVDB.delete_by_database``
+    explicitly excludes the ``CustomAnalysis`` label (see
+    ``gsf/vdb/postgres.py``), and retrieval matches on label + vector
+    similarity, not on database.
+
+    When *analysis_id* is given, the Cypher match is narrowed to that
+    one ``CustomAnalysis`` — used by the create/update paths to embed
+    only the row just written instead of re-embedding every analysis.
+    ``None`` (the default) embeds every ``CustomAnalysis`` linked to
+    an ``Sql`` node, used for full ingests. Because writes are
+    append-only (see operator note above), passing *analysis_id* for
+    an analysis already present in the VDB would duplicate its row;
+    callers updating an existing analysis must delete the stale VDB
+    row first.
     """
     import pandas as pd
 
@@ -513,8 +592,7 @@ def _embed_custom_analyses(
 
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-              -[:{Edges.SQL}]->(t:{Labels.TABLE})<-[:{Edges.CONTAINS}]-(s:{Labels.SCHEMA})
-              <-[:{Edges.CONTAINS}]-(d:{Labels.DB}{{name: $database_name}})
+        WHERE $analysis_id IS NULL OR ca.id = $analysis_id
         WITH DISTINCT ca, sql,
              CASE
                  WHEN ca.description IS NOT NULL AND trim(toString(ca.description)) <> ''
@@ -536,12 +614,14 @@ def _embed_custom_analyses(
         }}) AS docs
     """
     result = get_neo4j_conn().query_read(
-        query, parameters={"database_name": database_name}
+        query,
+        parameters={"analysis_id": analysis_id},
     )
     docs = result[0].get("docs") if result else None
     if not docs:
         logger.info(
-            "No CustomAnalysis rows found for %r; skipping VDB upsert.", database_name
+            "No CustomAnalysis rows found for analysis_id=%r; skipping VDB upsert.",
+            analysis_id,
         )
         return
 
@@ -554,7 +634,6 @@ def _embed_custom_analyses(
             "label": item.get("label", ""),
             "name": item.get("name", ""),
             "source_path": path,
-            "database_name": database_name,
         }
         rows.append(
             {

@@ -154,6 +154,23 @@ def update_custom_analysis(analysis_id: str, body: CustomAnalysisCreate) -> dict
     return {"data": row}
 
 
+@router.delete("/custom-analyses/{analysis_id}")
+def delete_custom_analysis(analysis_id: str) -> dict:
+    """Delete a CustomAnalysis (with its Sql node and VDB embedding).
+
+    Returns 404 when no CustomAnalysis with ``analysis_id`` exists.
+    On success the deleted ``{"id": ...}`` is echoed so the UI can
+    confirm the targeted record was removed.
+    """
+    row = custom_analyses_dal.delete_custom_analysis(analysis_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"CustomAnalysis {analysis_id!r} not found",
+        )
+    return {"data": row}
+
+
 # ---------------------------------------------------------------------------
 # Node property update (/api/nodes/{node_id})
 # ---------------------------------------------------------------------------
