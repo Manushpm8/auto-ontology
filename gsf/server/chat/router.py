@@ -4,9 +4,10 @@
 
 """Chat streaming endpoint — wraps the LangGraph text-to-SQL pipeline.
 
-Each chat request runs in its own subprocess (``AgentWorker``) so we can
-hard-cancel an in-flight stream if the user navigates away mid-thinking and
-sends a new question on return. See ``worker.py`` for the rationale.
+Each chat request runs in a prewarmed agent subprocess from
+``WarmPool``. See ``worker.py`` for why subprocess isolation is
+necessary (cancellation of sync, C-blocked agent code) and how the warm
+pool keeps the cold-start cost off the request path.
 
 Concurrency model
 -----------------
@@ -19,8 +20,9 @@ state, single LLM rate budget), so only one stream is allowed at a time.
   the new request is rejected with HTTP 409.
 * If the slot is held by an **orphaned** stream (its client navigated away
   and the TCP connection died) → the new request preempts: the orphan
-  worker is SIGKILLed and the new one takes over. This is what makes
-  "navigate away → come back → ask again" work without a 409.
+  worker is killed-and-replaced via the pool, and the new request takes
+  the standby. This is what makes "navigate away → come back → ask again"
+  work without a 409.
 
 Disconnect detection
 --------------------
@@ -45,7 +47,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from gsf.server.chat.helpers import NODE_LABELS, ChatRequest
-from gsf.server.chat.worker import AgentWorker
+from gsf.server.chat.worker import PrewarmedWorker, get_pool
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +62,15 @@ _DISCONNECT_POLL_S = 0.1
 class _Slot:
     """In-flight stream descriptor stored in ``_active_slot``."""
 
-    worker: AgentWorker
-    # Set while the SSE response is actively streaming to a connected client.
-    # Cleared by the watchdog on disconnect or by the response generator's
-    # ``finally`` on natural completion. A cleared event means "no one is
-    # listening" → safe to preempt.
+    worker: PrewarmedWorker
     client_alive: threading.Event
+    # Set if the watchdog detected a client disconnect. Tells the stream's
+    # finally whether to ``replace`` the worker (cancel) or ``return_alive``
+    # it to the warm pool (natural completion).
+    cancelled: threading.Event
+    # Latches the moment any path (watchdog or stream finally) has called
+    # back into the pool, so the second path doesn't double-release.
+    released: threading.Event
 
 
 _active_slot: _Slot | None = None
@@ -79,8 +84,9 @@ def _sse(event: dict) -> str:
 def _try_claim_slot(new_slot: _Slot) -> _Slot | None:
     """Install ``new_slot`` if the previous one's client is gone.
 
-    Returns the displaced slot (caller must kill its worker) on success.
-    Raises HTTPException(409) if the previous slot still has a live client.
+    Returns the displaced slot (caller must replace its worker via the pool)
+    on success. Raises HTTPException(409) if the previous slot still has a
+    live client.
     """
 
     global _active_slot
@@ -95,15 +101,29 @@ def _try_claim_slot(new_slot: _Slot) -> _Slot | None:
         return prev
 
 
-def _release_slot(slot: _Slot) -> None:
-    """Mark ``slot``'s client as gone and clear it from the active slot."""
+def _release(slot: _Slot) -> None:
+    """Free the slot and hand the worker back to the pool.
+
+    Idempotent. ``slot.cancelled`` decides whether the worker is killed
+    (cancel) or returned alive (natural end). The first caller wins; the
+    second is a no-op via ``slot.released``.
+    """
+
+    if slot.released.is_set():
+        return
+    slot.released.set()
+    slot.client_alive.clear()
 
     global _active_slot
-    slot.client_alive.clear()
     with _slot_lock:
         if _active_slot is slot:
             _active_slot = None
-    slot.worker.kill()
+
+    pool = get_pool()
+    if slot.cancelled.is_set():
+        pool.replace(slot.worker)
+    else:
+        pool.return_alive(slot.worker)
 
 
 async def _watch_disconnect(http_request: Request, slot: _Slot) -> None:
@@ -122,12 +142,13 @@ async def _watch_disconnect(http_request: Request, slot: _Slot) -> None:
             logger.exception("Disconnect watchdog failed")
             return
         if disconnected:
-            _release_slot(slot)
+            slot.cancelled.set()
+            _release(slot)
             return
         await asyncio.sleep(_DISCONNECT_POLL_S)
 
 
-def _stream_chat(worker: AgentWorker) -> Generator[str, None, None]:
+def _stream_chat(worker: PrewarmedWorker) -> Generator[str, None, None]:
     try:
         for item in worker.events():
             if item is None:
@@ -152,34 +173,38 @@ def _stream_with_slot(slot: _Slot) -> Generator[str, None, None]:
     try:
         yield from _stream_chat(slot.worker)
     finally:
-        # Idempotent with the watchdog's cleanup — whichever runs first
-        # frees the slot; the second call is a no-op.
-        _release_slot(slot)
+        _release(slot)
 
 
 @router.post("/chat/completions")
 async def chat_completions(
     request: ChatRequest, http_request: Request
 ) -> StreamingResponse:
-    worker = AgentWorker()
-    worker.start(request.question)
-    slot = _Slot(worker=worker, client_alive=threading.Event())
+    pool = get_pool()
+    worker = pool.acquire()
+    slot = _Slot(
+        worker=worker,
+        client_alive=threading.Event(),
+        cancelled=threading.Event(),
+        released=threading.Event(),
+    )
     slot.client_alive.set()
 
     try:
         displaced = _try_claim_slot(slot)
     except HTTPException:
-        # Lost the race against a still-connected sibling — tear down the
-        # subprocess we just spawned so we don't leak it.
-        worker.kill()
+        # Lost the race against a still-connected sibling — return the
+        # acquired worker to the pool so we don't waste its warm state.
+        pool.return_alive(worker)
         raise
 
     if displaced is not None:
-        displaced.worker.kill()
+        # Previous client was gone — replace the orphan via the pool so a
+        # fresh standby is on its way for the next request.
+        displaced.cancelled.set()
+        _release(displaced)
 
-    # Fire-and-forget: the task self-terminates when client_alive clears
-    # (either by disconnect detection or by the stream's finally on natural
-    # completion). No await/cancel needed from the response path.
+    worker.submit(request.question)
     asyncio.create_task(_watch_disconnect(http_request, slot))
 
     return StreamingResponse(
