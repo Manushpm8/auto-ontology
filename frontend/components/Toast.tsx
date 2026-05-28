@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 type ToastVariant = 'error' | 'success' | 'info' | 'pending';
@@ -86,10 +86,18 @@ const defaultTitle: Record<ToastVariant, string | undefined> = {
 const capitalizeFirst = (value: string): string =>
 	value.length === 0 ? value : value.charAt(0).toUpperCase() + value.slice(1);
 
+// Track hydration via useSyncExternalStore so the snapshot differs between
+// server (false) and client (true) without a setState-in-effect.
+const subscribeHydration = () => () => {};
+const getHydratedSnapshot = () => true;
+const getHydratedServerSnapshot = () => false;
+
 export const Toast = ({ open, message, title, variant = 'error', onClose }: ToastProps) => {
-	// Mount the portal only on the client to avoid SSR `document` access.
-	const [mounted, setMounted] = useState(false);
-	useEffect(() => setMounted(true), []);
+	const mounted = useSyncExternalStore(
+		subscribeHydration,
+		getHydratedSnapshot,
+		getHydratedServerSnapshot,
+	);
 
 	if (!mounted || !open) return null;
 
