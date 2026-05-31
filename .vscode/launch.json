@@ -2,6 +2,18 @@
   "version": "0.2.0",
   "configurations": [
     {
+        "name": "Create Ontology",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "gsf.ontology.rigor",
+        "args": ["--all", "--bird-root", "~/bird/minidev/MINIDEV"],
+        "cwd": "${workspaceFolder}",
+        "python": "${workspaceFolder}/.venv/bin/python",
+        "envFile": "${workspaceFolder}/.env",
+        "console": "integratedTerminal",
+        "justMyCode": false
+    },
+    {
       "name": "Debug Ingest Postgres",
       "type": "debugpy",
       "request": "launch",
