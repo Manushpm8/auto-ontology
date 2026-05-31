@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _FETCH_TABLES_QUERY = f"""
-MATCH (db:{Labels.DB} {{name: $db_name}})-[:{Edges.CONTAINS}]->
-      (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
+MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+      (s:{Labels.SCHEMA} {{name: $schema_name}})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
 OPTIONAL MATCH (t)<-[:{Edges.SQL}]-(sql:{Labels.SQL})
 WITH t, s, count(DISTINCT sql) AS query_count
 RETURN t.id          AS id,
@@ -70,8 +70,8 @@ LIMIT $limit
 """
 
 _FETCH_ALL_SQL_QUERY = f"""
-MATCH (db:{Labels.DB} {{name: $db_name}})-[:{Edges.CONTAINS}]->
-      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(:{Labels.TABLE})
+MATCH (:{Labels.DB})-[:{Edges.CONTAINS}]->
+      (:{Labels.SCHEMA} {{name: $schema_name}})-[:{Edges.CONTAINS}]->(:{Labels.TABLE})
       <-[:{Edges.SQL}]-(sql:{Labels.SQL})
 RETURN DISTINCT sql.sql_full_query AS sql_text,
        sql.total_counter           AS total_counter
@@ -80,8 +80,8 @@ LIMIT $limit
 """
 
 _FETCH_JOINS_QUERY = f"""
-MATCH (db:{Labels.DB} {{name: $db_name}})-[:{Edges.CONTAINS}]->
-      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t1:{Labels.TABLE})
+MATCH (:{Labels.DB})-[:{Edges.CONTAINS}]->
+      (:{Labels.SCHEMA} {{name: $schema_name}})-[:{Edges.CONTAINS}]->(t1:{Labels.TABLE})
       -[j:{Edges.JOIN}]->(t2:{Labels.TABLE})
 RETURN t1.name AS source_table,
        t2.name AS target_table,
@@ -100,7 +100,7 @@ def fetch_sorted_tables(
 ) -> list[dict[str, Any]]:
     """Return tables sorted by query count (descending)."""
     conn = get_neo4j_conn()
-    rows = conn.query_read(_FETCH_TABLES_QUERY, {"db_name": database_name})
+    rows = conn.query_read(_FETCH_TABLES_QUERY, {"schema_name": database_name})
     tables = []
     for r in rows:
         qc = int(r.get("query_count") or 0)
@@ -148,7 +148,7 @@ def fetch_all_sql_texts(
     conn = get_neo4j_conn()
     return conn.query_read(
         _FETCH_ALL_SQL_QUERY,
-        {"db_name": database_name, "limit": limit},
+        {"schema_name": database_name, "limit": limit},
     )
 
 
@@ -157,7 +157,7 @@ def fetch_existing_joins(
 ) -> list[dict[str, Any]]:
     """Return all [:JOIN] edges already in the graph."""
     conn = get_neo4j_conn()
-    return conn.query_read(_FETCH_JOINS_QUERY, {"db_name": database_name})
+    return conn.query_read(_FETCH_JOINS_QUERY, {"schema_name": database_name})
 
 
 # ---------------------------------------------------------------------------
