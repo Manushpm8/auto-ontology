@@ -120,18 +120,11 @@ def _build_user_prompt(
             if isinstance(samples, list) and samples
             else "(none)"
         )
-        val_desc = ctx.get("value_descriptions", {}).get(c["name"], "")
-        desc_parts = []
-        if c.get("description"):
-            desc_parts.append(c["description"])
-        if val_desc:
-            desc_parts.append(f"[BIRD: {val_desc}]")
-
         col_lines.append(
             f"  - {c['name']} ({c.get('data_type', '?')})"
             f"  |  sql_refs={c.get('sql_ref_count', 0)}"
             f"  |  samples=[{sample_str}]"
-            f"  |  desc={' '.join(desc_parts) or '(none)'}"
+            f"  |  desc={c.get('description') or '(none)'}"
         )
     if col_lines:
         blocks.append("### Columns\n" + "\n".join(col_lines))

@@ -1,12 +1,11 @@
 """Data loading for the Rigor pipeline.
 
-Primary source: Neo4j graph (tables, columns, FKs, SQL queries).
-Supplementary: BIRD evidence strings and value_description CSVs.
+Primary source: Neo4j graph (tables, columns with descriptions, FKs, SQL queries).
+Supplementary: BIRD evidence strings.
 """
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
 from pathlib import Path
@@ -206,59 +205,15 @@ def load_evidence(
     return {"all": evidence_strings}
 
 
-def load_value_descriptions(
-    db_id: str,
-    bird_root: str,
-) -> dict[str, dict[str, str]]:
-    """Load value_description from BIRD database_description CSVs.
-
-    Returns {table_name: {column_name: value_description}}.
-    Only includes columns with non-empty value_description.
-    """
-    db_desc_dir = Path(bird_root) / "dev_databases" / db_id / "database_description"
-    if not db_desc_dir.exists():
-        logger.warning("No database_description dir at %s", db_desc_dir)
-        return {}
-
-    result: dict[str, dict[str, str]] = {}
-    for csv_path in sorted(db_desc_dir.glob("*.csv")):
-        table_name = csv_path.stem
-        col_descs: dict[str, str] = {}
-        with open(csv_path, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                col_name = row.get("original_column_name", "").strip()
-                val_desc = row.get("value_description", "").strip()
-                col_desc = row.get("column_description", "").strip()
-                if col_name and (val_desc or col_desc):
-                    parts = []
-                    if col_desc:
-                        parts.append(col_desc)
-                    if val_desc:
-                        parts.append(val_desc)
-                    col_descs[col_name] = "; ".join(parts)
-        if col_descs:
-            result[table_name] = col_descs
-
-    logger.info(
-        "Loaded value_descriptions for %d tables from %s",
-        len(result),
-        db_desc_dir,
-    )
-    return result
-
-
 def enrich_context_with_bird(
     ctx: dict[str, Any],
     table_name: str,
     evidence: dict[str, list[str]],
-    value_descs: dict[str, dict[str, str]],
 ) -> None:
-    """Enrich a table context dict with BIRD supplementary data (in-place).
+    """Enrich a table context dict with BIRD evidence strings (in-place).
 
     Adds:
-      ctx["evidence"] — evidence strings mentioning this table's columns
-      ctx["value_descriptions"] — per-column value descriptions
+      ctx["evidence"] — evidence strings mentioning this table or its columns
     """
     col_names = {c["name"].lower() for c in ctx.get("columns", [])}
 
@@ -269,4 +224,3 @@ def enrich_context_with_bird(
             relevant_evidence.append(ev)
 
     ctx["evidence"] = relevant_evidence
-    ctx["value_descriptions"] = value_descs.get(table_name, {})

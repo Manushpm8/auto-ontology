@@ -31,7 +31,6 @@ from gsf.ontology.rigor.loaders import (
     fetch_sorted_tables,
     fetch_table_context,
     load_evidence,
-    load_value_descriptions,
 )
 from gsf.ontology.rigor.models import BusinessTerm, CoreOntology, Provenance
 from gsf.ontology.rigor.neo4j_ops import write_ontology_to_neo4j
@@ -75,10 +74,8 @@ def build_ontology(
     logger.info("Found %d tables: %s", len(tables), all_table_names)
 
     evidence: dict[str, list[str]] = {}
-    value_descs: dict[str, dict[str, str]] = {}
     if bird_root:
         evidence = load_evidence(database_name, bird_root)
-        value_descs = load_value_descriptions(database_name, bird_root)
 
     vocab_service = ExternalVocabService(db_id=database_name, evidence=evidence)
 
@@ -108,7 +105,7 @@ def build_ontology(
 
         # 2. Enrich with BIRD data
         if bird_root:
-            enrich_context_with_bird(ctx, table["name"], evidence, value_descs)
+            enrich_context_with_bird(ctx, table["name"], evidence)
 
         # 3. Deterministic detection
         det_result = run_deterministic(table, ctx, all_table_names)
