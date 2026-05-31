@@ -18,9 +18,7 @@ const getResponseErrorMessage = async (res: Response): Promise<string> => {
 	try {
 		const { detail } = JSON.parse(text) as { detail?: unknown };
 		if (typeof detail === 'string' && detail.trim()) return detail;
-	} catch {
-
-	}
+	} catch {}
 	return text;
 };
 
