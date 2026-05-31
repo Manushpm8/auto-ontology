@@ -10,6 +10,20 @@ import type {
 	ErrorEvent,
 } from '@/types/chat';
 
+const getResponseErrorMessage = async (res: Response): Promise<string> => {
+	const fallback = `Server responded with ${res.status}`;
+	const text = await res.text().catch(() => '');
+	if (!text) return fallback;
+
+	try {
+		const { detail } = JSON.parse(text) as { detail?: unknown };
+		if (typeof detail === 'string' && detail.trim()) return detail;
+	} catch {
+
+	}
+	return text;
+};
+
 export type StreamChatCallbacks = {
 	/**
 	 * Fires once the backend has accepted the request (HTTP 200 + body ready
@@ -49,25 +63,10 @@ export const streamChat = (
 			});
 
 			if (!res.ok || !res.body) {
-				let message = `Server responded with ${res.status}`;
-				try {
-					const text = await res.text();
-					if (text) {
-						try {
-							const parsed = JSON.parse(text) as { detail?: unknown };
-							if (typeof parsed.detail === 'string' && parsed.detail.trim()) {
-								message = parsed.detail;
-							} else {
-								message = text;
-							}
-						} catch {
-							message = text;
-						}
-					}
-				} catch {
-					// keep default message
-				}
-				callbacks.onError({ type: 'error', message });
+				callbacks.onError({
+					type: 'error',
+					message: await getResponseErrorMessage(res),
+				});
 				return;
 			}
 
