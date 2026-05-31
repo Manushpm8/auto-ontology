@@ -25,6 +25,18 @@
       "justMyCode": false
     },
     {
+      "name": "Ontology: Rigor+",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.ontology.rigor",
+      "args": ["--all", "--bird-root", "~/bird/minidev/MINIDEV"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "Debug Ingest DuckDB",
       "type": "debugpy",
       "request": "launch",

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
@@ -183,49 +184,80 @@ class BioPortalClient:
 class FIBOLocalIndex:
     """Search FIBO concepts from a locally cached OWL file.
 
-    Downloads the FIBO OWL from GitHub on first use and builds an
-    in-memory label index. Uses rdflib for parsing.
+    Downloads FIBO OWL modules from GitHub via sparse checkout on first
+    use and builds an in-memory label index. Uses rdflib for parsing.
     """
 
-    _FIBO_OWL_URL = (
-        "https://spec.edmcouncil.org/fibo/ontology/master/latest/dev/fibo-vD.ttl"
-    )
+    _FIBO_REPO = "https://github.com/edmcouncil/fibo.git"
+    _FIBO_MODULES = ["FND", "FBC", "BE"]
     _CACHE_DIR = ".cache/fibo"
 
     def __init__(self) -> None:
         self._labels: dict[str, str] | None = None
 
+    def _clone_sparse(self, repo_dir: Path) -> None:
+        import subprocess  # noqa: PLC0415
+
+        logger.info("Cloning FIBO (sparse) into %s ...", repo_dir)
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "--sparse",
+                self._FIBO_REPO,
+                str(repo_dir),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "sparse-checkout", "set", *self._FIBO_MODULES],
+            cwd=str(repo_dir),
+            check=True,
+            capture_output=True,
+        )
+
     def _ensure_loaded(self) -> dict[str, str]:
         if self._labels is not None:
             return self._labels
 
-        cache_path = _project_root() / self._CACHE_DIR / "fibo.ttl"
-        if not cache_path.exists():
-            logger.info("Downloading FIBO OWL to %s ...", cache_path)
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_dir = _project_root() / self._CACHE_DIR
+        repo_dir = cache_dir / "repo"
+
+        if not (repo_dir / ".git").exists():
+            cache_dir.mkdir(parents=True, exist_ok=True)
             try:
-                resp = httpx.get(
-                    self._FIBO_OWL_URL, timeout=60.0, follow_redirects=True
-                )
-                resp.raise_for_status()
-                cache_path.write_bytes(resp.content)
+                self._clone_sparse(repo_dir)
             except Exception:
-                logger.warning("Failed to download FIBO OWL", exc_info=True)
+                logger.warning("Failed to clone FIBO repo", exc_info=True)
                 self._labels = {}
                 return self._labels
 
+        self._labels = {}
         try:
             import rdflib  # noqa: PLC0415
 
             g = rdflib.Graph()
-            g.parse(str(cache_path), format="turtle")
-            self._labels = {}
+            parsed = 0
+            for rdf_file in repo_dir.rglob("*.rdf"):
+                if rdf_file.name.startswith("All") or "Metadata" in rdf_file.name:
+                    continue
+                try:
+                    g.parse(str(rdf_file), format="xml")
+                    parsed += 1
+                except Exception:
+                    logger.debug("Skipped unparseable %s", rdf_file.name)
+
             rdfs_label = rdflib.RDFS.label
-            for subj, _, obj in g.triples((None, rdfs_label, None)):
+            for _, _, obj in g.triples((None, rdfs_label, None)):
                 self._labels[str(obj).lower()] = str(obj)
-            logger.info("FIBO index loaded: %d labels", len(self._labels))
+            logger.info(
+                "FIBO index loaded: %d labels from %d files", len(self._labels), parsed
+            )
         except Exception:
-            logger.warning("Failed to parse FIBO OWL", exc_info=True)
+            logger.warning("Failed to parse FIBO files", exc_info=True)
             self._labels = {}
 
         return self._labels
@@ -390,8 +422,6 @@ def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
-def _project_root() -> Any:
+def _project_root() -> Path:
     """Return the GSF project root (two levels up from this file)."""
-    from pathlib import Path  # noqa: PLC0415
-
     return Path(__file__).resolve().parents[3]
