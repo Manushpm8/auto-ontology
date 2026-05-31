@@ -105,7 +105,13 @@ def invoke_text(
     """Invoke ChatNVIDIA and return the raw text response."""
     llm = get_llm(temperature=temperature, max_tokens=max_tokens)
     response = llm.invoke(messages)
-    return response.content
+    content = response.content
+    if not content:
+        logger.warning(
+            "LLM returned empty content. response_metadata=%s",
+            getattr(response, "response_metadata", {}),
+        )
+    return content
 
 
 def invoke_json(

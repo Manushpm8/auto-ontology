@@ -27,8 +27,9 @@ class DomainSummary(BaseModel):
     for downstream Phase 1 attribute extraction calls.
     """
 
-    domain: str = Field(
-        ..., description="High-level domain classification of the corpus"
+    domains: list[str] = Field(
+        default_factory=list,
+        description="Distinct business domains present in the corpus",
     )
     core_entities: list[str] = Field(
         default_factory=list,

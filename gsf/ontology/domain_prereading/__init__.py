@@ -2,13 +2,12 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Phase 0 — Domain Pre-Reading: map-reduce summarization of the corpus."""
+"""Phase 0 — Domain Pre-Reading: iterative knowledge graph construction."""
 
 from gsf.ontology.domain_prereading.pipeline import run_domain_prereading
-from gsf.ontology.domain_prereading.models import ChunkSignals, DomainSummary
+from gsf.ontology.domain_prereading.models import DomainSummary
 
 __all__ = [
-    "ChunkSignals",
     "DomainSummary",
     "run_domain_prereading",
 ]

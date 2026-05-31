@@ -63,16 +63,12 @@ def chunk_schema(
         schema = tbl["table_schema"]
         name = tbl["table_name"]
         tbl_cols = columns_df[
-            (columns_df["table_schema"] == schema)
-            & (columns_df["table_name"] == name)
+            (columns_df["table_schema"] == schema) & (columns_df["table_name"] == name)
         ]
         block = _format_table_block(schema, name, tbl_cols)
         block_tokens = _estimate_tokens(block)
 
-        if (
-            current_tokens + block_tokens > TARGET_CHUNK_TOKENS
-            and current_lines
-        ):
+        if current_tokens + block_tokens > TARGET_CHUNK_TOKENS and current_lines:
             chunks.append(
                 Chunk(
                     text="\n\n".join(current_lines),
@@ -82,9 +78,7 @@ def chunk_schema(
             )
             overlap_text = current_lines[-1] if current_lines else ""
             current_lines = [overlap_text] if overlap_text else []
-            current_tables = (
-                [current_tables[-1]] if current_tables else []
-            )
+            current_tables = [current_tables[-1]] if current_tables else []
             current_tokens = _estimate_tokens(overlap_text)
 
         current_lines.append(block)
