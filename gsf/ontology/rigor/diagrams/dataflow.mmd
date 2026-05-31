@@ -1,0 +1,47 @@
+flowchart TD
+  subgraph primary ["Neo4j Graph - Already Ingested"]
+    neo4jDB["DB / Schema / Table / Column"]
+    neo4jFK["FK + JOIN edges"]
+    neo4jSQL["SQL query nodes"]
+  end
+  subgraph bird ["BIRD Supplementary Files"]
+    EV["evidence strings"]
+    DD["value_descriptions CSVs"]
+  end
+  subgraph external ["External Ontology Sources"]
+    LOV["LOV - all domains"]
+    BP["BioPortal - biomedical"]
+    FIBO["FIBO OWL - finance"]
+  end
+
+  neo4jDB --> loaders["loaders.py"]
+  neo4jFK --> loaders
+  neo4jSQL --> loaders
+  EV --> loaders
+  DD --> loaders
+  LOV --> extVocab["external_vocab.py"]
+  BP --> extVocab
+  FIBO --> extVocab
+  EV -->|"evidence field"| extVocab
+
+  loaders --> pipeline["pipeline.py"]
+  extVocab --> pipeline
+
+  subgraph phase1 ["Phase 1: Per-Table Loop"]
+    det["deterministic.py"]
+    prop["proposer.py (Gen-LLM)"]
+    jdg["judge.py (Judge-LLM)"]
+    det --> prop --> jdg
+  end
+
+  pipeline --> phase1
+  jdg -->|"validated delta"| merge["CoreOntology.merge()"]
+  merge -->|"next table sees updated ontology"| det
+
+  subgraph phase2 ["Phase 2: Behavioral"]
+    beh["behavioral.py (sqlglot)"]
+  end
+
+  merge --> phase2
+  phase2 -->|"inferred edges + metrics"| finalOntology["CoreOntology"]
+  finalOntology --> neo4j["neo4j_ops.py"]

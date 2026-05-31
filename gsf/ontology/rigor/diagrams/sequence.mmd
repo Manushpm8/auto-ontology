@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant P as pipeline.py
+    participant N as Neo4j
+    participant B as BIRD files
+    participant D as deterministic.py
+    participant E as external_vocab.py
+    participant G as proposer.py (Gen-LLM)
+    participant J as judge.py (Judge-LLM)
+    participant O as CoreOntology
+
+    P->>N: fetch_sorted_tables(db_name)
+    N-->>P: tables[]
+
+    loop For each table
+        P->>N: fetch_table_context(table_id)
+        N-->>P: columns, FKs, SQLs
+        P->>B: load evidence + value_descriptions
+        B-->>P: enriched context
+        P->>D: run_deterministic(table, ctx)
+        D-->>P: edges, denormalized candidates
+        P->>E: find_similar_concepts(table, columns)
+        E-->>P: ExternalMatch[]
+        P->>G: invoke_proposer(table, ctx, det, ext, ontology)
+        G-->>P: DeltaOntology
+        P->>J: invoke_judge(delta, ontology)
+        J-->>P: JudgeVerdict
+        P->>O: ontology.merge(verdict.apply(delta))
+    end

@@ -1,0 +1,20 @@
+graph LR
+  subgraph existing ["Existing Neo4j Graph"]
+    DB["DB"] -->|CONTAINS| S["Schema"]
+    S -->|CONTAINS| T["Table"]
+    T -->|CONTAINS| C["Column"]
+    C -->|FOREIGN_KEY| C2["Column"]
+    SQL["SQL"] -->|SQL| T
+  end
+
+  subgraph rigorOutput ["Rigor Output Nodes"]
+    BT["BusinessTerm"]
+    Attr["Attribute"]
+    Met["Metric"]
+  end
+
+  C -->|REPRESENTS| BT
+  C -->|HAS_ATTRIBUTE| Attr
+  Attr -->|IS_PROPERTY_OF| BT
+  BT -->|RELATES_TO| BT2["BusinessTerm"]
+  BT -->|SUBCLASS_OF| BT3["BusinessTerm"]
