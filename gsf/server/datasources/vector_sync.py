@@ -34,7 +34,7 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
 from nemo_retriever.vdb.operators import UpsertVdbOperator
 
-from server.ingestion.params import get_embed_params, get_vdb_params
+from gsf.server.ingestion.params import get_embed_params, get_vdb_params
 
 logger = logging.getLogger(__name__)
 

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Ingestion service.
 
 Runs ``ingest()`` once at startup, then every 24 hours at the same wall-clock
@@ -5,7 +9,7 @@ time (anchored to startup) — independent of how long each run takes.
 
 Usage::
 
-    PYTHONPATH=gsf uv run --no-sync python gsf/ingestion-service/main.py
+    uv run --no-sync python gsf/ingestion_service/main.py
 """
 
 from __future__ import annotations
@@ -13,24 +17,23 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from gsf.ingestion_service.ingest import run_ingest
+import os
 
-logger = logging.getLogger("gsf.ingestion-service")
+logger = logging.getLogger("gsf.ingestion_service")
 
 INGEST_INTERVAL = timedelta(hours=24)
 
 
-async def ingest() -> None:
-    """Run one ingestion pass.
-
-    Stub — replace with the real ingestion call (e.g. invoking the
-    ``scripts.ingest_local_postgres`` flow against the configured sources).
-    """
+async def ingest(connection_strings: list[str]) -> None:
+    """Run one ingestion pass."""
     logger.info("ingest: starting")
-    await asyncio.sleep(0)
+    for connection_string in connection_strings:
+        run_ingest(connection_string)
     logger.info("ingest: finished")
 
 
-async def _run_forever() -> None:
+async def _run_forever(connection_strings: list[str]) -> None:
     next_run = datetime.now(timezone.utc)
     while True:
         delay = (next_run - datetime.now(timezone.utc)).total_seconds()
@@ -41,7 +44,7 @@ async def _run_forever() -> None:
             await asyncio.sleep(delay)
 
         try:
-            await ingest()
+            await ingest(connection_strings)
         except Exception:
             logger.exception("ingest: unhandled error; will retry on next tick")
 
@@ -62,10 +65,19 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    try:
-        asyncio.run(_run_forever())
-    except KeyboardInterrupt:
-        logger.info("ingestion-service: shutting down")
+    if not os.environ.get("CONNECTION_STRINGS"):
+        logger.warning(
+            "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
+        )
+    else:
+        connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
+        if len(connection_strings) == 1:
+            try:
+                asyncio.run(_run_forever(connection_strings))
+            except KeyboardInterrupt:
+                logger.info("ingestion_service: shutting down")
+        else:
+            logger.warning("Multiple connection is not supported yet.")
 
 
 if __name__ == "__main__":

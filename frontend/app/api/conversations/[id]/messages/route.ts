@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
 
@@ -12,6 +16,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 			role: body.role,
 			content: body.content ?? '',
 			sqlCode: body.sqlCode ?? null,
+			sqlResponse: body.sqlResponse ?? null,
 		},
 	});
 

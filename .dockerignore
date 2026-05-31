@@ -1,0 +1,50 @@
+**/.git
+**/.gitignore
+**/.gitattributes
+**/.github
+**/.vscode
+**/.idea
+**/.cursor
+**/.claude
+**/.DS_Store
+
+# Python
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+
+# Node / Next.js (built separately)
+**/node_modules
+**/.next
+**/.turbo
+**/coverage
+**/out
+**/build
+**/.pnpm-store
+frontend/
+
+# Local env files (never bake secrets into images)
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Local data
+**/*.duckdb
+**/*.duckdb.wal
+lancedb/
+
+# Helm / k8s artefacts
+helm/
+
+# Misc
+docker-compose*.yml
+README.md
+SECURITY.md
+*.md
+!gsf/**/*.md
+dev_tools/

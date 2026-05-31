@@ -1,16 +1,18 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 export type ChatMessage = {
 	id: string;
 	role: 'user' | 'assistant';
 	content: string;
 	sql?: string;
+	sqlResponse?: string;
 	timestamp: number;
 };
 
 export type ChatRequest = {
 	question: string;
-	connectorName?: string;
-	acronyms?: string;
-	customPrompts?: string;
 };
 
 export type StepEvent = {

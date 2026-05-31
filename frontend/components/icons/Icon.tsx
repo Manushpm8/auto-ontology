@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import type { FC, SVGProps } from 'react';
 
 import MenuSvg from './svg/menu.svg';
@@ -12,6 +16,7 @@ import ChevronRightSvg from './svg/chevron-right.svg';
 import NvidiaLogoSvg from './svg/nvidia-logo.svg';
 import DatabaseSvg from './svg/database.svg';
 import SettingsSvg from './svg/settings.svg';
+import ChartBarSvg from './svg/chart-bar.svg';
 
 export enum IconName {
 	Menu = 'menu',
@@ -26,6 +31,7 @@ export enum IconName {
 	NvidiaLogo = 'nvidia-logo',
 	Database = 'database',
 	Settings = 'settings',
+	ChartBar = 'chart-bar',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -41,6 +47,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.NvidiaLogo]: NvidiaLogoSvg,
 	[IconName.Database]: DatabaseSvg,
 	[IconName.Settings]: SettingsSvg,
+	[IconName.ChartBar]: ChartBarSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

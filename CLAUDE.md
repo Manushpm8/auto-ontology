@@ -19,11 +19,11 @@ Frontend commands run from `/frontend`:
 | `pnpm build` | Build the frontend |
 | `pnpm lint` | ESLint the frontend |
 
-Backend command runs from `/gsf`:
+Backend command runs from the repo root:
 
 | Command | Description |
 |---|---|
-| `cd gsf && uv run --project .. uvicorn server.main:app --reload --host 127.0.0.1 --port 3001` | Start FastAPI on :3001 |
+| `uv run uvicorn gsf.server.main:app --reload --host 127.0.0.1 --port 3001 --app-dir .` | Start FastAPI on :3001 |
 
 To install dependencies:
 - Frontend: `pnpm install` from `/frontend`

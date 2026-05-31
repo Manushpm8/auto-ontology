@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 'use client';
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
@@ -6,6 +10,7 @@ import type { BreadcrumbItem } from '@/components/Breadcrumbs';
 
 const PATH_LABELS: Record<string, BreadcrumbItem> = {
 	'/chat': { label: 'Chat', href: '/chat' },
+	'/analysis': { label: 'Analysis', href: '/analysis' },
 	'/data': { label: 'All Data', href: '/data' },
 	'/settings': { label: 'Settings', href: '/settings' },
 };

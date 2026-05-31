@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Data Access Layer — Neo4j driver, catalog graph, and datasource queries."""
 
 from __future__ import annotations
@@ -111,8 +115,8 @@ def list_tables_for_schema(
               (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
         RETURN t.id AS id,
                t.name AS name,
-               t.db_name AS db_name,
-               t.schema_name AS schema_name, t.description AS description,
+               s.db_name AS db_name,
+               s.name AS schema_name, t.description AS description,
                count(c) AS columns_count
         ORDER BY name
         """,

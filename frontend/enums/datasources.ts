@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 export enum DataModels {
 	DB = 'db',
 	SCHEMA = 'schema',
@@ -15,6 +19,7 @@ export enum TreeFocusState {
 /** Block type in SinglePageComposer sections. */
 export enum ComposerSectionKind {
 	TEXT_CARD = 'textCard',
+	TAG_LIST = 'tagList',
 	INFO_GRID = 'infoGrid',
 	DATA_TABLE = 'dataTable',
 	LOADING_PANEL = 'loadingPanel',

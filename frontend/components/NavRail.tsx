@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 'use client';
 
 import Link from 'next/link';
@@ -12,6 +16,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
 	{ icon: IconName.ChatBubble, href: '/chat', label: 'Chat' },
+	{ icon: IconName.ChartBar, href: '/analysis', label: 'Analysis' },
 	{ icon: IconName.Database, href: '/data', label: 'Data Catalog' },
 	{ icon: IconName.Settings, href: '/settings', label: 'Settings' },
 ];

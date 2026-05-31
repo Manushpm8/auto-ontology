@@ -1,0 +1,124 @@
+# Default values for the GSF Helm chart.
+
+# Global image pull policy. With minikube + locally-built images,
+# IfNotPresent prevents the cluster from trying to pull from a remote registry.
+imagePullPolicy: IfNotPresent
+
+# ------------------------------------------------------------------
+# Shared credentials — populate a single k8s Secret (<release>-secrets)
+# consumed by all GSF workloads.
+# ------------------------------------------------------------------
+# Postgres
+postgresUser: gsf
+postgresPassword: ""
+postgresDatabase: gsf
+# Neo4j
+neo4jUsername: neo4j
+neo4jPassword: ""
+# pgAdmin
+pgadminEmail: admin@example.com
+pgadminPassword: admin
+# NVIDIA NIM
+nvidiaApiKey: ""
+baseUrl: "https://integrate.api.nvidia.com/v1"
+modelName: "nvidia/nemotron-3-nano-30b-a3b"
+embedEndpoint: "https://integrate.api.nvidia.com/v1"
+embedModel: "nvidia/llama-nemotron-embed-1b-v2"
+# Ingestion targets - comma-separated list of PG URLs the worker reads from.
+connectionStrings: ""
+
+# ------------------------------------------------------------------
+# Postgres (pgvector)
+# ------------------------------------------------------------------
+postgres:
+  image:
+    repository: pgvector/pgvector
+    tag: pg17
+  service:
+    port: 5432
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# ------------------------------------------------------------------
+# pgAdmin
+# ------------------------------------------------------------------
+pgadmin:
+  image:
+    repository: dpage/pgadmin4
+    tag: latest
+  service:
+    port: 80
+    nodePort: 30050
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+# ------------------------------------------------------------------
+# Neo4j
+# ------------------------------------------------------------------
+neo4j:
+  image:
+    repository: neo4j
+    tag: latest
+  service:
+    httpPort: 7474
+    boltPort: 7687
+  persistence:
+    dataSize: 5Gi
+    logsSize: 1Gi
+    pluginsSize: 1Gi
+    importSize: 1Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 1Gi
+
+# ------------------------------------------------------------------
+# GSF FastAPI backend
+# ------------------------------------------------------------------
+backend:
+  image:
+    repository: nvcr.io/nvstaging/gsf
+    tag: 0.0.1
+  service:
+    port: 3001
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# ------------------------------------------------------------------
+# Ingestion worker (no Service, no ingress; long-running pod)
+# ------------------------------------------------------------------
+ingestion:
+  image:
+    # Reuses the backend image with a different entrypoint arg.
+    repository: nvcr.io/nvstaging/gsf
+    tag: 0.0.1
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# ------------------------------------------------------------------
+# Next.js frontend
+# ------------------------------------------------------------------
+frontend:
+  image:
+    repository: nvcr.io/nvstaging/gsf-frontend
+    tag: 0.0.1
+  service:
+    port: 3000
+    nodePort: 30000
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi

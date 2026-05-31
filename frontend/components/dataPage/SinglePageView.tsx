@@ -1,8 +1,16 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
-import { SinglePageComposer, type SinglePageComposerProps } from '@/common/SinglePageComposer';
+import {
+	SinglePageComposer,
+	type ComposerEditValue,
+	type SinglePageComposerProps,
+} from '@/common/SinglePageComposer';
 
 export type SinglePageFormat = SinglePageComposerProps;
 
@@ -15,7 +23,7 @@ export type SinglePageViewProps = {
 	treeDataEpoch?: number;
 	parentId?: string;
 	isEditing?: boolean;
-	onSave?: (edits: Record<string, string>) => void;
+	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
 };
 

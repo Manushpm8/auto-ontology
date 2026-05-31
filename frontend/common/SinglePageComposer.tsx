@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 'use client';
 
 import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -7,11 +11,34 @@ import { ComposerSectionKind } from '@/enums/datasources';
 import {
 	isComposerSection,
 	type ComposerSection,
+	type ComposerTagListSection,
 	type ComposerTextCardSection,
 } from '@/types/composer-section';
 import { Icon, IconName } from '@/components/icons';
+import { TagInput } from '@/components/TagInput';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
+
+export type ComposerEditValue = string | string[];
+
+type EditableComposerSection = ComposerTextCardSection | ComposerTagListSection;
+
+const isEditableComposerSection = (s: ComposerSection): s is EditableComposerSection =>
+	(s.type === ComposerSectionKind.TEXT_CARD || s.type === ComposerSectionKind.TAG_LIST) &&
+	s.editable === true;
+
+function sectionEditValue(section: EditableComposerSection): ComposerEditValue {
+	if (section.type === ComposerSectionKind.TAG_LIST) return [...section.values];
+	return section.body;
+}
+
+function editValuesEqual(a: ComposerEditValue, b: ComposerEditValue | undefined): boolean {
+	if (Array.isArray(a)) {
+		const arr = Array.isArray(b) ? b : [];
+		return a.length === arr.length && a.every((v, i) => v === arr[i]);
+	}
+	return a === (typeof b === 'string' ? b : '');
+}
 
 export type SinglePageComposerProps = {
 	sections: unknown[];
@@ -27,7 +54,7 @@ export type SinglePageComposerProps = {
 	};
 	entityUpdatingProperties?: Record<string, string | string[]>;
 	isEditing?: boolean;
-	onSave?: (edits: Record<string, string>) => void;
+	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
 };
 
@@ -62,7 +89,7 @@ const EditableTextCard = ({
 	};
 
 	return (
-		<div className="rounded-lg border-2 border-emerald-500 bg-white/90 p-5 shadow-sm ring-1 ring-emerald-500/20 dark:border-emerald-400 dark:bg-zinc-950/50 dark:ring-emerald-400/20">
+		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 shadow-sm ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
 			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 				{section.title}
 			</h2>
@@ -71,11 +98,82 @@ const EditableTextCard = ({
 				value={value}
 				onChange={handleChange}
 				rows={4}
-				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-emerald-400 dark:focus:ring-emerald-400/30"
+				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
 			/>
 		</div>
 	);
 };
+
+const EditableTagListCard = ({
+	section,
+	onChange,
+	autoFocus = false,
+}: {
+	section: { id: string; title: string; values: string[]; hint?: string };
+	onChange: (sectionId: string, value: string[]) => void;
+	autoFocus?: boolean;
+}) => {
+	const [tags, setTags] = useState<string[]>(section.values);
+
+	const handleChange = (next: string[]) => {
+		setTags(next);
+		onChange(section.id, next);
+	};
+
+	return (
+		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 shadow-sm ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
+			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+				{section.title}
+			</h2>
+			<div className="mt-3">
+				<TagInput
+					value={tags}
+					onChange={handleChange}
+					autoFocus={autoFocus}
+					placeholder="Type a value and press Enter"
+					ariaLabel={section.title}
+				/>
+			</div>
+			<p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+				{section.hint ??
+					'Press Enter or comma to add. Backspace to remove the last tag. Paste comma-separated values to add many at once.'}
+			</p>
+		</div>
+	);
+};
+
+const ReadOnlyTagList = ({
+	title,
+	values,
+	sectionId,
+}: {
+	title: string;
+	values: string[];
+	sectionId: string;
+}) => (
+	<div
+		id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
+		className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+	>
+		<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
+		{values.length === 0 ? (
+			<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+		) : (
+			<ul className="mt-3 flex flex-wrap gap-1.5">
+				{values.map((v, i) => (
+					<li
+						key={`${v}-${i}`}
+						className="inline-flex max-w-full items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
+					>
+						<span className="max-w-[24rem] truncate" title={v}>
+							{v}
+						</span>
+					</li>
+				))}
+			</ul>
+		)}
+	</div>
+);
 
 function renderComposerSection(section: ComposerSection): ReactNode {
 	switch (section.type) {
@@ -92,6 +190,14 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 						{section.body}
 					</p>
 				</div>
+			);
+		case ComposerSectionKind.TAG_LIST:
+			return (
+				<ReadOnlyTagList
+					title={section.title}
+					values={section.values}
+					sectionId={section.id}
+				/>
 			);
 		case ComposerSectionKind.INFO_GRID:
 			return (
@@ -203,21 +309,17 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
 
 		const editableSections = sections.filter(
-			(s): s is ComposerTextCardSection =>
-				isComposerSection(s) &&
-				s.type === ComposerSectionKind.TEXT_CARD &&
-				s.editable === true,
+			(s): s is EditableComposerSection => isComposerSection(s) && isEditableComposerSection(s),
 		);
 		const firstEditableId = editableSections[0]?.id ?? null;
 		const hasEditableSections = firstEditableId !== null;
 		const [localIsEditing, setLocalIsEditing] = useState(false);
 		const isEditingActive = isEditing || localIsEditing;
 
-		const pendingEditsRef = useRef<Record<string, string>>({});
-		// Snapshot of editable section bodies captured when the user enters
-		// edit mode. Used to filter out no-op fields before PATCH so the
-		// server never sees a value that did not actually change.
-		const initialEditsRef = useRef<Record<string, string>>({});
+		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
+		// Snapshot captured when edit mode starts — only changed fields are PATCHed
+		// so the server does not re-embed unchanged vector fields.
+		const initialEditsRef = useRef<Record<string, ComposerEditValue>>({});
 
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
@@ -298,7 +400,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								onClick={() => {
 									pendingEditsRef.current = {};
 									initialEditsRef.current = Object.fromEntries(
-										editableSections.map((s) => [s.id, s.body]),
+										editableSections.map((s) => [s.id, sectionEditValue(s)]),
 									);
 									setLocalIsEditing(true);
 								}}
@@ -325,29 +427,24 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 									onClick={async () => {
 										const edits = pendingEditsRef.current;
 										const initial = initialEditsRef.current;
-										// Drop fields whose value matches the snapshot taken
-										// when edit mode was entered — the server-side PATCH
-										// re-embeds anything it receives, so sending unchanged
-										// values would trigger a needless vector resync.
-										const changed: Record<string, string> = {};
+										const changed: Record<string, ComposerEditValue> = {};
 										for (const [id, val] of Object.entries(edits)) {
-											if (val !== (initial[id] ?? '')) changed[id] = val;
+											if (!editValuesEqual(val, initial[id])) changed[id] = val;
 										}
 										if (entityId && Object.keys(changed).length > 0) {
-											const { sample_values: rawSamples, ...rest } = changed;
-											const patch: NodePatch = { ...rest };
-											if (rawSamples !== undefined) {
-												patch.sample_values = rawSamples
-													.split(',')
-													.map((s) => s.trim())
-													.filter(Boolean);
+											const patch: NodePatch = {};
+											if (typeof changed.description === 'string') {
+												patch.description = changed.description;
+											}
+											if (Array.isArray(changed.sample_values)) {
+												patch.sample_values = changed.sample_values;
 											}
 											await datasources.updateNode(entityId, patch);
 										}
 										setLocalIsEditing(false);
 										onSave?.(changed);
 									}}
-									className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+									className="rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
 								>
 									Save
 								</button>
@@ -383,7 +480,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						{sections.length === 0 ? (
 							<div className="flex min-h-[14rem] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-8 py-12 text-center dark:border-zinc-600 dark:bg-zinc-900/30">
 								<div
-									className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-100/90 text-xl dark:bg-emerald-950/60"
+									className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
 									aria-hidden
 								>
 									◇
@@ -421,15 +518,27 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										);
 									}
 
-									const isEditable =
+									const isEditableTextCard =
 										isEditingActive &&
 										section.type === ComposerSectionKind.TEXT_CARD &&
+										section.editable === true;
+									const isEditableTagList =
+										isEditingActive &&
+										section.type === ComposerSectionKind.TAG_LIST &&
 										section.editable === true;
 
 									return (
 										<div key={section.id}>
-											{isEditable ? (
+											{isEditableTextCard ? (
 												<EditableTextCard
+													section={section}
+													autoFocus={section.id === firstEditableId}
+													onChange={(id, val) => {
+														pendingEditsRef.current[id] = val;
+													}}
+												/>
+											) : isEditableTagList ? (
+												<EditableTagListCard
 													section={section}
 													autoFocus={section.id === firstEditableId}
 													onChange={(id, val) => {

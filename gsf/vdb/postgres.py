@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Postgres + pgvector implementation of the NV-Ingest ``VDB`` operator.
 
 Backed by :class:`langchain_postgres.PGVectorStore` (the v2 vector store API).
@@ -75,6 +79,12 @@ class PostgresVDB(VDB):
     underlying table so it can be used as a filter for bulk deletes and
     similarity searches.
     """
+
+    # Tells upstream ``search_semantic_index`` to build per-query metadata
+    # filters as a flat ``{column: value | [values]}`` mapping instead of a
+    # SQL ``LIKE`` predicate over the JSON metadata column. The dict is fed
+    # straight into ``PGVectorStore.similarity_search_with_score_by_vector``.
+    metadata_filter_format = "dict"
 
     def __init__(self, **kwargs: Any) -> None:
         connection_string = kwargs.get("connection_string")
@@ -256,25 +266,75 @@ class PostgresVDB(VDB):
         store.delete(filter=filter)
         return ids
 
+    def delete_by_id(self, node_id: str) -> int:
+        """Delete every row whose metadata ``id`` matches ``node_id``.
+
+        ``id`` lives in the JSONB ``langchain_metadata`` column (it is not
+        a promoted real column — only ``database_name`` and ``label`` are),
+        so the match goes through ``langchain_metadata ->> 'id'`` rather
+        than the typed-filter path used by :meth:`delete_by_database`.
+        Going through ``PGVectorStore.delete(filter=...)`` would be a
+        no-op for this case because the dict-format filter only resolves
+        declared metadata columns.
+
+        Returns the number of rows deleted (``0`` when the collection
+        table doesn't exist yet or nothing matched).
+        """
+        if not self._table_exists():
+            logger.info(
+                "PostgresVDB.delete_by_id: collection %s not found, nothing to delete",
+                self.collection_name,
+            )
+            return 0
+
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                # `collection_name` is internal config (defaults to
+                # 'nv_ingest_tabular'); psycopg can't parameterise table
+                # identifiers, so it's interpolated here. Not user input.
+                cur.execute(
+                    f"""
+                    DELETE FROM {self.collection_name}
+                    WHERE langchain_metadata ->> 'id' = %s
+                    """,
+                    (node_id,),
+                )
+                deleted = cur.rowcount
+
+        logger.info(
+            "PostgresVDB.delete_by_id: deleted %d rows from %s for id=%s",
+            deleted,
+            self.collection_name,
+            node_id,
+        )
+        return deleted
+
     def retrieval(
         self,
         queries: list,
         top_k: int = 10,
         **kwargs: Any,
     ) -> list[list[dict]]:
-        """Cosine-similarity k-NN search for each query string.
+        """Cosine-similarity k-NN search for each query vector.
 
-        Requires the constructor to have been given an ``embeddings`` instance;
-        the placeholder will raise otherwise.
+        ``kwargs["where"]`` is a langchain-postgres filter dict
+        (e.g. ``{"label": "CustomAnalysis", "database_name": "prod"}``)
+        applied to the declared metadata columns; passed straight through to
+        ``PGVectorStore.similarity_search_with_score_by_vector``.
+
+        Requires an ``embeddings`` instance from the constructor.
         """
         store = self._get_store()
         if store is None:
             return [[] for _ in queries]
+
         results: list[list[dict]] = []
         for query in queries:
             try:
                 hits = store.similarity_search_with_score_by_vector(
-                    embedding=query, k=top_k
+                    embedding=query,
+                    filter=kwargs.get("where", None),
+                    k=top_k,
                 )
                 results.append(
                     [

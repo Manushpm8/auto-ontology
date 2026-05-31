@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import type { SinglePageFormat } from '@/components/dataPage/SinglePageView';
 import { ComposerSectionKind, DataModels, TreeFocusState } from '@/enums/datasources';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
@@ -270,12 +274,10 @@ export function buildTreeFocusPageFormat(
 					editable: true,
 				},
 				{
-					type: ComposerSectionKind.TEXT_CARD,
+					type: ComposerSectionKind.TAG_LIST,
 					id: 'sample_values',
 					title: 'Sample Values',
-					body: Array.isArray(column.sample_values)
-						? column.sample_values.join(', ')
-						: (column.sample_values ?? ''),
+					values: column.sample_values ?? [],
 					editable: true,
 				},
 				{
@@ -289,8 +291,6 @@ export function buildTreeFocusPageFormat(
 							value: column.data_type.trim() ? column.data_type : '—',
 						},
 						{ label: 'Table', value: column.table_name },
-						{ label: 'Schema', value: column.schema_name },
-						{ label: 'Database', value: column.db_name },
 						{ label: 'Position', value: String(column.ordinal_position) },
 					],
 				},
@@ -300,7 +300,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: column.column_name,
-						subtitle: `Column · ${column.schema_name} · ${column.table_name} · ${column.db_name}`,
+						subtitle: `Column · ${column.table_name}`,
 						entityId: column.id,
 						parentId: table.id,
 					},

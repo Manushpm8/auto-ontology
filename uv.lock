@@ -882,6 +882,7 @@ dependencies = [
     { name = "neo4j" },
     { name = "pandas" },
     { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg-pool" },
     { name = "python-dotenv" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -902,6 +903,7 @@ requires-dist = [
     { name = "neo4j", specifier = ">=6.1.0" },
     { name = "pandas", specifier = ">=2.0,<3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
+    { name = "psycopg-pool", specifier = ">=3.3.1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
 ]
@@ -1576,8 +1578,8 @@ wheels = [
 
 [[package]]
 name = "nemo-retriever"
-version = "2026.5.13.dev20260513070824"
-source = { git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever#59e6348ddaf1d90efa0124911a434c57cae75994" }
+version = "2026.5.25.dev20260525081513"
+source = { git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever#c951d4024ee5cd5a912a4dac5600af51818f7632" }
 dependencies = [
     { name = "backoff" },
     { name = "click" },

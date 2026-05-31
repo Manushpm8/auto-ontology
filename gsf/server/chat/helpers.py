@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Chat-route helpers: request models, connector registry, retriever factory."""
 
 from __future__ import annotations
@@ -8,9 +12,8 @@ import os
 from pydantic import BaseModel, Field
 
 from nemo_retriever.retriever import Retriever
-from config import get_postgres_connection_string
-from connectors.postgres import PostgresDatabase
-from vdb.postgres import PostgresVDB
+from gsf.connectors.postgres import PostgresDatabase
+from gsf.vdb import get_vdb
 
 logger = logging.getLogger(__name__)
 
@@ -19,36 +22,30 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
-    connector_name: str | None = None
-    acronyms: str | None = None
-    custom_prompts: str | None = None
 
 
+# Maps LangGraph node names from
+# nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph
+# to a single user-facing label per agent (1-to-1 with the agent classes
+# instantiated inside ``create_graph``). Unknown nodes fall through to the
+# raw node_name in the router so we never display a blank thinking step.
 NODE_LABELS: dict[str, str] = {
-    "entities_extraction": "Extracting entities…",
-    "retrieve_candidates": "Searching relevant data…",
-    "prepare_candidates": "Searching relevant data…",
-    "construct_sql_from_candidates": "Constructing SQL query…",
-    "construct_sql_not_from_snippets": "Constructing SQL query…",
-    "validate_sql_query": "Validating SQL…",
-    "validate_intent": "Validating SQL…",
-    "reconstruct_sql": "Reconstructing SQL…",
-    "execute_sql_query": "Executing query…",
-    "format_and_respond": "Formatting response…",
-    "unconstructable_sql_response": "Query could not be constructed",
+    "entities_extraction": "Extracting entities",
+    "retrieve_candidates": "Retrieving candidates",
+    "prepare_candidates": "Preparing candidates",
+    "construct_sql_from_candidates": "Constructing SQL from candidates",
+    "construct_sql_not_from_snippets": "Constructing SQL from tables",
+    "reconstruct_sql": "Reconstructing SQL",
+    "validate_sql_query": "Validating SQL",
+    "validate_intent": "Validating intent",
+    "execute_sql_query": "Executing SQL",
+    "format_and_respond": "Formatting response",
+    "unconstructable_sql_response": "SQL could not be constructed",
 }
-
-
-# pgvector store containing tabular embeddings produced by
-# dev-tools/ingest_local_postgres.py. Read-side: the Retriever embeds the
-# query string itself (see EMBED_* below), then PostgresVDB.retrieval runs
-# a similarity search by vector — so we don't pass an `embeddings` instance
-# to the VDB on this path.
-_VDB_COLLECTION = os.environ.get("VDB_COLLECTION", "nv_ingest_tabular")
 
 # Remote NIM embedding endpoint — no local GPU required.
 # MUST match the model used at ingest time (see EMBED_PARAMS in
-# dev-tools/ingest_local_postgres.py); a mismatch produces garbage results
+# dev_tools/ingest_local_postgres.py); a mismatch produces garbage results
 # or a dimension error from pgvector.
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
@@ -63,29 +60,29 @@ _connector: PostgresDatabase | None = None
 def get_connector() -> PostgresDatabase:
     """Return the source-DB connector for the chat agent.
 
-    Reads ``CONNECTOR_URL`` from the environment (set in ``.env``); the same
-    URL is used by ``dev-tools/ingest_local_postgres.py`` so chat queries
+    Reads ``CONNECTION_STRINGS`` from the environment (set in ``.env``); the
+    same URL is used by ``dev_tools/ingest_local_postgres.py`` so chat queries
     target the database whose schema/embeddings were ingested.
     """
     global _connector
     if _connector is None:
-        url = os.environ.get("CONNECTOR_URL", "")
-        if not url:
-            raise EnvironmentError(
-                "CONNECTOR_URL is not set. Add it to your .env, e.g.:\n\n"
-                "    CONNECTOR_URL=postgresql://user:password@host:5432/dbname"
+        connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
+        if len(connection_strings) == 1:
+            _connector = PostgresDatabase(connection_strings[0])
+        elif len(connection_strings) == 0:
+            logger.warning(
+                "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
             )
-        _connector = PostgresDatabase(url)
+        else:
+            logger.warning("Multiple connection is not supported yet.")
+
     return _connector
 
 
 def get_retriever() -> Retriever:
     global _retriever
     if _retriever is None:
-        vdb = PostgresVDB(
-            connection_string=get_postgres_connection_string(),
-            collection_name=_VDB_COLLECTION,
-        )
+        vdb = get_vdb()
         _retriever = Retriever(
             vdb_kwargs={"vdb": vdb},
             embed_kwargs={

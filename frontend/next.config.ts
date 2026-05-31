@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import path from 'node:path';
 import dotenv from 'dotenv';
 import type { NextConfig } from 'next';
@@ -7,6 +11,8 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 const pythonApiUrl = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
 const nextConfig: NextConfig = {
+	output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
+	outputFileTracingRoot: path.resolve(__dirname, '..'),
 	transpilePackages: ['@nvidia/foundations-react-core'],
 	turbopack: {
 		rules: {
@@ -41,6 +47,14 @@ const nextConfig: NextConfig = {
 			{
 				source: '/api/nodes/:path*',
 				destination: `${pythonApiUrl}/api/nodes/:path*`,
+			},
+			{
+				source: '/api/custom-analyses',
+				destination: `${pythonApiUrl}/api/custom-analyses`,
+			},
+			{
+				source: '/api/custom-analyses/:path*',
+				destination: `${pythonApiUrl}/api/custom-analyses/:path*`,
 			},
 			{
 				source: '/api/health',
