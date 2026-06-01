@@ -13,12 +13,19 @@ Phase 2: Behavioral analysis
   - Parse SQL queries for JOIN paths -> inferred edges
   - Extract aggregation patterns -> Metrics
 
+Resilience:
+  - Checkpoints after each table so progress survives crashes
+  - LLM calls have timeouts + retries (see llm.py)
+  - Individual table failures are caught and skipped
+
 Output: Write CoreOntology to Neo4j
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from gsf.ontology.rigor.behavioral import analyze_sql_behavior
@@ -44,12 +51,91 @@ from gsf.ontology.rigor.proposer import invoke_proposer
 
 logger = logging.getLogger(__name__)
 
+_CHECKPOINT_DIR = Path(".rigor_checkpoints")
+
+
+# -----------------------------------------------------------------
+# Checkpoint helpers — survive crashes without losing progress
+# -----------------------------------------------------------------
+
+
+def _checkpoint_path(database_name: str) -> Path:
+    """Return the checkpoint file path for a database run."""
+    return _CHECKPOINT_DIR / f"{database_name}.json"
+
+
+def _save_checkpoint(
+    database_name: str,
+    ontology: CoreOntology,
+    completed_tables: list[str],
+) -> None:
+    """Persist ontology + list of finished tables to disk."""
+    _CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    path = _checkpoint_path(database_name)
+    payload = {
+        "completed_tables": completed_tables,
+        "ontology": ontology.model_dump(mode="json"),
+    }
+    path.write_text(json.dumps(payload, indent=2))
+    logger.info(
+        "  [checkpoint] Saved → %s (%d tables done)",
+        path,
+        len(completed_tables),
+    )
+
+
+def _load_checkpoint(
+    database_name: str,
+) -> tuple[CoreOntology, list[str]] | None:
+    """Load a previous checkpoint if one exists.
+
+    Returns (ontology, completed_tables) or None.
+    """
+    path = _checkpoint_path(database_name)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        ontology = CoreOntology.model_validate(data["ontology"])
+        completed = data["completed_tables"]
+        logger.info(
+            "[checkpoint] Resumed from %s — %d tables already done, "
+            "%d terms, %d attrs, %d OPs loaded",
+            path,
+            len(completed),
+            len(ontology.business_terms),
+            len(ontology.attributes),
+            len(ontology.object_properties),
+        )
+        return ontology, completed
+    except Exception:
+        logger.warning(
+            "[checkpoint] Failed to load %s — starting fresh",
+            path,
+            exc_info=True,
+        )
+        return None
+
+
+def _clear_checkpoint(database_name: str) -> None:
+    """Remove checkpoint file after a successful run."""
+    path = _checkpoint_path(database_name)
+    if path.exists():
+        path.unlink()
+        logger.info("[checkpoint] Cleared %s", path)
+
+
+# -----------------------------------------------------------------
+# Main pipeline
+# -----------------------------------------------------------------
+
 
 def build_ontology(
     database_name: str,
     bird_root: str | None = None,
     skip_threshold: int = 0,
     write_to_neo4j: bool = True,
+    resume: bool = True,
 ) -> CoreOntology:
     """Build a business ontology for a database.
 
@@ -58,11 +144,18 @@ def build_ontology(
         bird_root: Path to BIRD minidev root (optional supplementary data).
         skip_threshold: Skip tables with fewer than this many SQL references.
         write_to_neo4j: Whether to write results to Neo4j.
+        resume: If True, resume from the last checkpoint (if any).
 
     Returns:
         The constructed CoreOntology.
     """
+    # Try to resume from a previous checkpoint
+    completed_tables: list[str] = []
     ontology = CoreOntology()
+    if resume:
+        loaded = _load_checkpoint(database_name)
+        if loaded:
+            ontology, completed_tables = loaded
 
     # -----------------------------------------------------------------
     # INIT — Load data
@@ -94,6 +187,17 @@ def build_ontology(
 
     for idx, table in enumerate(tables, 1):
         table_key = f"{table.get('schema_name', '')}.{table['name']}"
+
+        # Skip tables already completed in a previous run
+        if table["name"] in completed_tables:
+            logger.info(
+                "\n[%d/%d] Skipping %s (already completed in checkpoint)",
+                idx,
+                len(tables),
+                table_key,
+            )
+            continue
+
         logger.info(
             "\n[%d/%d] Processing %s (queries=%d)",
             idx,
@@ -102,85 +206,21 @@ def build_ontology(
             table.get("query_count", 0),
         )
 
-        # 1. Fetch context from Neo4j
-        ctx = fetch_table_context(table["id"])
-        columns = ctx.get("columns", [])
-        if not columns:
-            logger.warning("  Table %s has no columns — skipping.", table_key)
-            continue
-
-        # 2. Enrich with BIRD data
-        if bird_root:
-            enrich_context_with_bird(ctx, table["name"], evidence)
-
-        # 3. Deterministic detection
-        det_result = run_deterministic(table, ctx, all_table_names)
-
-        # Add deterministic edges to ontology immediately
-        for edge in det_result.edges:
-            _ensure_term_exists(ontology, edge.source_term, table)
-            _ensure_term_exists(ontology, edge.target_term, table)
-            if not ontology.has_edge(edge.source_term, edge.target_term, edge.name):
-                ontology.object_properties.append(edge)
-
-        # 4. Collect evidence for this table (needed by enricher + proposer)
-        evidence_for_table = vocab_service.get_evidence_for_table(
-            table["name"],
-            [c.get("name", "") for c in columns],
-        )
-        ctx["evidence"] = ctx.get("evidence", []) + [
-            e for e in evidence_for_table if e not in ctx.get("evidence", [])
-        ]
-        ctx["table_name"] = table["name"]
-        ctx["table_description"] = table.get("description") or ""
-
-        # 5. Enrich attributes via LLM
-        enriched_columns = enrich_attributes(
-            det_result.attributes, ctx, ctx.get("evidence", [])
-        )
-
-        # Build lookup from source_column -> enriched info
-        enriched_map = {ec.source_column: ec for ec in enriched_columns}
-
-        # Merge enriched attributes into ontology
-        term_name = (
-            det_result.attributes[0].term_name if det_result.attributes else None
-        )
-        if term_name:
-            _ensure_term_exists(ontology, term_name, table)
-        for attr in det_result.attributes:
-            ec = enriched_map.get(attr.source_column)
-            ontology.attributes.append(
-                Attribute(
-                    name=ec.canonical_name if ec else attr.name,
-                    datatype=attr.datatype,
-                    term_name=attr.term_name,
-                    source_column=attr.source_column,
-                    provenance=Provenance(
-                        source_table=table["name"],
-                        source_column=attr.source_column,
-                        derivation="deterministic",
-                    ),
-                    description=ec.description if ec else None,
-                    formula=ec.formula if ec else None,
-                    usage_hint=ec.usage_hint if ec else None,
-                )
+        try:
+            _process_one_table(
+                table, ontology, all_table_names, bird_root,
+                evidence, vocab_service,
+            )
+        except Exception:
+            logger.error(
+                "  [FAILED] Table %s — skipping (deterministic work preserved)",
+                table_key,
+                exc_info=True,
             )
 
-        # 6. External vocabulary lookup
-        ext_matches = vocab_service.find_similar_terms(table["name"], columns)
-
-        # 7. Invoke Proposer (Gen-LLM)
-        delta = invoke_proposer(
-            table, ctx, det_result, ext_matches, ontology, enriched_columns
-        )
-
-        # 8. Invoke Judge (Judge-LLM)
-        verdict = invoke_judge(delta, ontology)
-
-        # 9. Apply verdict and merge into ontology
-        validated_delta = verdict.apply(delta, table["name"])
-        ontology.merge(validated_delta, table["name"])
+        # Checkpoint after every table (even failed ones, so we don't retry)
+        completed_tables.append(table["name"])
+        _save_checkpoint(database_name, ontology, completed_tables)
 
         logger.info(
             "  -> Ontology now: %d terms, %d attrs, %d OPs",
@@ -222,6 +262,8 @@ def build_ontology(
     # -----------------------------------------------------------------
     # Summary
     # -----------------------------------------------------------------
+    _clear_checkpoint(database_name)
+
     logger.info("=" * 60)
     logger.info("Rigor pipeline complete for %r", database_name)
     logger.info(
@@ -234,6 +276,116 @@ def build_ontology(
     logger.info("=" * 60)
 
     return ontology
+
+
+# -----------------------------------------------------------------
+# Per-table processing — extracted so failures can be caught
+# -----------------------------------------------------------------
+
+
+def _process_one_table(
+    table: dict[str, Any],
+    ontology: CoreOntology,
+    all_table_names: list[str],
+    bird_root: str | None,
+    evidence: dict[str, list[str]],
+    vocab_service: ExternalVocabService,
+) -> None:
+    """Run deterministic + LLM steps for a single table.
+
+    Raises on LLM timeout/error so the caller can catch and skip.
+    """
+    table_key = f"{table.get('schema_name', '')}.{table['name']}"
+
+    # 1. Fetch context from Neo4j
+    ctx = fetch_table_context(table["id"])
+    columns = ctx.get("columns", [])
+    fks = ctx.get("fks", [])
+    if not columns:
+        logger.warning("  Table %s has no columns — skipping.", table_key)
+        return
+
+    logger.info("  %d columns, %d FKs from graph", len(columns), len(fks))
+    for fk in fks:
+        logger.info(
+            "    FK: %s -> %s.%s",
+            fk["source_column"],
+            fk["target_table"],
+            fk["target_column"],
+        )
+
+    # 2. Enrich with BIRD data
+    if bird_root:
+        enrich_context_with_bird(ctx, table["name"], evidence)
+
+    # 3. Deterministic detection
+    det_result = run_deterministic(table, ctx, all_table_names)
+
+    # Add deterministic edges to ontology immediately
+    for edge in det_result.edges:
+        _ensure_term_exists(ontology, edge.source_term, table)
+        _ensure_term_exists(ontology, edge.target_term, table)
+        if not ontology.has_edge(edge.source_term, edge.target_term, edge.name):
+            ontology.object_properties.append(edge)
+
+    # 4. Collect evidence for this table (needed by enricher + proposer)
+    evidence_for_table = vocab_service.get_evidence_for_table(
+        table["name"],
+        [c.get("name", "") for c in columns],
+    )
+    ctx["evidence"] = ctx.get("evidence", []) + [
+        e for e in evidence_for_table if e not in ctx.get("evidence", [])
+    ]
+    ctx["table_name"] = table["name"]
+    ctx["table_description"] = table.get("description") or ""
+
+    # 5. Enrich attributes via LLM (may raise on timeout)
+    enriched_columns = enrich_attributes(
+        det_result.attributes, ctx, ctx.get("evidence", [])
+    )
+
+    # Build lookup from source_column -> enriched info
+    enriched_map = {ec.source_column: ec for ec in enriched_columns}
+
+    # Merge enriched attributes into ontology
+    term_name = (
+        det_result.attributes[0].term_name if det_result.attributes else None
+    )
+    if term_name:
+        _ensure_term_exists(ontology, term_name, table)
+    for attr in det_result.attributes:
+        ec = enriched_map.get(attr.source_column)
+        ontology.attributes.append(
+            Attribute(
+                name=ec.canonical_name if ec else attr.name,
+                datatype=attr.datatype,
+                term_name=attr.term_name,
+                source_column=attr.source_column,
+                provenance=Provenance(
+                    source_table=table["name"],
+                    source_column=attr.source_column,
+                    derivation="deterministic",
+                ),
+                description=ec.description if ec else None,
+                formula=ec.formula if ec else None,
+                usage_hint=ec.usage_hint if ec else None,
+            )
+        )
+
+    # 6. External vocabulary lookup
+    ext_matches = vocab_service.find_similar_terms(table["name"], columns)
+
+    # 7. Invoke Proposer (Gen-LLM) — may raise on timeout
+    delta = invoke_proposer(
+        table, ctx, det_result, ext_matches, ontology, enriched_columns
+    )
+
+    # 8. Invoke Judge (Judge-LLM) — may raise on timeout
+    verdict = invoke_judge(delta, ontology)
+
+    # 9. Apply verdict and merge into ontology
+    validated_delta = verdict.apply(delta, table["name"])
+    ontology.merge(validated_delta, table["name"])
 
 
 def _ensure_term_exists(

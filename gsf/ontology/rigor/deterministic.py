@@ -249,12 +249,26 @@ def run_deterministic(
             )
         )
 
+    all_col_names = [c["name"] for c in columns]
+    attr_names = [a.source_column for a in result.attributes]
     logger.info(
-        "  [det] Column classification: %d PK, %d FK, %d attributes",
-        len(result.pk_column_names),
-        len(result.fk_column_names),
-        len(result.attributes),
+        "  [det] Columns: %d total -> %d attrs, %d skipped",
+        len(all_col_names),
+        len(attr_names),
+        len(result.pk_column_names) + len(result.fk_column_names),
     )
+    if result.pk_column_names:
+        logger.info(
+            "  [det]   Skipped (PK): %s",
+            ", ".join(sorted(result.pk_column_names)),
+        )
+    if result.fk_column_names:
+        logger.info(
+            "  [det]   Skipped (FK): %s",
+            ", ".join(sorted(result.fk_column_names)),
+        )
+    if attr_names:
+        logger.info("  [det]   Kept as attrs: %s", ", ".join(attr_names))
 
     return result
 

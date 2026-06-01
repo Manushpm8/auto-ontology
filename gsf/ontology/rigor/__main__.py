@@ -47,6 +47,11 @@ def main() -> None:
         help="Skip writing results to Neo4j (dry run).",
     )
     parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Ignore checkpoints and start fresh (default: resume from last checkpoint).",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -84,6 +89,7 @@ def main() -> None:
             bird_root=args.bird_root,
             skip_threshold=args.skip_threshold,
             write_to_neo4j=not args.no_write,
+            resume=not args.no_resume,
         )
 
         all_summaries[db_name] = {

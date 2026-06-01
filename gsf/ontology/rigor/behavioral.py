@@ -194,11 +194,13 @@ def extract_metrics(
         agg_counts.items(), key=lambda x: x[1]["count"], reverse=True
     ):
         name = _name_metric(info["agg_type"], info["col_name"], evidence)
+        col = info["col_name"] if info["col_name"] != "?" else None
         metrics.append(
             Metric(
                 name=name,
                 expression=info["expression"],
                 source_tables=sorted(info["tables"]),
+                source_column=col,
                 aggregation_type=info["agg_type"],
             )
         )

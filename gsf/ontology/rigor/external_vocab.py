@@ -67,10 +67,24 @@ class VocabSource(Protocol):
 _LOV_SEARCH_URL = "https://lov.linkeddata.es/dataset/lov/api/v2/term/search"
 
 
+_LOV_FAIL_THRESHOLD = 3  # disable after this many consecutive failures
+
+
 class LOVClient:
-    """Search LOV for ontology classes matching a term."""
+    """Search LOV for ontology classes matching a term.
+
+    Tracks consecutive failures and disables itself after
+    ``_LOV_FAIL_THRESHOLD`` to avoid wasting time on a dead API.
+    """
+
+    def __init__(self) -> None:
+        self._consecutive_failures = 0
+        self._disabled = False
 
     def search(self, term: str, max_results: int = 5) -> list[ExternalConcept]:
+        if self._disabled:
+            return []
+
         try:
             resp = httpx.get(
                 _LOV_SEARCH_URL,
@@ -79,8 +93,18 @@ class LOVClient:
             )
             resp.raise_for_status()
             data = resp.json()
+            self._consecutive_failures = 0
         except Exception:
-            logger.debug("LOV search failed for %r", term, exc_info=True)
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= _LOV_FAIL_THRESHOLD:
+                self._disabled = True
+                logger.warning(
+                    "LOV disabled after %d consecutive failures — "
+                    "API appears down, skipping future requests",
+                    self._consecutive_failures,
+                )
+            else:
+                logger.debug("LOV search failed for %r", term, exc_info=True)
             return []
 
         results: list[ExternalConcept] = []

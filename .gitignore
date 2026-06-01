@@ -24,6 +24,9 @@ npm-debug.log*
 .env*.local
 .env
 
+# Rigor pipeline checkpoints
+.rigor_checkpoints/
+
 # DuckDB database files
 *.duckdb
 *.duckdb.wal

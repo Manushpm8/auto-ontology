@@ -5,13 +5,13 @@ Writes the constructed CoreOntology back to Neo4j as new nodes and edges:
   - Attribute nodes: Column -[:HAS_ATTRIBUTE]-> Attribute -[:IS_PROPERTY_OF]-> BusinessTerm
   - ObjectProperty as RELATES_TO edges between BusinessTerms
   - SUBCLASS_OF edges for hierarchy
-  - REPRESENTS edges from Column -> BusinessTerm (provenance)
   - Metric nodes
 """
 
 from __future__ import annotations
 
 import logging
+import re
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Edges,
@@ -22,6 +22,12 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 from gsf.ontology.rigor.models import CoreOntology
 
 logger = logging.getLogger(__name__)
+
+
+def _table_to_term_name(table_name: str) -> str:
+    """Convert a table name to the CamelCase BusinessTerm name convention."""
+    parts = re.split(r"[_\s]+", table_name)
+    return "".join(p.capitalize() for p in parts if p)
 
 RIGOR_SOURCE = "rigor"
 
@@ -69,20 +75,20 @@ SET r.derivation = $derivation,
 RETURN src.name AS src, r.name AS rel, tgt.name AS tgt
 """
 
-_MERGE_REPRESENTS = f"""
-MATCH (t:{Labels.TABLE} {{name: $table_name}})
-      -[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-MATCH (bt:BusinessTerm {{name: $term_name, source: $source}})
-MERGE (c)-[:REPRESENTS]->(bt)
-RETURN count(c) AS linked
-"""
-
 _MERGE_METRIC = """
 MERGE (m:Metric {name: $name, source: $source})
 SET m.expression = $expression,
     m.aggregation_type = $aggregation_type,
     m.source_tables = $source_tables
 RETURN m.name AS name
+"""
+
+_LINK_METRIC_TO_ATTRIBUTE = """
+MATCH (m:Metric {name: $metric_name, source: $source})
+MATCH (a:Attribute {source_column: $source_column, source: $source})
+WHERE a.business_term IN $source_terms
+MERGE (m)-[:AGGREGATES]->(a)
+RETURN m.name AS metric, a.name AS attr
 """
 
 
@@ -102,8 +108,8 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
         "subclass_edges": 0,
         "attributes": 0,
         "object_properties": 0,
-        "represents_links": 0,
         "metrics": 0,
+        "metric_edges": 0,
     }
 
     # 1. Write BusinessTerm nodes
@@ -131,17 +137,6 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
             )
             if rows:
                 stats["subclass_edges"] += 1
-
-        for prov in term.provenance:
-            conn.query_write(
-                _MERGE_REPRESENTS,
-                {
-                    "table_name": prov.source_table,
-                    "term_name": term.name,
-                    "source": RIGOR_SOURCE,
-                },
-            )
-            stats["represents_links"] += 1
 
     # 2. Write Attribute nodes: Column -[:HAS_ATTRIBUTE]-> Attribute -[:IS_PROPERTY_OF]-> BusinessTerm
     for attr in ontology.attributes:
@@ -179,7 +174,7 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
         if rows:
             stats["object_properties"] += 1
 
-    # 4. Write Metric nodes
+    # 4. Write Metric nodes + link to Attributes they aggregate
     for metric in ontology.metrics:
         rows = conn.query_write(
             _MERGE_METRIC,
@@ -194,14 +189,34 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
         if rows:
             stats["metrics"] += 1
 
+        if metric.source_column and metric.source_tables:
+            _to_term = _table_to_term_name
+            source_terms = [_to_term(t) for t in metric.source_tables]
+            linked = conn.query_write(
+                _LINK_METRIC_TO_ATTRIBUTE,
+                {
+                    "metric_name": metric.name,
+                    "source_column": metric.source_column,
+                    "source_terms": source_terms,
+                    "source": RIGOR_SOURCE,
+                },
+            )
+            if linked:
+                stats["metric_edges"] += len(linked)
+                logger.info(
+                    "  [neo4j] Metric %s -[:AGGREGATES]-> %s",
+                    metric.name,
+                    [r["attr"] for r in linked],
+                )
+
     logger.info(
         "[neo4j] Write complete: %d business_terms, %d attributes, %d OPs, "
-        "%d subclass, %d represents, %d metrics",
+        "%d subclass, %d metrics (%d linked to attrs)",
         stats["business_terms"],
         stats["attributes"],
         stats["object_properties"],
         stats["subclass_edges"],
-        stats["represents_links"],
         stats["metrics"],
+        stats["metric_edges"],
     )
     return stats

@@ -119,6 +119,9 @@ class Metric(BaseModel):
     )
     expression: str = Field(..., description="SQL expression, e.g. 'SUM(amount)'.")
     source_tables: list[str] = Field(default_factory=list)
+    source_column: str | None = Field(
+        None, description="Column being aggregated, e.g. 'amount'."
+    )
     aggregation_type: AggregationType = AggregationType.OTHER
 
 
