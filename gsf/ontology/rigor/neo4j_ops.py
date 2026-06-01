@@ -11,7 +11,6 @@ Writes the constructed CoreOntology back to Neo4j as new nodes and edges:
 from __future__ import annotations
 
 import logging
-import re
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Edges,
@@ -23,12 +22,6 @@ from gsf.ontology.rigor.models import CoreOntology
 
 logger = logging.getLogger(__name__)
 
-
-def _table_to_term_name(table_name: str) -> str:
-    """Convert a table name to the CamelCase BusinessTerm name convention."""
-    parts = re.split(r"[_\s]+", table_name)
-    return "".join(p.capitalize() for p in parts if p)
-
 RIGOR_SOURCE = "rigor"
 
 # ---------------------------------------------------------------------------
@@ -37,7 +30,8 @@ RIGOR_SOURCE = "rigor"
 
 _MERGE_BUSINESS_TERM = """
 MERGE (bt:BusinessTerm {name: $name, source: $source})
-SET bt.description = $description
+SET bt.description = $description,
+    bt.source_tables = $source_tables
 RETURN bt.name AS name
 """
 
@@ -83,12 +77,24 @@ SET m.expression = $expression,
 RETURN m.name AS name
 """
 
-_LINK_METRIC_TO_ATTRIBUTE = """
-MATCH (m:Metric {name: $metric_name, source: $source})
-MATCH (a:Attribute {source_column: $source_column, source: $source})
-WHERE a.business_term IN $source_terms
+_LINK_METRIC_TO_ATTRIBUTE = f"""
+MATCH (m:Metric {{name: $metric_name, source: $source}})
+MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN} {{name: $source_column}})
+      -[:HAS_ATTRIBUTE]->(a:Attribute {{source: $source}})
+WHERE t.name IN $source_tables
 MERGE (m)-[:AGGREGATES]->(a)
 RETURN m.name AS metric, a.name AS attr
+"""
+
+_LINK_METRIC_TO_TERM = f"""
+MATCH (m:Metric {{name: $metric_name, source: $source}})
+MATCH (t:{Labels.TABLE} {{name: $source_table}})
+      -[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+      -[:HAS_ATTRIBUTE]->(:Attribute {{source: $source}})
+      -[:IS_PROPERTY_OF]->(bt:BusinessTerm {{source: $source}})
+WITH m, bt LIMIT 1
+MERGE (m)-[:DERIVED_FROM]->(bt)
+RETURN m.name AS metric, bt.name AS term
 """
 
 
@@ -114,11 +120,15 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
 
     # 1. Write BusinessTerm nodes
     for term in ontology.business_terms:
+        source_tables = sorted(
+            {p.source_table for p in term.provenance}
+        )
         rows = conn.query_write(
             _MERGE_BUSINESS_TERM,
             {
                 "name": term.name,
                 "description": term.description,
+                "source_tables": source_tables,
                 "source": RIGOR_SOURCE,
             },
         )
@@ -174,7 +184,7 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
         if rows:
             stats["object_properties"] += 1
 
-    # 4. Write Metric nodes + link to Attributes they aggregate
+    # 4. Write Metric nodes + link to Attributes or BusinessTerms
     for metric in ontology.metrics:
         rows = conn.query_write(
             _MERGE_METRIC,
@@ -189,25 +199,46 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
         if rows:
             stats["metrics"] += 1
 
-        if metric.source_column and metric.source_tables:
-            _to_term = _table_to_term_name
-            source_terms = [_to_term(t) for t in metric.source_tables]
-            linked = conn.query_write(
-                _LINK_METRIC_TO_ATTRIBUTE,
+        if not metric.source_column or not metric.source_tables:
+            continue
+
+        # Try linking to the Attribute via the Column graph path
+        linked = conn.query_write(
+            _LINK_METRIC_TO_ATTRIBUTE,
+            {
+                "metric_name": metric.name,
+                "source_column": metric.source_column,
+                "source_tables": metric.source_tables,
+                "source": RIGOR_SOURCE,
+            },
+        )
+        if linked:
+            stats["metric_edges"] += len(linked)
+            logger.info(
+                "  [neo4j] Metric %s -[:AGGREGATES]-> %s",
+                metric.name,
+                [r["attr"] for r in linked],
+            )
+            continue
+
+        # Fallback: link to BusinessTerm via DERIVED_FROM
+        for src_table in metric.source_tables:
+            fallback = conn.query_write(
+                _LINK_METRIC_TO_TERM,
                 {
                     "metric_name": metric.name,
-                    "source_column": metric.source_column,
-                    "source_terms": source_terms,
+                    "source_table": src_table,
                     "source": RIGOR_SOURCE,
                 },
             )
-            if linked:
-                stats["metric_edges"] += len(linked)
+            if fallback:
+                stats["metric_edges"] += 1
                 logger.info(
-                    "  [neo4j] Metric %s -[:AGGREGATES]-> %s",
+                    "  [neo4j] Metric %s -[:DERIVED_FROM]-> %s",
                     metric.name,
-                    [r["attr"] for r in linked],
+                    fallback[0]["term"],
                 )
+                break
 
     logger.info(
         "[neo4j] Write complete: %d business_terms, %d attributes, %d OPs, "
