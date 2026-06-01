@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from gsf.ontology.rigor.behavioral import analyze_sql_behavior
-from gsf.ontology.rigor.deterministic import run_deterministic
+from gsf.ontology.rigor.deterministic import run_deterministic, to_term_name
 from gsf.ontology.rigor.enricher import enrich_attributes
 from gsf.ontology.rigor.external_vocab import ExternalVocabService
 from gsf.ontology.rigor.judge import invoke_judge
@@ -386,6 +386,19 @@ def _process_one_table(
     # 9. Apply verdict and merge into ontology
     validated_delta = verdict.apply(delta, table["name"])
     ontology.merge(validated_delta, table["name"])
+
+    # 10. Rename provisional term if the LLM chose a better name
+    provisional = to_term_name(table["name"])
+    if validated_delta.business_terms:
+        proposed_name = validated_delta.business_terms[0].name
+        if proposed_name != provisional and ontology.has_term(provisional):
+            refs = ontology.rename_term(provisional, proposed_name)
+            logger.info(
+                "  [rename] %s -> %s (%d references updated)",
+                provisional,
+                proposed_name,
+                refs,
+            )
 
 
 def _ensure_term_exists(

@@ -51,13 +51,17 @@ Your output is a DeltaOntology with:
 
 - ALWAYS propose ONE primary BusinessTerm for this table (the business \
 entity it represents). Use CamelCase naming (e.g. "Customer", "Transaction").
+- Choose a clear, full business name — do NOT keep abbreviations or raw \
+table names. For example, if the table is "trans", name the term \
+"Transaction"; if "acct", name it "Account".
 - If a column hides a denormalized entity (flagged as a "denormalized \
 candidate"), you may propose an ADDITIONAL inferred BusinessTerm for it.
 - If this table's business term is a specialization of an existing term, \
 set `parent` to the parent term name (SubClassOf relationship).
-- Review the "Existing Business Terms" section. If the table clearly belongs \
-to an already-named term, reuse that exact name — do NOT create \
-a duplicate.
+- Some terms in "Existing Business Terms" are auto-generated placeholders \
+with raw table names (e.g. "Trans", "Acct"). You should propose the \
+correct business name — the system will handle the rename. Only reuse \
+an existing name if it is already a good business-friendly name.
 
 ## 2. ObjectProperties (edges between business terms)
 

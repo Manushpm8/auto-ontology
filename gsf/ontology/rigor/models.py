@@ -316,6 +316,29 @@ class CoreOntology(BaseModel):
     def term_names(self) -> list[str]:
         return [t.name for t in self.business_terms]
 
+    def rename_term(self, old_name: str, new_name: str) -> int:
+        """Rename a business term and update all references.
+
+        Returns the number of references updated (edges + attributes).
+        """
+        updated = 0
+        for bt in self.business_terms:
+            if bt.name == old_name:
+                bt.name = new_name
+                updated += 1
+        for attr in self.attributes:
+            if attr.term_name == old_name:
+                attr.term_name = new_name
+                updated += 1
+        for op in self.object_properties:
+            if op.source_term == old_name:
+                op.source_term = new_name
+                updated += 1
+            if op.target_term == old_name:
+                op.target_term = new_name
+                updated += 1
+        return updated
+
     def merge(self, delta: DeltaOntology, source_table: str) -> None:
         """Integrate a validated DeltaOntology into the core ontology."""
         prov = Provenance(source_table=source_table, derivation="llm_proposed")

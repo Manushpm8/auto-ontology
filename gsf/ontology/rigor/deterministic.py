@@ -57,7 +57,7 @@ class DeterministicResult(BaseModel):
     )
 
 
-def _to_term_name(table_name: str) -> str:
+def to_term_name(table_name: str) -> str:
     """Convert a table name to CamelCase business term name.
 
     Examples: 'order_items' -> 'OrderItems', 'customers' -> 'Customers'
@@ -79,7 +79,7 @@ def run_deterministic(
         all_table_names: All table names in the database for implicit FK matching
     """
     table_name = table["name"]
-    term_name = _to_term_name(table_name)
+    term_name = to_term_name(table_name)
     fks = ctx.get("fks", [])
     columns = ctx.get("columns", [])
 
@@ -93,7 +93,7 @@ def run_deterministic(
         tgt_table = fk["target_table"]
         fk_source_cols.add(src_col)
 
-        target_term = _to_term_name(tgt_table)
+        target_term = to_term_name(tgt_table)
 
         # 2. Self-referential detection
         if tgt_table == table_name:
@@ -157,7 +157,7 @@ def run_deterministic(
         prefix = match.group(1).lower()
         matched_table = _find_table_match(prefix, known_tables, table_name)
         if matched_table:
-            target_term = _to_term_name(matched_table)
+            target_term = to_term_name(matched_table)
             prov = Provenance(
                 source_table=table_name,
                 source_column=col_name,
@@ -216,7 +216,7 @@ def run_deterministic(
         for pattern, label in _DENORM_PATTERNS:
             m = pattern.match(col_name)
             if m:
-                entity = _to_term_name(m.group(1))
+                entity = to_term_name(m.group(1))
                 result.denormalized_candidates.append(
                     DenormalizedCandidate(
                         column_name=col_name,
@@ -291,7 +291,7 @@ def _infer_fk_edge_name(column_name: str, target_table: str) -> str:
         camel = parts[0].lower() + "".join(p.capitalize() for p in parts[1:])
         return f"has{camel[0].upper()}{camel[1:]}"
 
-    return f"relatesTo{_to_term_name(target_table)}"
+    return f"relatesTo{to_term_name(target_table)}"
 
 
 def _infer_self_ref_name(column_name: str) -> str:
