@@ -31,6 +31,7 @@ from gsf.vdb import get_vdb
 from gsf.connectors.postgres import PostgresDatabase
 
 from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
+from gsf.ingestion_service.table_types import apply_table_types
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
@@ -82,6 +83,7 @@ def run_ingest() -> None:
     extract_graph = Graph() >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
     extract_graph.execute(None)
 
+    apply_table_types(connector)
     apply_metadata(database_name)
 
     embed_graph = (

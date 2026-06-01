@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SinglePageFormat } from '@/components/dataPage/SinglePageView';
+import { labelForCatalogNode } from '@/components/dataPage/catalog-node-icons';
 import { ComposerSectionKind, DataModels, TreeFocusState } from '@/enums/datasources';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import type { ComposerSection } from '@/types/composer-section';
@@ -185,7 +186,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: database.name,
-						subtitle: 'database',
+						subtitle: labelForCatalogNode(DataModels.DB),
 						entityId: database.id,
 						parentId: workspaceDataId,
 					},
@@ -219,7 +220,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: schema.schema_name,
-						subtitle: `Schema · ${database.name}`,
+						subtitle: `${labelForCatalogNode(DataModels.SCHEMA)} · ${database.name}`,
 						entityId: schema.id,
 						parentId: database.id,
 					},
@@ -228,9 +229,11 @@ export function buildTreeFocusPageFormat(
 		}
 		case DataModels.TABLE: {
 			const { database, schema, table } = resolvedFocus;
+			const tableTypeLabel = labelForCatalogNode(DataModels.TABLE, table.type);
 			sections.push(
 				...baseCardsForEntity(table.description ?? '', [
-					{ label: 'Table', value: table.name },
+					{ label: 'Type', value: tableTypeLabel },
+					{ label: 'Name', value: table.name },
 					{ label: 'Schema', value: table.schema_name },
 					{ label: 'Database', value: table.db_name },
 					{ label: 'Columns', value: String(table.columns_count) },
@@ -256,7 +259,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: table.name,
-						subtitle: `Table · ${schema.schema_name} · ${database.name}`,
+						subtitle: `${tableTypeLabel} · ${schema.schema_name} · ${database.name}`,
 						entityId: table.id,
 						parentId: schema.id,
 					},
@@ -300,7 +303,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: column.column_name,
-						subtitle: `Column · ${column.table_name}`,
+						subtitle: `${labelForCatalogNode(DataModels.COLUMN)} · ${column.table_name}`,
 						entityId: column.id,
 						parentId: table.id,
 					},

@@ -10,6 +10,13 @@ export enum DataModels {
 	COLUMN = 'column',
 }
 
+/** Postgres ``table_type`` values stamped on Neo4j ``Table`` nodes. */
+export enum TableObjectType {
+	BASE_TABLE = 'base table',
+	VIEW = 'view',
+	MATERIALIZED_VIEW = 'materialized view',
+}
+
 /** Tree focus resolution before a catalog entity is matched. */
 export enum TreeFocusState {
 	NONE = 'none',

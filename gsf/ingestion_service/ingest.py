@@ -17,6 +17,7 @@ from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import EmbedParams, TabularExtractParams
 from gsf.vdb import get_vdb
 from gsf.connectors.postgres import PostgresDatabase
+from gsf.ingestion_service.table_types import apply_table_types
 
 logger = logging.getLogger("ingestion_service.ingest")
 
@@ -42,16 +43,18 @@ def run_ingest(connection_string: str) -> None:
         connector=PostgresDatabase(connection_string),
     )
 
-    graph = (
+    extract_graph = Graph() >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
+    extract_graph.execute(None)
+    apply_table_types(TABULAR_PARAMS.connector)
+
+    embed_graph = (
         Graph()
-        >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
         >> TabularFetchEmbeddingsOp(
             database_name=TABULAR_PARAMS.connector.database_name
         )
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
-
-    results = graph.execute(None)
+    results = embed_graph.execute(None)
     result_df = results[0] if results else None
 
     if result_df is not None and not result_df.empty:
