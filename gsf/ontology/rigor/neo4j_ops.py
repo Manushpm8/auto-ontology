@@ -44,7 +44,11 @@ RETURN child.name AS child, parent.name AS parent
 
 _MERGE_ATTRIBUTE = f"""
 MERGE (a:Attribute {{name: $name, business_term: $term_name, source: $source}})
-SET a.datatype = $datatype
+SET a.datatype = $datatype,
+    a.source_column = $source_column,
+    a.description = $description,
+    a.formula = $formula,
+    a.usage_hint = $usage_hint
 WITH a
 MATCH (bt:BusinessTerm {{name: $term_name, source: $source}})
 MERGE (a)-[:IS_PROPERTY_OF]->(bt)
@@ -150,6 +154,9 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
                 "source_table": attr.provenance.source_table,
                 "source_column": attr.source_column,
                 "source": RIGOR_SOURCE,
+                "description": attr.description,
+                "formula": attr.formula,
+                "usage_hint": attr.usage_hint,
             },
         )
         if rows:

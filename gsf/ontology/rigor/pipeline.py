@@ -23,6 +23,7 @@ from typing import Any
 
 from gsf.ontology.rigor.behavioral import analyze_sql_behavior
 from gsf.ontology.rigor.deterministic import run_deterministic
+from gsf.ontology.rigor.enricher import enrich_attributes
 from gsf.ontology.rigor.external_vocab import ExternalVocabService
 from gsf.ontology.rigor.judge import invoke_judge
 from gsf.ontology.rigor.loaders import (
@@ -32,7 +33,12 @@ from gsf.ontology.rigor.loaders import (
     fetch_table_context,
     load_evidence,
 )
-from gsf.ontology.rigor.models import BusinessTerm, CoreOntology, Provenance
+from gsf.ontology.rigor.models import (
+    Attribute,
+    BusinessTerm,
+    CoreOntology,
+    Provenance,
+)
 from gsf.ontology.rigor.neo4j_ops import write_ontology_to_neo4j
 from gsf.ontology.rigor.proposer import invoke_proposer
 
@@ -117,10 +123,7 @@ def build_ontology(
             if not ontology.has_edge(edge.source_term, edge.target_term, edge.name):
                 ontology.object_properties.append(edge)
 
-        # 4. External vocabulary lookup
-        ext_matches = vocab_service.find_similar_terms(table["name"], columns)
-
-        # 5. Get BIRD evidence for this table
+        # 4. Collect evidence for this table (needed by enricher + proposer)
         evidence_for_table = vocab_service.get_evidence_for_table(
             table["name"],
             [c.get("name", "") for c in columns],
@@ -128,14 +131,54 @@ def build_ontology(
         ctx["evidence"] = ctx.get("evidence", []) + [
             e for e in evidence_for_table if e not in ctx.get("evidence", [])
         ]
+        ctx["table_name"] = table["name"]
+        ctx["table_description"] = table.get("description") or ""
 
-        # 6. Invoke Proposer (Gen-LLM)
-        delta = invoke_proposer(table, ctx, det_result, ext_matches, ontology)
+        # 5. Enrich attributes via LLM
+        enriched_columns = enrich_attributes(
+            det_result.attributes, ctx, ctx.get("evidence", [])
+        )
 
-        # 7. Invoke Judge (Judge-LLM)
+        # Build lookup from source_column -> enriched info
+        enriched_map = {ec.source_column: ec for ec in enriched_columns}
+
+        # Merge enriched attributes into ontology
+        term_name = (
+            det_result.attributes[0].term_name if det_result.attributes else None
+        )
+        if term_name:
+            _ensure_term_exists(ontology, term_name, table)
+        for attr in det_result.attributes:
+            ec = enriched_map.get(attr.source_column)
+            ontology.attributes.append(
+                Attribute(
+                    name=ec.canonical_name if ec else attr.name,
+                    datatype=attr.datatype,
+                    term_name=attr.term_name,
+                    source_column=attr.source_column,
+                    provenance=Provenance(
+                        source_table=table["name"],
+                        source_column=attr.source_column,
+                        derivation="deterministic",
+                    ),
+                    description=ec.description if ec else None,
+                    formula=ec.formula if ec else None,
+                    usage_hint=ec.usage_hint if ec else None,
+                )
+            )
+
+        # 6. External vocabulary lookup
+        ext_matches = vocab_service.find_similar_terms(table["name"], columns)
+
+        # 7. Invoke Proposer (Gen-LLM)
+        delta = invoke_proposer(
+            table, ctx, det_result, ext_matches, ontology, enriched_columns
+        )
+
+        # 8. Invoke Judge (Judge-LLM)
         verdict = invoke_judge(delta, ontology)
 
-        # 8. Apply verdict and merge into ontology
+        # 9. Apply verdict and merge into ontology
         validated_delta = verdict.apply(delta, table["name"])
         ontology.merge(validated_delta, table["name"])
 

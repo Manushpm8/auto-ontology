@@ -30,9 +30,12 @@ logger = logging.getLogger(__name__)
 
 _JUDGE_SYSTEM_PROMPT = """\
 You are an ontology quality reviewer. You receive:
-1. A proposed DeltaOntology (new business terms, attributes, object \
-properties) from a generative model.
+1. A proposed DeltaOntology (new business terms and object properties) \
+from a generative model.
 2. The current CoreOntology built so far.
+
+Attributes are handled automatically and are NOT part of the review.
+Leave `approved_attributes` empty.
 
 Your job is to validate the proposed Delta and return a JudgeVerdict.
 
@@ -47,7 +50,6 @@ different name? E.g., "Client" vs "Customer", "Product" vs "Item".
 ### 2. Naming Quality
 - Business term names must be CamelCase (e.g. "OrderItem", not "order_item").
 - Relationship names should be camelCase verbs (e.g. "placedBy", "contains").
-- Attribute names should match the source column name.
 - If a name is unclear or misleading, reject it with a reason.
 
 ### 3. Consistency
@@ -57,14 +59,11 @@ different name? E.g., "Client" vs "Customer", "Product" vs "Item".
 - If an edge references a business term that doesn't exist and isn't \
 proposed, reject the edge.
 
-### 4. Redundancy
-- If an Attribute duplicates information already captured by an \
-ObjectProperty or vice versa, reject the redundant one.
-
 ## Output rules
 
-- approved_business_terms: business terms that pass all checks (with any name fixes applied).
-- approved_attributes: attributes that pass.
+- approved_business_terms: business terms that pass all checks \
+(with any name fixes applied).
+- approved_attributes: leave EMPTY (attributes are deterministic).
 - approved_object_properties: object properties that pass.
 - rejected: elements that fail checks, with reasons.
 - merge_instructions: for duplicate business terms, specify which proposed \
@@ -99,13 +98,6 @@ def _build_judge_prompt(
             term_lines.append(f"  - {t.name}{parent_tag}: {t.description}")
         blocks.append("### Proposed Business Terms\n" + "\n".join(term_lines))
 
-    if delta.attributes:
-        attr_lines = [
-            f"  - {a.name} ({a.datatype}) -> {a.term_name} [col: {a.source_column}]"
-            for a in delta.attributes
-        ]
-        blocks.append("### Proposed Attributes\n" + "\n".join(attr_lines))
-
     if delta.object_properties:
         op_lines = [
             f"  - ({op.source_term}) --[{op.name}]--> ({op.target_term})"
@@ -113,11 +105,7 @@ def _build_judge_prompt(
         ]
         blocks.append("### Proposed ObjectProperties\n" + "\n".join(op_lines))
 
-    if (
-        not delta.business_terms
-        and not delta.attributes
-        and not delta.object_properties
-    ):
+    if not delta.business_terms and not delta.object_properties:
         blocks.append("(Empty delta — nothing to review.)")
 
     return "\n\n".join(blocks)
@@ -133,11 +121,7 @@ def invoke_judge(
     ontology: CoreOntology,
 ) -> JudgeVerdict:
     """Call the Judge-LLM to validate a proposed DeltaOntology."""
-    if (
-        not delta.business_terms
-        and not delta.attributes
-        and not delta.object_properties
-    ):
+    if not delta.business_terms and not delta.object_properties:
         logger.info("  [judge] Empty delta — auto-approving.")
         return JudgeVerdict()
 
@@ -161,10 +145,8 @@ def invoke_judge(
     )
 
     logger.info(
-        "  [judge] Verdict: %d approved terms, %d approved attrs, "
-        "%d approved OPs, %d rejected, %d merges",
+        "  [judge] Verdict: %d approved terms, %d approved OPs, %d rejected, %d merges",
         len(verdict.approved_business_terms),
-        len(verdict.approved_attributes),
         len(verdict.approved_object_properties),
         len(verdict.rejected),
         len(verdict.merge_instructions),

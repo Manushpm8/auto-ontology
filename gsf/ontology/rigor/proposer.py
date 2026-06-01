@@ -8,8 +8,10 @@ For each table, the Proposer receives:
   - BIRD evidence strings
   - The current CoreOntology snapshot
 
-It returns a DeltaOntology with proposed BusinessTerms, Attributes,
-and ObjectProperties for this table.
+It returns a DeltaOntology with proposed BusinessTerms and
+ObjectProperties for this table. Attributes are created
+deterministically (see deterministic.py) and are NOT proposed
+by the LLM.
 """
 
 from __future__ import annotations
@@ -22,7 +24,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from gsf.ontology.domain_prereading.llm import invoke_structured
 from gsf.ontology.rigor.deterministic import DeterministicResult
 from gsf.ontology.rigor.external_vocab import ExternalMatch
-from gsf.ontology.rigor.models import CoreOntology, DeltaOntology
+from gsf.ontology.rigor.models import (
+    CoreOntology,
+    DeltaOntology,
+    EnrichedColumn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +42,15 @@ You are an expert ontology engineer building a business ontology from a \
 relational database schema. You receive one table at a time and must \
 propose ontology elements for it.
 
-Your output is a DeltaOntology with three lists:
+Attributes are created automatically for every non-PK, non-FK column — \
+you do NOT need to propose them. Leave the `attributes` list empty.
+
+Your output is a DeltaOntology with:
 
 ## 1. BusinessTerms (business entities)
 
-- Propose ONE primary BusinessTerm for this table (the business entity it \
-represents). Use CamelCase naming (e.g. "Customer", "Transaction").
+- ALWAYS propose ONE primary BusinessTerm for this table (the business \
+entity it represents). Use CamelCase naming (e.g. "Customer", "Transaction").
 - If a column hides a denormalized entity (flagged as a "denormalized \
 candidate"), you may propose an ADDITIONAL inferred BusinessTerm for it.
 - If this table's business term is a specialization of an existing term, \
@@ -50,32 +59,21 @@ set `parent` to the parent term name (SubClassOf relationship).
 to an already-named term, reuse that exact name — do NOT create \
 a duplicate.
 
-## 2. Attributes (typed column attributes)
-
-- For each non-FK, non-ID column that is NOT consumed by a deterministic \
-edge or denormalized candidate, propose an Attribute.
-- The `term_name` must reference a business term you are proposing (or one \
-that already exists).
-- `source_column` must be the exact column name this attribute comes from.
-- Use the column's actual name as the attribute name.
-- Use the column's SQL data type as the datatype.
-- NOT every column becomes an Attribute: FK columns become edges, \
-PK/ID columns are structural, denormalized columns may become BusinessTerms.
-
-## 3. ObjectProperties (edges between business terms)
+## 2. ObjectProperties (edges between business terms)
 
 - Deterministic edges (FK, implicit FK, self-ref) are already handled. \
 Do NOT re-propose them.
 - For denormalized candidates: decide if the column represents a hidden \
-entity. If yes, propose an ObjectProperty (e.g. "belongsTo") linking \
-the table's business term to the inferred business term. If no, treat it \
-as an Attribute instead.
+entity. If yes, propose the inferred BusinessTerm AND an ObjectProperty \
+(e.g. "belongsTo") linking the table's term to it.
 - You may propose additional semantic relationships you detect from \
 context (e.g. hierarchy, composition, temporal ordering).
 
 ## Rules
 
-- Be conservative: only propose elements with clear evidence.
+- ALWAYS propose at least ONE BusinessTerm for this table.
+- Be conservative with ObjectProperties: only propose edges with clear \
+evidence.
 - Names must be clear and business-friendly.
 - Every BusinessTerm must have a meaningful one-sentence description.
 - Use external ontology matches as naming hints — prefer established \
@@ -95,6 +93,7 @@ def _build_user_prompt(
     det_result: DeterministicResult,
     ext_matches: list[ExternalMatch],
     ontology: CoreOntology,
+    enriched_columns: list[EnrichedColumn] | None = None,
 ) -> str:
     """Assemble the user prompt with all retrieval context."""
     blocks: list[str] = []
@@ -111,23 +110,20 @@ def _build_user_prompt(
     )
     blocks.append(table_header)
 
-    # Block 3 — Columns
-    col_lines: list[str] = []
-    for c in ctx.get("columns", []):
-        samples = c.get("sample_values")
-        sample_str = (
-            ", ".join(str(s) for s in samples[:5])
-            if isinstance(samples, list) and samples
-            else "(none)"
+    # Block 3 — Enriched attributes (already created)
+    if enriched_columns:
+        attr_lines = []
+        for ec in enriched_columns:
+            line = f"  - {ec.canonical_name} ({ec.source_column}): {ec.description}"
+            if ec.formula:
+                line += f"  |  formula={ec.formula}"
+            if ec.usage_hint:
+                line += f"  |  hint={ec.usage_hint}"
+            attr_lines.append(line)
+        blocks.append(
+            "### Enriched Attributes (already created — use for context)\n"
+            + "\n".join(attr_lines)
         )
-        col_lines.append(
-            f"  - {c['name']} ({c.get('data_type', '?')})"
-            f"  |  sql_refs={c.get('sql_ref_count', 0)}"
-            f"  |  samples=[{sample_str}]"
-            f"  |  desc={c.get('description') or '(none)'}"
-        )
-    if col_lines:
-        blocks.append("### Columns\n" + "\n".join(col_lines))
 
     # Block 4 — Deterministic edges already created
     if det_result.edges:
@@ -149,7 +145,7 @@ def _build_user_prompt(
             for dc in det_result.denormalized_candidates
         ]
         blocks.append(
-            "### Denormalized Candidates (decide: inferred BusinessTerm or Attribute?)\n"
+            "### Denormalized Candidates (decide: inferred BusinessTerm + edge?)\n"
             + "\n".join(cand_lines)
         )
 
@@ -208,9 +204,12 @@ def invoke_proposer(
     det_result: DeterministicResult,
     ext_matches: list[ExternalMatch],
     ontology: CoreOntology,
+    enriched_columns: list[EnrichedColumn] | None = None,
 ) -> DeltaOntology:
     """Call the Gen-LLM to propose a DeltaOntology for one table."""
-    user_prompt = _build_user_prompt(table, ctx, det_result, ext_matches, ontology)
+    user_prompt = _build_user_prompt(
+        table, ctx, det_result, ext_matches, ontology, enriched_columns
+    )
 
     messages = [
         SystemMessage(content=_SYSTEM_PROMPT),
@@ -231,9 +230,8 @@ def invoke_proposer(
     )
 
     logger.info(
-        "  [proposer] Result: %d business_terms, %d attributes, %d obj_props",
+        "  [proposer] Result: %d business_terms, %d obj_props",
         len(result.business_terms),
-        len(result.attributes),
         len(result.object_properties),
     )
 

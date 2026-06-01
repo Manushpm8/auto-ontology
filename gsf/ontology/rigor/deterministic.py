@@ -5,6 +5,8 @@ Scans a table's columns and foreign keys to detect:
 2. Self-referential edges (FK pointing to own table)
 3. Implicit FK patterns (*_id columns without declared FK)
 4. Denormalized entity candidates (*_name, *_type, *_category, *_status)
+5. PK column detection (explicit and implicit)
+6. Auto-create Attribute nodes for all non-PK, non-FK columns
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from pydantic import BaseModel, Field
 from gsf.ontology.rigor.models import (
     DenormalizedCandidate,
     ObjectProperty,
+    ProposedAttribute,
     Provenance,
 )
 
@@ -43,6 +46,14 @@ class DeterministicResult(BaseModel):
     fk_column_names: set[str] = Field(
         default_factory=set,
         description="Columns consumed by FK/implicit-FK detection.",
+    )
+    pk_column_names: set[str] = Field(
+        default_factory=set,
+        description="Columns identified as primary keys.",
+    )
+    attributes: list[ProposedAttribute] = Field(
+        default_factory=list,
+        description="Auto-created attributes for non-PK, non-FK columns.",
     )
 
 
@@ -170,7 +181,29 @@ def run_deterministic(
                 edge_name,
             )
 
-    # 4. Denormalized entity candidates
+    # 4. PK detection
+    pk_cols: set[str] = set()
+    explicit_pk = table.get("pk")
+    if explicit_pk:
+        if isinstance(explicit_pk, list):
+            pk_cols.update(explicit_pk)
+        else:
+            pk_cols.add(str(explicit_pk))
+
+    if not pk_cols:
+        col_names_lower = {c["name"].lower(): c["name"] for c in columns}
+        if "id" in col_names_lower:
+            pk_cols.add(col_names_lower["id"])
+        else:
+            implicit_pk = f"{table_name}_id"
+            if implicit_pk.lower() in col_names_lower:
+                pk_cols.add(col_names_lower[implicit_pk.lower()])
+
+    result.pk_column_names = pk_cols
+    if pk_cols:
+        logger.info("  [det] PK columns: %s", pk_cols)
+
+    # 5. Denormalized entity candidates
     for col in columns:
         col_name = col["name"]
         if col_name in result.fk_column_names:
@@ -200,6 +233,28 @@ def run_deterministic(
                     label,
                 )
                 break
+
+    # 6. Auto-create attributes for all non-PK, non-FK columns
+    skip_cols = result.fk_column_names | result.pk_column_names
+    for col in columns:
+        col_name = col["name"]
+        if col_name in skip_cols:
+            continue
+        result.attributes.append(
+            ProposedAttribute(
+                name=col_name,
+                datatype=col.get("data_type") or "unknown",
+                term_name=term_name,
+                source_column=col_name,
+            )
+        )
+
+    logger.info(
+        "  [det] Column classification: %d PK, %d FK, %d attributes",
+        len(result.pk_column_names),
+        len(result.fk_column_names),
+        len(result.attributes),
+    )
 
     return result
 

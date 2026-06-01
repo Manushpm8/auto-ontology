@@ -62,6 +62,25 @@ def invoke_structured(
         try:
             model_llm = llm.with_structured_output(schema, method="function_calling")
             result = model_llm.invoke(current_messages)
+            if result is None:
+                logger.warning(
+                    "LLM returned None for %s (attempt %d/%d)",
+                    schema_name,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                )
+                if attempt < _MAX_RETRIES - 1:
+                    current_messages.append(
+                        SystemMessage(
+                            content=(
+                                "Your previous response could not be parsed. "
+                                "Please return a **fully valid** JSON object "
+                                "matching the required schema."
+                            )
+                        )
+                    )
+                    continue
+                return schema()
             return result
         except ValidationError as e:
             if attempt < _MAX_RETRIES - 1:
@@ -91,6 +110,8 @@ def invoke_structured(
                 type(e).__name__,
                 e,
             )
+            if attempt < _MAX_RETRIES - 1:
+                continue
             raise
 
     raise RuntimeError(f"invoke_structured failed for {schema_name}")

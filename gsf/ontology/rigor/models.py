@@ -28,6 +28,7 @@ DerivationType = Literal[
     "implicit_id_pattern",
     "self_referential",
     "denormalized_entity",
+    "deterministic",
     "llm_proposed",
     "sql_join_inferred",
     "sql_metric_inferred",
@@ -78,6 +79,15 @@ class Attribute(BaseModel):
         description="Name of the source Column this attribute is derived from.",
     )
     provenance: Provenance
+    description: str | None = Field(
+        None, description="Business description of this attribute."
+    )
+    formula: str | None = Field(
+        None, description="Derivation formula if this is a computed column."
+    )
+    usage_hint: str | None = Field(
+        None, description="Guidance on how to use this column in queries/analysis."
+    )
 
 
 class ObjectProperty(BaseModel):
@@ -146,6 +156,39 @@ class ProposedObjectProperty(BaseModel):
     name: str = Field(..., description="Relationship name, e.g. 'belongsTo'.")
     source_term: str
     target_term: str
+
+
+# ---------------------------------------------------------------------------
+# Column enrichment — LLM output for per-table attribute enrichment
+# ---------------------------------------------------------------------------
+
+
+class EnrichedColumn(BaseModel):
+    """LLM-produced enrichment for a single column."""
+
+    source_column: str = Field(
+        ..., description="Raw column name (must match input exactly)."
+    )
+    canonical_name: str = Field(
+        ..., description="Business-friendly name, e.g. 'DistrictName' for 'A2'."
+    )
+    description: str = Field(
+        ..., description="What this attribute represents in business terms."
+    )
+    formula: str | None = Field(
+        None,
+        description="Derivation formula if computed, e.g. 'revenue - cost'.",
+    )
+    usage_hint: str | None = Field(
+        None,
+        description="How to use this column in queries or analysis.",
+    )
+
+
+class ColumnEnrichmentResult(BaseModel):
+    """LLM output: enrichment for all non-PK/FK columns of a table."""
+
+    columns: list[EnrichedColumn] = Field(default_factory=list)
 
 
 class DeltaOntology(BaseModel):
@@ -291,6 +334,14 @@ class CoreOntology(BaseModel):
                 )
 
         for attr in delta.attributes:
+            if not self.has_term(attr.term_name):
+                self.business_terms.append(
+                    BusinessTerm(
+                        name=attr.term_name,
+                        description=f"(auto-created for attribute {attr.name})",
+                        provenance=[prov],
+                    )
+                )
             col_prov = Provenance(
                 source_table=source_table,
                 source_column=attr.source_column,
