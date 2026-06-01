@@ -65,7 +65,9 @@ MATCH (tgt:BusinessTerm {name: $target_term, source: $source})
 MERGE (src)-[r:RELATES_TO {name: $name}]->(tgt)
 SET r.derivation = $derivation,
     r.source_table = $source_table,
-    r.source_column = $source_column
+    r.source_column = $source_column,
+    r.target_table = $target_table,
+    r.target_column = $target_column
 RETURN src.name AS src, r.name AS rel, tgt.name AS tgt
 """
 
@@ -120,9 +122,7 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
 
     # 1. Write BusinessTerm nodes
     for term in ontology.business_terms:
-        source_tables = sorted(
-            {p.source_table for p in term.provenance}
-        )
+        source_tables = sorted({p.source_table for p in term.provenance})
         rows = conn.query_write(
             _MERGE_BUSINESS_TERM,
             {
@@ -178,6 +178,8 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
                 "derivation": op.provenance.derivation,
                 "source_table": op.provenance.source_table,
                 "source_column": op.provenance.source_column or "",
+                "target_table": op.provenance.target_table or "",
+                "target_column": op.provenance.target_column or "",
                 "source": RIGOR_SOURCE,
             },
         )

@@ -40,6 +40,8 @@ class Provenance(BaseModel):
 
     source_table: str
     source_column: str | None = None
+    target_table: str | None = None
+    target_column: str | None = None
     derivation: DerivationType
 
 

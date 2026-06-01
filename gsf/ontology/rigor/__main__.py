@@ -52,6 +52,11 @@ def main() -> None:
         help="Ignore checkpoints and start fresh (default: resume from last checkpoint).",
     )
     parser.add_argument(
+        "--no-embed",
+        action="store_true",
+        help="Skip embedding ontology elements into pgvector.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -91,6 +96,11 @@ def main() -> None:
             write_to_neo4j=not args.no_write,
             resume=not args.no_resume,
         )
+
+        if not args.no_write and not args.no_embed:
+            from gsf.ontology.rigor.embed import embed_ontology
+
+            embed_ontology(ontology, db_name)
 
         all_summaries[db_name] = {
             "business_terms": len(ontology.business_terms),

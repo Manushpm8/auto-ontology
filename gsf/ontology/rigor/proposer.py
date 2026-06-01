@@ -49,13 +49,15 @@ Your output is a DeltaOntology with:
 
 ## 1. BusinessTerms (business entities)
 
-- ALWAYS propose ONE primary BusinessTerm for this table (the business \
-entity it represents). Use CamelCase naming (e.g. "Customer", "Transaction").
+- ALWAYS propose exactly ONE primary BusinessTerm for this table (the \
+business entity it represents). Use CamelCase naming (e.g. "Customer", \
+"Transaction").
 - Choose a clear, full business name — do NOT keep abbreviations or raw \
 table names. For example, if the table is "trans", name the term \
 "Transaction"; if "acct", name it "Account".
-- If a column hides a denormalized entity (flagged as a "denormalized \
-candidate"), you may propose an ADDITIONAL inferred BusinessTerm for it.
+- Do NOT propose additional BusinessTerms from columns — columns are \
+already handled as Attributes. A column like "type" with enumerated \
+values (OWNER, USER) is an attribute, not a separate business entity.
 - If this table's business term is a specialization of an existing term, \
 set `parent` to the parent term name (SubClassOf relationship).
 - Some terms in "Existing Business Terms" are auto-generated placeholders \
@@ -67,15 +69,12 @@ an existing name if it is already a good business-friendly name.
 
 - Deterministic edges (FK, implicit FK, self-ref) are already handled. \
 Do NOT re-propose them.
-- For denormalized candidates: decide if the column represents a hidden \
-entity. If yes, propose the inferred BusinessTerm AND an ObjectProperty \
-(e.g. "belongsTo") linking the table's term to it.
 - You may propose additional semantic relationships you detect from \
 context (e.g. hierarchy, composition, temporal ordering).
 
 ## Rules
 
-- ALWAYS propose at least ONE BusinessTerm for this table.
+- ALWAYS propose exactly ONE BusinessTerm for this table — no more.
 - Be conservative with ObjectProperties: only propose edges with clear \
 evidence.
 - Names must be clear and business-friendly.
@@ -141,19 +140,7 @@ def _build_user_prompt(
             + "\n".join(edge_lines)
         )
 
-    # Block 5 — Denormalized candidates
-    if det_result.denormalized_candidates:
-        cand_lines = [
-            f"  - {dc.column_name} -> possibly {dc.inferred_entity_name}"
-            f"  (pattern: {dc.pattern}, type: {dc.column_type})"
-            for dc in det_result.denormalized_candidates
-        ]
-        blocks.append(
-            "### Denormalized Candidates (decide: inferred BusinessTerm + edge?)\n"
-            + "\n".join(cand_lines)
-        )
-
-    # Block 6 — FK context
+    # Block 5 — FK context
     fk_lines: list[str] = []
     for fk in ctx.get("fks", []):
         fk_lines.append(

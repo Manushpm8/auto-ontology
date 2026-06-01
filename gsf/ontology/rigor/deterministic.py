@@ -95,12 +95,16 @@ def run_deterministic(
 
         target_term = to_term_name(tgt_table)
 
+        tgt_col = fk["target_column"]
+
         # 2. Self-referential detection
         if tgt_table == table_name:
             edge_name = _infer_self_ref_name(src_col)
             prov = Provenance(
                 source_table=table_name,
                 source_column=src_col,
+                target_table=tgt_table,
+                target_column=tgt_col,
                 derivation="self_referential",
             )
             result.edges.append(
@@ -122,6 +126,8 @@ def run_deterministic(
             prov = Provenance(
                 source_table=table_name,
                 source_column=src_col,
+                target_table=tgt_table,
+                target_column=tgt_col,
                 derivation="declared_fk",
             )
             edge_name = _infer_fk_edge_name(src_col, tgt_table)
@@ -161,6 +167,8 @@ def run_deterministic(
             prov = Provenance(
                 source_table=table_name,
                 source_column=col_name,
+                target_table=matched_table,
+                target_column=col_name,
                 derivation="implicit_id_pattern",
             )
             edge_name = _infer_fk_edge_name(col_name, matched_table)
