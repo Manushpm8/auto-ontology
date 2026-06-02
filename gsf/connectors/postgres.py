@@ -13,6 +13,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 
@@ -73,14 +74,17 @@ class PostgresDatabase(SQLDatabase):
     def get_tables(self) -> pd.DataFrame:
         # Filter tables that are part of partitioned tables.
         # relkind distinguishes materialized views (m) from ordinary tables (r).
-        return self.execute("""
+        view = TableTypes.VIEW
+        matview = TableTypes.MATERIALIZED_VIEW
+        base = TableTypes.BASE_TABLE
+        return self.execute(f"""
             SELECT
                 t.table_schema AS table_schema,
                 t.table_name   AS table_name,
                 CASE c.relkind
-                    WHEN 'v' THEN 'view'
-                    WHEN 'm' THEN 'materialized view'
-                    ELSE 'base table'
+                    WHEN 'v' THEN '{view}'
+                    WHEN 'm' THEN '{matview}'
+                    ELSE '{base}'
                 END AS table_type
             FROM information_schema.tables t
             JOIN pg_namespace n ON n.nspname = t.table_schema

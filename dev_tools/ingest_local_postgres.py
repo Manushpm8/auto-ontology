@@ -30,8 +30,9 @@ from nemo_retriever.params import EmbedParams, TabularExtractParams
 from gsf.vdb import get_vdb
 from gsf.connectors.postgres import PostgresDatabase
 
-from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
-from gsf.ingestion_service.table_types import apply_table_types
+import nemo_retriever.tabular_data.dev_tools.enrich_graph as neo_enrich
+
+from dev_tools.evaluation.enrich_graph import add_custom_analyses
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
@@ -81,17 +82,21 @@ def run_ingest() -> None:
     database_name = connector.database_name
 
     extract_graph = Graph() >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-    extract_graph.execute(None)
-
-    apply_table_types(connector)
-    apply_metadata(database_name)
+    extract_results = extract_graph.execute(None)
+    frames = extract_results[0] if extract_results else (None, None)
+    if not (isinstance(frames, tuple) and len(frames) == 2):
+        raise RuntimeError(
+            "TabularSchemaExtractOp did not return a (tables_df, columns_df) tuple; "
+            "cannot run embed step."
+        )
+    frames = neo_enrich.apply_metadata(database_name, frames) or frames
 
     embed_graph = (
         Graph()
         >> TabularFetchEmbeddingsOp(database_name=database_name)
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
-    results = embed_graph.execute(None)
+    results = embed_graph.execute(frames)
     result_df = results[0] if results else None
 
     # Build the pgvector VDB once. PostgresVDB.__init__ wipes existing rows
