@@ -176,7 +176,7 @@ def update_node_properties(
     node_props = dict(rows[0]["props"])
     result = {"id": rows[0]["id"], **{k: node_props.get(k) for k in properties}}
 
-    reembed_ids = _reembed_targets_for_update(
+    reembed_ids = _get_node_ids_for_embedding_update(
         node_id=node_id,
         label=rows[0]["label"],
         properties=properties,
@@ -187,7 +187,7 @@ def update_node_properties(
     return result
 
 
-def _reembed_targets_for_update(
+def _get_node_ids_for_embedding_update(
     *,
     node_id: str,
     label: str,
@@ -210,7 +210,7 @@ def _reembed_targets_for_update(
         return []
 
     if has_description:
-        table_id = _parent_table_id_for_column(node_id)
+        table_id = get_parent_table_id_for_column(node_id)
         targets = [node_id]
         if table_id is not None:
             targets.append(table_id)
@@ -227,7 +227,7 @@ def _reembed_targets_for_update(
     return []
 
 
-def _parent_table_id_for_column(column_id: str) -> str | None:
+def get_parent_table_id_for_column(column_id: str) -> str | None:
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{id: $column_id}})
@@ -251,7 +251,9 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     for nid in unique_ids:
         vdb.delete_by_id(nid)
 
-    tables_df, columns_df, database_name = _tabular_frames_for_node_ids(node_ids)
+    tables_df, columns_df, database_name = _get_tables_and_columns_by_node_ids(
+        node_ids,
+    )
     if tables_df.empty and columns_df.empty:
         logger.info(
             "No Table/Column rows found for node_ids=%r; skipping VDB upsert.",
@@ -295,10 +297,10 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     IngestVdbOperator(vdb=vdb)(rows)
 
 
-def _tabular_frames_for_node_ids(
+def _get_tables_and_columns_by_node_ids(
     node_ids: list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, str]:
-    """Load Neo4j slices for :class:`TabularFetchEmbeddingsOp`.
+    """Load Table/Column rows from Neo4j as dataframes for :class:`TabularFetchEmbeddingsOp`.
 
     When a table id is included, all of its columns are loaded so table
     embedding text matches full ingest (not only the column row being edited).
