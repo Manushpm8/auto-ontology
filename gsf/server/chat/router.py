@@ -19,6 +19,7 @@ from gsf.server.chat.helpers import (
     NODE_LABELS,
     ChatRequest,
     get_connector,
+    get_ontology_retriever,
     get_retriever,
 )
 
@@ -36,6 +37,7 @@ def _stream_chat(request: ChatRequest) -> Generator[str, None, None]:
         payload = {
             "question": request.question,
             "retriever": get_retriever(),
+            "ontology_retriever": get_ontology_retriever(),
             "connector": get_connector(),
             "acronyms": request.acronyms or "",
             "custom_prompts": request.custom_prompts or "",

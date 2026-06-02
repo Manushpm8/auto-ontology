@@ -100,7 +100,7 @@ def main() -> None:
         if not args.no_write and not args.no_embed:
             from gsf.ontology.rigor.embed import embed_ontology
 
-            embed_ontology(ontology, db_name)
+            embed_ontology(ontology, database_name="bird", schema_name=db_name)
 
         all_summaries[db_name] = {
             "business_terms": len(ontology.business_terms),

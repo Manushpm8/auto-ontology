@@ -47,8 +47,11 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_res
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 
 from gsf.connectors.postgres import PostgresDatabase
+from gsf.ontology.rigor.embed import RIGOR_VDB_COLLECTION
 from gsf.server.env import load_server_env
 from gsf.vdb import get_vdb
+from gsf.vdb.config import get_postgres_connection_string
+from gsf.vdb.postgres import PostgresVDB
 
 load_server_env()
 
@@ -109,6 +112,22 @@ def _build_retriever() -> Retriever:
     return Retriever(
         top_k=15,
         vdb_kwargs={"vdb": get_vdb()},
+        embed_kwargs={
+            "model_name": EMBED_PARAMS.model_name,
+            "embed_invoke_url": EMBED_PARAMS.embed_invoke_url,
+            "api_key": EMBED_PARAMS.api_key,
+        },
+    )
+
+
+def _build_ontology_retriever() -> Retriever:
+    """Build a retriever backed by the rigor_ontology pgvector collection."""
+    vdb = PostgresVDB(
+        connection_string=get_postgres_connection_string(),
+        collection_name=RIGOR_VDB_COLLECTION,
+    )
+    return Retriever(
+        vdb_kwargs={"vdb": vdb},
         embed_kwargs={
             "model_name": EMBED_PARAMS.model_name,
             "embed_invoke_url": EMBED_PARAMS.embed_invoke_url,
@@ -426,6 +445,7 @@ def evaluate(
 
     connector = _build_connector()
     retriever = _build_retriever()
+    ontology_retriever = _build_ontology_retriever()
 
     resuming = start_index > 0 and output_path.exists()
     mode = "a" if resuming else "w"
@@ -472,6 +492,7 @@ def evaluate(
                     "path_state": {},
                     "custom_prompts": "",
                     "acronyms": [],
+                    "ontology_retriever": ontology_retriever,
                 }
                 agent_result = get_agent_response(payload)
                 _print_agent_result(qid, question, agent_result, expected_sql)
@@ -617,6 +638,7 @@ def evaluate_consistency(
 
     connector = _build_connector()
     retriever = _build_retriever()
+    ontology_retriever = _build_ontology_retriever()
 
     results: Dict[int, list] = {i: [] for i in range(len(questions))}
 
@@ -638,6 +660,7 @@ def evaluate_consistency(
                     "path_state": {},
                     "custom_prompts": "",
                     "acronyms": [],
+                    "ontology_retriever": ontology_retriever,
                 }
                 agent_result = get_agent_response(payload)
                 returned_sql = _normalize_text(
@@ -704,6 +727,7 @@ def run_single_query(question: str) -> None:
     """Run a single question through the agent and print the result."""
     connector = _build_connector()
     retriever = _build_retriever()
+    ontology_retriever = _build_ontology_retriever()
 
     payload: AgentPayload = {
         "question": question,
@@ -712,6 +736,7 @@ def run_single_query(question: str) -> None:
         "path_state": {},
         "custom_prompts": "",
         "acronyms": [],
+        "ontology_retriever": ontology_retriever,
     }
     t0 = time.perf_counter()
     agent_result = get_agent_response(payload)

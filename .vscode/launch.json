@@ -105,6 +105,30 @@
       "justMyCode": false
     },
     {
+      "name": "Eval BIRD",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": ["--input", "dev_tools/evaluation/bird_evaluation.json", "--output", "dev_tools/evaluation/bird_evaluation_scores.csv"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Eval BIRD (single query)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": ["--single", "--input", "dev_tools/evaluation/bird_evaluation.json"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "Ontology: Attributes & Concepts",
       "type": "debugpy",
       "request": "launch",

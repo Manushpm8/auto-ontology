@@ -14,6 +14,9 @@ from pydantic import BaseModel, Field
 from nemo_retriever.retriever import Retriever
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.vdb import get_vdb
+from gsf.vdb.config import get_postgres_connection_string
+from gsf.vdb.postgres import PostgresVDB
+from gsf.ontology.rigor.embed import RIGOR_VDB_COLLECTION
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,7 @@ _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2"
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
 _retriever: Retriever | None = None
+_ontology_retriever: Retriever | None = None
 _connector: PostgresDatabase | None = None
 
 
@@ -95,3 +99,22 @@ def get_retriever() -> Retriever:
             },
         )
     return _retriever
+
+
+def get_ontology_retriever() -> Retriever:
+    """Return a Retriever backed by the rigor_ontology pgvector collection."""
+    global _ontology_retriever
+    if _ontology_retriever is None:
+        vdb = PostgresVDB(
+            connection_string=get_postgres_connection_string(),
+            collection_name=RIGOR_VDB_COLLECTION,
+        )
+        _ontology_retriever = Retriever(
+            vdb_kwargs={"vdb": vdb},
+            embed_kwargs={
+                "model_name": _EMBED_MODEL,
+                "embed_invoke_url": _EMBED_ENDPOINT,
+                "api_key": _NVIDIA_API_KEY,
+            },
+        )
+    return _ontology_retriever

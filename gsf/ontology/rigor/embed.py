@@ -79,6 +79,7 @@ def _metric_text(
 def _build_records(
     ontology: CoreOntology,
     database_name: str,
+    schema_name: str,
 ) -> list[dict]:
     """Convert ontology elements into NeMo-compatible record dicts."""
     attrs_by_term: dict[str, list[str]] = defaultdict(list)
@@ -95,6 +96,7 @@ def _build_records(
             "name": bt.name,
             "source_tables": source_tables,
             "database_name": database_name,
+            "schema_name": schema_name,
         }
         records.append(
             {
@@ -121,6 +123,7 @@ def _build_records(
             "source_column": attr.source_column,
             "source_table": attr.provenance.source_table,
             "database_name": database_name,
+            "schema_name": schema_name,
         }
         records.append(
             {
@@ -144,6 +147,7 @@ def _build_records(
             "name": m.name,
             "source_tables": m.source_tables,
             "database_name": database_name,
+            "schema_name": schema_name,
         }
         records.append(
             {
@@ -158,9 +162,21 @@ def _build_records(
     return records
 
 
-def embed_ontology(ontology: CoreOntology, database_name: str) -> int:
-    """Embed all ontology elements into pgvector. Returns row count."""
-    records = _build_records(ontology, database_name)
+def embed_ontology(
+    ontology: CoreOntology,
+    database_name: str,
+    schema_name: str | None = None,
+) -> int:
+    """Embed all ontology elements into pgvector. Returns row count.
+
+    *database_name* is the Postgres database (e.g. ``bird``).
+    *schema_name* is the schema inside that database (e.g. the BIRD ``db_id``).
+    When *schema_name* is not given it defaults to *database_name* for
+    backward compatibility.
+    """
+    if schema_name is None:
+        schema_name = database_name
+    records = _build_records(ontology, database_name, schema_name)
     if not records:
         logger.info("No ontology elements to embed for %r.", database_name)
         return 0
