@@ -91,9 +91,9 @@ def _build_records(
     for bt in ontology.business_terms:
         text = _term_text(bt.name, bt.description, attrs_by_term.get(bt.name, []))
         source_tables = sorted({p.source_table for p in bt.provenance})
-        rid = f"rigor:BusinessTerm:{bt.name}"
+        node_id = bt.id or f"rigor:BusinessTerm:{bt.name}"
         meta = {
-            "id": rid,
+            "id": node_id,
             "label": "BusinessTerm",
             "name": bt.name,
             "source_tables": source_tables,
@@ -104,7 +104,7 @@ def _build_records(
             {
                 "text": text,
                 "_embed_modality": "text",
-                "path": rid,
+                "path": node_id,
                 "page_number": -1,
                 "metadata": {**meta, "content_metadata": dict(meta)},
             }
@@ -118,9 +118,9 @@ def _build_records(
             attr.description,
             attr.usage_hint,
         )
-        rid = f"rigor:Attribute:{attr.term_name}.{attr.name}"
+        node_id = attr.id or f"rigor:Attribute:{attr.term_name}.{attr.name}"
         meta = {
-            "id": rid,
+            "id": node_id,
             "label": "Attribute",
             "name": attr.name,
             "term_name": attr.term_name,
@@ -133,7 +133,7 @@ def _build_records(
             {
                 "text": text,
                 "_embed_modality": "text",
-                "path": rid,
+                "path": node_id,
                 "page_number": -1,
                 "metadata": {**meta, "content_metadata": dict(meta)},
             }
@@ -146,9 +146,9 @@ def _build_records(
             m.aggregation_type.value,
             m.source_tables,
         )
-        rid = f"rigor:Metric:{m.name}"
+        node_id = m.id or f"rigor:Metric:{m.name}"
         meta = {
-            "id": rid,
+            "id": node_id,
             "label": "Metric",
             "name": m.name,
             "source_tables": m.source_tables,
@@ -159,7 +159,7 @@ def _build_records(
             {
                 "text": text,
                 "_embed_modality": "text",
-                "path": rid,
+                "path": node_id,
                 "page_number": -1,
                 "metadata": {**meta, "content_metadata": dict(meta)},
             }

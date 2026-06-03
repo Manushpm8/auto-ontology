@@ -53,6 +53,7 @@ class Provenance(BaseModel):
 class BusinessTerm(BaseModel):
     """A business entity node in the ontology (e.g. Customer, Order)."""
 
+    id: str | None = Field(None, description="UUID assigned during Neo4j write.")
     name: str = Field(..., description="CamelCase business term name, e.g. 'Customer'.")
     description: str = Field(
         ..., description="One-sentence description of this business term."
@@ -69,6 +70,7 @@ class Attribute(BaseModel):
     Graph: Column -[:HAS_ATTRIBUTE]-> Attribute -[:IS_PROPERTY_OF]-> BusinessTerm
     """
 
+    id: str | None = Field(None, description="UUID assigned during Neo4j write.")
     name: str = Field(..., description="Attribute name, e.g. 'email', 'unitPrice'.")
     datatype: str = Field(
         ..., description="SQL or logical data type, e.g. 'text', 'integer'."
@@ -116,6 +118,7 @@ class AggregationType(str, Enum):
 class Metric(BaseModel):
     """A business metric derived from SQL aggregation patterns."""
 
+    id: str | None = Field(None, description="UUID assigned during Neo4j write.")
     name: str = Field(
         ..., description="Metric name, e.g. 'TotalRevenue', 'AvgOrderValue'."
     )

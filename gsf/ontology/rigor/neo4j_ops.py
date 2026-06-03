@@ -11,6 +11,7 @@ Writes the constructed CoreOntology back to Neo4j as new nodes and edges:
 from __future__ import annotations
 
 import logging
+import uuid
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Edges,
@@ -30,9 +31,10 @@ RIGOR_SOURCE = "rigor"
 
 _MERGE_BUSINESS_TERM = """
 MERGE (bt:BusinessTerm {name: $name, source: $source})
-SET bt.description = $description,
+SET bt.id = $id,
+    bt.description = $description,
     bt.source_tables = $source_tables
-RETURN bt.name AS name
+RETURN bt.name AS name, bt.id AS id
 """
 
 _MERGE_SUBCLASS = """
@@ -44,7 +46,8 @@ RETURN child.name AS child, parent.name AS parent
 
 _MERGE_ATTRIBUTE = f"""
 MERGE (a:Attribute {{name: $name, business_term: $term_name, source: $source}})
-SET a.datatype = $datatype,
+SET a.id = $id,
+    a.datatype = $datatype,
     a.source_column = $source_column,
     a.description = $description,
     a.formula = $formula,
@@ -73,10 +76,11 @@ RETURN src.name AS src, r.name AS rel, tgt.name AS tgt
 
 _MERGE_METRIC = """
 MERGE (m:Metric {name: $name, source: $source})
-SET m.expression = $expression,
+SET m.id = $id,
+    m.expression = $expression,
     m.aggregation_type = $aggregation_type,
     m.source_tables = $source_tables
-RETURN m.name AS name
+RETURN m.name AS name, m.id AS id
 """
 
 _LINK_METRIC_TO_ATTRIBUTE = f"""
@@ -122,10 +126,12 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
 
     # 1. Write BusinessTerm nodes
     for term in ontology.business_terms:
+        node_id = str(uuid.uuid4())
         source_tables = sorted({p.source_table for p in term.provenance})
         rows = conn.query_write(
             _MERGE_BUSINESS_TERM,
             {
+                "id": node_id,
                 "name": term.name,
                 "description": term.description,
                 "source_tables": source_tables,
@@ -133,8 +139,9 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
             },
         )
         if rows:
+            term.id = node_id
             stats["business_terms"] += 1
-            logger.info("  [neo4j] BusinessTerm: %s", term.name)
+            logger.info("  [neo4j] BusinessTerm: %s (%s)", term.name, node_id)
 
         if term.parent:
             rows = conn.query_write(
@@ -150,9 +157,11 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
 
     # 2. Write Attribute nodes: Column -[:HAS_ATTRIBUTE]-> Attribute -[:IS_PROPERTY_OF]-> BusinessTerm
     for attr in ontology.attributes:
+        node_id = str(uuid.uuid4())
         rows = conn.query_write(
             _MERGE_ATTRIBUTE,
             {
+                "id": node_id,
                 "name": attr.name,
                 "term_name": attr.term_name,
                 "datatype": attr.datatype,
@@ -165,6 +174,7 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
             },
         )
         if rows:
+            attr.id = node_id
             stats["attributes"] += 1
 
     # 3. Write ObjectProperty edges
@@ -188,9 +198,11 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
 
     # 4. Write Metric nodes + link to Attributes or BusinessTerms
     for metric in ontology.metrics:
+        node_id = str(uuid.uuid4())
         rows = conn.query_write(
             _MERGE_METRIC,
             {
+                "id": node_id,
                 "name": metric.name,
                 "expression": metric.expression,
                 "aggregation_type": metric.aggregation_type.value,
@@ -199,6 +211,7 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
             },
         )
         if rows:
+            metric.id = node_id
             stats["metrics"] += 1
 
         if not metric.source_column or not metric.source_tables:
