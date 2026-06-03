@@ -11,7 +11,7 @@ import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { DataModels } from '@/enums/datasources';
 import { Icon, IconName } from '@/components/icons';
 import { datasources } from '@/api/datasources';
-import { iconForCatalogNode, labelForCatalogNode } from '@/components/dataPage/catalog-node-icons';
+import { catalogNodeLabel, iconForCatalogNode } from '@/components/dataPage/catalog-node-icons';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { splitId } from '@/lib/data/catalog-ids';
 import {
@@ -87,8 +87,8 @@ function Row({
 	hasChildren,
 	loading,
 	name,
-	metaIcon,
-	metaTitle,
+	icon,
+	title,
 	selected,
 	href,
 	onClick,
@@ -101,8 +101,8 @@ function Row({
 	hasChildren: boolean;
 	loading?: boolean;
 	name: string;
-	metaIcon?: IconName;
-	metaTitle?: string;
+	icon?: IconName;
+	title?: string;
 	selected: boolean;
 	href?: string;
 	onClick?: () => void;
@@ -114,9 +114,9 @@ function Row({
 	const pad = 12 + depth * 12;
 	const style = { paddingLeft: pad, paddingRight: 12 };
 
-	const nodeIconEl = metaIcon ? (
-		<span className="inline-flex shrink-0" title={metaTitle} aria-hidden>
-			<Icon name={metaIcon} className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+	const nodeIconEl = icon ? (
+		<span className="inline-flex shrink-0" title={title} aria-hidden>
+			<Icon name={icon} className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
 		</span>
 	) : null;
 
@@ -205,8 +205,8 @@ function ColumnBlock({
 				onToggle={() => setOpen((o) => !o)}
 				hasChildren={false}
 				name={column.column_name}
-				metaIcon={iconForCatalogNode(DataModels.COLUMN)}
-				metaTitle={labelForCatalogNode(DataModels.COLUMN)}
+				icon={iconForCatalogNode(DataModels.COLUMN)}
+				title={catalogNodeLabel(DataModels.COLUMN)}
 				selected={selectedId === columnFocusPath}
 				href={catalogPathFromFocusId(columnFocusPath, pathBase)}
 			/>
@@ -270,8 +270,8 @@ function TableBlock({
 				hasChildren={hasChildren}
 				loading={loading}
 				name={table.name}
-				metaIcon={iconForCatalogNode(DataModels.TABLE, table.type)}
-				metaTitle={labelForCatalogNode(DataModels.TABLE, table.type)}
+				icon={iconForCatalogNode(DataModels.TABLE, table.type)}
+				title={catalogNodeLabel(DataModels.TABLE, table.type)}
 				selected={selectedId === tableFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(tableFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateTable : undefined}
@@ -357,8 +357,8 @@ function SchemaBlock({
 				hasChildren={hasChildren}
 				loading={loadingTables}
 				name={schema.schema_name}
-				metaIcon={iconForCatalogNode(DataModels.SCHEMA)}
-				metaTitle={labelForCatalogNode(DataModels.SCHEMA)}
+				icon={iconForCatalogNode(DataModels.SCHEMA)}
+				title={catalogNodeLabel(DataModels.SCHEMA)}
 				selected={selectedId === schemaFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(schemaFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateSchemaBranch : undefined}
@@ -444,8 +444,8 @@ function DatabaseBlock({
 				hasChildren={hasChildren}
 				loading={loadingSchemas}
 				name={database.name}
-				metaIcon={iconForCatalogNode(DataModels.DB)}
-				metaTitle={labelForCatalogNode(DataModels.DB)}
+				icon={iconForCatalogNode(DataModels.DB)}
+				title={catalogNodeLabel(DataModels.DB)}
 				selected={selectedId === database.id}
 				href={undefined}
 				onActivateBranch={activateDatabaseBranch}

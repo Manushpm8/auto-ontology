@@ -11,7 +11,7 @@ export enum DataModels {
 }
 
 /** Postgres ``table_type`` values stamped on Neo4j ``Table`` nodes. */
-export enum TableObjectType {
+export enum TableType {
 	BASE_TABLE = 'base table',
 	VIEW = 'view',
 	MATERIALIZED_VIEW = 'materialized view',

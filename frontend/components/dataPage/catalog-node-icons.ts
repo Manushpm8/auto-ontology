@@ -22,16 +22,16 @@ const catalogNodeLabels: Record<DataModels, string> = {
 	[DataModels.COLUMN]: 'column',
 };
 
-export function iconForCatalogNode(kind: DataModels, tableType?: string): IconName {
-	if (kind === DataModels.TABLE) {
-		return iconForTableType(tableType);
+export function iconForCatalogNode(kind: DataModels, type?: string): IconName {
+	if (type) {
+		return iconForTableType(type);
 	}
 	return catalogNodeIcons[kind];
 }
 
-export function labelForCatalogNode(kind: DataModels, tableType?: string): string {
-	if (kind === DataModels.TABLE) {
-		return labelForTableType(tableType);
+export function catalogNodeLabel(kind: DataModels, type?: string): string {
+	if (type) {
+		return labelForTableType(type);
 	}
 	return catalogNodeLabels[kind];
 }

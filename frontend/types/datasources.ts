@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { TableObjectType } from '@/enums/datasources';
+import type { TableType } from '@/enums/datasources';
 
 export type Column = {
 	id: string;
@@ -23,7 +23,7 @@ export type Table = {
 	schema_name: string;
 	columns_count: number;
 	columns: Column[];
-	type?: TableObjectType;
+	type?: TableType;
 	description?: string;
 };
 
