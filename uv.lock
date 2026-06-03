@@ -1615,8 +1615,8 @@ wheels = [
 
 [[package]]
 name = "nemo-retriever"
-version = "2026.6.2.dev20260602094945"
-source = { git = "https://github.com/ftatiana-nv/NeMo-Retriever.git?subdirectory=nemo_retriever&branch=tfrenklach%2Fontology#136f07c3394a5825cd8e2a3c5a5124aa278fbe11" }
+version = "2026.6.2.dev20260602122020"
+source = { git = "https://github.com/ftatiana-nv/NeMo-Retriever.git?subdirectory=nemo_retriever&branch=tfrenklach%2Fontology#4f323edd48214cabb9d176da8e8f3c81bc42777f" }
 dependencies = [
     { name = "backoff" },
     { name = "click" },
