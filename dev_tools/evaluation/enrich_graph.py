@@ -21,6 +21,101 @@ logger = logging.getLogger(__name__)
 DEFAULT_DIR = Path(__file__).resolve().parent
 
 
+def apply_metadata(database_name: str) -> None:
+    """Stamp table/column metadata onto the Neo4j graph.
+
+    Reads ``<this dir>/<database_name>.json`` (keyed by table name) and
+    updates the following properties for every table/column belonging to
+    *database_name*:
+
+    * ``Table.description``
+    * ``Column.description``
+    * ``Column.sample_values`` (from the JSON's ``value_examples`` field, when
+      present and non-empty)
+
+    Tables/columns that aren't present in the graph are silently skipped
+    (the MATCH simply finds nothing). Properties for which the JSON has no
+    value are left untouched (``coalesce`` preserves the existing value).
+    """
+    from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+
+    metadata_path = DEFAULT_DIR / f"{database_name}.json"
+
+    if not metadata_path.exists():
+        raise SystemExit(
+            f"Metadata file not found: {metadata_path}\n"
+            f"Expected a JSON file describing tables/columns for database "
+            f"{database_name!r}."
+        )
+
+    with metadata_path.open() as f:
+        raw = json.load(f)
+
+    table_rows: list[dict[str, str]] = []
+    column_rows: list[dict[str, str | list[str] | None]] = []
+    samples_count = 0
+    for table_name, table_meta in raw.items():
+        table_desc = table_meta.get("description")
+        if table_desc:
+            table_rows.append({"table_name": table_name, "description": table_desc})
+
+        for col in table_meta.get("columns", []) or []:
+            col_desc = col.get("description")
+            value_examples = col.get("value_examples")
+            sample_values: list[str] | None = (
+                [str(v) for v in value_examples]
+                if isinstance(value_examples, list) and value_examples
+                else None
+            )
+            if not col_desc and sample_values is None:
+                continue
+            if sample_values is not None:
+                samples_count += 1
+            column_rows.append(
+                {
+                    "table_name": table_name,
+                    "column_name": col["name"],
+                    "description": col_desc or None,
+                    "sample_values": sample_values,
+                }
+            )
+
+    conn = get_neo4j_conn()
+
+    if table_rows:
+        conn.query_write(
+            query=(
+                "UNWIND $rows AS row "
+                "MATCH (d:Database {name: $database_name})-[:CONTAINS]->"
+                "(:Schema)-[:CONTAINS]->(t:Table {name: row.table_name}) "
+                "SET t.description = coalesce(row.description, t.description)"
+            ),
+            parameters={"rows": table_rows, "database_name": database_name},
+        )
+
+    if column_rows:
+        conn.query_write(
+            query=(
+                "UNWIND $rows AS row "
+                "MATCH (d:Database {name: $database_name})-[:CONTAINS]->"
+                "(:Schema)-[:CONTAINS]->(t:Table {name: row.table_name})"
+                "-[:CONTAINS]->(c:Column {name: row.column_name}) "
+                "SET c.description = coalesce(row.description, c.description), "
+                "    c.sample_values = coalesce(row.sample_values, c.sample_values)"
+            ),
+            parameters={"rows": column_rows, "database_name": database_name},
+        )
+
+    logger.info(
+        "Applied metadata: %d table description(s), %d column description(s), "
+        "%d column sample_values from %s",
+        len(table_rows),
+        sum(1 for r in column_rows if r.get("description")),
+        samples_count,
+        metadata_path,
+    )
+
+
 def add_custom_analyses(
     database_name: str,
     dialect: str,
@@ -90,7 +185,7 @@ def add_custom_analyses(
             logger.warning("Skipping custom analysis %r — no SQL provided.", name)
             continue
 
-        query_obj = parse_query_single(sql=sql, dialect=dialect, schemas=schemas)
+        query_obj = parse_query_single(sql=sql, dialects=[dialect], schemas=schemas)
         if query_obj is None:
             logger.warning(
                 "Could not resolve any tables for custom analysis %r — skipping.",

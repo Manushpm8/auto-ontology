@@ -77,7 +77,8 @@ def _worker_loop(
             stream_agent_response,
         )
 
-        from gsf.server.chat.helpers import get_connector, get_retriever
+        from gsf.connectors import get_connectors
+        from gsf.server.chat.helpers import get_retriever
         from gsf.server.chat.settings_dal import (
             fetch_acronyms,
             fetch_custom_prompts,
@@ -85,7 +86,7 @@ def _worker_loop(
 
         # Eagerly build the heavyweights so they're hot before the first ask.
         retriever = get_retriever()
-        connector = get_connector()
+        connectors = get_connectors()
     except BaseException as exc:  # noqa: BLE001 — surface init failure to parent
         logger.exception("Worker init failed")
         try:
@@ -115,7 +116,7 @@ def _worker_loop(
             agent_payload = {
                 "question": payload,
                 "retriever": retriever,
-                "connector": connector,
+                "connectors": connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": fetch_custom_prompts(),
             }

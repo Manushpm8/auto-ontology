@@ -235,7 +235,7 @@ export function buildTreeFocusPageFormat(
 					{ label: 'Type', value: tableTypeLabel },
 					{ label: 'Name', value: table.name },
 					{ label: 'Schema', value: table.schema_name },
-					{ label: 'Database', value: table.db_name },
+					{ label: 'Database', value: table.database_name },
 					{ label: 'Columns', value: String(table.columns_count) },
 				]),
 			);
