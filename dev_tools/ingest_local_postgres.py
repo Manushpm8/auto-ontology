@@ -30,9 +30,7 @@ from nemo_retriever.params import EmbedParams, TabularExtractParams
 from gsf.vdb import get_vdb
 from gsf.connectors.postgres import PostgresDatabase
 
-import nemo_retriever.tabular_data.dev_tools.enrich_graph as neo_enrich
-
-from dev_tools.evaluation.enrich_graph import add_custom_analyses
+from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
@@ -90,14 +88,14 @@ def run_ingest() -> None:
             f"got {type(schema_data).__name__}."
         )
 
-    frames = neo_enrich.apply_metadata(database_name, frames) or frames
+    apply_metadata(database_name)
 
     embed_graph = (
         Graph()
         >> TabularFetchEmbeddingsOp(database_name=database_name)
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
-    results = embed_graph.execute(frames)
+    results = embed_graph.execute(schema_data)
     result_df = results[0] if results else None
 
     # Build the pgvector VDB once. PostgresVDB.__init__ wipes existing rows

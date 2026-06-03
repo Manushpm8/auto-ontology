@@ -2,7 +2,43 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""GSF dev-tools helpers for custom analyses ingestion."""
+"""Stamp table/column metadata onto the Neo4j graph.
+
+This module reads ``<database_name>.json`` (sitting next to it — e.g.
+``dor_prod.json`` for the ``dor_prod`` database) and writes descriptions and
+sample values onto the ``Table`` and ``Column`` nodes that the tabular ingest
+pipeline created in Neo4j. It is intentionally a small, dev-tools-only helper
+and is meant to be invoked at the end of an ingest run.
+
+JSON shape (per table)::
+
+    {
+        "<table_name>": {
+            "description": "...",
+            "columns": [
+                {
+                    "name": "...",
+                    "description": "...",
+                    "value_examples": ["...", ...] | null,
+                    ...
+                },
+                ...
+            ]
+        },
+        ...
+    }
+
+Custom analyses (optional, separate file ``<database_name>_custom_analyses.json``)::
+
+    [
+        {
+            "name": "...",
+            "description": "...",
+            "sql": "SELECT ..."
+        },
+        ...
+    ]
+"""
 
 from __future__ import annotations
 
@@ -185,7 +221,7 @@ def add_custom_analyses(
             logger.warning("Skipping custom analysis %r — no SQL provided.", name)
             continue
 
-        query_obj = parse_query_single(sql=sql, dialects=[dialect], schemas=schemas)
+        query_obj = parse_query_single(sql=sql, dialect=dialect, schemas=schemas)
         if query_obj is None:
             logger.warning(
                 "Could not resolve any tables for custom analysis %r — skipping.",
@@ -193,8 +229,15 @@ def add_custom_analyses(
             )
             continue
 
+        # Match the Sql node by its full text so re-runs reuse the existing
+        # node instead of creating a fresh one (which would cause duplicate
+        # HAS_SQL edges from the merged CustomAnalysis node).
         query_obj.sql_node.match_props = {"sql_full_query": sql}
 
+        # Match the CustomAnalysis node by name so re-running the script is
+        # idempotent (Tables/Columns merge by id derived from their fully
+        # qualified path; CustomAnalysis has no such id, so name is the
+        # natural key from the JSON spec).
         analysis_node = Neo4jNode(
             name=name,
             label=Labels.CUSTOM_ANALYSIS,
