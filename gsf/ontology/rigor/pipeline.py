@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,7 @@ from gsf.ontology.rigor.proposer import invoke_proposer
 logger = logging.getLogger(__name__)
 
 _CHECKPOINT_DIR = Path(".rigor_checkpoints")
+_INVALID_TERM_NAMES = {"unnamed", "unnamed term", "unknown", "none", ""}
 
 
 # -----------------------------------------------------------------
@@ -208,8 +210,12 @@ def build_ontology(
 
         try:
             _process_one_table(
-                table, ontology, all_table_names, bird_root,
-                evidence, vocab_service,
+                table,
+                ontology,
+                all_table_names,
+                bird_root,
+                evidence,
+                vocab_service,
             )
         except Exception:
             logger.error(
@@ -321,11 +327,16 @@ def _process_one_table(
     # 3. Deterministic detection
     det_result = run_deterministic(table, ctx, all_table_names)
 
-    # Add deterministic edges to ontology immediately
+    # Add deterministic edges to ontology immediately, resolving term names
+    # via table_to_term so we don't recreate renamed placeholders.
     for edge in det_result.edges:
-        _ensure_term_exists(ontology, edge.source_term, table)
-        _ensure_term_exists(ontology, edge.target_term, table)
-        if not ontology.has_edge(edge.source_term, edge.target_term, edge.name):
+        src = ontology.resolve_term(edge.provenance.source_table or table["name"])
+        tgt = ontology.resolve_term(edge.provenance.target_table or table["name"])
+        edge.source_term = src
+        edge.target_term = tgt
+        _ensure_term_exists(ontology, src, table)
+        _ensure_term_exists(ontology, tgt, table)
+        if not ontology.has_edge(src, tgt, edge.name):
             ontology.object_properties.append(edge)
 
     # 4. Collect evidence for this table (needed by enricher + proposer)
@@ -348,11 +359,10 @@ def _process_one_table(
     enriched_map = {ec.source_column: ec for ec in enriched_columns}
 
     # Merge enriched attributes into ontology
-    term_name = (
-        det_result.attributes[0].term_name if det_result.attributes else None
-    )
+    term_name = det_result.attributes[0].term_name if det_result.attributes else None
     if term_name:
         _ensure_term_exists(ontology, term_name, table)
+        ontology.table_to_term[table["name"]] = term_name
     for attr in det_result.attributes:
         ec = enriched_map.get(attr.source_column)
         ontology.attributes.append(
@@ -380,15 +390,41 @@ def _process_one_table(
         table, ctx, det_result, ext_matches, ontology, enriched_columns
     )
 
+    # Keep only the first BusinessTerm (prompt asks for exactly one)
+    if len(delta.business_terms) > 1:
+        logger.warning(
+            "  [proposer] Returned %d terms, keeping only first: %s",
+            len(delta.business_terms),
+            delta.business_terms[0].name,
+        )
+        delta.business_terms = delta.business_terms[:1]
+
     # 8. Invoke Judge (Judge-LLM) — may raise on timeout
     verdict = invoke_judge(delta, ontology)
 
     # 9. Apply verdict and merge into ontology
     validated_delta = verdict.apply(delta, table["name"])
+
+    # Reject invalid term names from the LLM
+    provisional = to_term_name(table["name"])
+    cleaned_terms = []
+    for bt in validated_delta.business_terms:
+        name_lower = bt.name.strip().lower()
+        if name_lower in _INVALID_TERM_NAMES or not re.match(
+            r"^[A-Z][A-Za-z0-9]+$", bt.name.strip()
+        ):
+            logger.warning(
+                "  [guard] Rejected invalid term name %r, using %s",
+                bt.name,
+                provisional,
+            )
+            bt.name = provisional
+        cleaned_terms.append(bt)
+    validated_delta.business_terms = cleaned_terms
+
     ontology.merge(validated_delta, table["name"])
 
     # 10. Rename provisional term if the LLM chose a better name
-    provisional = to_term_name(table["name"])
     if validated_delta.business_terms:
         proposed_name = validated_delta.business_terms[0].name
         if proposed_name != provisional and ontology.has_term(provisional):

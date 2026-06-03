@@ -301,6 +301,7 @@ class CoreOntology(BaseModel):
     attributes: list[Attribute] = Field(default_factory=list)
     object_properties: list[ObjectProperty] = Field(default_factory=list)
     metrics: list[Metric] = Field(default_factory=list)
+    table_to_term: dict[str, str] = Field(default_factory=dict)
 
     def has_term(self, name: str) -> bool:
         return any(t.name == name for t in self.business_terms)
@@ -317,6 +318,19 @@ class CoreOntology(BaseModel):
 
     def term_names(self) -> list[str]:
         return [t.name for t in self.business_terms]
+
+    def resolve_term(self, table_name: str) -> str:
+        """Return the current BusinessTerm name for a table.
+
+        Uses the table_to_term mapping when available, otherwise
+        falls back to the deterministic CamelCase conversion.
+        """
+        import re
+
+        if table_name in self.table_to_term:
+            return self.table_to_term[table_name]
+        parts = re.split(r"[_\s]+", table_name)
+        return "".join(p.capitalize() for p in parts if p)
 
     def rename_term(self, old_name: str, new_name: str) -> int:
         """Rename a business term and update all references.
@@ -339,6 +353,9 @@ class CoreOntology(BaseModel):
             if op.target_term == old_name:
                 op.target_term = new_name
                 updated += 1
+        for tbl, term in self.table_to_term.items():
+            if term == old_name:
+                self.table_to_term[tbl] = new_name
         return updated
 
     def merge(self, delta: DeltaOntology, source_table: str) -> None:

@@ -86,8 +86,8 @@ def extract_join_edges(
 
         pairs = _extract_join_pairs(sql)
         for source, target in pairs:
-            src_term = _to_term_name(source)
-            tgt_term = _to_term_name(target)
+            src_term = ontology.resolve_term(source)
+            tgt_term = ontology.resolve_term(target)
 
             pair_key = (src_term, tgt_term)
             reverse_key = (tgt_term, src_term)
