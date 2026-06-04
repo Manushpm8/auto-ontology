@@ -46,6 +46,7 @@ from nemo_retriever.retriever import Retriever
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 
+from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.ontology.rigor.embed import RIGOR_VDB_COLLECTION
 from gsf.server.env import load_server_env
@@ -90,7 +91,7 @@ _DEFAULT_INPUT = Path(__file__).parent / "chatbot_evaluation.json"
 _DEFAULT_OUTPUT = Path(__file__).parent / "chatbot_evaluation_scores.csv"
 
 
-def _build_connector() -> PostgresDatabase:
+def _build_connector() -> PostgresDatabase | DuckDBDatabase:
     """Build the source-DB connector against ``CONNECTION_STRINGS`` (single URL)."""
     raw = os.environ.get("CONNECTION_STRINGS", "")
     if not raw:
@@ -104,7 +105,10 @@ def _build_connector() -> PostgresDatabase:
             f"CONNECTION_STRINGS must be exactly one URL for eval (got {len(parts)}); "
             "multi-connector eval isn't supported yet."
         )
-    return PostgresDatabase(parts[0])
+    conn_str = parts[0].strip()
+    if conn_str.startswith("duckdb://"):
+        return DuckDBDatabase(conn_str[len("duckdb://"):])
+    return PostgresDatabase(conn_str)
 
 
 def _build_retriever() -> Retriever:
@@ -181,24 +185,35 @@ def _canonical(value: Any) -> Any:
 
 
 def _execute_sql(
-    connector: PostgresDatabase, sql: str
+    connector: PostgresDatabase, sql: str, *, schema_name: str = ""
 ) -> Tuple[Optional[pd.DataFrame], str]:
     if not sql or not sql.strip():
         return None, "empty SQL"
     try:
+        if schema_name and hasattr(connector, "conn"):
+            connector.conn.execute(f"SET schema = '{schema_name}'")
         df = connector.execute(sql)
         if not isinstance(df, pd.DataFrame):
             df = pd.DataFrame(df)
         return df, ""
     except Exception as exc:  # pragma: no cover - tooling script
         return None, f"{type(exc).__name__}: {exc}"
+    finally:
+        if schema_name and hasattr(connector, "conn"):
+            try:
+                connector.conn.execute("SET schema = 'main'")
+            except Exception:
+                pass
 
 
 def _score_sql(
-    connector: PostgresDatabase, expected: str, actual: str
+    connector: PostgresDatabase, expected: str, actual: str,
+    *, schema_name: str = "",
 ) -> Dict[str, Any]:
     text_sim = _sql_text_similarity(expected, actual)
-    expected_df, expected_err = _execute_sql(connector, expected)
+    expected_df, expected_err = _execute_sql(
+        connector, expected, schema_name=schema_name,
+    )
     actual_df, actual_err = _execute_sql(connector, actual)
     exec_match = 0
     if expected_df is not None and actual_df is not None:
@@ -462,6 +477,7 @@ def evaluate(
             expected_sql = item.get("SQL", "")
             expected_answer = item.get("answer_raw", "")
             difficulty = item.get("difficulty", "")
+            db_id = item.get("db_id", "")
             logger.info("[%d/%d] q%s: %s", idx + 1, len(questions), qid, question)
 
             row: Dict[str, Any] = {
@@ -503,8 +519,22 @@ def evaluate(
                 row["returned_sql"] = returned_sql
                 row["returned_answer"] = returned_db_str
 
-                row.update(_score_sql(connector, expected_sql, returned_sql))
+                score = _score_sql(
+                    connector, expected_sql, returned_sql,
+                    schema_name=db_id,
+                )
+                row.update(score)
                 row.update(_score_answer(expected_answer, returned_db_str))
+
+                expected_result = score.get("expected_sql_result", "")
+                expected_err = score.get("expected_sql_error", "")
+                match_flag = score.get("sql_exec_match", 0)
+                if expected_result:
+                    print(f"\n  [expected_result] (exec_match={match_flag})")
+                    print(f"    {expected_result[:300]}")
+                elif expected_err:
+                    print("\n  [expected_sql_error]")
+                    print(f"    {expected_err}")
             except Exception as exc:
                 logger.exception("Question %s failed", qid)
                 row["error"] = f"{type(exc).__name__}: {exc}"

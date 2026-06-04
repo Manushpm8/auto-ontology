@@ -36,6 +36,14 @@ def main() -> None:
         help="Path to BIRD minidev root for supplementary evidence/descriptions.",
     )
     parser.add_argument(
+        "--schema-name",
+        default=None,
+        help=(
+            "Neo4j Schema node name (e.g. 'public'). "
+            "Defaults to --database-name for BIRD compatibility."
+        ),
+    )
+    parser.add_argument(
         "--skip-threshold",
         type=int,
         default=0,
@@ -72,20 +80,43 @@ def main() -> None:
     )
 
     from gsf.ontology.rigor.external_vocab import DOMAIN_MAP
+    from gsf.ontology.rigor.loaders import fetch_schemas_for_database
     from gsf.ontology.rigor.pipeline import build_ontology
 
-    db_names: list[str] = list(DOMAIN_MAP.keys()) if args.all else [args.database_name]
-
     logger = logging.getLogger(__name__)
+
+    # Build list of (database_name, schema_name) pairs to process.
+    if args.all:
+        # BIRD mode: DOMAIN_MAP keys are schema names used as db identifiers
+        targets = [(name, name) for name in DOMAIN_MAP.keys()]
+    elif args.schema_name:
+        targets = [(args.database_name, args.schema_name)]
+    else:
+        # Auto-discover all schemas under the database in Neo4j
+        schemas = fetch_schemas_for_database(args.database_name)
+        if not schemas:
+            logger.error(
+                "No schemas found for database %r in Neo4j", args.database_name
+            )
+            return
+        logger.info(
+            "Discovered %d schema(s) for %r: %s",
+            len(schemas),
+            args.database_name,
+            schemas,
+        )
+        targets = [(args.database_name, s) for s in schemas]
+
     all_summaries: dict[str, dict] = {}
 
-    for i, db_name in enumerate(db_names, 1):
+    for i, (db_name, schema) in enumerate(targets, 1):
+        label = f"{db_name}.{schema}" if db_name != schema else db_name
         logger.info(
-            "\n%s [%d/%d] Database: %s %s",
+            "\n%s [%d/%d] %s %s",
             "=" * 20,
             i,
-            len(db_names),
-            db_name,
+            len(targets),
+            label,
             "=" * 20,
         )
 
@@ -95,14 +126,15 @@ def main() -> None:
             skip_threshold=args.skip_threshold,
             write_to_neo4j=not args.no_write,
             resume=not args.no_resume,
+            schema_name=schema,
         )
 
         if not args.no_write and not args.no_embed:
             from gsf.ontology.rigor.embed import embed_ontology
 
-            embed_ontology(ontology, database_name="bird", schema_name=db_name)
+            embed_ontology(ontology, database_name=db_name, schema_name=schema)
 
-        all_summaries[db_name] = {
+        all_summaries[label] = {
             "business_terms": len(ontology.business_terms),
             "attributes": len(ontology.attributes),
             "object_properties": len(ontology.object_properties),

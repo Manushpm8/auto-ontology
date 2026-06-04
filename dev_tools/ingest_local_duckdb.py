@@ -26,7 +26,7 @@ import logging
 import os
 from pathlib import Path
 
-from nemo_retriever.tabular_data.dev_tools.duckdb_connector import DuckDB
+from gsf.connectors.duckdb import DuckDBDatabase
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
 from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
@@ -57,7 +57,7 @@ if not _NVIDIA_API_KEY:
         "Get your key at https://build.nvidia.com"
     )
 
-connector = DuckDB(_DUCKDB_PATH)
+connector = DuckDBDatabase(_DUCKDB_PATH)
 
 EMBED_PARAMS = EmbedParams(
     embed_invoke_url=_EMBED_ENDPOINT,

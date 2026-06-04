@@ -20,6 +20,24 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Schema discovery
+# ---------------------------------------------------------------------------
+
+_FETCH_SCHEMAS_QUERY = f"""
+MATCH (db:{Labels.DB} {{name: $db_name}})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+RETURN s.name AS schema_name
+ORDER BY s.name
+"""
+
+
+def fetch_schemas_for_database(database_name: str) -> list[str]:
+    """Return all schema names under a database node in Neo4j."""
+    conn = get_neo4j_conn()
+    rows = conn.query_read(_FETCH_SCHEMAS_QUERY, {"db_name": database_name})
+    return [r["schema_name"] for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # Neo4j read queries (reused from attributes_extraction.py)
 # ---------------------------------------------------------------------------
 
@@ -96,10 +114,18 @@ RETURN t1.name AS source_table,
 def fetch_sorted_tables(
     database_name: str,
     skip_threshold: int = 0,
+    schema_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return tables sorted by query count (descending)."""
+    """Return tables sorted by query count (descending).
+
+    *schema_name* is the Neo4j Schema node name (e.g. ``"public"``).
+    Defaults to *database_name* for BIRD compatibility where the
+    schema name equals the database name.
+    """
+    if schema_name is None:
+        schema_name = database_name
     conn = get_neo4j_conn()
-    rows = conn.query_read(_FETCH_TABLES_QUERY, {"schema_name": database_name})
+    rows = conn.query_read(_FETCH_TABLES_QUERY, {"schema_name": schema_name})
     tables = []
     for r in rows:
         qc = int(r.get("query_count") or 0)
@@ -142,21 +168,27 @@ def fetch_table_context(
 def fetch_all_sql_texts(
     database_name: str,
     limit: int = 500,
+    schema_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all SQL query texts across the database for Phase 2."""
+    if schema_name is None:
+        schema_name = database_name
     conn = get_neo4j_conn()
     return conn.query_read(
         _FETCH_ALL_SQL_QUERY,
-        {"schema_name": database_name, "limit": limit},
+        {"schema_name": schema_name, "limit": limit},
     )
 
 
 def fetch_existing_joins(
     database_name: str,
+    schema_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return all [:JOIN] edges already in the graph."""
+    if schema_name is None:
+        schema_name = database_name
     conn = get_neo4j_conn()
-    return conn.query_read(_FETCH_JOINS_QUERY, {"schema_name": database_name})
+    return conn.query_read(_FETCH_JOINS_QUERY, {"schema_name": schema_name})
 
 
 # ---------------------------------------------------------------------------

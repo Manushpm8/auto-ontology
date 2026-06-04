@@ -2,16 +2,20 @@
   "version": "0.2.0",
   "configurations": [
     {
-        "name": "Create Ontology",
-        "type": "debugpy",
-        "request": "launch",
-        "module": "gsf.ontology.rigor",
-        "args": ["--all", "--bird-root", "~/bird/minidev/MINIDEV"],
-        "cwd": "${workspaceFolder}",
-        "python": "${workspaceFolder}/.venv/bin/python",
-        "envFile": "${workspaceFolder}/.env",
-        "console": "integratedTerminal",
-        "justMyCode": false
+      "name": "Create Ontology",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.ontology.rigor",
+      "args": [
+        "--all",
+        "--bird-root",
+        "~/bird/minidev/MINIDEV"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
     },
     {
       "name": "Debug Ingest Postgres",
@@ -29,7 +33,11 @@
       "type": "debugpy",
       "request": "launch",
       "module": "gsf.ontology.rigor",
-      "args": ["--all", "--bird-root", "~/bird/minidev/MINIDEV"],
+      "args": [
+        "--all",
+        "--bird-root",
+        "~/bird/minidev/MINIDEV"
+      ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",
@@ -85,7 +93,11 @@
       "type": "debugpy",
       "request": "launch",
       "module": "dev_tools.evaluation.eval_chatbot",
-      "args": ["--consistency", "--runs", "10"],
+      "args": [
+        "--consistency",
+        "--runs",
+        "10"
+      ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",
@@ -97,7 +109,9 @@
       "type": "debugpy",
       "request": "launch",
       "module": "dev_tools.evaluation.eval_chatbot",
-      "args": ["--single"],
+      "args": [
+        "--single"
+      ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",
@@ -109,7 +123,12 @@
       "type": "debugpy",
       "request": "launch",
       "module": "dev_tools.evaluation.eval_chatbot",
-      "args": ["--input", "dev_tools/evaluation/bird_evaluation.json", "--output", "dev_tools/evaluation/bird_evaluation_scores.csv"],
+      "args": [
+        "--input",
+        "dev_tools/evaluation/bird_evaluation.json",
+        "--output",
+        "dev_tools/evaluation/bird_evaluation_scores.csv"
+      ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",
@@ -121,7 +140,26 @@
       "type": "debugpy",
       "request": "launch",
       "module": "dev_tools.evaluation.eval_chatbot",
-      "args": ["--single", "--input", "dev_tools/evaluation/bird_evaluation.json"],
+      "args": [
+        "--single",
+        "--input",
+        "dev_tools/evaluation/bird_evaluation.json"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Ontology: Rigor+ dor_prod",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.ontology.rigor",
+      "args": [
+        "--database-name",
+        "dor_prod"
+      ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",

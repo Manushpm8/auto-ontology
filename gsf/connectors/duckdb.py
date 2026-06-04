@@ -124,7 +124,8 @@ class DuckDBDatabase(SQLDatabase):
     def get_queries(self) -> pd.DataFrame:
         """DuckDB has no built-in query history — loads sample queries from a CSV."""
         csv_path = (
-            Path(__file__).parent
+            Path(__file__).resolve().parents[2]
+            / "dev_tools"
             / "benchmarks"
             / self._database_name
             / "sample_queries.csv"

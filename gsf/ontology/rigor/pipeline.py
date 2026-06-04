@@ -138,6 +138,7 @@ def build_ontology(
     skip_threshold: int = 0,
     write_to_neo4j: bool = True,
     resume: bool = True,
+    schema_name: str | None = None,
 ) -> CoreOntology:
     """Build a business ontology for a database.
 
@@ -147,10 +148,14 @@ def build_ontology(
         skip_threshold: Skip tables with fewer than this many SQL references.
         write_to_neo4j: Whether to write results to Neo4j.
         resume: If True, resume from the last checkpoint (if any).
+        schema_name: Neo4j Schema node name (e.g. ``"public"``).
+            Defaults to *database_name* for BIRD compatibility.
 
     Returns:
         The constructed CoreOntology.
     """
+    if schema_name is None:
+        schema_name = database_name
     # Try to resume from a previous checkpoint
     completed_tables: list[str] = []
     ontology = CoreOntology()
@@ -166,7 +171,7 @@ def build_ontology(
     logger.info("Rigor: building ontology for %r", database_name)
     logger.info("=" * 60)
 
-    tables = fetch_sorted_tables(database_name, skip_threshold)
+    tables = fetch_sorted_tables(database_name, skip_threshold, schema_name=schema_name)
     if not tables:
         logger.warning("No tables found for database %r", database_name)
         return ontology
@@ -242,7 +247,7 @@ def build_ontology(
     logger.info("PHASE 2: Behavioral analysis (SQL queries)")
     logger.info("-" * 40)
 
-    sql_texts = fetch_all_sql_texts(database_name)
+    sql_texts = fetch_all_sql_texts(database_name, schema_name=schema_name)
     all_evidence = evidence.get("all", [])
 
     join_edges, metrics = analyze_sql_behavior(sql_texts, ontology, all_evidence)
