@@ -1,0 +1,30 @@
+# Secrets — must never be committed
+.env
+.env.*
+!.env.example
+
+# Rendered ingestion YAMLs (contain Snowflake creds + bot JWT). Templates are tracked.
+ingestion/*.yaml
+!ingestion/*.tmpl
+
+# Ingestion run logs (run-ingestion.sh scrubs secrets before writing, but keep
+# them out of git anyway).
+logs/
+
+# sed backups left if the in-place scrubber fails halfway through
+*.bak
+
+# Local volumes / runtime artifacts. docker-compose.yml maps the OM Postgres
+# data dir to ./docker-volume/db-data-postgres, which is many MB of binary
+# tablespaces that include the bot-JWT row and password-hash tables. NEVER commit.
+docker-volume/
+volumes/
+data/
+
+# Python / virtualenv
+.venv/
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
