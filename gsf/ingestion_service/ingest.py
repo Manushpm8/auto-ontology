@@ -35,9 +35,7 @@ def run_ingest(connection_string: str) -> None:
     graph = (
         Graph()
         >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-        >> TabularFetchEmbeddingsOp(
-            database_name=database_name
-        )
+        >> TabularFetchEmbeddingsOp(database_name=database_name)
         >> _BatchEmbedActor(params=embed_params)
     )
 
@@ -45,9 +43,7 @@ def run_ingest(connection_string: str) -> None:
     result_df = results[0] if results else None
 
     if result_df is not None and not result_df.empty:
-        ingest_op = IngestVdbOperator(
-            vdb=get_vdb(database_name=database_name)
-        )
+        ingest_op = IngestVdbOperator(vdb=get_vdb(database_name=database_name))
         ingest_op(result_df.to_dict(orient="records"))
         logger.info(
             f"Tabular ingest result: {len(result_df)} rows written to pgvector",
