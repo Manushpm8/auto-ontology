@@ -7,6 +7,7 @@ export enum DataModels {
 	SCHEMA = 'schema',
 	TABLE = 'table',
 	VIEW = 'view',
+	MATERIALIZED_VIEW = 'materialized view',
 	COLUMN = 'column',
 }
 

@@ -85,7 +85,7 @@ class PostgresDatabase(SQLDatabase):
                     WHEN 'v' THEN '{view}'
                     WHEN 'm' THEN '{matview}'
                     ELSE '{base}'
-                END AS table_type
+                END AS type
             FROM information_schema.tables t
             JOIN pg_namespace n ON n.nspname = t.table_schema
             JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
