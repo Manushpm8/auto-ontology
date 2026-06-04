@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Placeholders } from '@/assets/images/placeholders';
 import { ConnectionsInfoCardView } from '@/components/connectionsPage/ConnectionsInfoCardView';
+import { NewConnectionsModal } from '@/components/connectionsPage/NewConnectionsModal';
 import { Icon, IconName } from '@/components/icons';
 import { connectionsApi } from '@/api/connections';
 import type { Connection } from '@/types/connection';
@@ -15,6 +16,8 @@ export const ConnectionsView = () => {
 	const [connections, setConnections] = useState<Connection[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [connectionModalOpen, setConnectionModalOpen] = useState(false);
+	const [editingConnectionId, setEditingConnectionId] = useState<string | undefined>();
 
 	const fetchConnections = useCallback(async () => {
 		try {
@@ -41,11 +44,23 @@ export const ConnectionsView = () => {
 	}, [fetchConnections]);
 
 	const handleCreateConnection = () => {
-		// TODO: NewConnectionsModal
+		setEditingConnectionId(undefined);
+		setConnectionModalOpen(true);
 	};
 
-	const handleEditConnection = (_id: string) => {
-		// TODO: NewConnectionsModal with connectionId
+	const handleEditConnection = (id: string) => {
+		setEditingConnectionId(id);
+		setConnectionModalOpen(true);
+	};
+
+	const handleConnectionModalClose = () => {
+		setConnectionModalOpen(false);
+		setEditingConnectionId(undefined);
+	};
+
+	const handleConnectionModalConfirm = () => {
+		handleConnectionModalClose();
+		void fetchConnections();
 	};
 
 	const handleDeleteConnection = (_id: string, _name: string) => {
@@ -121,6 +136,14 @@ export const ConnectionsView = () => {
 					/>
 				</div>
 			)}
+
+			<NewConnectionsModal
+				key={`${editingConnectionId ?? 'create'}-${String(connectionModalOpen)}`}
+				open={connectionModalOpen}
+				onConfirm={handleConnectionModalConfirm}
+				onCancel={handleConnectionModalClose}
+				connectionId={editingConnectionId}
+			/>
 		</div>
 	);
 };
