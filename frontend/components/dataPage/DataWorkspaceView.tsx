@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { BackPanelLayout } from '@/components/BackPanelLayout';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from './SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
@@ -33,11 +34,8 @@ export function DataWorkspaceView() {
 	const databasesRef = useRef<Database[]>([]);
 	const [treeDatabases, setTreeDatabases] = useState<Database[]>([]);
 	const [treeDataEpoch, setTreeDataEpoch] = useState(0);
-	const [treeCollapsed, setTreeCollapsed] = useState(false);
 	const treeEpochFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const inFlightRef = useRef(false);
-
-	const toggleTreeCollapsed = useCallback(() => setTreeCollapsed((c) => !c), []);
 
 	const workspaceDb = databases[0];
 	const workspaceDataId = workspaceDb?.id ?? '';
@@ -238,21 +236,20 @@ export function DataWorkspaceView() {
 	}
 
 	return (
-		<div className="flex h-full w-full bg-white dark:bg-zinc-950">
-			<aside
-				className={`flex h-full shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 ${treeCollapsed ? 'w-8' : 'w-[296px]'}`}
-			>
+		<BackPanelLayout
+			panelAriaLabel="Datasource tree"
+			expandAriaLabel="Expand explorer"
+			collapseAriaLabel="Collapse explorer"
+			panel={
 				<DataTree
 					key="data-catalog-tree"
 					initialDatabases={treeDatabases}
 					selectedId={treeFocusId ?? undefined}
 					pathBase="/data"
-					collapsed={treeCollapsed}
-					onToggleCollapse={toggleTreeCollapsed}
 					onTreeDataUpdated={handleTreeDataUpdated}
 				/>
-			</aside>
-
+			}
+		>
 			<main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
 				<SinglePageView
 					dataId={workspaceDataId}
@@ -264,6 +261,6 @@ export function DataWorkspaceView() {
 					onSave={syncEdits}
 				/>
 			</main>
-		</div>
+		</BackPanelLayout>
 	);
 }
