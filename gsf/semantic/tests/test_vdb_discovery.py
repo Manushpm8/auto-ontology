@@ -26,3 +26,14 @@ def test_discover_tables_via_vdb_uses_query_hits() -> None:
         retriever=FakeRetriever(),
     )
     assert found == ["orders"]
+
+
+def test_metadata_from_hit_parses_json_string() -> None:
+    from gsf.semantic.vdb_discovery import _metadata_from_hit
+
+    hit = {
+        "text": "orders table",
+        "metadata": '{"label": "Table", "name": "orders"}',
+    }
+    meta = _metadata_from_hit(hit)
+    assert meta["name"] == "orders"

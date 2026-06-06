@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -44,11 +45,33 @@ def generate_business_questions(
         return BusinessQuestionsResult()
 
 
+def _coerce_metadata_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def _metadata_from_hit(hit: dict[str, Any]) -> dict[str, Any]:
-    meta = hit.get("metadata") or {}
+    """Normalize retriever hit metadata (dict or JSON string)."""
+    meta = _coerce_metadata_dict(hit.get("metadata"))
+    if not meta:
+        # Some retrieval paths flatten fields onto the hit root.
+        meta = {
+            k: v
+            for k, v in hit.items()
+            if k not in {"text", "score", "rerank_score", "metadata"}
+        }
+
     content = meta.get("content_metadata")
-    if isinstance(content, dict):
-        return content
+    content_dict = _coerce_metadata_dict(content)
+    if content_dict:
+        return content_dict
     return meta
 
 
@@ -68,6 +91,8 @@ def discover_tables_via_vdb(
             logger.warning("VDB search failed for entity %r", entity)
             continue
         for hit in hits or []:
+            if not isinstance(hit, dict):
+                continue
             meta = _metadata_from_hit(hit)
             if meta.get("label") == Labels.TABLE:
                 name = meta.get("name", "")
