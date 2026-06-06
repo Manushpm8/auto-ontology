@@ -48,7 +48,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.server.env import load_server_env
-from gsf.vdb import get_vdb
+from gsf.vdb import get_data_vdb
 
 load_server_env()
 
@@ -108,7 +108,7 @@ def _build_retriever() -> Retriever:
     """Build the retriever against the local pgvector store."""
     return Retriever(
         top_k=15,
-        vdb_kwargs={"vdb": get_vdb()},
+        vdb_kwargs={"vdb": get_data_vdb()},
         embed_kwargs={
             "model_name": EMBED_PARAMS.model_name,
             "embed_invoke_url": EMBED_PARAMS.embed_invoke_url,

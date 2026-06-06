@@ -27,7 +27,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_res
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import EmbedParams, TabularExtractParams
-from gsf.vdb import get_vdb
+from gsf.vdb import get_data_vdb
 from gsf.connectors.postgres import PostgresDatabase
 
 from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
@@ -102,7 +102,7 @@ def run_ingest() -> None:
     # for `database_name`, so reuse the same instance for the custom-analysis
     # append below — calling get_vdb(database_name=...) again would re-delete
     # everything we just wrote.
-    vdb = get_vdb(database_name=database_name)
+    vdb = get_data_vdb(database_name=database_name)
 
     if result_df is not None and not result_df.empty:
         ingest_op = IngestVdbOperator(vdb=vdb)
@@ -127,7 +127,7 @@ def run_retrieve() -> None:
     """Run the text-to-SQL agent against the previously ingested pgvector store."""
     retriever = Retriever(
         top_k=15,
-        vdb_kwargs={"vdb": get_vdb()},
+        vdb_kwargs={"vdb": get_data_vdb()},
         embed_kwargs={
             "model_name": _EMBED_MODEL,
             "embed_invoke_url": _EMBED_ENDPOINT,
