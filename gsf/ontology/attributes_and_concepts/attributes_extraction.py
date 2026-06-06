@@ -1,5 +1,10 @@
 """Phase 1 — Per-Table Attributes & Concept Assignment (value-add only).
 
+.. deprecated::
+    Use ``gsf.ontology.rigor.compile.run_semantic_compilation`` instead.
+    The Concept/BELONGS_TO model here is superseded by Term/Attribute
+    semantic compilation in ``gsf/ontology/rigor/``.
+
 Reads schema + query stats from Neo4j, calls the LLM per table with
 accumulated context (domain summary, FK neighbours, running glossary,
 existing concepts), and writes extracted Attribute nodes and Concept

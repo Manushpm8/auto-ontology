@@ -1,34 +1,26 @@
-"""Main orchestration loop for the Rigor ontology pipeline.
+"""Main orchestration loop for semantic compilation.
 
-Phase 1: Per-table iterative construction
-  - Fetch table context from Neo4j
-  - Enrich with BIRD evidence + value descriptions
-  - Run deterministic detection (FK, *_id, self-ref, denormalized)
-  - Query external vocabularies (LOV, BioPortal, FIBO)
-  - Invoke Gen-LLM (Proposer) for DeltaOntology
-  - Invoke Judge-LLM for validation
-  - Merge validated Delta into CoreOntology
-
-Phase 2: Behavioral analysis
-  - Parse SQL queries for JOIN paths -> inferred edges
-  - Extract aggregation patterns -> Metrics
-
-Resilience:
-  - Checkpoints after each table so progress survives crashes
-  - LLM calls have timeouts + retries (see llm.py)
-  - Individual table failures are caught and skipped
-
-Output: Write CoreOntology to Neo4j
+Phase 0: Domain summary (optional, supplied or loaded by compile.py)
+Phase 1: Seed table selection
+Phase 2: BFS expansion via TablesQueue
+Phase 3: Role synthesis with path attachment
+Phase 4: Deterministic orphan fallback (after BFS)
+Phase 5: Coverage sweep until all tables reviewed
+Phase 6: Behavioral SQL analysis + write + embed (via compile.py)
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
 
+from nemo_retriever.retriever import Retriever
+
+from gsf.ontology.domain_prereading.models import DomainSummary
 from gsf.ontology.rigor.behavioral import analyze_sql_behavior
 from gsf.ontology.rigor.deterministic import run_deterministic, to_term_name
 from gsf.ontology.rigor.enricher import enrich_attributes
@@ -37,7 +29,6 @@ from gsf.ontology.rigor.judge import invoke_judge
 from gsf.ontology.rigor.loaders import (
     enrich_context_with_bird,
     fetch_all_sql_texts,
-    fetch_sorted_tables,
     fetch_table_context,
     load_evidence,
 )
@@ -45,24 +36,39 @@ from gsf.ontology.rigor.models import (
     Attribute,
     BusinessTerm,
     CoreOntology,
+    ObjectProperty,
     Provenance,
 )
-from gsf.ontology.rigor.neo4j_ops import write_ontology_to_neo4j
+from gsf.ontology.rigor.neo4j_ops import (
+    lookup_existing_attribute,
+    write_ontology_to_neo4j,
+)
+from gsf.ontology.rigor.paths import synthesize_role_edges
 from gsf.ontology.rigor.proposer import invoke_proposer
+from gsf.ontology.rigor.traversal import (
+    TablesQueue,
+    build_tables_index,
+    clear_reviewed_flags,
+    discover_tables_via_vdb,
+    generate_business_questions,
+    load_join_edges,
+    mark_reviewed,
+    select_seed_table,
+)
 
 logger = logging.getLogger(__name__)
 
 _CHECKPOINT_DIR = Path(".rigor_checkpoints")
 _INVALID_TERM_NAMES = {"unnamed", "unnamed term", "unknown", "none", ""}
 
-
-# -----------------------------------------------------------------
-# Checkpoint helpers — survive crashes without losing progress
-# -----------------------------------------------------------------
+_EMBED_ENDPOINT = os.environ.get(
+    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
+)
+_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
+_NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
 
 def _checkpoint_path(database_name: str) -> Path:
-    """Return the checkpoint file path for a database run."""
     return _CHECKPOINT_DIR / f"{database_name}.json"
 
 
@@ -71,7 +77,6 @@ def _save_checkpoint(
     ontology: CoreOntology,
     completed_tables: list[str],
 ) -> None:
-    """Persist ontology + list of finished tables to disk."""
     _CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     path = _checkpoint_path(database_name)
     payload = {
@@ -89,10 +94,6 @@ def _save_checkpoint(
 def _load_checkpoint(
     database_name: str,
 ) -> tuple[CoreOntology, list[str]] | None:
-    """Load a previous checkpoint if one exists.
-
-    Returns (ontology, completed_tables) or None.
-    """
     path = _checkpoint_path(database_name)
     if not path.exists():
         return None
@@ -101,35 +102,49 @@ def _load_checkpoint(
         ontology = CoreOntology.model_validate(data["ontology"])
         completed = data["completed_tables"]
         logger.info(
-            "[checkpoint] Resumed from %s — %d tables already done, "
-            "%d terms, %d attrs, %d OPs loaded",
+            "[checkpoint] Resumed from %s — %d tables already done",
             path,
             len(completed),
-            len(ontology.business_terms),
-            len(ontology.attributes),
-            len(ontology.object_properties),
         )
         return ontology, completed
     except Exception:
-        logger.warning(
-            "[checkpoint] Failed to load %s — starting fresh",
-            path,
-            exc_info=True,
-        )
+        logger.warning("[checkpoint] Failed to load %s", path, exc_info=True)
         return None
 
 
 def _clear_checkpoint(database_name: str) -> None:
-    """Remove checkpoint file after a successful run."""
     path = _checkpoint_path(database_name)
     if path.exists():
         path.unlink()
-        logger.info("[checkpoint] Cleared %s", path)
 
 
-# -----------------------------------------------------------------
-# Main pipeline
-# -----------------------------------------------------------------
+def _build_data_retriever(database_name: str) -> Retriever | None:
+    if not _NVIDIA_API_KEY:
+        return None
+    try:
+        from gsf.vdb import get_data_vdb
+
+        return Retriever(
+            top_k=10,
+            vdb_kwargs={"vdb": get_data_vdb(database_name=database_name)},
+            embed_kwargs={
+                "model_name": _EMBED_MODEL,
+                "embed_invoke_url": _EMBED_ENDPOINT,
+                "api_key": _NVIDIA_API_KEY,
+            },
+        )
+    except Exception:
+        logger.warning("Could not build data-layer retriever for VDB discovery")
+        return None
+
+
+def _pending_tables(
+    tables: list[dict[str, Any]],
+    completed_tables: list[str],
+) -> list[dict[str, Any]]:
+    """Tables not yet processed in this compilation run."""
+    done = set(completed_tables)
+    return [t for t in tables if t["name"] not in done]
 
 
 def build_ontology(
@@ -139,45 +154,49 @@ def build_ontology(
     write_to_neo4j: bool = True,
     resume: bool = True,
     schema_name: str | None = None,
+    domain_summary: DomainSummary | None = None,
 ) -> CoreOntology:
-    """Build a business ontology for a database.
-
-    Args:
-        database_name: Name of the database in Neo4j.
-        bird_root: Path to BIRD minidev root (optional supplementary data).
-        skip_threshold: Skip tables with fewer than this many SQL references.
-        write_to_neo4j: Whether to write results to Neo4j.
-        resume: If True, resume from the last checkpoint (if any).
-        schema_name: Neo4j Schema node name (e.g. ``"public"``).
-            Defaults to *database_name* for BIRD compatibility.
-
-    Returns:
-        The constructed CoreOntology.
-    """
+    """Build a semantic ontology for a database using BFS compilation."""
     if schema_name is None:
         schema_name = database_name
-    # Try to resume from a previous checkpoint
+
     completed_tables: list[str] = []
     ontology = CoreOntology()
+
     if resume:
         loaded = _load_checkpoint(database_name)
         if loaded:
             ontology, completed_tables = loaded
+    else:
+        _clear_checkpoint(database_name)
 
-    # -----------------------------------------------------------------
-    # INIT — Load data
-    # -----------------------------------------------------------------
     logger.info("=" * 60)
-    logger.info("Rigor: building ontology for %r", database_name)
+    logger.info("Semantic compilation for %r (schema=%r)", database_name, schema_name)
     logger.info("=" * 60)
 
-    tables = fetch_sorted_tables(database_name, skip_threshold, schema_name=schema_name)
+    tables, tables_by_name = build_tables_index(
+        database_name, schema_name, skip_threshold
+    )
     if not tables:
         logger.warning("No tables found for database %r", database_name)
         return ontology
 
-    all_table_names = [t["name"] for t in tables]
-    logger.info("Found %d tables: %s", len(tables), all_table_names)
+    pending = _pending_tables(tables, completed_tables)
+    if not pending and completed_tables:
+        logger.info(
+            "Checkpoint has all %d tables complete — nothing to process. "
+            "Use --no-resume to rebuild.",
+            len(completed_tables),
+        )
+        return ontology
+
+    if not completed_tables or not resume:
+        clear_reviewed_flags(database_name, schema_name)
+        logger.info("Cleared reviewed flags — starting BFS from catalog")
+
+    all_table_names = list(tables_by_name.keys())
+    join_edges = load_join_edges(database_name, schema_name)
+    retriever = _build_data_retriever(database_name)
 
     evidence: dict[str, list[str]] = {}
     if bird_root:
@@ -185,84 +204,105 @@ def build_ontology(
 
     vocab_service = ExternalVocabService(db_id=database_name, evidence=evidence)
 
-    # -----------------------------------------------------------------
-    # PHASE 1 — Per-table iterative construction
-    # -----------------------------------------------------------------
-    logger.info("-" * 40)
-    logger.info("PHASE 1: Per-table processing (%d tables)", len(tables))
-    logger.info("-" * 40)
+    bfs_trees = 0
+    while True:
+        pending = _pending_tables(tables, completed_tables)
+        if not pending:
+            logger.info("All %d tables processed — BFS complete", len(tables))
+            break
 
-    for idx, table in enumerate(tables, 1):
-        table_key = f"{table.get('schema_name', '')}.{table['name']}"
+        if bfs_trees == 0 and domain_summary:
+            seed = select_seed_table(pending, domain_summary)
+        else:
+            seed = pending[0]
 
-        # Skip tables already completed in a previous run
-        if table["name"] in completed_tables:
-            logger.info(
-                "\n[%d/%d] Skipping %s (already completed in checkpoint)",
-                idx,
-                len(tables),
-                table_key,
-            )
-            continue
-
+        logger.info("-" * 40)
         logger.info(
-            "\n[%d/%d] Processing %s (queries=%d)",
-            idx,
+            "BFS tree %d: seed=%s (%d pending / %d total tables)",
+            bfs_trees + 1,
+            seed["name"],
+            len(pending),
             len(tables),
-            table_key,
-            table.get("query_count", 0),
         )
+        logger.info("-" * 40)
 
-        try:
-            _process_one_table(
-                table,
-                ontology,
-                all_table_names,
-                bird_root,
-                evidence,
-                vocab_service,
-            )
-        except Exception:
-            logger.error(
-                "  [FAILED] Table %s — skipping (deterministic work preserved)",
+        queue = TablesQueue(database_name, schema_name, tables_by_name, join_edges)
+        queue.push_seed(seed["name"])
+
+        while True:
+            entry = queue.pop()
+            if entry is None:
+                break
+
+            table = tables_by_name.get(entry.table_name)
+            if not table or table["name"] in completed_tables:
+                continue
+
+            table_key = f"{table.get('schema_name', '')}.{table['name']}"
+            logger.info(
+                "Processing %s (priority=%d, source=%s, hop=%d)",
                 table_key,
-                exc_info=True,
+                entry.priority,
+                entry.source,
+                entry.hop,
             )
 
-        # Checkpoint after every table (even failed ones, so we don't retry)
-        completed_tables.append(table["name"])
-        _save_checkpoint(database_name, ontology, completed_tables)
+            try:
+                vdb_names = _discover_vdb_neighbors(
+                    table, retriever, all_table_names, ontology
+                )
+                _process_one_table(
+                    table,
+                    ontology,
+                    all_table_names,
+                    bird_root,
+                    evidence,
+                    vocab_service,
+                    domain_summary,
+                )
+                queue.discover_neighbors(
+                    table["name"], entry.hop, vdb_table_names=vdb_names
+                )
+            except Exception:
+                logger.error(
+                    "  [FAILED] Table %s — skipping",
+                    table_key,
+                    exc_info=True,
+                )
 
-        logger.info(
-            "  -> Ontology now: %d terms, %d attrs, %d OPs",
-            len(ontology.business_terms),
-            len(ontology.attributes),
-            len(ontology.object_properties),
-        )
+            mark_reviewed(table["id"])
+            completed_tables.append(table["name"])
+            if table["name"] not in ontology.reviewed_tables:
+                ontology.reviewed_tables.append(table["name"])
+            _save_checkpoint(database_name, ontology, completed_tables)
 
-    # -----------------------------------------------------------------
-    # PHASE 2 — Behavioral analysis (SQL queries)
-    # -----------------------------------------------------------------
+        synthesize_role_edges(ontology, database_name, schema_name)
+        bfs_trees += 1
+
     logger.info("-" * 40)
-    logger.info("PHASE 2: Behavioral analysis (SQL queries)")
+    logger.info("Orphan sweep (deterministic fallback)")
+    logger.info("-" * 40)
+    orphan_sweep(
+        ontology,
+        database_name,
+        schema_name,
+        tables_by_name,
+        completed_tables,
+        join_edges,
+    )
+    _save_checkpoint(database_name, ontology, completed_tables)
+
+    logger.info("-" * 40)
+    logger.info("Behavioral analysis (SQL queries)")
     logger.info("-" * 40)
 
     sql_texts = fetch_all_sql_texts(database_name, schema_name=schema_name)
-    all_evidence = evidence.get("all", [])
-
-    join_edges, metrics = analyze_sql_behavior(sql_texts, ontology, all_evidence)
-    ontology.object_properties.extend(join_edges)
+    join_edges_behavior, metrics = analyze_sql_behavior(
+        sql_texts, ontology, evidence.get("all", [])
+    )
+    ontology.object_properties.extend(join_edges_behavior)
     ontology.metrics.extend(metrics)
 
-    logger.info(
-        "Phase 2 added: %d join edges, %d metrics",
-        len(join_edges),
-        len(metrics),
-    )
-
-    # -----------------------------------------------------------------
-    # WRITE — Save to Neo4j
-    # -----------------------------------------------------------------
     if write_to_neo4j:
         logger.info("-" * 40)
         logger.info("Writing ontology to Neo4j")
@@ -270,15 +310,12 @@ def build_ontology(
         stats = write_ontology_to_neo4j(ontology)
         logger.info("Write stats: %s", stats)
 
-    # -----------------------------------------------------------------
-    # Summary
-    # -----------------------------------------------------------------
     _clear_checkpoint(database_name)
 
     logger.info("=" * 60)
-    logger.info("Rigor pipeline complete for %r", database_name)
+    logger.info("Semantic compilation complete for %r", database_name)
     logger.info(
-        "  BusinessTerms: %d | Attributes: %d | ObjectProperties: %d | Metrics: %d",
+        "  Terms: %d | Attributes: %d | Relationships: %d | Metrics: %d",
         len(ontology.business_terms),
         len(ontology.attributes),
         len(ontology.object_properties),
@@ -289,9 +326,137 @@ def build_ontology(
     return ontology
 
 
-# -----------------------------------------------------------------
-# Per-table processing — extracted so failures can be caught
-# -----------------------------------------------------------------
+def _discover_vdb_neighbors(
+    table: dict[str, Any],
+    retriever: Retriever | None,
+    all_table_names: list[str],
+    ontology: CoreOntology,
+) -> list[str]:
+    if retriever is None:
+        return []
+    term_name = ontology.table_to_term.get(table["name"], to_term_name(table["name"]))
+    ctx = fetch_table_context(table["id"])
+    questions = generate_business_questions(table, ctx, term_name)
+    known = set(all_table_names)
+    return discover_tables_via_vdb(
+        questions.entities,
+        table.get("schema_name", "") or "",
+        retriever,
+        known,
+    )
+
+
+def orphan_sweep(
+    ontology: CoreOntology,
+    database_name: str,
+    schema_name: str,
+    tables_by_name: dict[str, dict[str, Any]],
+    completed_tables: list[str],
+    join_edges: list[dict[str, Any]],
+) -> int:
+    """Phase 4: deterministically bind tables BFS did not map to a Term."""
+    orphans = [
+        t for t in tables_by_name.values() if t["name"] not in ontology.table_to_term
+    ]
+    bound = 0
+
+    for orphan in orphans:
+        orphan_name = orphan["name"]
+        ctx = fetch_table_context(orphan["id"])
+        neighbor_term: str | None = None
+        neighbor_table: str | None = None
+
+        for fk in ctx.get("fks", []):
+            tgt = fk["target_table"]
+            if tgt in ontology.table_to_term:
+                neighbor_term = ontology.table_to_term[tgt]
+                neighbor_table = tgt
+                break
+
+        if not neighbor_term:
+            for edge in join_edges:
+                if edge["source_table"] == orphan_name:
+                    tgt = edge["target_table"]
+                elif edge["target_table"] == orphan_name:
+                    tgt = edge["source_table"]
+                else:
+                    continue
+                if tgt in ontology.table_to_term:
+                    neighbor_term = ontology.table_to_term[tgt]
+                    neighbor_table = tgt
+                    break
+
+        orphan_term = to_term_name(orphan_name)
+        if not ontology.has_term(orphan_term):
+            ontology.business_terms.append(
+                BusinessTerm(
+                    name=orphan_term,
+                    description=f"(orphan fallback from table {orphan_name})",
+                    provenance=[
+                        Provenance(
+                            source_table=orphan_name,
+                            derivation="orphan_fallback",
+                        )
+                    ],
+                )
+            )
+
+        if neighbor_term:
+            prov = Provenance(
+                source_table=orphan_name,
+                target_table=neighbor_table or "",
+                derivation="orphan_fallback",
+            )
+            if not ontology.has_edge(orphan_term, neighbor_term, "part_of", "part_of"):
+                ontology.object_properties.append(
+                    ObjectProperty(
+                        name="part_of",
+                        source_term=orphan_term,
+                        target_term=neighbor_term,
+                        relation_kind="part_of",
+                        provenance=prov,
+                    )
+                )
+            term = ontology.get_term(orphan_term)
+            if term:
+                term.part_of = neighbor_term
+
+        det = run_deterministic(orphan, ctx, list(tables_by_name.keys()))
+        bind_term = neighbor_term or orphan_term
+        for attr in det.attributes:
+            if ontology.has_attribute(bind_term, attr.source_column):
+                continue
+            ontology.attributes.append(
+                Attribute(
+                    name=attr.name,
+                    attribute_type="column",
+                    datatype=attr.datatype,
+                    term_name=bind_term,
+                    source_column=attr.source_column,
+                    provenance=Provenance(
+                        source_table=orphan_name,
+                        source_column=attr.source_column,
+                        derivation="orphan_fallback",
+                    ),
+                )
+            )
+
+        ontology.table_to_term[orphan_name] = orphan_term
+        mark_reviewed(orphan["id"])
+        if orphan_name not in completed_tables:
+            completed_tables.append(orphan_name)
+        if orphan_name not in ontology.reviewed_tables:
+            ontology.reviewed_tables.append(orphan_name)
+        bound += 1
+        logger.info(
+            "  [orphan] Bound %s -> term %s (neighbor=%s)",
+            orphan_name,
+            bind_term,
+            neighbor_term,
+        )
+
+    logger.info("Orphan sweep bound %d table(s)", bound)
+    return bound
 
 
 def _process_one_table(
@@ -301,50 +466,25 @@ def _process_one_table(
     bird_root: str | None,
     evidence: dict[str, list[str]],
     vocab_service: ExternalVocabService,
+    domain_summary: DomainSummary | None = None,
 ) -> None:
-    """Run deterministic + LLM steps for a single table.
-
-    Raises on LLM timeout/error so the caller can catch and skip.
-    """
+    """Run LLM term extraction then deterministic column attributes for one table."""
     table_key = f"{table.get('schema_name', '')}.{table['name']}"
 
-    # 1. Fetch context from Neo4j
     ctx = fetch_table_context(table["id"])
     columns = ctx.get("columns", [])
-    fks = ctx.get("fks", [])
     if not columns:
         logger.warning("  Table %s has no columns — skipping.", table_key)
         return
 
-    logger.info("  %d columns, %d FKs from graph", len(columns), len(fks))
-    for fk in fks:
-        logger.info(
-            "    FK: %s -> %s.%s",
-            fk["source_column"],
-            fk["target_table"],
-            fk["target_column"],
-        )
-
-    # 2. Enrich with BIRD data
     if bird_root:
         enrich_context_with_bird(ctx, table["name"], evidence)
 
-    # 3. Deterministic detection
+    if domain_summary:
+        ctx["domain_summary"] = domain_summary.model_dump()
+
     det_result = run_deterministic(table, ctx, all_table_names)
 
-    # Add deterministic edges to ontology immediately, resolving term names
-    # via table_to_term so we don't recreate renamed placeholders.
-    for edge in det_result.edges:
-        src = ontology.resolve_term(edge.provenance.source_table or table["name"])
-        tgt = ontology.resolve_term(edge.provenance.target_table or table["name"])
-        edge.source_term = src
-        edge.target_term = tgt
-        _ensure_term_exists(ontology, src, table)
-        _ensure_term_exists(ontology, tgt, table)
-        if not ontology.has_edge(src, tgt, edge.name):
-            ontology.object_properties.append(edge)
-
-    # 4. Collect evidence for this table (needed by enricher + proposer)
     evidence_for_table = vocab_service.get_evidence_for_table(
         table["name"],
         [c.get("name", "") for c in columns],
@@ -355,62 +495,29 @@ def _process_one_table(
     ctx["table_name"] = table["name"]
     ctx["table_description"] = table.get("description") or ""
 
-    # 5. Enrich attributes via LLM (may raise on timeout)
+    # Enrich column metadata for proposer context only — do not write attributes yet.
     enriched_columns = enrich_attributes(
         det_result.attributes, ctx, ctx.get("evidence", [])
     )
 
-    # Build lookup from source_column -> enriched info
-    enriched_map = {ec.source_column: ec for ec in enriched_columns}
-
-    # Merge enriched attributes into ontology
-    term_name = det_result.attributes[0].term_name if det_result.attributes else None
-    if term_name:
-        _ensure_term_exists(ontology, term_name, table)
-        ontology.table_to_term[table["name"]] = term_name
-    for attr in det_result.attributes:
-        ec = enriched_map.get(attr.source_column)
-        ontology.attributes.append(
-            Attribute(
-                name=ec.canonical_name if ec else attr.name,
-                datatype=attr.datatype,
-                term_name=attr.term_name,
-                source_column=attr.source_column,
-                provenance=Provenance(
-                    source_table=table["name"],
-                    source_column=attr.source_column,
-                    derivation="deterministic",
-                ),
-                description=ec.description if ec else None,
-                formula=ec.formula if ec else None,
-                usage_hint=ec.usage_hint if ec else None,
-            )
-        )
-
-    # 6. External vocabulary lookup
     ext_matches = vocab_service.find_similar_terms(table["name"], columns)
 
-    # 7. Invoke Proposer (Gen-LLM) — may raise on timeout
     delta = invoke_proposer(
-        table, ctx, det_result, ext_matches, ontology, enriched_columns
+        table,
+        ctx,
+        det_result,
+        ext_matches,
+        ontology,
+        enriched_columns,
+        domain_summary=domain_summary,
     )
 
-    # Keep only the first BusinessTerm (prompt asks for exactly one)
     if len(delta.business_terms) > 1:
-        logger.warning(
-            "  [proposer] Returned %d terms, keeping only first: %s",
-            len(delta.business_terms),
-            delta.business_terms[0].name,
-        )
         delta.business_terms = delta.business_terms[:1]
 
-    # 8. Invoke Judge (Judge-LLM) — may raise on timeout
     verdict = invoke_judge(delta, ontology)
-
-    # 9. Apply verdict and merge into ontology
     validated_delta = verdict.apply(delta, table["name"])
 
-    # Reject invalid term names from the LLM
     provisional = to_term_name(table["name"])
     cleaned_terms = []
     for bt in validated_delta.business_terms:
@@ -418,51 +525,67 @@ def _process_one_table(
         if name_lower in _INVALID_TERM_NAMES or not re.match(
             r"^[A-Z][A-Za-z0-9]+$", bt.name.strip()
         ):
-            logger.warning(
-                "  [guard] Rejected invalid term name %r, using %s",
-                bt.name,
-                provisional,
-            )
             bt.name = provisional
         cleaned_terms.append(bt)
     validated_delta.business_terms = cleaned_terms
 
     ontology.merge(validated_delta, table["name"])
 
-    # 10. Rename provisional term if the LLM chose a better name
     if validated_delta.business_terms:
         proposed_name = validated_delta.business_terms[0].name
         if proposed_name != provisional and ontology.has_term(provisional):
-            refs = ontology.rename_term(provisional, proposed_name)
-            logger.info(
-                "  [rename] %s -> %s (%d references updated)",
-                provisional,
-                proposed_name,
-                refs,
+            ontology.rename_term(provisional, proposed_name)
+        ontology.table_to_term[table["name"]] = validated_delta.business_terms[0].name
+    elif table["name"] not in ontology.table_to_term:
+        ontology.table_to_term[table["name"]] = provisional
+        if not ontology.has_term(provisional):
+            ontology.business_terms.append(
+                BusinessTerm(
+                    name=provisional,
+                    description=f"(from table {table['name']})",
+                    provenance=[
+                        Provenance(
+                            source_table=table["name"],
+                            derivation="deterministic",
+                        )
+                    ],
+                )
             )
 
+    term_name = ontology.table_to_term[table["name"]]
+    enriched_map = {ec.source_column: ec for ec in enriched_columns}
 
-def _ensure_term_exists(
-    ontology: CoreOntology,
-    term_name: str,
-    table: dict[str, Any],
-) -> None:
-    """Create a placeholder business term if it doesn't exist yet.
+    for edge in det_result.edges:
+        src = ontology.resolve_term(edge.provenance.source_table or table["name"])
+        tgt = ontology.resolve_term(edge.provenance.target_table or table["name"])
+        edge.source_term = src
+        edge.target_term = tgt
+        if not ontology.has_edge(src, tgt, edge.name):
+            ontology.object_properties.append(edge)
 
-    Deterministic edges may reference terms not yet proposed by
-    the LLM. These placeholders will be enriched when the target
-    table is processed.
-    """
-    if not ontology.has_term(term_name):
-        ontology.business_terms.append(
-            BusinessTerm(
-                name=term_name,
-                description=f"(auto-created from table {table['name']})",
-                provenance=[
-                    Provenance(
-                        source_table=table["name"],
-                        derivation="declared_fk",
-                    )
-                ],
+    for attr in det_result.attributes:
+        canonical = enriched_map.get(attr.source_column)
+        attr_name = canonical.canonical_name if canonical else attr.name
+        if ontology.has_attribute(term_name, attr.source_column):
+            continue
+        existing = lookup_existing_attribute(attr_name, term_name)
+        if existing:
+            continue
+        ontology.attributes.append(
+            Attribute(
+                name=attr_name,
+                attribute_type="column",
+                datatype=attr.datatype,
+                term_name=term_name,
+                source_column=attr.source_column,
+                provenance=Provenance(
+                    source_table=table["name"],
+                    source_column=attr.source_column,
+                    derivation="deterministic",
+                ),
+                description=canonical.description if canonical else None,
+                formula=canonical.formula if canonical else None,
+                usage_hint=canonical.usage_hint if canonical else None,
+                definition=canonical.formula if canonical else None,
             )
         )

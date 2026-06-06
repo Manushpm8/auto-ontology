@@ -15,7 +15,7 @@ from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
 from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import EmbedParams, TabularExtractParams
-from gsf.vdb import get_vdb
+from gsf.vdb import get_data_vdb
 from gsf.connectors.postgres import PostgresDatabase
 
 logger = logging.getLogger("ingestion_service.ingest")
@@ -56,7 +56,7 @@ def run_ingest(connection_string: str) -> None:
 
     if result_df is not None and not result_df.empty:
         ingest_op = IngestVdbOperator(
-            vdb=get_vdb(database_name=TABULAR_PARAMS.connector.database_name)
+            vdb=get_data_vdb(database_name=TABULAR_PARAMS.connector.database_name)
         )
         ingest_op(result_df.to_dict(orient="records"))
         logger.info(

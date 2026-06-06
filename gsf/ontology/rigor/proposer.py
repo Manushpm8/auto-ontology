@@ -21,6 +21,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from gsf.ontology.domain_prereading.models import DomainSummary
 from gsf.ontology.domain_prereading.llm import invoke_structured
 from gsf.ontology.rigor.deterministic import DeterministicResult
 from gsf.ontology.rigor.external_vocab import ExternalMatch
@@ -59,7 +60,11 @@ table names. For example, if the table is "trans", name the term \
 already handled as Attributes. A column like "type" with enumerated \
 values (OWNER, USER) is an attribute, not a separate business entity.
 - If this table's business term is a specialization of an existing term, \
-set `parent` to the parent term name (SubClassOf relationship).
+set `parent` to the parent term name (is_a relationship).
+- If this table represents a component of a broader entity, set \
+`part_of_target` to the parent Term name.
+- Optionally propose `role_relationships` for peer associations between \
+this term and existing terms (e.g. assigned_to, plays).
 - Some terms in "Existing Business Terms" are auto-generated placeholders \
 with raw table names (e.g. "Trans", "Acct"). You should propose the \
 correct business name — the system will handle the rename. Only reuse \
@@ -97,12 +102,20 @@ def _build_user_prompt(
     ext_matches: list[ExternalMatch],
     ontology: CoreOntology,
     enriched_columns: list[EnrichedColumn] | None = None,
+    domain_summary: DomainSummary | None = None,
 ) -> str:
     """Assemble the user prompt with all retrieval context."""
     blocks: list[str] = []
 
     # Block 1 — Existing ontology state
     blocks.append(ontology.snapshot_for_prompt())
+
+    if domain_summary:
+        domains = ", ".join(domain_summary.domains[:10])
+        entities = ", ".join(domain_summary.core_entities[:15])
+        blocks.append(
+            f"## Domain Context\nDomains: {domains}\nCore entities: {entities}"
+        )
 
     # Block 2 — Table metadata
     table_header = (
@@ -140,7 +153,19 @@ def _build_user_prompt(
             + "\n".join(edge_lines)
         )
 
-    # Block 5 — FK context
+    # Block 5 — Denormalized entity candidates
+    if det_result.denormalized_candidates:
+        dc_lines = [
+            f"  - {dc.column_name} -> inferred entity {dc.inferred_entity_name} "
+            f"({dc.pattern})"
+            for dc in det_result.denormalized_candidates
+        ]
+        blocks.append(
+            "### Denormalized Column Candidates (evaluate: attribute vs entity)\n"
+            + "\n".join(dc_lines)
+        )
+
+    # Block 6 — FK context
     fk_lines: list[str] = []
     for fk in ctx.get("fks", []):
         fk_lines.append(
@@ -196,10 +221,17 @@ def invoke_proposer(
     ext_matches: list[ExternalMatch],
     ontology: CoreOntology,
     enriched_columns: list[EnrichedColumn] | None = None,
+    domain_summary: DomainSummary | None = None,
 ) -> DeltaOntology:
     """Call the Gen-LLM to propose a DeltaOntology for one table."""
     user_prompt = _build_user_prompt(
-        table, ctx, det_result, ext_matches, ontology, enriched_columns
+        table,
+        ctx,
+        det_result,
+        ext_matches,
+        ontology,
+        enriched_columns,
+        domain_summary=domain_summary,
     )
 
     messages = [

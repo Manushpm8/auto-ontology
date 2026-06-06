@@ -13,10 +13,7 @@ from pydantic import BaseModel, Field
 
 from nemo_retriever.retriever import Retriever
 from gsf.connectors.postgres import PostgresDatabase
-from gsf.vdb import get_vdb
-from gsf.vdb.config import get_postgres_connection_string
-from gsf.vdb.postgres import PostgresVDB
-from gsf.ontology.rigor.embed import RIGOR_VDB_COLLECTION
+from gsf.vdb import get_data_vdb, get_semantic_vdb
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +75,8 @@ def get_connector() -> PostgresDatabase:
             _connector = PostgresDatabase(connection_strings[0])
         elif len(connection_strings) == 0:
             logger.warning(
-                "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
+                "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
+                "    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
             )
         else:
             logger.warning("Multiple connection is not supported yet.")
@@ -89,7 +87,7 @@ def get_connector() -> PostgresDatabase:
 def get_retriever() -> Retriever:
     global _retriever
     if _retriever is None:
-        vdb = get_vdb()
+        vdb = get_data_vdb()
         _retriever = Retriever(
             vdb_kwargs={"vdb": vdb},
             embed_kwargs={
@@ -102,13 +100,10 @@ def get_retriever() -> Retriever:
 
 
 def get_ontology_retriever() -> Retriever:
-    """Return a Retriever backed by the rigor_ontology pgvector collection."""
+    """Return a Retriever backed by the semantic_layer pgvector collection."""
     global _ontology_retriever
     if _ontology_retriever is None:
-        vdb = PostgresVDB(
-            connection_string=get_postgres_connection_string(),
-            collection_name=RIGOR_VDB_COLLECTION,
-        )
+        vdb = get_semantic_vdb()
         _ontology_retriever = Retriever(
             vdb_kwargs={"vdb": vdb},
             embed_kwargs={

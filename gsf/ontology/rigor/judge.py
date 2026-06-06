@@ -105,7 +105,22 @@ def _build_judge_prompt(
         ]
         blocks.append("### Proposed ObjectProperties\n" + "\n".join(op_lines))
 
-    if not delta.business_terms and not delta.object_properties:
+    if delta.role_relationships:
+        primary = delta.business_terms[0].name if delta.business_terms else "?"
+        role_lines = [
+            f"  - {primary} {{role: {r.role}}} {r.target_term}"
+            for r in delta.role_relationships
+        ]
+        blocks.append("### Proposed Role Relationships\n" + "\n".join(role_lines))
+
+    if delta.part_of_target:
+        blocks.append(f"### Proposed part_of target: {delta.part_of_target}")
+
+    if (
+        not delta.business_terms
+        and not delta.object_properties
+        and not delta.role_relationships
+    ):
         blocks.append("(Empty delta — nothing to review.)")
 
     return "\n\n".join(blocks)
@@ -121,7 +136,11 @@ def invoke_judge(
     ontology: CoreOntology,
 ) -> JudgeVerdict:
     """Call the Judge-LLM to validate a proposed DeltaOntology."""
-    if not delta.business_terms and not delta.object_properties:
+    if (
+        not delta.business_terms
+        and not delta.object_properties
+        and not delta.role_relationships
+    ):
         logger.info("  [judge] Empty delta — auto-approving.")
         return JudgeVerdict()
 

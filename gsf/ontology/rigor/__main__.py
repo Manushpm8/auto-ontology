@@ -79,9 +79,9 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
 
+    from gsf.ontology.rigor.compile import run_semantic_compilation
     from gsf.ontology.rigor.external_vocab import DOMAIN_MAP
     from gsf.ontology.rigor.loaders import fetch_schemas_for_database
-    from gsf.ontology.rigor.pipeline import build_ontology
 
     logger = logging.getLogger(__name__)
 
@@ -120,19 +120,15 @@ def main() -> None:
             "=" * 20,
         )
 
-        ontology = build_ontology(
+        ontology = run_semantic_compilation(
             database_name=db_name,
             bird_root=args.bird_root,
             skip_threshold=args.skip_threshold,
             write_to_neo4j=not args.no_write,
+            embed=not args.no_embed,
             resume=not args.no_resume,
             schema_name=schema,
         )
-
-        if not args.no_write and not args.no_embed:
-            from gsf.ontology.rigor.embed import embed_ontology
-
-            embed_ontology(ontology, database_name=db_name, schema_name=schema)
 
         all_summaries[label] = {
             "business_terms": len(ontology.business_terms),

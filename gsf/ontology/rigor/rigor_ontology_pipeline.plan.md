@@ -1,4 +1,8 @@
-# Rigor: Iterative Business Ontology Construction
+# Rigor: Semantic Layer Compilation Pipeline
+
+Evolved from iterative per-table construction to BFS-from-seed semantic
+compilation with five phases: seed selection, BFS expansion, role synthesis,
+orphan fallback, and coverage sweep. See ``gsf/ontology/rigor/compile.py``.
 
 ## Input Data Sources
 

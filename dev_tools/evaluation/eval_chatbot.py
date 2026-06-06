@@ -48,11 +48,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 
 from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.postgres import PostgresDatabase
-from gsf.ontology.rigor.embed import RIGOR_VDB_COLLECTION
-from gsf.server.env import load_server_env
-from gsf.vdb import get_vdb
-from gsf.vdb.config import get_postgres_connection_string
-from gsf.vdb.postgres import PostgresVDB
+from gsf.vdb import get_semantic_vdb, get_vdb
 
 load_server_env()
 
@@ -125,13 +121,9 @@ def _build_retriever() -> Retriever:
 
 
 def _build_ontology_retriever() -> Retriever:
-    """Build a retriever backed by the rigor_ontology pgvector collection."""
-    vdb = PostgresVDB(
-        connection_string=get_postgres_connection_string(),
-        collection_name=RIGOR_VDB_COLLECTION,
-    )
+    """Build a retriever backed by the semantic_layer pgvector collection."""
     return Retriever(
-        vdb_kwargs={"vdb": vdb},
+        vdb_kwargs={"vdb": get_semantic_vdb()},
         embed_kwargs={
             "model_name": EMBED_PARAMS.model_name,
             "embed_invoke_url": EMBED_PARAMS.embed_invoke_url,

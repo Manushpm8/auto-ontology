@@ -1,20 +1,16 @@
-"""Pydantic models for the Rigor ontology construction pipeline.
+"""Pydantic models for the semantic compilation pipeline.
 
-Defines the core ontology representation (BusinessTerms, Attributes,
-ObjectProperties, Metrics), the per-table Delta proposed by the Gen-LLM,
-and the JudgeVerdict returned by the Judge-LLM.
-
-Graph model:
-    Column -[:HAS_ATTRIBUTE]-> Attribute -[:IS_PROPERTY_OF]-> BusinessTerm
-    Not every column becomes an Attribute — FK columns become ObjectProperty
-    edges, PK/ID columns are structural, denormalized columns may become
-    separate BusinessTerms.
+Defines Terms, Attributes (column/sql/text), semantic relationships, and
+compilation state.  Graph model:
+    Column -[:HAS_ATTRIBUTE]-> ColumnAttribute|SqlAttribute|TextAttribute
+    Attribute -[:PROPERTY_OF]-> Term
+    Term -[:IS_A]-> Term | Term -[:PART_OF]-> Term | Term -[:ROLE]-> Term
 """
 
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,7 +28,24 @@ DerivationType = Literal[
     "llm_proposed",
     "sql_join_inferred",
     "sql_metric_inferred",
+    "orphan_fallback",
 ]
+
+AttributeType = Literal["column", "sql", "text"]
+
+ATTRIBUTE_NEO4J_LABELS: dict[AttributeType, str] = {
+    "column": "ColumnAttribute",
+    "sql": "SqlAttribute",
+    "text": "TextAttribute",
+}
+
+
+def attribute_neo4j_label(attribute_type: AttributeType) -> str:
+    """Neo4j node label for an attribute kind."""
+    return ATTRIBUTE_NEO4J_LABELS[attribute_type]
+
+
+RelationKind = Literal["relates_to", "part_of", "role", "is_a"]
 
 
 class Provenance(BaseModel):
@@ -51,7 +64,10 @@ class Provenance(BaseModel):
 
 
 class BusinessTerm(BaseModel):
-    """A business entity node in the ontology (e.g. Customer, Order)."""
+    """A business Term / entity (e.g. Customer, Order).
+
+    Written to Neo4j as both ``Term`` and ``BusinessTerm`` labels.
+    """
 
     id: str | None = Field(None, description="UUID assigned during Neo4j write.")
     name: str = Field(..., description="CamelCase business term name, e.g. 'Customer'.")
@@ -59,35 +75,44 @@ class BusinessTerm(BaseModel):
         ..., description="One-sentence description of this business term."
     )
     provenance: list[Provenance] = Field(default_factory=list)
-    parent: str | None = Field(
-        None, description="Parent term name for SubClassOf hierarchy."
+    parent: str | None = Field(None, description="Parent term name for IS_A hierarchy.")
+    part_of: str | None = Field(
+        None, description="Broader Term this entity is part_of, if compositional."
     )
 
 
 class Attribute(BaseModel):
-    """A typed data attribute linked to a source Column and a BusinessTerm.
+    """Attribute: column (1:1 column), sql, or text definition.
 
-    Graph: Column -[:HAS_ATTRIBUTE]-> Attribute -[:IS_PROPERTY_OF]-> BusinessTerm
+    Graph: Column -[:HAS_ATTRIBUTE]-> ColumnAttribute|SqlAttribute|TextAttribute
+    Node -[:PROPERTY_OF]-> Term
     """
 
     id: str | None = Field(None, description="UUID assigned during Neo4j write.")
     name: str = Field(..., description="Attribute name, e.g. 'email', 'unitPrice'.")
+    attribute_type: AttributeType = Field(
+        "column", description="Attribute kind: column, sql, or text."
+    )
     datatype: str = Field(
         ..., description="SQL or logical data type, e.g. 'text', 'integer'."
     )
     term_name: str = Field(
-        ..., description="Name of the BusinessTerm this attribute belongs to."
+        ..., description="Name of the Term this attribute belongs to."
     )
     source_column: str = Field(
-        ...,
-        description="Name of the source Column this attribute is derived from.",
+        default="",
+        description="Source column for column attributes; empty for sql/text.",
     )
     provenance: Provenance
     description: str | None = Field(
         None, description="Business description of this attribute."
     )
+    definition: str | None = Field(
+        None,
+        description="SQL snippet (sql type) or free-text rule (text type).",
+    )
     formula: str | None = Field(
-        None, description="Derivation formula if this is a computed column."
+        None, description="Legacy derivation formula; maps to definition for sql."
     )
     usage_hint: str | None = Field(
         None, description="Guidance on how to use this column in queries/analysis."
@@ -95,7 +120,7 @@ class Attribute(BaseModel):
 
 
 class ObjectProperty(BaseModel):
-    """A named directed edge between two BusinessTerms (e.g. PLACES)."""
+    """A semantic relationship between two Terms."""
 
     name: str = Field(
         ...,
@@ -103,7 +128,17 @@ class ObjectProperty(BaseModel):
     )
     source_term: str
     target_term: str
+    relation_kind: RelationKind = Field(
+        "relates_to",
+        description="Relation type: relates_to, part_of, role, is_a.",
+    )
     provenance: Provenance
+    path_data_layer: list[dict[str, Any]] | None = Field(
+        None, description="Shortest path over fk/join between physical tables."
+    )
+    path_semantic_layer: list[dict[str, Any]] | None = Field(
+        None, description="Shortest path over semantic edges between Terms."
+    )
 
 
 class AggregationType(str, Enum):
@@ -158,12 +193,20 @@ class ProposedAttribute(BaseModel):
     )
 
 
+class ProposedRoleRelationship(BaseModel):
+    """Peer role relationship between Terms."""
+
+    role: str = Field(..., description="Role name, e.g. 'assigned_to', 'plays'.")
+    target_term: str
+
+
 class ProposedObjectProperty(BaseModel):
     """An object property (edge) proposed by the Gen-LLM."""
 
     name: str = Field(..., description="Relationship name, e.g. 'belongsTo'.")
     source_term: str
     target_term: str
+    relation_kind: RelationKind = "relates_to"
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +248,10 @@ class DeltaOntology(BaseModel):
     business_terms: list[ProposedBusinessTerm] = Field(default_factory=list)
     attributes: list[ProposedAttribute] = Field(default_factory=list)
     object_properties: list[ProposedObjectProperty] = Field(default_factory=list)
+    role_relationships: list[ProposedRoleRelationship] = Field(default_factory=list)
+    part_of_target: str | None = Field(
+        None, description="Term this table's entity is part_of, if compositional."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +344,23 @@ class JudgeVerdict(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class TableReviewState(BaseModel):
+    """Tracks BFS compilation progress for a physical table."""
+
+    table_id: str
+    table_name: str
+    reviewed: bool = False
+
+
+class CompilationState(BaseModel):
+    """Global compilation checkpoint for the semantic pipeline."""
+
+    database_name: str
+    schema_name: str
+    reviewed_table_ids: set[str] = Field(default_factory=set)
+    completed_bfs_trees: int = 0
+
+
 class CoreOntology(BaseModel):
     """The full ontology built incrementally across all tables."""
 
@@ -305,6 +369,9 @@ class CoreOntology(BaseModel):
     object_properties: list[ObjectProperty] = Field(default_factory=list)
     metrics: list[Metric] = Field(default_factory=list)
     table_to_term: dict[str, str] = Field(default_factory=dict)
+    reviewed_tables: list[str] = Field(
+        default_factory=list, description="Table names marked reviewed in BFS."
+    )
 
     def has_term(self, name: str) -> bool:
         return any(t.name == name for t in self.business_terms)
@@ -312,12 +379,26 @@ class CoreOntology(BaseModel):
     def get_term(self, name: str) -> BusinessTerm | None:
         return next((t for t in self.business_terms if t.name == name), None)
 
-    def has_edge(self, source: str, target: str, name: str | None = None) -> bool:
+    def has_edge(
+        self,
+        source: str,
+        target: str,
+        name: str | None = None,
+        relation_kind: RelationKind | None = None,
+    ) -> bool:
         for op in self.object_properties:
             if op.source_term == source and op.target_term == target:
+                if relation_kind is not None and op.relation_kind != relation_kind:
+                    continue
                 if name is None or op.name == name:
                     return True
         return False
+
+    def has_attribute(self, term_name: str, source_column: str) -> bool:
+        return any(
+            a.term_name == term_name and a.source_column == source_column
+            for a in self.attributes
+        )
 
     def term_names(self) -> list[str]:
         return [t.name for t in self.business_terms]
@@ -406,15 +487,49 @@ class CoreOntology(BaseModel):
             )
 
         for op in delta.object_properties:
-            if not self.has_edge(op.source_term, op.target_term, op.name):
+            if not self.has_edge(
+                op.source_term, op.target_term, op.name, op.relation_kind
+            ):
                 self.object_properties.append(
                     ObjectProperty(
                         name=op.name,
                         source_term=op.source_term,
                         target_term=op.target_term,
+                        relation_kind=op.relation_kind,
                         provenance=prov,
                     )
                 )
+
+        primary_term = delta.business_terms[0].name if delta.business_terms else None
+        if primary_term and delta.part_of_target:
+            if not self.has_edge(
+                primary_term, delta.part_of_target, "part_of", "part_of"
+            ):
+                self.object_properties.append(
+                    ObjectProperty(
+                        name="part_of",
+                        source_term=primary_term,
+                        target_term=delta.part_of_target,
+                        relation_kind="part_of",
+                        provenance=prov,
+                    )
+                )
+            term = self.get_term(primary_term)
+            if term:
+                term.part_of = delta.part_of_target
+
+        if primary_term:
+            for role in delta.role_relationships:
+                if not self.has_edge(primary_term, role.target_term, role.role, "role"):
+                    self.object_properties.append(
+                        ObjectProperty(
+                            name=role.role,
+                            source_term=primary_term,
+                            target_term=role.target_term,
+                            relation_kind="role",
+                            provenance=prov,
+                        )
+                    )
 
     def snapshot_for_prompt(self) -> str:
         """Compact text representation for LLM context windows."""
