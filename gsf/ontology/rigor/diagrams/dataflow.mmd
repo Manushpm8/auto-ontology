@@ -4,10 +4,6 @@ flowchart TD
     neo4jFK["FK + JOIN edges"]
     neo4jSQL["SQL query nodes"]
   end
-  subgraph bird ["BIRD Supplementary Files"]
-    EV["evidence strings"]
-    DD["value_descriptions CSVs"]
-  end
   subgraph external ["External Ontology Sources"]
     LOV["LOV - all domains"]
     BP["BioPortal - biomedical"]
@@ -17,17 +13,14 @@ flowchart TD
   neo4jDB --> loaders["loaders.py"]
   neo4jFK --> loaders
   neo4jSQL --> loaders
-  EV --> loaders
-  DD --> loaders
   LOV --> extVocab["external_vocab.py"]
   BP --> extVocab
   FIBO --> extVocab
-  EV -->|"evidence field"| extVocab
 
   loaders --> pipeline["pipeline.py"]
   extVocab --> pipeline
 
-  subgraph phase1 ["Phase 1: Per-Table Loop"]
+  subgraph phase1 ["Phase 1: BFS Per-Table Loop"]
     det["deterministic.py"]
     prop["proposer.py (Gen-LLM)"]
     jdg["judge.py (Judge-LLM)"]

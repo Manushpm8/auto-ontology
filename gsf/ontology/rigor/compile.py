@@ -35,7 +35,6 @@ def _save_domain_summary(database_name: str, summary: DomainSummary) -> None:
 def run_semantic_compilation(
     database_name: str,
     *,
-    bird_root: str | None = None,
     skip_threshold: int = 0,
     schema_name: str | None = None,
     write_to_neo4j: bool = True,
@@ -55,7 +54,6 @@ def run_semantic_compilation(
 
     ontology = build_ontology(
         database_name=database_name,
-        bird_root=bird_root,
         skip_threshold=skip_threshold,
         write_to_neo4j=write_to_neo4j,
         resume=resume,

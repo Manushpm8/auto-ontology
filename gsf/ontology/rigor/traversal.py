@@ -173,6 +173,15 @@ def generate_business_questions(
         return BusinessQuestionsResult()
 
 
+def _metadata_from_hit(hit: dict[str, Any]) -> dict[str, Any]:
+    """Extract tabular node metadata from a Retriever query hit."""
+    meta = hit.get("metadata") or {}
+    content = meta.get("content_metadata")
+    if isinstance(content, dict):
+        return content
+    return meta
+
+
 def discover_tables_via_vdb(
     entities: list[str],
     database_name: str,
@@ -185,12 +194,12 @@ def discover_tables_via_vdb(
     for entity in entities[:5]:
         query = f"table related to {entity} business entity"
         try:
-            hits = retriever.retrieve(query, top_k=top_k)
+            hits = retriever.query(query, top_k=top_k)
         except Exception:
             logger.warning("VDB search failed for entity %r", entity)
             continue
         for hit in hits or []:
-            meta = hit.get("metadata") or hit.get("content_metadata") or {}
+            meta = _metadata_from_hit(hit)
             label = meta.get("label", "")
             name = meta.get("name", "")
             if label == Labels.TABLE and name and name not in known_table_names:

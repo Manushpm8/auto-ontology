@@ -27,10 +27,8 @@ from gsf.ontology.rigor.enricher import enrich_attributes
 from gsf.ontology.rigor.external_vocab import ExternalVocabService
 from gsf.ontology.rigor.judge import invoke_judge
 from gsf.ontology.rigor.loaders import (
-    enrich_context_with_bird,
     fetch_all_sql_texts,
     fetch_table_context,
-    load_evidence,
 )
 from gsf.ontology.rigor.models import (
     Attribute,
@@ -149,7 +147,6 @@ def _pending_tables(
 
 def build_ontology(
     database_name: str,
-    bird_root: str | None = None,
     skip_threshold: int = 0,
     write_to_neo4j: bool = True,
     resume: bool = True,
@@ -198,11 +195,7 @@ def build_ontology(
     join_edges = load_join_edges(database_name, schema_name)
     retriever = _build_data_retriever(database_name)
 
-    evidence: dict[str, list[str]] = {}
-    if bird_root:
-        evidence = load_evidence(database_name, bird_root)
-
-    vocab_service = ExternalVocabService(db_id=database_name, evidence=evidence)
+    vocab_service = ExternalVocabService(db_id=database_name)
 
     bfs_trees = 0
     while True:
@@ -255,8 +248,6 @@ def build_ontology(
                     table,
                     ontology,
                     all_table_names,
-                    bird_root,
-                    evidence,
                     vocab_service,
                     domain_summary,
                 )
@@ -297,9 +288,7 @@ def build_ontology(
     logger.info("-" * 40)
 
     sql_texts = fetch_all_sql_texts(database_name, schema_name=schema_name)
-    join_edges_behavior, metrics = analyze_sql_behavior(
-        sql_texts, ontology, evidence.get("all", [])
-    )
+    join_edges_behavior, metrics = analyze_sql_behavior(sql_texts, ontology)
     ontology.object_properties.extend(join_edges_behavior)
     ontology.metrics.extend(metrics)
 
@@ -463,8 +452,6 @@ def _process_one_table(
     table: dict[str, Any],
     ontology: CoreOntology,
     all_table_names: list[str],
-    bird_root: str | None,
-    evidence: dict[str, list[str]],
     vocab_service: ExternalVocabService,
     domain_summary: DomainSummary | None = None,
 ) -> None:
@@ -477,28 +464,16 @@ def _process_one_table(
         logger.warning("  Table %s has no columns — skipping.", table_key)
         return
 
-    if bird_root:
-        enrich_context_with_bird(ctx, table["name"], evidence)
-
     if domain_summary:
         ctx["domain_summary"] = domain_summary.model_dump()
 
     det_result = run_deterministic(table, ctx, all_table_names)
 
-    evidence_for_table = vocab_service.get_evidence_for_table(
-        table["name"],
-        [c.get("name", "") for c in columns],
-    )
-    ctx["evidence"] = ctx.get("evidence", []) + [
-        e for e in evidence_for_table if e not in ctx.get("evidence", [])
-    ]
     ctx["table_name"] = table["name"]
     ctx["table_description"] = table.get("description") or ""
 
     # Enrich column metadata for proposer context only — do not write attributes yet.
-    enriched_columns = enrich_attributes(
-        det_result.attributes, ctx, ctx.get("evidence", [])
-    )
+    enriched_columns = enrich_attributes(det_result.attributes, ctx, [])
 
     ext_matches = vocab_service.find_similar_terms(table["name"], columns)
 

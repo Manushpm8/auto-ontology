@@ -18,10 +18,9 @@ The schema is already in Neo4j via NeMo-Retriever ingestion. The pipeline reads 
 
 Existing query patterns from [attributes_extraction.py](gsf/ontology/attributes_and_concepts/attributes_extraction.py) are reused: `_FETCH_TABLES_QUERY`, `_FETCH_COLUMNS_QUERY`, `_FETCH_FKS_QUERY`, `_FETCH_SQL_TEXTS_QUERY`.
 
-### Supplementary: BIRD evidence file
+### Domain summary (optional, Phase 0)
 
-- **Evidence strings** -- `~/bird/minidev/MINIDEV/mini_dev_postgresql.json` `evidence` field. Expert domain knowledge like _"A3 refers to region names"_, _"'POPLATEK PO OBRATU' represents 'issuance after transaction'"_. Loaded per `db_id`.
-- **Database description CSVs** -- `~/bird/minidev/MINIDEV/dev_databases/{db}/database_description/*.csv` with `value_description` (richer than what's in Neo4j's `c.description`). Only used if Neo4j column descriptions are sparse.
+- **DomainSummary** — loaded from `.semantic_summaries/{database_name}.json` or produced by domain pre-reading. Used for seed selection and proposer context.
 
 ### External ontology sources (domain-mapped)
 
@@ -49,8 +48,8 @@ gsf/ontology/rigor/
   __init__.py
   __main__.py          # CLI entry point
   models.py            # Pydantic: CoreOntology, DeltaOntology, BusinessTerm, Attribute, ObjectProperty, Metric, Provenance, JudgeVerdict
-  loaders.py           # Read schema/columns/FKs/SQLs from Neo4j + load BIRD evidence/descriptions from files
-  external_vocab.py    # BioPortal REST client + BIRD evidence grouping as external knowledge
+  loaders.py           # Read schema/columns/FKs/SQLs from Neo4j
+  external_vocab.py    # LOV, BioPortal, FIBO clients + domain mapping
   deterministic.py     # FK scan, *_id pattern, self-ref, denormalized entity heuristic
   proposer.py          # Gen-LLM: proposes DeltaOntology per table
   judge.py             # Judge-LLM: validates Delta against CoreOntology
@@ -86,7 +85,7 @@ Core types following the pseudocode structure:
 - **`DeltaOntology`** -- same shape but represents a single-table proposal
 - **`JudgeVerdict`** -- `approved_business_terms: list[BusinessTerm]`, `approved_attributes: list[Attribute]`, `approved_object_properties: list[ObjectProperty]`, `rejected: list[RejectedItem]`, `merge_instructions: list[MergeInstruction]`
 
-### 2. `loaders.py` -- Data Loading (Neo4j + BIRD files)
+### 2. `loaders.py` -- Data Loading (Neo4j)
 
 **From Neo4j** (reusing query patterns from `attributes_extraction.py`):
 
@@ -94,19 +93,13 @@ Core types following the pseudocode structure:
 - `fetch_table_context(table_id)` -- columns (name, type, description, samples, sql_ref_count), FKs (source -> target table.column), top SQL texts
 - `fetch_existing_joins(database_name)` -- all `[:JOIN]` edges already in the graph
 
-**From BIRD files** (supplementary):
-
-- `load_evidence(db_id, bird_root)` -- filter `mini_dev_postgresql.json` by `db_id`, return grouped evidence strings
-- `load_value_descriptions(db_id, bird_root)` -- parse `database_description/*.csv`, return `dict[table_name, dict[column_name, str]]` for enriching column context beyond what Neo4j stores
-
 ### 3. `external_vocab.py` -- External Knowledge
 
-Four knowledge sources behind a common `VocabSource` protocol, selected via domain mapping:
+Three knowledge sources behind a common `VocabSource` protocol, selected via domain mapping:
 
 - **`LOVClient`** -- `search(term) -> list[ExternalConcept]` via REST `GET /api/v2/term/search?q={term}&type=class`. Always active. Returns URI, prefLabel, vocabulary name.
 - **`BioPortalClient`** -- `search(term) -> list[ExternalConcept]` via REST `GET /search?q={term}`. Gated on `BIOPORTAL_API_KEY`. Returns prefLabel, definition, ontology source.
 - **`FIBOLocalIndex`** -- downloads FIBO OWL from GitHub once to a cache dir, parses with `rdflib`, builds an in-memory label index. `search(term) -> list[ExternalConcept]` does fuzzy match on rdfs:label. Activated for finance domains.
-- **`BirdEvidenceKB`** -- groups BIRD evidence strings by db_id, provides `get_evidence_for_table(table_name) -> list[str]` by matching table/column names in evidence text. Always active.
 - **`ExternalVocabService`** -- reads domain mapping config, instantiates the right sources for a given `db_id`, aggregates results. Provides `find_similar_terms(table_name, column_names) -> list[ExternalMatch]`.
 
 ### 4. `deterministic.py` -- Pattern Detection (No LLM)
@@ -127,13 +120,12 @@ System prompt instructs the LLM to:
 2. For each non-FK, non-ID column, propose an **Attribute** (with `source_column` pointing to the Column)
 3. For denormalized candidates (from deterministic step), decide whether to create an **InferredBusinessTerm + ObjectProperty** or treat as an Attribute
 4. Detect **SubClassOf** hierarchy if applicable
-5. Use the retrieval context: existing ontology state, column descriptions, external knowledge matches, evidence strings
+5. Use the retrieval context: existing ontology state, column descriptions, external knowledge matches
 
 Input context (built by `build_proposer_prompt()`):
 - Existing CoreOntology snapshot (business terms + edges so far)
-- Column descriptions from `database_description/*.csv`
+- Column descriptions from Neo4j
 - External knowledge matches from `external_vocab.py`
-- Evidence strings relevant to this table
 - Deterministic edges already created
 - Denormalized candidates to evaluate
 
@@ -155,7 +147,7 @@ Output: `JudgeVerdict`
 After all tables are processed in Phase 1:
 
 - **JOIN analysis**: parse each SQL query with `sqlglot`, extract JOIN paths. For each join link not already in CoreOntology, create an ObjectProperty with `derivation="sql_join_inferred"`.
-- **Metric extraction**: identify `SUM()`, `COUNT()`, `AVG()`, `MAX()`, `MIN()` patterns. Combine with evidence strings to name the metric. Create `Metric` objects. Use LLM for metric naming if evidence doesn't provide a clear name.
+- **Metric extraction**: identify `SUM()`, `COUNT()`, `AVG()`, `MAX()`, `MIN()` patterns. Create `Metric` objects. Use LLM for metric naming when needed.
 
 ### 8. `neo4j_ops.py` -- Graph Write-Back
 
@@ -172,43 +164,37 @@ New graph elements (extending existing Neo4j schema from [attributes_extraction.
 
 ### 9. `pipeline.py` -- Orchestration
 
+BFS-from-seed compilation via `build_ontology()` in `pipeline.py`, entry point `run_semantic_compilation()` in `compile.py`:
+
 ```python
-def build_ontology(database_name: str, bird_root: str | None = None) -> CoreOntology:
-    # INIT — read schema graph from Neo4j
-    ontology = CoreOntology()
-    tables = fetch_sorted_tables(database_name)
-    evidence = load_evidence(db_id, bird_root) if bird_root else {}
-    value_descs = load_value_descriptions(db_id, bird_root) if bird_root else {}
-    vocab_service = ExternalVocabService(db_id=db_id, evidence=evidence)
+def build_ontology(database_name: str, ...) -> CoreOntology:
+    tables, tables_by_name = build_tables_index(database_name, schema_name)
+    vocab_service = ExternalVocabService(db_id=database_name)
 
-    # PHASE 1: per-table loop
-    for table in tables:
-        ctx = fetch_table_context(table["id"])          # columns, FKs, SQLs from Neo4j
-        enrich_with_bird(ctx, table, evidence, value_descs)  # add evidence + value_descriptions
-        ext_matches = vocab_service.find_similar_terms(table["name"], ctx["columns"])
-        det_result = run_deterministic(table, ctx)      # FK, *_id, self-ref, denormalized
-        delta = invoke_proposer(table, ctx, det_result, ext_matches, ontology)
-        verdict = invoke_judge(delta, ontology)
-        ontology.merge(verdict.apply(delta))
+    while pending_tables:
+        seed = select_seed_table(pending, domain_summary)  # first tree only
+        queue = TablesQueue(...); queue.push_seed(seed)
 
-    # PHASE 2: behavioral — SQL queries already in Neo4j
-    sql_texts = fetch_sql_texts(database_name)
-    join_edges, metrics = analyze_sql_behavior(sql_texts, ontology)
-    ontology.object_properties.extend(join_edges)
-    ontology.metrics.extend(metrics)
+        while entry := queue.pop():
+            vdb_names = _discover_vdb_neighbors(...)   # LLM questions + data VDB
+            _process_one_table(...)                    # term → attrs → FK edges
+            queue.discover_neighbors(..., vdb_table_names=vdb_names)
 
-    # WRITE — new ontology nodes/edges back to Neo4j
+        synthesize_role_edges(...)                     # shortest paths on ROLE edges
+
+    orphan_sweep(...)                                  # deterministic fallback
+    analyze_sql_behavior(...)                          # SQL join/metric inference
     write_ontology_to_neo4j(ontology)
     return ontology
 ```
 
 ### 10. `__main__.py` + `launch.json`
 
-CLI entry: `python -m gsf.ontology.rigor --database-name financial --bird-root ~/bird/minidev/MINIDEV`
+CLI entry: `python -m gsf.ontology.rigor --database-name dor_prod`
 
-`--bird-root` is optional. Without it, the pipeline runs purely from Neo4j (no BIRD evidence/descriptions). With it, BIRD evidence and value_descriptions are loaded as supplementary context.
+Optional flags: `--no-resume`, `--no-write`, `--no-embed`, `--schema-name public`.
 
-Update `.vscode/launch.json` with a new debug configuration.
+Update `.vscode/launch.json` with a debug configuration (e.g. `"Ontology: Rigor+ dor_prod"`).
 
 ## Dependencies
 

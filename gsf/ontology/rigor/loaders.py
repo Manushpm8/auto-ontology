@@ -1,14 +1,11 @@
 """Data loading for the Rigor pipeline.
 
 Primary source: Neo4j graph (tables, columns with descriptions, FKs, SQL queries).
-Supplementary: BIRD evidence strings.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
@@ -119,8 +116,7 @@ def fetch_sorted_tables(
     """Return tables sorted by query count (descending).
 
     *schema_name* is the Neo4j Schema node name (e.g. ``"public"``).
-    Defaults to *database_name* for BIRD compatibility where the
-    schema name equals the database name.
+    Defaults to *database_name* when omitted.
     """
     if schema_name is None:
         schema_name = database_name
@@ -189,70 +185,3 @@ def fetch_existing_joins(
         schema_name = database_name
     conn = get_neo4j_conn()
     return conn.query_read(_FETCH_JOINS_QUERY, {"schema_name": schema_name})
-
-
-# ---------------------------------------------------------------------------
-# BIRD supplementary loaders
-# ---------------------------------------------------------------------------
-
-
-def load_evidence(
-    db_id: str,
-    bird_root: str,
-) -> dict[str, list[str]]:
-    """Load BIRD evidence strings grouped by question for a database.
-
-    Returns a flat list of unique, non-empty evidence strings.
-    The dict is keyed "all" for the flat list, but future versions
-    could group by table name.
-    """
-    bird_path = Path(bird_root)
-    candidates = [
-        bird_path / "mini_dev_postgresql.json",
-        bird_path / "mini_dev_sqlite.json",
-        bird_path / "dev.json",
-    ]
-    json_path = next((p for p in candidates if p.exists()), None)
-    if json_path is None:
-        logger.warning("No BIRD JSON found under %s", bird_root)
-        return {}
-
-    with open(json_path) as f:
-        data = json.load(f)
-
-    evidence_strings: list[str] = []
-    for item in data:
-        if item.get("db_id") != db_id:
-            continue
-        ev = (item.get("evidence") or "").strip()
-        if ev and ev not in evidence_strings:
-            evidence_strings.append(ev)
-
-    logger.info(
-        "Loaded %d evidence strings for db_id=%s from %s",
-        len(evidence_strings),
-        db_id,
-        json_path.name,
-    )
-    return {"all": evidence_strings}
-
-
-def enrich_context_with_bird(
-    ctx: dict[str, Any],
-    table_name: str,
-    evidence: dict[str, list[str]],
-) -> None:
-    """Enrich a table context dict with BIRD evidence strings (in-place).
-
-    Adds:
-      ctx["evidence"] — evidence strings mentioning this table or its columns
-    """
-    col_names = {c["name"].lower() for c in ctx.get("columns", [])}
-
-    relevant_evidence: list[str] = []
-    for ev in evidence.get("all", []):
-        ev_lower = ev.lower()
-        if table_name.lower() in ev_lower or any(cn in ev_lower for cn in col_names):
-            relevant_evidence.append(ev)
-
-    ctx["evidence"] = relevant_evidence

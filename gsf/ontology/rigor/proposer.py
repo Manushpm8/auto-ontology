@@ -5,7 +5,6 @@ For each table, the Proposer receives:
   - Deterministic edges already created
   - Denormalized candidates to evaluate
   - External ontology matches (LOV, BioPortal, FIBO)
-  - BIRD evidence strings
   - The current CoreOntology snapshot
 
 It returns a DeltaOntology with proposed BusinessTerms and
@@ -197,14 +196,6 @@ def _build_user_prompt(
                 "### External Ontology Matches (use as naming hints)\n"
                 + "\n".join(ext_lines)
             )
-
-    # Block 9 — BIRD evidence
-    evidence = ctx.get("evidence", [])
-    if evidence:
-        ev_lines = [f"  - {ev}" for ev in evidence[:15]]
-        blocks.append(
-            "### Domain Evidence (expert-annotated knowledge)\n" + "\n".join(ev_lines)
-        )
 
     return "\n\n".join(blocks)
 

@@ -13,7 +13,13 @@ from gsf.ontology.rigor.models import (
     ProposedBusinessTerm,
     Provenance,
 )
-from gsf.ontology.rigor.traversal import QueueEntry, QueuePriority, TablesQueue
+from gsf.ontology.rigor.traversal import (
+    QueueEntry,
+    QueuePriority,
+    TablesQueue,
+    discover_tables_via_vdb,
+)
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 
 def test_queue_priority_ordering() -> None:
@@ -104,3 +110,27 @@ def test_role_edge_carries_path_metadata() -> None:
     )
     assert op.path_data_layer is not None
     assert op.path_data_layer[0]["node"] == "orders"
+
+
+def test_discover_tables_via_vdb_uses_query_hits() -> None:
+    class FakeRetriever:
+        def query(self, query: str, top_k: int = 5) -> list[dict[str, object]]:
+            return [
+                {
+                    "text": "orders table",
+                    "metadata": {
+                        "content_metadata": {
+                            "label": Labels.TABLE,
+                            "name": "orders",
+                        }
+                    },
+                }
+            ]
+
+    found = discover_tables_via_vdb(
+        entities=["Order"],
+        database_name="dor_prod",
+        retriever=FakeRetriever(),
+        known_table_names={"observers"},
+    )
+    assert found == ["orders"]

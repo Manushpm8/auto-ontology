@@ -1,8 +1,7 @@
 """CLI entry point for the Rigor ontology pipeline.
 
 Usage:
-    python -m gsf.ontology.rigor --database-name financial
-    python -m gsf.ontology.rigor --all --bird-root ~/bird/minidev/MINIDEV
+    python -m gsf.ontology.rigor --database-name dor_prod
 """
 
 from __future__ import annotations
@@ -28,19 +27,14 @@ def main() -> None:
     group.add_argument(
         "--all",
         action="store_true",
-        help="Run on all BIRD databases from the domain map.",
-    )
-    parser.add_argument(
-        "--bird-root",
-        default=None,
-        help="Path to BIRD minidev root for supplementary evidence/descriptions.",
+        help="Run on all databases from the domain map.",
     )
     parser.add_argument(
         "--schema-name",
         default=None,
         help=(
             "Neo4j Schema node name (e.g. 'public'). "
-            "Defaults to --database-name for BIRD compatibility."
+            "Defaults to auto-discovering schemas under --database-name."
         ),
     )
     parser.add_argument(
@@ -87,7 +81,6 @@ def main() -> None:
 
     # Build list of (database_name, schema_name) pairs to process.
     if args.all:
-        # BIRD mode: DOMAIN_MAP keys are schema names used as db identifiers
         targets = [(name, name) for name in DOMAIN_MAP.keys()]
     elif args.schema_name:
         targets = [(args.database_name, args.schema_name)]
@@ -122,7 +115,6 @@ def main() -> None:
 
         ontology = run_semantic_compilation(
             database_name=db_name,
-            bird_root=args.bird_root,
             skip_threshold=args.skip_threshold,
             write_to_neo4j=not args.no_write,
             embed=not args.no_embed,

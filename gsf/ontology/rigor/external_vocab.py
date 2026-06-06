@@ -6,7 +6,6 @@ the VocabSource protocol and return ExternalConcept results.
 - LOVClient: Linked Open Vocabularies (all domains, no key)
 - BioPortalClient: biomedical ontologies (requires BIOPORTAL_API_KEY)
 - FIBOLocalIndex: Financial Industry Business Ontology (local OWL)
-- BirdEvidenceKB: BIRD dataset evidence strings as domain knowledge
 """
 
 from __future__ import annotations
@@ -308,32 +307,6 @@ class FIBOLocalIndex:
 
 
 # ---------------------------------------------------------------------------
-# BIRD Evidence KB
-# ---------------------------------------------------------------------------
-
-
-class BirdEvidenceKB:
-    """Uses BIRD evidence strings as domain knowledge."""
-
-    def __init__(self, evidence: dict[str, list[str]]) -> None:
-        self._evidence = evidence.get("all", [])
-
-    def get_evidence_for_table(
-        self,
-        table_name: str,
-        column_names: list[str] | None = None,
-    ) -> list[str]:
-        """Return evidence strings relevant to this table."""
-        search_terms = {table_name.lower()}
-        if column_names:
-            search_terms.update(c.lower() for c in column_names)
-
-        return [
-            ev for ev in self._evidence if any(t in ev.lower() for t in search_terms)
-        ]
-
-
-# ---------------------------------------------------------------------------
 # Domain mapping config
 # ---------------------------------------------------------------------------
 
@@ -365,13 +338,8 @@ class ExternalVocabService:
     Instantiates the right sources for a given db_id and aggregates results.
     """
 
-    def __init__(
-        self,
-        db_id: str,
-        evidence: dict[str, list[str]] | None = None,
-    ) -> None:
+    def __init__(self, db_id: str) -> None:
         self._db_id = db_id
-        self._evidence_kb = BirdEvidenceKB(evidence or {})
 
         source_names = DOMAIN_MAP.get(db_id, _DEFAULT_SOURCES)
         self._sources: list[VocabSource] = []
@@ -425,13 +393,6 @@ class ExternalVocabService:
                 matches.append(ExternalMatch(term=term, concepts=all_concepts))
 
         return matches
-
-    def get_evidence_for_table(
-        self,
-        table_name: str,
-        column_names: list[str] | None = None,
-    ) -> list[str]:
-        return self._evidence_kb.get_evidence_for_table(table_name, column_names)
 
 
 # ---------------------------------------------------------------------------

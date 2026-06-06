@@ -7,9 +7,7 @@
       "request": "launch",
       "module": "gsf.ontology.rigor",
       "args": [
-        "--all",
-        "--bird-root",
-        "~/bird/minidev/MINIDEV"
+        "--all"
       ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
@@ -34,9 +32,7 @@
       "request": "launch",
       "module": "gsf.ontology.rigor",
       "args": [
-        "--all",
-        "--bird-root",
-        "~/bird/minidev/MINIDEV"
+        "--all"
       ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
