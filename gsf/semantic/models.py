@@ -18,19 +18,32 @@ class TermProposal(BaseModel):
     )
 
 
-class BusinessQuestionsResult(BaseModel):
-    """LLM output: simple two-entity business questions for VDB discovery."""
+class BusinessQuestionItem(BaseModel):
+    """One business question with its target entity and ontology ROLE for finalize."""
 
-    questions: list[str] = Field(
-        default_factory=list,
-        description="Question text only — no prefixes or entity lists.",
-    )
-    entities: list[str] = Field(
-        default_factory=list,
+    question: str = Field(..., description="Plain question text — no prefixes.")
+    entity: str = Field(
+        ...,
         description=(
-            "CamelCase business entity names for VDB discovery — OTHER entities "
-            "referenced in questions, never the anchor Term of the current table."
+            "CamelCase business entity Term referenced in the question — never the "
+            "anchor Term of the current table."
         ),
+    )
+    role: str = Field(
+        ...,
+        description=(
+            "camelCase ROLE edge name from the anchor Term to this entity Term "
+            "(e.g. placedBy, belongsTo, shippedVia)."
+        ),
+    )
+
+
+class BusinessQuestionsResult(BaseModel):
+    """LLM output: paired questions, entities, and ROLE names for VDB + finalize."""
+
+    items: list[BusinessQuestionItem] = Field(
+        default_factory=list,
+        description="Exactly 3 items — one per business angle.",
     )
 
 

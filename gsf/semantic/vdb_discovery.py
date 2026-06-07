@@ -16,7 +16,7 @@ from nemo_retriever.tabular_data.retrieval.data_access.semantic_search import (
 
 from gsf.semantic.deterministic import fk_target_table_names
 from gsf.semantic.llm import invoke_structured
-from gsf.semantic.models import BusinessQuestionsResult
+from gsf.semantic.models import BusinessQuestionItem, BusinessQuestionsResult
 
 logger = logging.getLogger(__name__)
 
@@ -36,30 +36,41 @@ def _question_system_prompt(anchor_term: str) -> str:
     return f"""\
 Generate exactly 3 simple business questions to discover related database tables.
 
-Anchor Term (current table — do NOT put this in entities): {anchor_term}
+Anchor Term (current table — do NOT use as entity): {anchor_term}
 
 Rules:
-1. COVERAGE: Each question explores a different business angle. Never repeat the same \
+1. COVERAGE: Each item explores a different business angle. Never repeat the same \
 theme (e.g. only one question about dates/creation, only one about counts, etc.).
-2. CROSS-ENTITY: Each question must involve the anchor Term plus at least one OTHER \
-business entity suggested by FK targets, column names, or domain context.
-3. entities: REQUIRED non-empty list. Collect every OTHER CamelCase entity referenced \
-across all questions — never "{anchor_term}" or variants. entities is used for VDB \
-table lookup; an empty list is invalid when questions mention other entities.
-4. questions: plain question text only — no "Question:" prefix, no inline entity lists.
+2. CROSS-ENTITY: Each question must involve the anchor Term plus one OTHER business \
+entity suggested by FK targets, column names, or domain context.
+3. entity: REQUIRED CamelCase business entity Term — never "{anchor_term}" or variants. \
+Used for VDB table lookup and for the ROLE edge target at finalize.
+4. role: REQUIRED camelCase ontology ROLE edge name from the anchor Term ({anchor_term}) \
+to entity (e.g. placedBy, fulfilledBy, categorizedBy). Direction is anchor → entity.
+5. question: plain question text only — no "Question:" prefix.
 
 Example (anchor Term = Order):
 {{
-  "questions": [
-    "How many orders did each customer place last month?",
-    "Which orders are still awaiting shipment?",
-    "What is the average order value by product category?"
-  ],
-  "entities": ["Customer", "Shipment", "Product"]
+  "items": [
+    {{
+      "question": "How many orders did each customer place last month?",
+      "entity": "Customer",
+      "role": "placedBy"
+    }},
+    {{
+      "question": "Which orders are still awaiting shipment?",
+      "entity": "Shipment",
+      "role": "fulfilledBy"
+    }},
+    {{
+      "question": "What is the average order value by product category?",
+      "entity": "Product",
+      "role": "contains"
+    }}
+  ]
 }}
 
-In the example above, "Order" is the anchor term and belong only in questions, \
-not in entities. Extract "Customer", "Shipment", etc. from what the questions reference."""
+In the example, "Order" is the anchor and appears only in questions, never as entity."""
 
 
 def _build_question_prompt(
@@ -145,7 +156,7 @@ def _metadata_from_hit(hit: dict[str, Any]) -> dict[str, Any]:
 
 
 def discover_tables_via_vdb(
-    entities: list[str],
+    items: list[BusinessQuestionItem],
     retriever: Retriever,
     *,
     top_k: int = 5,
@@ -154,6 +165,7 @@ def discover_tables_via_vdb(
     discovered: list[str] = []
     where = _build_table_discovery_where(retriever)
     vdb_kwargs = {"where": where} if where else None
+    entities = list(dict.fromkeys(item.entity for item in items if item.entity))
     for entity in entities[:5]:
         try:
             hits = retriever.query(

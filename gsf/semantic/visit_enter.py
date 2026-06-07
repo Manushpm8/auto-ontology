@@ -13,10 +13,12 @@ from gsf.semantic.deterministic import column_attribute_specs, fk_target_table_n
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.queue import TablesQueue
 from gsf.semantic.term_extractor import extract_term
+from gsf.semantic.models import BusinessQuestionItem
 from gsf.semantic.vdb_discovery import (
     discover_tables_via_vdb,
     generate_business_questions,
 )
+from gsf.semantic.visit_finalize import write_question_role_edges
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,7 @@ def visit_enter(
     retriever: Retriever | None,
     domain_summary: DomainSummary | None,
 ) -> None:
-    """First visit: local semantic nodes + discovery. No ROLE edges."""
+    """First visit: local semantic nodes, discovery, enqueue, question ROLE edges."""
     table_id = table["id"]
     table_name = table["name"]
 
@@ -83,9 +85,11 @@ def visit_enter(
         )
 
     vdb_names: list[str] = []
+    question_items: list[BusinessQuestionItem] = []
     if retriever is not None:
         questions = generate_business_questions(table, ctx, proposal.name)
-        vdb_names = discover_tables_via_vdb(questions.entities, retriever)
+        question_items = questions.items
+        vdb_names = discover_tables_via_vdb(question_items, retriever)
 
     fk_targets = fk_target_table_names(ctx.get("fks", []))
     queue.discover_neighbors(
@@ -96,10 +100,20 @@ def visit_enter(
         fk_targets=fk_targets,
     )
 
+    role_count = 0
+    if question_items:
+        role_count = write_question_role_edges(
+            table_id,
+            proposal.name,
+            table_name,
+            question_items,
+        )
+
     logger.info(
-        "Enter %s → Term %r (%d attrs, %d vdb neighbors)",
+        "Enter %s → Term %r (%d attrs, %d vdb neighbors, %d question ROLE)",
         table_name,
         proposal.name,
         len(specs),
         len(vdb_names),
+        role_count,
     )

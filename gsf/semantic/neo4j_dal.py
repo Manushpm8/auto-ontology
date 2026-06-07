@@ -79,6 +79,22 @@ def get_term_for_table(table_id: str) -> str | None:
     return rows[0]["name"] if rows else None
 
 
+def get_table_for_term(term_name: str) -> dict[str, str] | None:
+    """Physical table mapped to a semantic Term (for ROLE path resolution)."""
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
+              (term:{LABEL_TERM} {{name: $term_name, source: $source}})
+        RETURN t.id AS id, t.name AS name
+        LIMIT 1
+        """,
+        {"term_name": term_name, "source": SEMANTIC_SOURCE},
+    )
+    if not rows:
+        return None
+    return {"id": rows[0]["id"], "name": rows[0]["name"]}
+
+
 def merge_term(name: str, description: str, table_id: str) -> None:
     get_neo4j_conn().query_write(
         f"""

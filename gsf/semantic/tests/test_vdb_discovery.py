@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gsf.semantic.models import BusinessQuestionItem
 from gsf.semantic.vdb_discovery import (
     _build_table_discovery_where,
     discover_tables_via_vdb,
@@ -54,7 +55,11 @@ def test_discover_tables_via_vdb_uses_query_hits() -> None:
             ]
 
     found = discover_tables_via_vdb(
-        entities=["Customer"],
+        items=[
+            BusinessQuestionItem(
+                question="Who ordered?", entity="Customer", role="placedBy"
+            )
+        ],
         retriever=FakeRetriever(),
     )
     assert found == ["orders"]
