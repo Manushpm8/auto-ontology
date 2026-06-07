@@ -22,7 +22,7 @@ def test_discover_tables_via_vdb_uses_query_hits() -> None:
             ]
 
     found = discover_tables_via_vdb(
-        entities=["Order"],
+        entities=["Customer"],
         retriever=FakeRetriever(),
     )
     assert found == ["orders"]

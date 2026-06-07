@@ -10,14 +10,73 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.retriever import Retriever
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
+from gsf.semantic.deterministic import fk_target_table_names
 from gsf.semantic.llm import invoke_structured
 from gsf.semantic.models import BusinessQuestionsResult
 
 logger = logging.getLogger(__name__)
 
-_QUESTION_SYSTEM = """\
-Generate up to 3 simple business questions spanning at most two entities.
-Extract the business entity names mentioned. Questions help discover related tables."""
+
+def _question_system_prompt(anchor_term: str) -> str:
+    return f"""\
+Generate exactly 3 simple business questions to discover related database tables.
+
+Anchor Term (current table — do NOT put this in entities): {anchor_term}
+
+Rules:
+1. COVERAGE: Each question explores a different business angle. Never repeat the same \
+theme (e.g. only one question about dates/creation, only one about counts, etc.).
+2. CROSS-ENTITY: Each question must involve the anchor Term plus at least one OTHER \
+business entity suggested by FK targets, column names, or domain context.
+3. entities: REQUIRED non-empty list. Collect every OTHER CamelCase entity referenced \
+across all questions — never "{anchor_term}" or variants. entities is used for VDB \
+table lookup; an empty list is invalid when questions mention other entities.
+4. questions: plain question text only — no "Question:" prefix, no inline entity lists.
+
+Example (anchor Term = Order):
+{{
+  "questions": [
+    "How many orders did each customer place last month?",
+    "Which orders are still awaiting shipment?",
+    "What is the average order value by product category?"
+  ],
+  "entities": ["Customer", "Shipment", "Product"]
+}}
+
+In the example above, "Order" is the anchor term and belong only in questions, \
+not in entities. Extract "Customer", "Shipment", etc. from what the questions reference."""
+
+
+def _build_question_prompt(
+    table: dict[str, Any],
+    ctx: dict[str, Any],
+    term_name: str,
+) -> str:
+    desc = table.get("description") or ""
+    cols = ", ".join(c["name"] for c in ctx.get("columns", [])[:20])
+    fk_targets = fk_target_table_names(ctx.get("fks", []))
+    fk_block = ", ".join(fk_targets) if fk_targets else "(none)"
+    neighbor_block = "(none)"
+    table_id = table.get("id")
+    if table_id:
+        try:
+            from gsf.semantic import neo4j_dal
+
+            neighbors = neo4j_dal.fetch_neighbor_terms(table_id, limit=8)
+            if neighbors:
+                neighbor_block = ", ".join(neighbors)
+        except Exception:
+            pass
+
+    return (
+        f"Table: {table['name']}\n"
+        f"Anchor Term: {term_name}\n"
+        f"Description: {desc}\n"
+        f"Columns: {cols}\n"
+        f"FK target tables: {fk_block}\n"
+        f"Known neighbor Terms: {neighbor_block}\n"
+        "Use FK targets and column semantics to invent plausible OTHER business entities."
+    )
 
 
 def generate_business_questions(
@@ -25,16 +84,11 @@ def generate_business_questions(
     ctx: dict[str, Any],
     term_name: str,
 ) -> BusinessQuestionsResult:
-    desc = table.get("description") or ""
-    cols = ", ".join(c["name"] for c in ctx.get("columns", [])[:20])
-    prompt = (
-        f"Table: {table['name']}\nTerm: {term_name}\nDescription: {desc}\n"
-        f"Columns: {cols}"
-    )
+    prompt = _build_question_prompt(table, ctx, term_name)
     try:
         return invoke_structured(
             [
-                SystemMessage(content=_QUESTION_SYSTEM),
+                SystemMessage(content=_question_system_prompt(term_name)),
                 HumanMessage(content=prompt),
             ],
             BusinessQuestionsResult,
@@ -84,9 +138,8 @@ def discover_tables_via_vdb(
     """Return table names from data-layer VDB hits (catalog filtering is in TablesQueue)."""
     discovered: list[str] = []
     for entity in entities[:5]:
-        query = f"table related to {entity} business entity"
         try:
-            hits = retriever.query(query, top_k=top_k)
+            hits = retriever.query(entity, top_k=top_k)
         except Exception:
             logger.warning("VDB search failed for entity %r", entity)
             continue

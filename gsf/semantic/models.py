@@ -21,8 +21,17 @@ class TermProposal(BaseModel):
 class BusinessQuestionsResult(BaseModel):
     """LLM output: simple two-entity business questions for VDB discovery."""
 
-    questions: list[str] = Field(default_factory=list)
-    entities: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(
+        default_factory=list,
+        description="Question text only — no prefixes or entity lists.",
+    )
+    entities: list[str] = Field(
+        default_factory=list,
+        description=(
+            "CamelCase business entity names for VDB discovery — OTHER entities "
+            "referenced in questions, never the anchor Term of the current table."
+        ),
+    )
 
 
 class SeedSelectionResult(BaseModel):
