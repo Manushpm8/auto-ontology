@@ -16,6 +16,9 @@ from gsf.semantic.models import BusinessQuestionsResult
 
 logger = logging.getLogger(__name__)
 
+# PostgresVDB.retrieval accepts kwargs["where"] as a langchain-postgres metadata filter.
+_TABLE_DISCOVERY_VDB_WHERE = {"label": {"$ne": Labels.CUSTOM_ANALYSIS}}
+
 
 def _question_system_prompt(anchor_term: str) -> str:
     return f"""\
@@ -139,7 +142,11 @@ def discover_tables_via_vdb(
     discovered: list[str] = []
     for entity in entities[:5]:
         try:
-            hits = retriever.query(entity, top_k=top_k)
+            hits = retriever.query(
+                entity,
+                top_k=top_k,
+                vdb_kwargs={"where": _TABLE_DISCOVERY_VDB_WHERE},
+            )
         except Exception:
             logger.warning("VDB search failed for entity %r", entity)
             continue
