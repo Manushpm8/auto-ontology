@@ -92,6 +92,10 @@ class Attribute(BaseModel):
     usage_hint: str | None = Field(
         None, description="Guidance on how to use this column in queries/analysis."
     )
+    is_primary_key: bool = Field(
+        default=False,
+        description="True when this attribute corresponds to a primary-key column.",
+    )
 
 
 class ObjectProperty(BaseModel):
@@ -146,7 +150,7 @@ class ProposedBusinessTerm(BaseModel):
 
 
 class ProposedAttribute(BaseModel):
-    """An attribute proposed by the Gen-LLM for a non-FK, non-ID column."""
+    """An attribute proposed for a non-FK column."""
 
     name: str = Field(..., description="Attribute name (matches source column name).")
     datatype: str
@@ -155,6 +159,10 @@ class ProposedAttribute(BaseModel):
     )
     source_column: str = Field(
         ..., description="The source column name this attribute comes from."
+    )
+    is_primary_key: bool = Field(
+        default=False,
+        description="True when this attribute corresponds to a primary-key column.",
     )
 
 
@@ -270,6 +278,7 @@ class JudgeVerdict(BaseModel):
                 datatype=attr.datatype,
                 term_name=_remap(attr.term_name),
                 source_column=attr.source_column,
+                is_primary_key=attr.is_primary_key,
             )
             for attr in self.approved_attributes
             if attr.name not in rejected_names

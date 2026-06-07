@@ -466,7 +466,7 @@ def _build_prompt(
 # Neo4j write-back — Attribute nodes with HAS_ATTRIBUTE edges
 # ---------------------------------------------------------------------------
 
-ATTRIBUTE_LABEL = "Attribute"
+ATTRIBUTE_LABEL = "ColumnAttribute"
 HAS_ATTRIBUTE_EDGE = "HAS_ATTRIBUTE"
 EXTRACTION_SOURCE = "phase1"
 

@@ -384,6 +384,7 @@ def _process_one_table(
                 description=ec.description if ec else None,
                 formula=ec.formula if ec else None,
                 usage_hint=ec.usage_hint if ec else None,
+                is_primary_key=attr.is_primary_key,
             )
         )
 

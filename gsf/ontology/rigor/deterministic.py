@@ -53,7 +53,7 @@ class DeterministicResult(BaseModel):
     )
     attributes: list[ProposedAttribute] = Field(
         default_factory=list,
-        description="Auto-created attributes for non-PK, non-FK columns.",
+        description="Auto-created attributes for non-FK columns (PKs included).",
     )
 
 
@@ -242,8 +242,8 @@ def run_deterministic(
                 )
                 break
 
-    # 6. Auto-create attributes for all non-PK, non-FK columns
-    skip_cols = result.fk_column_names | result.pk_column_names
+    # 6. Auto-create attributes for all non-FK columns (PKs included)
+    skip_cols = result.fk_column_names
     for col in columns:
         col_name = col["name"]
         if col_name in skip_cols:
@@ -254,21 +254,24 @@ def run_deterministic(
                 datatype=col.get("data_type") or "unknown",
                 term_name=term_name,
                 source_column=col_name,
+                is_primary_key=col_name in result.pk_column_names,
             )
         )
 
     all_col_names = [c["name"] for c in columns]
     attr_names = [a.source_column for a in result.attributes]
+    pk_attr_names = [a.source_column for a in result.attributes if a.is_primary_key]
     logger.info(
-        "  [det] Columns: %d total -> %d attrs, %d skipped",
+        "  [det] Columns: %d total -> %d attrs (%d PK), %d skipped (FK)",
         len(all_col_names),
         len(attr_names),
-        len(result.pk_column_names) + len(result.fk_column_names),
+        len(pk_attr_names),
+        len(result.fk_column_names),
     )
-    if result.pk_column_names:
+    if pk_attr_names:
         logger.info(
-            "  [det]   Skipped (PK): %s",
-            ", ".join(sorted(result.pk_column_names)),
+            "  [det]   PK attrs: %s",
+            ", ".join(sorted(pk_attr_names)),
         )
     if result.fk_column_names:
         logger.info(

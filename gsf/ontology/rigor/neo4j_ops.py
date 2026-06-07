@@ -2,10 +2,10 @@
 
 Writes the constructed CoreOntology back to Neo4j as new nodes and edges:
   - BusinessTerm nodes
-  - Attribute nodes: Column -[:HAS_ATTRIBUTE]-> Attribute -[:IS_PROPERTY_OF]-> BusinessTerm
+  - ColumnAttribute nodes: Column -[:HAS_ATTRIBUTE]-> ColumnAttribute -[:IS_PROPERTY_OF]-> BusinessTerm
   - ObjectProperty as RELATES_TO edges between BusinessTerms
   - SUBCLASS_OF edges for hierarchy
-  - Metric nodes
+  - SqlAttribute nodes
 """
 
 from __future__ import annotations
@@ -45,13 +45,14 @@ RETURN child.name AS child, parent.name AS parent
 """
 
 _MERGE_ATTRIBUTE = f"""
-MERGE (a:Attribute {{name: $name, business_term: $term_name, source: $source}})
+MERGE (a:ColumnAttribute {{name: $name, business_term: $term_name, source: $source}})
 SET a.id = $id,
     a.datatype = $datatype,
     a.source_column = $source_column,
     a.description = $description,
     a.formula = $formula,
-    a.usage_hint = $usage_hint
+    a.usage_hint = $usage_hint,
+    a.is_primary_key = $is_primary_key
 WITH a
 MATCH (bt:BusinessTerm {{name: $term_name, source: $source}})
 MERGE (a)-[:IS_PROPERTY_OF]->(bt)
@@ -74,8 +75,8 @@ SET r.derivation = $derivation,
 RETURN src.name AS src, r.name AS rel, tgt.name AS tgt
 """
 
-_MERGE_METRIC = """
-MERGE (m:Metric {name: $name, source: $source})
+_MERGE_SQL_ATTRIBUTE = """
+MERGE (m:SqlAttribute {name: $name, source: $source})
 SET m.id = $id,
     m.expression = $expression,
     m.aggregation_type = $aggregation_type,
@@ -83,24 +84,24 @@ SET m.id = $id,
 RETURN m.name AS name, m.id AS id
 """
 
-_LINK_METRIC_TO_ATTRIBUTE = f"""
-MATCH (m:Metric {{name: $metric_name, source: $source}})
+_LINK_SQL_ATTR_TO_COL_ATTR = f"""
+MATCH (m:SqlAttribute {{name: $sql_attr_name, source: $source}})
 MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN} {{name: $source_column}})
-      -[:HAS_ATTRIBUTE]->(a:Attribute {{source: $source}})
+      -[:HAS_ATTRIBUTE]->(a:ColumnAttribute {{source: $source}})
 WHERE t.name IN $source_tables
 MERGE (m)-[:AGGREGATES]->(a)
-RETURN m.name AS metric, a.name AS attr
+RETURN m.name AS sql_attr, a.name AS col_attr
 """
 
-_LINK_METRIC_TO_TERM = f"""
-MATCH (m:Metric {{name: $metric_name, source: $source}})
+_LINK_SQL_ATTR_TO_TERM = f"""
+MATCH (m:SqlAttribute {{name: $sql_attr_name, source: $source}})
 MATCH (t:{Labels.TABLE} {{name: $source_table}})
       -[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-      -[:HAS_ATTRIBUTE]->(:Attribute {{source: $source}})
+      -[:HAS_ATTRIBUTE]->(:ColumnAttribute {{source: $source}})
       -[:IS_PROPERTY_OF]->(bt:BusinessTerm {{source: $source}})
 WITH m, bt LIMIT 1
 MERGE (m)-[:DERIVED_FROM]->(bt)
-RETURN m.name AS metric, bt.name AS term
+RETURN m.name AS sql_attr, bt.name AS term
 """
 
 
@@ -155,7 +156,7 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
             if rows:
                 stats["subclass_edges"] += 1
 
-    # 2. Write Attribute nodes: Column -[:HAS_ATTRIBUTE]-> Attribute -[:IS_PROPERTY_OF]-> BusinessTerm
+    # 2. Write ColumnAttribute nodes: Column -[:HAS_ATTRIBUTE]-> ColumnAttribute -[:IS_PROPERTY_OF]-> BusinessTerm
     for attr in ontology.attributes:
         node_id = str(uuid.uuid4())
         rows = conn.query_write(
@@ -171,6 +172,7 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
                 "description": attr.description,
                 "formula": attr.formula,
                 "usage_hint": attr.usage_hint,
+                "is_primary_key": attr.is_primary_key,
             },
         )
         if rows:
@@ -196,11 +198,11 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
         if rows:
             stats["object_properties"] += 1
 
-    # 4. Write Metric nodes + link to Attributes or BusinessTerms
+    # 4. Write SqlAttribute nodes + link to ColumnAttributes or BusinessTerms
     for metric in ontology.metrics:
         node_id = str(uuid.uuid4())
         rows = conn.query_write(
-            _MERGE_METRIC,
+            _MERGE_SQL_ATTRIBUTE,
             {
                 "id": node_id,
                 "name": metric.name,
@@ -217,11 +219,11 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
         if not metric.source_column or not metric.source_tables:
             continue
 
-        # Try linking to the Attribute via the Column graph path
+        # Try linking to the ColumnAttribute via the Column graph path
         linked = conn.query_write(
-            _LINK_METRIC_TO_ATTRIBUTE,
+            _LINK_SQL_ATTR_TO_COL_ATTR,
             {
-                "metric_name": metric.name,
+                "sql_attr_name": metric.name,
                 "source_column": metric.source_column,
                 "source_tables": metric.source_tables,
                 "source": RIGOR_SOURCE,
@@ -230,18 +232,18 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
         if linked:
             stats["metric_edges"] += len(linked)
             logger.info(
-                "  [neo4j] Metric %s -[:AGGREGATES]-> %s",
+                "  [neo4j] SqlAttribute %s -[:AGGREGATES]-> %s",
                 metric.name,
-                [r["attr"] for r in linked],
+                [r["col_attr"] for r in linked],
             )
             continue
 
         # Fallback: link to BusinessTerm via DERIVED_FROM
         for src_table in metric.source_tables:
             fallback = conn.query_write(
-                _LINK_METRIC_TO_TERM,
+                _LINK_SQL_ATTR_TO_TERM,
                 {
-                    "metric_name": metric.name,
+                    "sql_attr_name": metric.name,
                     "source_table": src_table,
                     "source": RIGOR_SOURCE,
                 },
@@ -249,7 +251,7 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
             if fallback:
                 stats["metric_edges"] += 1
                 logger.info(
-                    "  [neo4j] Metric %s -[:DERIVED_FROM]-> %s",
+                    "  [neo4j] SqlAttribute %s -[:DERIVED_FROM]-> %s",
                     metric.name,
                     fallback[0]["term"],
                 )

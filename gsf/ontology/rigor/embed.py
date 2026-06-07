@@ -1,6 +1,6 @@
 """Embed Rigor ontology elements into pgvector for semantic search.
 
-Converts BusinessTerms, Attributes, and Metrics from a CoreOntology into
+Converts BusinessTerms, ColumnAttributes, and SqlAttributes from a CoreOntology into
 composite text documents, embeds them via the NVIDIA NIM API, and writes
 the vectors into a dedicated pgvector collection (``rigor_ontology``).
 """
@@ -118,16 +118,17 @@ def _build_records(
             attr.description,
             attr.usage_hint,
         )
-        node_id = attr.id or f"rigor:Attribute:{attr.term_name}.{attr.name}"
+        node_id = attr.id or f"rigor:ColumnAttribute:{attr.term_name}.{attr.name}"
         meta = {
             "id": node_id,
-            "label": "Attribute",
+            "label": "ColumnAttribute",
             "name": attr.name,
             "term_name": attr.term_name,
             "source_column": attr.source_column,
             "source_table": attr.provenance.source_table,
             "database_name": database_name,
             "schema_name": schema_name,
+            "is_primary_key": attr.is_primary_key,
         }
         records.append(
             {
@@ -146,10 +147,10 @@ def _build_records(
             m.aggregation_type.value,
             m.source_tables,
         )
-        node_id = m.id or f"rigor:Metric:{m.name}"
+        node_id = m.id or f"rigor:SqlAttribute:{m.name}"
         meta = {
             "id": node_id,
-            "label": "Metric",
+            "label": "SqlAttribute",
             "name": m.name,
             "source_tables": m.source_tables,
             "database_name": database_name,
