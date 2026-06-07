@@ -2,14 +2,37 @@
 
 from __future__ import annotations
 
-from gsf.semantic.vdb_discovery import discover_tables_via_vdb
+from gsf.semantic.vdb_discovery import (
+    _build_table_discovery_where,
+    discover_tables_via_vdb,
+)
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+
+
+def test_build_table_discovery_where_uses_nemo_dict_format() -> None:
+    class FakeVdb:
+        metadata_filter_format = "dict"
+        database_name = "dor_prod"
+
+    class FakeRetriever:
+        vdb_kwargs = {"vdb": FakeVdb()}
+
+    assert _build_table_discovery_where(FakeRetriever()) == {
+        "label": Labels.TABLE,
+        "database_name": "dor_prod",
+    }
 
 
 def test_discover_tables_via_vdb_uses_query_hits() -> None:
     captured: dict[str, object] = {}
 
+    class FakeVdb:
+        metadata_filter_format = "dict"
+        database_name = "dor_prod"
+
     class FakeRetriever:
+        vdb_kwargs = {"vdb": FakeVdb()}
+
         def query(
             self,
             query: str,
@@ -37,7 +60,7 @@ def test_discover_tables_via_vdb_uses_query_hits() -> None:
     assert found == ["orders"]
     assert captured["query"] == "Customer"
     assert captured["vdb_kwargs"] == {
-        "where": {"label": {"$ne": Labels.CUSTOM_ANALYSIS}},
+        "where": {"label": Labels.TABLE, "database_name": "dor_prod"},
     }
 
 

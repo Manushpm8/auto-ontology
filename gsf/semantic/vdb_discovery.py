@@ -9,6 +9,10 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.retriever import Retriever
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from nemo_retriever.tabular_data.retrieval.data_access.semantic_search import (
+    _build_metadata_where_clause,
+    _metadata_filter_format,
+)
 
 from gsf.semantic.deterministic import fk_target_table_names
 from gsf.semantic.llm import invoke_structured
@@ -16,8 +20,16 @@ from gsf.semantic.models import BusinessQuestionsResult
 
 logger = logging.getLogger(__name__)
 
-# PostgresVDB.retrieval accepts kwargs["where"] as a langchain-postgres metadata filter.
-_TABLE_DISCOVERY_VDB_WHERE = {"label": {"$ne": Labels.CUSTOM_ANALYSIS}}
+
+def _build_table_discovery_where(retriever: Retriever) -> dict[str, Any] | str | None:
+    """Build a server-side metadata filter for table-only VDB hits."""
+    vdb = (getattr(retriever, "vdb_kwargs", None) or {}).get("vdb")
+    database_name = getattr(vdb, "database_name", None)
+    return _build_metadata_where_clause(
+        labels=[Labels.TABLE],
+        database_name=database_name,
+        fmt=_metadata_filter_format(retriever),
+    )
 
 
 def _question_system_prompt(anchor_term: str) -> str:
@@ -140,12 +152,14 @@ def discover_tables_via_vdb(
 ) -> list[str]:
     """Return table names from data-layer VDB hits (catalog filtering is in TablesQueue)."""
     discovered: list[str] = []
+    where = _build_table_discovery_where(retriever)
+    vdb_kwargs = {"where": where} if where else None
     for entity in entities[:5]:
         try:
             hits = retriever.query(
                 entity,
                 top_k=top_k,
-                vdb_kwargs={"where": _TABLE_DISCOVERY_VDB_WHERE},
+                vdb_kwargs=vdb_kwargs,
             )
         except Exception:
             logger.warning("VDB search failed for entity %r", entity)
