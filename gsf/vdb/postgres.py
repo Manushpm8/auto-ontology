@@ -103,12 +103,8 @@ class PostgresVDB(VDB):
         self._engine: Optional[PGEngine] = None
         self._store: Optional[PGVectorStore] = None
         self.vector_size: Optional[int] = kwargs.get("vector_size", 2048)
-        # Resetting the database embeddings prior to ingestion
-        # In order to support without recreate:
-        # 1. The ingestion should return which tables/columns were added/updated/deleted
-        # 2. The implemtation should support be fault tolerant and support incremental ingestion, which is challenging.
         self.database_name = kwargs.get("database_name")
-        if self.database_name:
+        if kwargs.get("reset") and self.database_name:
             ids = self.delete_by_database(self.database_name)
             logger.info(
                 "PostgresVDB.delete_by_database: deleted %d rows for database %s",

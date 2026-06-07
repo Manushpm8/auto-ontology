@@ -513,9 +513,8 @@ def delete_custom_analysis(analysis_id: str) -> dict[str, str] | None:
     Graph delete happens before the VDB delete so a Neo4j failure
     leaves both stores pointing at the same (still-present) record;
     if Neo4j succeeds and the VDB delete throws, the orphan VDB row
-    will be cleaned up on the next ingest of *database_name*
-    (``PostgresVDB.__init__`` calls ``delete_by_database`` at startup,
-    see ``gsf/vdb/postgres.py``).
+    will be cleaned up on the next ingest of *database_name* with ``reset=True``
+    (see :func:`gsf.vdb.get_data_vdb`).
     """
     existing = get_neo4j_conn().query_read(
         f"""

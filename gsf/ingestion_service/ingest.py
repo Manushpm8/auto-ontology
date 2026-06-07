@@ -56,7 +56,10 @@ def run_ingest(connection_string: str) -> None:
 
     if result_df is not None and not result_df.empty:
         ingest_op = IngestVdbOperator(
-            vdb=get_vdb(database_name=TABULAR_PARAMS.connector.database_name)
+            vdb=get_vdb(
+                database_name=TABULAR_PARAMS.connector.database_name,
+                reset=True,
+            )
         )
         ingest_op(result_df.to_dict(orient="records"))
         logger.info(

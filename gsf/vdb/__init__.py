@@ -14,18 +14,24 @@ SEMANTIC_VDB_COLLECTION = "semantic_layer"
 VDB_COLLECTION = DATA_VDB_COLLECTION
 
 
-def get_data_vdb(*, database_name: str | None = None) -> PostgresVDB:
-    """Build a PostgresVDB for the tabular data layer."""
+def get_data_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
+    """Build a PostgresVDB for the tabular data layer.
+
+    Pass ``database_name`` for query-time metadata filtering. Pass ``reset=True``
+    only when replacing ingest rows (tables/columns) for that database.
+    """
     kwargs: dict = {
         "connection_string": get_postgres_connection_string(),
         "collection_name": DATA_VDB_COLLECTION,
     }
     if database_name:
         kwargs["database_name"] = database_name
+    if reset:
+        kwargs["reset"] = True
     return PostgresVDB(**kwargs)
 
 
-def get_semantic_vdb(*, database_name: str | None = None) -> PostgresVDB:
+def get_semantic_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
     """Build a PostgresVDB for the semantic layer."""
     kwargs: dict = {
         "connection_string": get_postgres_connection_string(),
@@ -33,9 +39,11 @@ def get_semantic_vdb(*, database_name: str | None = None) -> PostgresVDB:
     }
     if database_name:
         kwargs["database_name"] = database_name
+    if reset:
+        kwargs["reset"] = True
     return PostgresVDB(**kwargs)
 
 
-def get_vdb(*, database_name: str | None = None) -> PostgresVDB:
+def get_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
     """Alias for :func:`get_data_vdb` (tabular / data layer)."""
-    return get_data_vdb(database_name=database_name)
+    return get_data_vdb(database_name=database_name, reset=reset)

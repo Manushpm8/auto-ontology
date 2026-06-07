@@ -93,7 +93,7 @@ def embed_semantic_layer(
             f"Embedding produced 0/{len(embedded)} semantic rows with embeddings"
         )
 
-    vdb = get_semantic_vdb(database_name=database_name)
+    vdb = get_semantic_vdb(database_name=database_name, reset=True)
     IngestVdbOperator(vdb=vdb)(with_embeddings)
     logger.info(
         "Embedded %d semantic records in %.2fs",

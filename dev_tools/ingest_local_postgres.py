@@ -98,11 +98,10 @@ def run_ingest() -> None:
     results = embed_graph.execute(schema_data)
     result_df = results[0] if results else None
 
-    # Build the pgvector VDB once. PostgresVDB.__init__ wipes existing rows
-    # for `database_name`, so reuse the same instance for the custom-analysis
-    # append below — calling get_vdb(database_name=...) again would re-delete
-    # everything we just wrote.
-    vdb = get_data_vdb(database_name=database_name)
+    # Build the pgvector VDB once with reset=True so prior table/column rows
+    # for this database are cleared before write. CustomAnalysis rows are kept
+    # by delete_by_database; reuse this instance for the append below.
+    vdb = get_data_vdb(database_name=database_name, reset=True)
 
     if result_df is not None and not result_df.empty:
         ingest_op = IngestVdbOperator(vdb=vdb)
