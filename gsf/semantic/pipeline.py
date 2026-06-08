@@ -47,6 +47,9 @@ def run_bfs_tree(
             continue
 
         ctx = fetch_table_context(table["id"])
+        if ctx.get("reviewed"):
+            logger.debug("Skip %s — already reviewed", table["name"])
+            continue
         if not ctx.get("columns"):
             logger.warning("Table %s has no columns — skipping", table["name"])
             neo4j_dal.mark_table_reviewed(table["id"])
