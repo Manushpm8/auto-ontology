@@ -6,11 +6,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "gsf.ontology.rigor",
-      "args": [
-        "--all",
-        "--bird-root",
-        "~/bird/minidev/MINIDEV"
-      ],
+      "args": ["--all", "--bird-root", "~/bird/minidev/MINIDEV"],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",
@@ -18,12 +14,12 @@
       "justMyCode": false
     },
     {
-      "name": "Debug Ingest Postgres",
+      "name": "Debug Local Ingest",
       "type": "debugpy",
       "request": "launch",
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
-      "module": "dev_tools.ingest_local_postgres",
+      "module": "dev_tools.local_ingest",
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
@@ -33,11 +29,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "gsf.ontology.rigor",
-      "args": [
-        "--all",
-        "--bird-root",
-        "~/bird/minidev/MINIDEV"
-      ],
+      "args": ["--all", "--bird-root", "~/bird/minidev/MINIDEV"],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",
@@ -93,11 +85,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "dev_tools.evaluation.eval_chatbot",
-      "args": [
-        "--consistency",
-        "--runs",
-        "10"
-      ],
+      "args": ["--consistency", "--runs", "10"],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",
@@ -109,9 +97,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "dev_tools.evaluation.eval_chatbot",
-      "args": [
-        "--single"
-      ],
+      "args": ["--single"],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",
@@ -156,10 +142,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "gsf.ontology.rigor",
-      "args": [
-        "--database-name",
-        "dor_prod"
-      ],
+      "args": ["--database-name", "dor_prod"],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",

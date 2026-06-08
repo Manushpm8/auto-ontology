@@ -6,15 +6,22 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from gsf.server.custom_analyses import dal as custom_analyses_dal
 from gsf.server.datasources import dal
 
 
 class NodeUpdate(BaseModel):
     description: str | None = None
     sample_values: list[str] | None = None
+
+
+class CustomAnalysisCreate(BaseModel):
+    name: str
+    description: str
+    sql: str
 
 
 router = APIRouter()
@@ -69,6 +76,99 @@ def list_columns_by_table(table_id: str) -> dict:
 def list_databases() -> dict:
     rows = dal.list_databases()
     return _count_payload(rows)
+
+
+# ---------------------------------------------------------------------------
+# Custom analyses (/api/custom-analyses)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/custom-analyses")
+def list_custom_analyses() -> dict:
+    """All CustomAnalysis nodes joined with their HAS_SQL neighbour."""
+    rows = custom_analyses_dal.list_custom_analyses()
+    return _count_payload(rows)
+
+
+@router.post("/custom-analyses", status_code=201)
+def create_custom_analysis(body: CustomAnalysisCreate) -> dict:
+    """Create a new CustomAnalysis with its Sql node.
+
+    Strict insert: input shape is enforced by :class:`CustomAnalysisCreate`
+    and the frontend is responsible for trimming and rejecting blank
+    values before sending. Updating an existing analysis goes through
+    ``PUT /custom-analyses/{analysis_id}``.
+
+    Returns 409 when ``name`` or ``sql`` is already used by another
+    CustomAnalysis (both are unique natural keys), and 422 when the SQL
+    can't be parsed against the current catalog (no recognised tables) —
+    without those references the analysis would be invisible to
+    retrieval.
+    """
+    try:
+        row = custom_analyses_dal.create_custom_analysis(
+            name=body.name,
+            description=body.description,
+            sql=body.sql,
+        )
+    except (
+        custom_analyses_dal.CustomAnalysisNameConflict,
+        custom_analyses_dal.CustomAnalysisSqlConflict,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except custom_analyses_dal.CustomAnalysisSqlError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": row}
+
+
+@router.put("/custom-analyses/{analysis_id}")
+def update_custom_analysis(analysis_id: str, body: CustomAnalysisCreate) -> dict:
+    """Replace a CustomAnalysis (matched by id) and re-link its Sql node.
+
+    Returns 404 when no CustomAnalysis with ``analysis_id`` exists, 409
+    when ``name`` or ``sql`` is already taken by a different
+    CustomAnalysis, and 422 when the SQL can't be parsed against the
+    current catalog — all surface the failure to the UI without
+    producing an inconsistent graph.
+    """
+    try:
+        row = custom_analyses_dal.update_custom_analysis(
+            analysis_id=analysis_id,
+            name=body.name,
+            description=body.description,
+            sql=body.sql,
+        )
+    except (
+        custom_analyses_dal.CustomAnalysisNameConflict,
+        custom_analyses_dal.CustomAnalysisSqlConflict,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except custom_analyses_dal.CustomAnalysisSqlError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"CustomAnalysis {analysis_id!r} not found",
+        )
+    return {"data": row}
+
+
+@router.delete("/custom-analyses/{analysis_id}")
+def delete_custom_analysis(analysis_id: str) -> dict:
+    """Delete a CustomAnalysis (with its Sql node and VDB embedding).
+
+    Returns 404 when no CustomAnalysis with ``analysis_id`` exists.
+    On success the deleted ``{"id": ...}`` is echoed so the UI can
+    confirm the targeted record was removed.
+    """
+    row = custom_analyses_dal.delete_custom_analysis(analysis_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"CustomAnalysis {analysis_id!r} not found",
+        )
+    return {"data": row}
 
 
 # ---------------------------------------------------------------------------

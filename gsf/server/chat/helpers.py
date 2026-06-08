@@ -2,33 +2,11 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Chat-route helpers: request models, connector registry, retriever factory."""
+"""Chat-route helpers: request models and node labels."""
 
 from __future__ import annotations
 
-import logging
-import os
-
 from pydantic import BaseModel, Field
-
-from nemo_retriever.retriever import Retriever
-from gsf.connectors.postgres import PostgresDatabase
-from gsf.vdb import get_vdb
-from gsf.vdb.config import get_postgres_connection_string
-from gsf.vdb.postgres import PostgresVDB
-from gsf.ontology.rigor.embed import RIGOR_VDB_COLLECTION
-
-logger = logging.getLogger(__name__)
-
-
-class ChatRequest(BaseModel):
-    """Payload sent by the frontend to start a chat completion."""
-
-    question: str = Field(..., min_length=1)
-    connector_name: str | None = None
-    acronyms: str | None = None
-    custom_prompts: str | None = None
-
 
 # Maps LangGraph node names from
 # nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph
@@ -49,72 +27,8 @@ NODE_LABELS: dict[str, str] = {
     "unconstructable_sql_response": "SQL could not be constructed",
 }
 
-# Remote NIM embedding endpoint — no local GPU required.
-# MUST match the model used at ingest time (see EMBED_PARAMS in
-# dev_tools/ingest_local_postgres.py); a mismatch produces garbage results
-# or a dimension error from pgvector.
-_EMBED_ENDPOINT = os.environ.get(
-    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
-)
-_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
-_NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
-_retriever: Retriever | None = None
-_ontology_retriever: Retriever | None = None
-_connector: PostgresDatabase | None = None
+class ChatRequest(BaseModel):
+    """Payload sent by the frontend to start a chat completion."""
 
-
-def get_connector() -> PostgresDatabase:
-    """Return the source-DB connector for the chat agent.
-
-    Reads ``CONNECTION_STRINGS`` from the environment (set in ``.env``); the
-    same URL is used by ``dev_tools/ingest_local_postgres.py`` so chat queries
-    target the database whose schema/embeddings were ingested.
-    """
-    global _connector
-    if _connector is None:
-        connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
-        if len(connection_strings) == 1:
-            _connector = PostgresDatabase(connection_strings[0])
-        elif len(connection_strings) == 0:
-            logger.warning(
-                "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
-            )
-        else:
-            logger.warning("Multiple connection is not supported yet.")
-
-    return _connector
-
-
-def get_retriever() -> Retriever:
-    global _retriever
-    if _retriever is None:
-        vdb = get_vdb()
-        _retriever = Retriever(
-            vdb_kwargs={"vdb": vdb},
-            embed_kwargs={
-                "model_name": _EMBED_MODEL,
-                "embed_invoke_url": _EMBED_ENDPOINT,
-                "api_key": _NVIDIA_API_KEY,
-            },
-        )
-    return _retriever
-
-
-def get_ontology_retriever() -> Retriever:
-    """Return a Retriever backed by the rigor_ontology pgvector collection."""
-    global _ontology_retriever
-    if _ontology_retriever is None:
-        vdb = PostgresVDB(
-            connection_string=get_postgres_connection_string(),
-            collection_name=RIGOR_VDB_COLLECTION,
-        )
-        _ontology_retriever = Retriever(
-            vdb_kwargs={"vdb": vdb},
-            embed_kwargs={
-                "model_name": _EMBED_MODEL,
-                "embed_invoke_url": _EMBED_ENDPOINT,
-                "api_key": _NVIDIA_API_KEY,
-            },
-        )
-    return _ontology_retriever
+    question: str = Field(..., min_length=1)
