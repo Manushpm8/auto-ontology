@@ -14,12 +14,12 @@ from gsf.vdb import get_vdb
 _retriever: Retriever | None = None
 
 
-def get_retriever() -> Retriever:
-    global _retriever
-    if _retriever is None:
-        vdb = get_vdb()
-        _retriever = Retriever(
-            vdb_kwargs={"vdb": vdb},
-            embed_kwargs=get_embed_kwargs(),
-        )
+def get_retriever(collection_name: str | None = None) -> Retriever:
+    """Return a Retriever backed by the given pgvector collection."""
+
+    vdb = get_vdb(collection_name=collection_name)
+    _retriever = Retriever(
+        vdb_kwargs={"vdb": vdb},
+        embed_kwargs=get_embed_kwargs(),
+    )
     return _retriever
