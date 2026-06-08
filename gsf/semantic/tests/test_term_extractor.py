@@ -11,6 +11,44 @@ from gsf.semantic.models import (
 from gsf.semantic.term_extractor import _sanitize_result
 
 
+def test_sanitize_uses_llm_display_names() -> None:
+    specs = [
+        ColumnAttributeSpec(
+            source_column="amount",
+            name="amount",
+            datatype="numeric",
+        ),
+        ColumnAttributeSpec(
+            source_column="status",
+            name="status",
+            datatype="text",
+        ),
+    ]
+    raw = RawTableTermsResult(
+        terms=[
+            RawTermProposal(
+                name="Purchase Order",
+                description="A purchase order",
+                attributes=[
+                    TermColumnRef(
+                        source_column="amount",
+                        display_name="Total Amount",
+                    )
+                ],
+            )
+        ]
+    )
+
+    result = _sanitize_result(raw, table={"name": "purchase_orders"}, specs=specs)
+
+    assert len(result.terms) == 1
+    assert result.terms[0].name == "Purchase Order"
+    assigned = {a.source_column: a.display_name for a in result.terms[0].attributes}
+    assert assigned == {"amount": "Total Amount", "status": "status"}
+    assert specs[0].display_name == "Total Amount"
+    assert specs[1].display_name == "status"
+
+
 def test_sanitize_assigns_orphan_specs_to_primary_term() -> None:
     specs = [
         ColumnAttributeSpec(
@@ -27,15 +65,28 @@ def test_sanitize_assigns_orphan_specs_to_primary_term() -> None:
     raw = RawTableTermsResult(
         terms=[
             RawTermProposal(
-                name="PurchaseOrder",
+                name="Purchase Order",
                 description="A purchase order",
-                attributes=[TermColumnRef(source_column="amount")],
+                attributes=[
+                    TermColumnRef(
+                        source_column="amount",
+                        display_name="Total Amount",
+                    ),
+                    TermColumnRef(
+                        source_column="status",
+                        display_name="Order Status",
+                    ),
+                ],
             )
         ]
     )
 
     result = _sanitize_result(raw, table={"name": "purchase_orders"}, specs=specs)
 
-    assert len(result.terms) == 1
     assigned = {a.source_column: a.display_name for a in result.terms[0].attributes}
-    assert assigned == {"amount": "amount", "status": "status"}
+    assert assigned == {
+        "amount": "Total Amount",
+        "status": "Order Status",
+    }
+    assert specs[0].display_name == "Total Amount"
+    assert specs[1].display_name == "Order Status"

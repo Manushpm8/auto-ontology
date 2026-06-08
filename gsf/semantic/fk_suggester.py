@@ -37,9 +37,7 @@ def _candidate_columns(
     excluded: set[str],
 ) -> list[dict[str, Any]]:
     return [
-        col
-        for col in columns
-        if (name := col.get("name")) and name not in excluded
+        col for col in columns if (name := col.get("name")) and name not in excluded
     ]
 
 
@@ -65,12 +63,8 @@ def suggest_potential_foreign_keys(
         return PotentialFkResult()
 
     schema_name = table.get("schema_name") or ""
-    table_header = (
-        f"{schema_name}.{table['name']}" if schema_name else table["name"]
-    )
-    known_fk_block = (
-        ", ".join(sorted(known_fk_names)) if known_fk_names else "(none)"
-    )
+    table_header = f"{schema_name}.{table['name']}" if schema_name else table["name"]
+    known_fk_block = ", ".join(sorted(known_fk_names)) if known_fk_names else "(none)"
     pk_block = ", ".join(sorted(pk_names)) if pk_names else "(none)"
     candidate_lines = "\n".join(_format_column_line(col) for col in candidates)
 

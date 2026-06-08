@@ -20,36 +20,52 @@ from gsf.semantic.models import (
 from gsf.semantic import neo4j_dal
 
 _INVALID = {"unnamed", "unknown", "none", ""}
-_TERM_RE = re.compile(r"^[A-Z][A-Za-z0-9]+$")
+_LABEL_RE = re.compile(r"^[A-Z][A-Za-z0-9]*(?: [A-Za-z][A-Za-z0-9]*)*$")
 
 _SYSTEM = """\
-You propose business Terms for a relational table and assign pre-defined column \
-attributes to each Term.
+You propose business Terms for a relational table and assign candidate columns \
+to each Term with user-friendly display labels.
 
 Rules:
 1. Default to ONE Term that best represents the table. Add a second or third Term \
 only when columns clearly belong to distinct business concepts (e.g. audit metadata \
 vs core entity fields).
-2. Use user-friendly CamelCase Term names (e.g. PurchaseOrder, not purchase_orders).
-3. Assign EVERY candidate attribute to exactly one Term. Return only source_column \
-values exactly as given — attribute names are already defined; do not rename them.
-4. Optionally propose IS_A parent or PART_OF container per Term when clearly implied.
+2. Term names must be user-friendly with spaces between words (e.g. Purchase Order, \
+not purchase_orders or PurchaseOrder).
+3. Assign EVERY candidate column to exactly one Term. For each assignment return \
+source_column exactly as given and a display_name — a user-friendly ColumnAttribute \
+label with spaces between words (e.g. Order Date, Total Amount).
+4. Optionally propose IS_A parent or PART_OF container per Term when clearly implied. \
+Use the same user-friendly naming style for referenced Term names.
 5. Do not propose ROLE relationships here."""
 
 
-def _normalize_term_name(name: str, *, fallback: str) -> str:
+def _normalize_label(name: str, *, fallback: str) -> str:
     cleaned = name.strip()
-    if cleaned.lower() in _INVALID or not _TERM_RE.match(cleaned):
+    if cleaned.lower() in _INVALID or not _LABEL_RE.match(cleaned):
         return fallback
     return cleaned
 
 
 def _format_spec_line(spec: ColumnAttributeSpec) -> str:
     desc = f" — {spec.description}" if spec.description else ""
-    return (
-        f"  - source_column={spec.source_column} "
-        f"attribute={spec.name} ({spec.datatype}){desc}"
-    )
+    return f"  - source_column={spec.source_column} ({spec.datatype}){desc}"
+
+
+def apply_display_names_to_specs(
+    table_result: TableTermsResult,
+    specs: list[ColumnAttributeSpec],
+) -> None:
+    """Write LLM display labels back onto column specs for downstream merges."""
+    by_column = {spec.source_column: spec for spec in specs}
+    for term in table_result.terms:
+        for attr in term.attributes:
+            spec = by_column.get(attr.source_column)
+            if spec is not None:
+                spec.display_name = attr.display_name
+    for spec in specs:
+        if not spec.display_name:
+            spec.display_name = spec.name
 
 
 def _fallback_result(
@@ -64,7 +80,7 @@ def _fallback_result(
         )
         for spec in specs
     ]
-    return TableTermsResult(
+    result = TableTermsResult(
         terms=[
             TermProposal(
                 name=name,
@@ -73,6 +89,8 @@ def _fallback_result(
             )
         ]
     )
+    apply_display_names_to_specs(result, specs)
+    return result
 
 
 def _sanitize_result(
@@ -90,7 +108,7 @@ def _sanitize_result(
     assigned_columns: set[str] = set()
 
     for raw_term in result.terms:
-        term_name = _normalize_term_name(raw_term.name, fallback=default_term)
+        term_name = _normalize_label(raw_term.name, fallback=default_term)
         if term_name in seen_term_names:
             continue
         seen_term_names.add(term_name)
@@ -108,7 +126,10 @@ def _sanitize_result(
             attributes.append(
                 TermAttributeAssignment(
                     source_column=source_column,
-                    display_name=spec.name,
+                    display_name=_normalize_label(
+                        raw_attr.display_name,
+                        fallback=spec.name,
+                    ),
                 )
             )
             assigned_columns.add(source_column)
@@ -137,7 +158,9 @@ def _sanitize_result(
             )
             assigned_columns.add(spec.source_column)
 
-    return TableTermsResult(terms=sanitized_terms)
+    table_result = TableTermsResult(terms=sanitized_terms)
+    apply_display_names_to_specs(table_result, specs)
+    return table_result
 
 
 def extract_term(
@@ -162,7 +185,7 @@ def extract_term(
     prompt = (
         f"Table: {table['name']}\n"
         f"Description: {table.get('description') or ''}\n"
-        f"Candidate attributes (assign each to exactly one Term):\n"
+        f"Candidate columns (assign each to exactly one Term with a display_name):\n"
         f"{spec_lines}\n"
         f"Known neighbor Terms: {', '.join(neighbor_terms) or '(none)'}\n"
         f"{domain_block}"

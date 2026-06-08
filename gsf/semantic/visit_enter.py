@@ -13,7 +13,7 @@ from gsf.semantic.deterministic import column_attribute_specs, fk_target_table_n
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.queue import TablesQueue
-from gsf.semantic.term_extractor import extract_term
+from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
 from gsf.semantic.models import BusinessQuestionItem, ColumnAttributeSpec
 from gsf.semantic.vdb_discovery import (
     discover_tables_via_vdb,
@@ -63,12 +63,6 @@ def visit_enter(
     table_id = table["id"]
     table_name = table["name"]
 
-    # TODO:
-    # 1. Extract more than one Term per table (optional).
-    # 2. User friendly term name and columns (specs) names.
-    # 3. Set on column nodes (neo4j) suspected as fk. pk columns are not fks.
-    # 4. Do not merge column attributes for fks.
-
     neo4j_dal.mark_table_reviewed(table_id)
     fk_suggestions = suggest_potential_foreign_keys(table, ctx)
     neo4j_dal.mark_suspected_foreign_keys(
@@ -82,6 +76,7 @@ def visit_enter(
         suggested_fk_columns=suggested_fk_names,
     )
     term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
+    apply_display_names_to_specs(term_result, specs)
     spec_by_column: dict[str, ColumnAttributeSpec] = {
         spec.source_column: spec for spec in specs
     }
@@ -102,7 +97,7 @@ def visit_enter(
                 term_name=term.name,
                 table_id=table_id,
                 source_column=spec.source_column,
-                attr_name=assignment.display_name,
+                attr_name=spec.display_name,
                 datatype=spec.datatype,
                 description=spec.description,
             )
