@@ -5,10 +5,26 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
-class TermProposal(BaseModel):
-    """LLM output: one business Term for a physical table."""
+class TermColumnRef(BaseModel):
+    """LLM output: assign an existing ColumnAttribute by physical column name."""
 
-    name: str = Field(..., description="CamelCase business Term name.")
+    source_column: str = Field(
+        ...,
+        description="Physical column name — must match a candidate attribute.",
+    )
+
+
+class TermAttributeAssignment(BaseModel):
+    """Resolved column assignment on a Term (display name from ColumnAttributeSpec)."""
+
+    source_column: str
+    display_name: str
+
+
+class RawTermProposal(BaseModel):
+    """LLM output: one business Term with column assignments only."""
+
+    name: str = Field(..., description="User-friendly CamelCase business Term name.")
     description: str = Field(default="", description="Short business definition.")
     is_a_parent: str | None = Field(
         default=None, description="Parent Term name for IS_A, if applicable."
@@ -16,6 +32,39 @@ class TermProposal(BaseModel):
     part_of_target: str | None = Field(
         default=None, description="Container Term name for PART_OF, if applicable."
     )
+    attributes: list[TermColumnRef] = Field(
+        default_factory=list,
+        description="Candidate attributes assigned to this Term (source_column only).",
+    )
+
+
+class RawTableTermsResult(BaseModel):
+    """LLM output: Terms and column assignments for a single physical table."""
+
+    terms: list[RawTermProposal] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Usually one Term. Propose multiple only when columns clearly belong "
+            "to distinct business concepts."
+        ),
+    )
+
+
+class TermProposal(BaseModel):
+    """Sanitized Term with resolved ColumnAttribute assignments."""
+
+    name: str
+    description: str = ""
+    is_a_parent: str | None = None
+    part_of_target: str | None = None
+    attributes: list[TermAttributeAssignment] = Field(default_factory=list)
+
+
+class TableTermsResult(BaseModel):
+    """Sanitized Terms and column assignments for a single physical table."""
+
+    terms: list[TermProposal] = Field(..., min_length=1)
 
 
 class BusinessQuestionItem(BaseModel):
@@ -61,3 +110,25 @@ class ColumnAttributeSpec(BaseModel):
     name: str
     datatype: str = ""
     description: str | None = None
+
+
+class PotentialFkSuggestion(BaseModel):
+    """One column the LLM suspects is a foreign key."""
+
+    column_name: str = Field(
+        ...,
+        description="Physical column name that likely references another table.",
+    )
+    rationale: str = Field(
+        default="",
+        description="Brief reason this column looks like a foreign key.",
+    )
+
+
+class PotentialFkResult(BaseModel):
+    """LLM output: columns that may be FKs but lack graph FOREIGN_KEY edges."""
+
+    suggestions: list[PotentialFkSuggestion] = Field(
+        default_factory=list,
+        description="Suspected FK columns; empty when none apply.",
+    )

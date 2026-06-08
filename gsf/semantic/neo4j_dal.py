@@ -95,6 +95,36 @@ def get_table_for_term(term_name: str) -> dict[str, str] | None:
     return {"id": rows[0]["id"], "name": rows[0]["name"]}
 
 
+def mark_suspected_foreign_keys(
+    table_id: str,
+    suggestions: list[dict[str, Any]],
+) -> None:
+    """Flag column nodes the LLM suspects are foreign keys."""
+    if not suggestions:
+        return
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
+              (col:{Labels.COLUMN})
+        UNWIND $suggestions AS s
+        WITH col, s
+        WHERE col.name = s.column_name
+        SET col.suspected_foreign_key = true,
+            col.suspected_fk_rationale = s.rationale
+        """,
+        {
+            "table_id": table_id,
+            "suggestions": [
+                {
+                    "column_name": item["column_name"],
+                    "rationale": item.get("rationale") or "",
+                }
+                for item in suggestions
+            ],
+        },
+    )
+
+
 def merge_term(name: str, description: str, table_id: str) -> None:
     get_neo4j_conn().query_write(
         f"""

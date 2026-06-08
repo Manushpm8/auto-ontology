@@ -21,9 +21,12 @@ def fk_source_columns(fks: list[dict[str, Any]]) -> set[str]:
 def column_attribute_specs(
     columns: list[dict[str, Any]],
     fks: list[dict[str, Any]],
+    suggested_fk_columns: set[str] | None = None,
 ) -> list[ColumnAttributeSpec]:
     """Non-FK columns mapped 1:1 to ColumnAttribute candidates."""
     fk_cols = fk_source_columns(fks)
+    if suggested_fk_columns:
+        fk_cols |= suggested_fk_columns
     specs: list[ColumnAttributeSpec] = []
     for col in columns:
         name = col.get("name", "")

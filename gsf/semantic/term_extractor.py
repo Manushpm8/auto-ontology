@@ -10,30 +10,149 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from gsf.semantic.deterministic import to_term_name
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.llm import invoke_structured
-from gsf.semantic.models import TermProposal
+from gsf.semantic.models import (
+    ColumnAttributeSpec,
+    RawTableTermsResult,
+    TableTermsResult,
+    TermAttributeAssignment,
+    TermProposal,
+)
 from gsf.semantic import neo4j_dal
 
 _INVALID = {"unnamed", "unknown", "none", ""}
 _TERM_RE = re.compile(r"^[A-Z][A-Za-z0-9]+$")
 
 _SYSTEM = """\
-You identify the single core business Term for a relational table.
-Return CamelCase Term name and a one-sentence description.
-Optionally propose IS_A parent or PART_OF container if clearly implied.
-Do not propose ROLE relationships here."""
+You propose business Terms for a relational table and assign pre-defined column \
+attributes to each Term.
+
+Rules:
+1. Default to ONE Term that best represents the table. Add a second or third Term \
+only when columns clearly belong to distinct business concepts (e.g. audit metadata \
+vs core entity fields).
+2. Use user-friendly CamelCase Term names (e.g. PurchaseOrder, not purchase_orders).
+3. Assign EVERY candidate attribute to exactly one Term. Return only source_column \
+values exactly as given — attribute names are already defined; do not rename them.
+4. Optionally propose IS_A parent or PART_OF container per Term when clearly implied.
+5. Do not propose ROLE relationships here."""
+
+
+def _normalize_term_name(name: str, *, fallback: str) -> str:
+    cleaned = name.strip()
+    if cleaned.lower() in _INVALID or not _TERM_RE.match(cleaned):
+        return fallback
+    return cleaned
+
+
+def _format_spec_line(spec: ColumnAttributeSpec) -> str:
+    desc = f" — {spec.description}" if spec.description else ""
+    return (
+        f"  - source_column={spec.source_column} "
+        f"attribute={spec.name} ({spec.datatype}){desc}"
+    )
+
+
+def _fallback_result(
+    table: dict[str, Any],
+    specs: list[ColumnAttributeSpec],
+) -> TableTermsResult:
+    name = to_term_name(table["name"])
+    attributes = [
+        TermAttributeAssignment(
+            source_column=spec.source_column,
+            display_name=spec.name,
+        )
+        for spec in specs
+    ]
+    return TableTermsResult(
+        terms=[
+            TermProposal(
+                name=name,
+                description=f"Business entity represented by table {table['name']}",
+                attributes=attributes,
+            )
+        ]
+    )
+
+
+def _sanitize_result(
+    result: RawTableTermsResult,
+    *,
+    table: dict[str, Any],
+    specs: list[ColumnAttributeSpec],
+) -> TableTermsResult:
+    spec_by_column = {spec.source_column: spec for spec in specs}
+    allowed_columns = set(spec_by_column)
+    default_term = to_term_name(table["name"])
+
+    sanitized_terms: list[TermProposal] = []
+    seen_term_names: set[str] = set()
+    assigned_columns: set[str] = set()
+
+    for raw_term in result.terms:
+        term_name = _normalize_term_name(raw_term.name, fallback=default_term)
+        if term_name in seen_term_names:
+            continue
+        seen_term_names.add(term_name)
+
+        attributes: list[TermAttributeAssignment] = []
+        for raw_attr in raw_term.attributes:
+            source_column = raw_attr.source_column.strip()
+            if (
+                not source_column
+                or source_column not in allowed_columns
+                or source_column in assigned_columns
+            ):
+                continue
+            spec = spec_by_column[source_column]
+            attributes.append(
+                TermAttributeAssignment(
+                    source_column=source_column,
+                    display_name=spec.name,
+                )
+            )
+            assigned_columns.add(source_column)
+
+        sanitized_terms.append(
+            TermProposal(
+                name=term_name,
+                description=raw_term.description.strip(),
+                is_a_parent=raw_term.is_a_parent,
+                part_of_target=raw_term.part_of_target,
+                attributes=attributes,
+            )
+        )
+
+    if not sanitized_terms:
+        return _fallback_result(table, specs)
+
+    primary = sanitized_terms[0]
+    for spec in specs:
+        if spec.source_column not in assigned_columns:
+            primary.attributes.append(
+                TermAttributeAssignment(
+                    source_column=spec.source_column,
+                    display_name=spec.name,
+                )
+            )
+            assigned_columns.add(spec.source_column)
+
+    return TableTermsResult(terms=sanitized_terms)
 
 
 def extract_term(
     table: dict[str, Any],
     ctx: dict[str, Any],
+    specs: list[ColumnAttributeSpec],
     *,
     domain_summary: DomainSummary | None = None,
-) -> TermProposal:
+) -> TableTermsResult:
+    """Propose one or more Terms and assign candidate column attributes to each."""
+    if not specs:
+        return _fallback_result(table, specs)
+
     neighbor_terms = neo4j_dal.fetch_neighbor_terms(table["id"])
-    col_lines = [
-        f"  - {c['name']} ({c.get('data_type', '')})"
-        for c in ctx.get("columns", [])[:30]
-    ]
+    spec_lines = "\n".join(_format_spec_line(spec) for spec in specs[:40])
     domain_block = ""
     if domain_summary:
         domain_block = (
@@ -43,22 +162,19 @@ def extract_term(
     prompt = (
         f"Table: {table['name']}\n"
         f"Description: {table.get('description') or ''}\n"
-        f"Columns:\n" + "\n".join(col_lines) + "\n"
+        f"Candidate attributes (assign each to exactly one Term):\n"
+        f"{spec_lines}\n"
         f"Known neighbor Terms: {', '.join(neighbor_terms) or '(none)'}\n"
         f"{domain_block}"
     )
     try:
         result = invoke_structured(
             [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
-            TermProposal,
+            RawTableTermsResult,
             temperature=0.0,
+            max_tokens=2048,
         )
     except Exception:
-        provisional = to_term_name(table["name"])
-        return TermProposal(name=provisional, description=f"From table {table['name']}")
+        return _fallback_result(table, specs)
 
-    name = result.name.strip()
-    if name.lower() in _INVALID or not _TERM_RE.match(name):
-        name = to_term_name(table["name"])
-    result.name = name
-    return result
+    return _sanitize_result(result, table=table, specs=specs)

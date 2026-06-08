@@ -10,6 +10,20 @@ from gsf.semantic.deterministic import (
 )
 
 
+def test_excludes_suggested_fk_columns() -> None:
+    columns = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "vendor_id", "data_type": "integer"},
+        {"name": "amount", "data_type": "numeric"},
+    ]
+    specs = column_attribute_specs(
+        columns,
+        [],
+        suggested_fk_columns={"vendor_id"},
+    )
+    assert {s.source_column for s in specs} == {"id", "amount"}
+
+
 def test_excludes_fk_columns() -> None:
     columns = [
         {"name": "id", "data_type": "integer"},

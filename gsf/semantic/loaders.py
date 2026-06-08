@@ -21,6 +21,7 @@ RETURN t.id AS id,
        t.name AS name,
        s.name AS schema_name,
        t.description AS description,
+       t.pk as pk,
        query_count
 ORDER BY query_count DESC
 """
@@ -28,12 +29,14 @@ ORDER BY query_count DESC
 _FETCH_COLUMNS_QUERY = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})
 OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+OPTIONAL MATCH (c)-[fk:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})
 RETURN coalesce(t.reviewed, false) AS reviewed,
        c.id AS id,
        c.name AS name,
        c.data_type AS data_type,
        c.description AS description,
-       c.ordinal_position AS ordinal_position
+       c.ordinal_position AS ordinal_position,
+       fk IS NOT NULL AS is_foreign_key
 ORDER BY c.ordinal_position
 """
 
@@ -62,7 +65,8 @@ OPTIONAL MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
 RETURN t.id AS id,
        t.name AS name,
        coalesce(s.name, '') AS schema_name,
-       t.description AS description
+       t.description AS description,
+       t.pk as pk
 """
 
 
@@ -76,6 +80,7 @@ def fetch_sorted_tables() -> list[dict[str, Any]]:
             "schema_name": r["schema_name"],
             "description": r.get("description") or "",
             "query_count": int(r.get("query_count") or 0),
+            "pk": r.get("pk") or [],
         }
         for r in rows
     ]
