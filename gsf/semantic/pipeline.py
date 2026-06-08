@@ -12,7 +12,7 @@ from gsf.semantic.loaders import (
     fetch_join_edges,
     fetch_table_context,
 )
-from gsf.semantic.orphan import orphan_stitch
+from gsf.semantic.orphan import pick_orphan_seed
 from gsf.semantic.queue import TablesQueue
 from gsf.semantic.seed import select_seed_table
 from gsf.semantic.visit_enter import build_data_retriever, visit_enter
@@ -21,7 +21,7 @@ from gsf.semantic.visit_finalize import visit_finalize
 logger = logging.getLogger(__name__)
 
 
-def run_bfs_tree(
+def _run_bfs_pass(
     seed: dict[str, Any],
     *,
     tables_by_name: dict[str, dict[str, Any]],
@@ -30,8 +30,9 @@ def run_bfs_tree(
     domain_summary: DomainSummary | None,
     retriever: Any,
     tree_index: int,
+    pass_label: str,
 ) -> list[str]:
-    """Expand queue from seed, then finalize in reverse visit order."""
+    """Single BFS expand + finalize pass from one seed."""
     queue = TablesQueue(tables_by_name, join_edges)
     queue.push_seed(seed["name"])
 
@@ -66,17 +67,70 @@ def run_bfs_tree(
         visit_order.append(table["id"])
 
     logger.info(
-        "BFS tree %d complete — %d tables, starting finalize pass",
+        "BFS tree %d %s complete — %d tables, starting finalize pass",
         tree_index + 1,
+        pass_label,
         len(visit_order),
     )
 
     for table_id in reversed(visit_order):
         visit_finalize(table_id)
 
-    orphan_stitch()
-
     return visit_order
+
+
+def run_bfs_tree(
+    seed: dict[str, Any],
+    *,
+    tables_by_name: dict[str, dict[str, Any]],
+    tables_by_id: dict[str, dict[str, Any]],
+    join_edges: list[dict[str, Any]],
+    domain_summary: DomainSummary | None,
+    retriever: Any,
+    tree_index: int,
+) -> list[str]:
+    """Expand from seed; re-seed from orphans until none remain."""
+    all_visit_order: list[str] = []
+    current_seed = seed
+    pass_index = 0
+
+    while current_seed is not None:
+        pass_label = "seed" if pass_index == 0 else f"orphan pass {pass_index}"
+        visit_order = _run_bfs_pass(
+            current_seed,
+            tables_by_name=tables_by_name,
+            tables_by_id=tables_by_id,
+            join_edges=join_edges,
+            domain_summary=domain_summary,
+            retriever=retriever,
+            tree_index=tree_index,
+            pass_label=pass_label,
+        )
+        all_visit_order.extend(visit_order)
+
+        next_seed = pick_orphan_seed(tables_by_id)
+        if next_seed is None:
+            break
+
+        ctx = fetch_table_context(next_seed["id"])
+        if ctx.get("reviewed"):
+            logger.warning(
+                "Orphan %s already reviewed but has no Term — stopping orphan BFS",
+                next_seed["name"],
+            )
+            break
+        if not visit_order and next_seed["id"] == current_seed["id"]:
+            logger.warning(
+                "No progress seeding BFS from orphan %s — stopping",
+                next_seed["name"],
+            )
+            break
+
+        logger.info("Orphan %s → seeding BFS pass", next_seed["name"])
+        current_seed = next_seed
+        pass_index += 1
+
+    return all_visit_order
 
 
 def compile_semantic_layer(
