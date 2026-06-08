@@ -79,9 +79,9 @@ def apply_metadata(database_name: str) -> None:
 
     if not metadata_path.exists():
         logger.warning(
-            "Metadata file not found: %s — skipping apply_metadata for %r",
-            metadata_path,
+            "Metadata file not found for %r, skipping graph enrichment: %s",
             database_name,
+            metadata_path,
         )
         return
 
