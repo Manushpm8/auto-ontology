@@ -116,27 +116,29 @@ export const NewConnectionsModal = ({
 			return;
 		}
 
-		if (!('data' in res)) {
+		if (!('success' in res)) {
 			setIsConnectionTested(false);
 			setAlert('Connection test failed.');
 			return;
 		}
 
-		const schemaCount = res.data.reduce((total, item) => total + item.schemas.length, 0);
 		setIsConnectionTested(true);
-		setTestSuccessMessage(
-			schemaCount > 0
-				? `Connection successful. Found ${schemaCount} schema${schemaCount === 1 ? '' : 's'}.`
-				: 'Connection successful.',
-		);
+		setTestSuccessMessage('Connection successful.');
+		setAlert(null);
 	}, [connectionType, connectionInput.connectionString]);
 
 	const handleCreate = useCallback(async (): Promise<void> => {
+		if (!isConnectionTested) {
+			setAlert('Connection must be tested before creating.');
+			return;
+		}
+
 		setLoading(true);
 		setAlert(null);
 		const res = await connectionsApi.create({
 			type: connectionType,
 			connectionString: connectionInput.connectionString,
+			tested: true,
 		});
 		setLoading(false);
 
@@ -146,7 +148,7 @@ export const NewConnectionsModal = ({
 		}
 
 		onConfirm();
-	}, [connectionType, connectionInput, onConfirm]);
+	}, [connectionType, connectionInput.connectionString, isConnectionTested, onConfirm]);
 
 	const renderStepContent = (step: number) => {
 		switch (step) {

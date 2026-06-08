@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -146,7 +145,6 @@ def find_connection_for_database(database_name: str) -> str | None:
         """
         MATCH (c:connection)
         WHERE c.database_name = $database_name
-           OR $database_name IN c.selected_databases
         RETURN c.name AS name
         LIMIT 1
         """,
@@ -164,8 +162,6 @@ def insert_connection(
     connection_type: str,
     connection_string: str,
     database_name: str,
-    selected_databases: list[str],
-    pull_info: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Create a connection node in Neo4j and return the public payload."""
     now = _utc_now().isoformat()
@@ -177,8 +173,6 @@ def insert_connection(
             type: $type,
             connection_string: $connection_string,
             database_name: $database_name,
-            selected_databases: $selected_databases,
-            pull_info: $pull_info,
             create_date: $create_date
         })
         RETURN properties(c) AS props
@@ -189,8 +183,6 @@ def insert_connection(
             "type": connection_type,
             "connection_string": connection_string,
             "database_name": database_name,
-            "selected_databases": selected_databases,
-            "pull_info": json.dumps(pull_info),
             "create_date": now,
         },
     )
@@ -229,10 +221,14 @@ def get_connection_by_id(connection_id: str) -> dict[str, Any] | None:
 
 def catalog_database_name(props: dict[str, Any]) -> str:
     """Return the catalog ``Database`` name linked to a connection node."""
+    database_name = str(props.get("database_name") or "").strip()
+    if database_name:
+        return database_name
+
     selected = props.get("selected_databases") or []
     if selected:
         return str(selected[0])
-    return str(props.get("database_name") or "")
+    return ""
 
 
 def list_custom_analysis_ids_for_database(database_name: str) -> list[str]:

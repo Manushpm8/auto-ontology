@@ -6,64 +6,62 @@ import { parseConnectionDatabaseName } from '@/lib/parseConnectionDatabaseName';
 import { requests } from './requests';
 import type { Connection } from '@/types/connection';
 import type { ConnectionInput } from '@/types/connectionInput';
-import type { ApiError, ResponseWithCount, ResponseWithError } from './types';
+import type { ApiError, ApiResponse, ResponseWithCount } from './types';
 
-type ListResponse = ResponseWithError<ResponseWithCount<Connection[]>>;
 type CreateResponse = ApiError | { data: Connection };
-type DeleteResponse = ResponseWithError<{ data: { id: string } }>;
-type TestResponse = ApiError | { data: ConnectionTestResult[] };
+type TestResponse = ApiError | { success: true };
 
-export type ConnectionTestResult = {
-	db_name: string;
-	schemas: string[];
+const err = (message: string): ApiError => ({ error: true, message });
+
+const validatedConnectionString = (raw: string): string | ApiError => {
+	const connectionString = raw.trim();
+	if (!connectionString) return err('Connection string is required.');
+	return connectionString;
 };
 
-type ConnectionPayload = {
-	name: string;
-	type: string;
-	connectionString: string;
-};
+const toCreatePayload = (input: ConnectionInput) => {
+	const connectionString = validatedConnectionString(input.connectionString);
+	if (typeof connectionString !== 'string') return connectionString;
 
-const toPayload = (input: ConnectionInput): ConnectionPayload | ApiError => {
-	const connectionString = input.connectionString.trim();
-	const name = parseConnectionDatabaseName(connectionString);
-	if (!name) {
-		return {
-			error: true,
-			message: 'Could not determine database name from connection string.',
-		};
-	}
+	if (!input.tested) return err('Connection must be tested before creating.');
+
+	const dbName = parseConnectionDatabaseName(connectionString);
+	if (!dbName) return err('Could not determine database name from connection string.');
 
 	return {
-		name,
+		name: dbName,
 		type: input.type,
 		connectionString,
+		database: { dbName },
 	};
 };
 
 export const connectionsApi = {
-	getAll: (): Promise<ListResponse> =>
+	getAll: (): Promise<ApiResponse<Connection[]>> =>
 		requests.get<ResponseWithCount<Connection[]>>('connections'),
 
 	create: async (input: ConnectionInput): Promise<CreateResponse> => {
-		const payload = toPayload(input);
-		if ('error' in payload && payload.error === true) {
-			return { error: true, message: payload.message };
-		}
+		const payload = toCreatePayload(input);
+		if ('error' in payload) return payload;
 		return requests.post<{ data: Connection }>('connections', payload);
 	},
 
 	test: async (input: ConnectionInput): Promise<TestResponse> => {
-		const connectionString = input.connectionString.trim();
-		if (!connectionString) {
-			return { error: true, message: 'Connection string is required.' };
-		}
-		return requests.post<{ data: ConnectionTestResult[] }>('connections/test', {
+		const connectionString = validatedConnectionString(input.connectionString);
+		if (typeof connectionString !== 'string') return connectionString;
+
+		const res = await requests.post<{ success: boolean }>('connections/test', {
 			type: input.type,
 			connectionString,
 		});
+
+		if (res.error || res.success !== true) {
+			return err(res.message ?? 'Connection test failed.');
+		}
+
+		return { success: true };
 	},
 
-	delete: (id: string): Promise<DeleteResponse> =>
+	delete: (id: string) =>
 		requests.delete<{ data: { id: string } }>(`connections/${encodeURIComponent(id)}`),
 };

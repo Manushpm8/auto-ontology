@@ -29,10 +29,17 @@ class ConnectionPublic(BaseModel):
     database: str
 
 
+class ConnectionDatabase(BaseModel):
+    db_name: str = Field(alias="dbName")
+
+    model_config = {"populate_by_name": True}
+
+
 class ConnectionCreate(BaseModel):
     name: str
     type: str
     connection_string: str = Field(default="", alias="connectionString")
+    database: ConnectionDatabase
 
     model_config = {"populate_by_name": True}
 
@@ -57,7 +64,7 @@ def list_connections() -> dict:
 @router.post("/connections/test")
 def test_connection(body: ConnectionTest) -> dict:
     try:
-        datasources = service.test_connection(body.type, body.connection_string)
+        service.test_connection(body.type, body.connection_string)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -65,7 +72,7 @@ def test_connection(body: ConnectionTest) -> dict:
             status_code=422,
             detail=f"Connection test failed: {exc}",
         ) from exc
-    return {"data": datasources}
+    return {"success": True}
 
 
 @router.post("/connections", status_code=201)
@@ -75,6 +82,7 @@ def create_connection(body: ConnectionCreate) -> dict:
             name=body.name,
             connection_type=body.type,
             connection_string=body.connection_string,
+            database=body.database.model_dump(by_alias=False),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
