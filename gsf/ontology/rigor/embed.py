@@ -56,8 +56,8 @@ def _attribute_text(
     description: str | None,
     usage_hint: str | None,
 ) -> str:
-    """Composite text for an Attribute embedding."""
-    parts = [f"attribute: {name} ({datatype}), property of {term_name}"]
+    """Composite text for a ColumnAttribute embedding."""
+    parts = [f"column_attribute: {name} ({datatype}), property of {term_name}"]
     if description:
         parts.append(description)
     if usage_hint:
@@ -65,15 +65,15 @@ def _attribute_text(
     return ". ".join(parts)
 
 
-def _metric_text(
+def _sql_attribute_text(
     name: str,
     expression: str,
     aggregation_type: str,
     source_tables: list[str],
 ) -> str:
-    """Composite text for a Metric embedding."""
+    """Composite text for a SqlAttribute embedding."""
     tables = ", ".join(source_tables) if source_tables else "unknown"
-    return f"metric: {name}. {expression} ({aggregation_type}) over {tables}"
+    return f"sql_attribute: {name}. {expression} ({aggregation_type}) over {tables}"
 
 
 def _build_records(
@@ -141,7 +141,7 @@ def _build_records(
         )
 
     for m in ontology.metrics:
-        text = _metric_text(
+        text = _sql_attribute_text(
             m.name,
             m.expression,
             m.aggregation_type.value,

@@ -159,6 +159,21 @@
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
+    },
+    {
+      "name": "Re-embed Ontology (dor_prod)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.reembed_ontology",
+      "args": [
+        "--database-name",
+        "dor_prod"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
   ]
 }
