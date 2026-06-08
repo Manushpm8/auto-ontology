@@ -109,38 +109,51 @@ def main() -> None:
 
     all_summaries: dict[str, dict] = {}
 
-    for i, (db_name, schema) in enumerate(targets, 1):
-        label = f"{db_name}.{schema}" if db_name != schema else db_name
-        logger.info(
-            "\n%s [%d/%d] %s %s",
-            "=" * 20,
-            i,
-            len(targets),
-            label,
-            "=" * 20,
-        )
+    vdb = None
+    if not args.no_write and not args.no_embed:
+        from gsf.ontology.rigor.embed import embed_ontology, make_ontology_vdb
 
-        ontology = build_ontology(
-            database_name=db_name,
-            bird_root=args.bird_root,
-            skip_threshold=args.skip_threshold,
-            write_to_neo4j=not args.no_write,
-            resume=not args.no_resume,
-            schema_name=schema,
-        )
+        vdb = make_ontology_vdb()
 
-        if not args.no_write and not args.no_embed:
-            from gsf.ontology.rigor.embed import embed_ontology
+    try:
+        for i, (db_name, schema) in enumerate(targets, 1):
+            label = f"{db_name}.{schema}" if db_name != schema else db_name
+            logger.info(
+                "\n%s [%d/%d] %s %s",
+                "=" * 20,
+                i,
+                len(targets),
+                label,
+                "=" * 20,
+            )
 
-            embed_ontology(ontology, database_name=db_name, schema_name=schema)
+            ontology = build_ontology(
+                database_name=db_name,
+                bird_root=args.bird_root,
+                skip_threshold=args.skip_threshold,
+                write_to_neo4j=not args.no_write,
+                resume=not args.no_resume,
+                schema_name=schema,
+            )
 
-        all_summaries[label] = {
-            "business_terms": len(ontology.business_terms),
-            "attributes": len(ontology.attributes),
-            "object_properties": len(ontology.object_properties),
-            "metrics": len(ontology.metrics),
-            "term_names": ontology.term_names(),
-        }
+            if vdb is not None:
+                embed_ontology(
+                    ontology,
+                    database_name=db_name,
+                    schema_name=schema,
+                    vdb=vdb,
+                )
+
+            all_summaries[label] = {
+                "business_terms": len(ontology.business_terms),
+                "attributes": len(ontology.attributes),
+                "object_properties": len(ontology.object_properties),
+                "metrics": len(ontology.metrics),
+                "term_names": ontology.term_names(),
+            }
+    finally:
+        if vdb is not None:
+            vdb.close()
 
     print(json.dumps(all_summaries, indent=2))
 

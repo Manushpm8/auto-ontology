@@ -169,10 +169,20 @@ def _build_records(
     return records
 
 
+def make_ontology_vdb(*, skip_delete: bool = True) -> PostgresVDB:
+    """Create a :class:`PostgresVDB` for the rigor_ontology collection."""
+    return PostgresVDB(
+        connection_string=get_postgres_connection_string(),
+        collection_name=RIGOR_VDB_COLLECTION,
+        skip_delete=skip_delete,
+    )
+
+
 def embed_ontology(
     ontology: CoreOntology,
     database_name: str,
     schema_name: str | None = None,
+    vdb: PostgresVDB | None = None,
 ) -> int:
     """Embed all ontology elements into pgvector. Returns row count.
 
@@ -180,6 +190,8 @@ def embed_ontology(
     *schema_name* is the schema inside that database (e.g. the BIRD ``db_id``).
     When *schema_name* is not given it defaults to *database_name* for
     backward compatibility.
+    If *vdb* is provided, it is reused; otherwise a temporary one is created
+    and closed after the write.
     """
     if schema_name is None:
         schema_name = database_name
@@ -213,15 +225,14 @@ def embed_ontology(
             f"check NIM API errors ({params.embed_invoke_url})."
         )
 
-    vdb = PostgresVDB(
-        connection_string=get_postgres_connection_string(),
-        collection_name=RIGOR_VDB_COLLECTION,
-        database_name=database_name,
-    )
+    owns_vdb = vdb is None
+    if owns_vdb:
+        vdb = make_ontology_vdb()
     try:
         IngestVdbOperator(vdb=vdb)(with_embeddings)
     finally:
-        vdb.close()
+        if owns_vdb:
+            vdb.close()
 
     elapsed = time.time() - start
     logger.info(

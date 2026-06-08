@@ -108,7 +108,8 @@ class PostgresVDB(VDB):
         # 1. The ingestion should return which tables/columns were added/updated/deleted
         # 2. The implemtation should support be fault tolerant and support incremental ingestion, which is challenging.
         self.database_name = kwargs.get("database_name")
-        if self.database_name:
+        skip_delete = kwargs.get("skip_delete", False)
+        if self.database_name and not skip_delete:
             ids = self.delete_by_database(self.database_name)
             logger.info(
                 "PostgresVDB.delete_by_database: deleted %d rows for database %s",

@@ -150,6 +150,50 @@
       "justMyCode": false
     },
     {
+      "name": "Ontology: Rigor+ WWI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.ontology.rigor",
+      "args": ["--database-name", "WIDEWORLDIMPORTERS"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Eval WWI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": [
+        "--input",
+        "dev_tools/evaluation/wwi_evaluation.json",
+        "--output",
+        "dev_tools/evaluation/wwi_evaluation_scores.csv"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Re-embed Ontology (WWI)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.reembed_ontology",
+      "args": [
+        "--database-name",
+        "WIDEWORLDIMPORTERS"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "Ontology: Attributes & Concepts",
       "type": "debugpy",
       "request": "launch",

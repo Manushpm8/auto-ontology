@@ -21,7 +21,7 @@ import logging
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.ontology.rigor.embed import embed_ontology
+from gsf.ontology.rigor.embed import embed_ontology, make_ontology_vdb
 from gsf.ontology.rigor.loaders import fetch_schemas_for_database
 from gsf.ontology.rigor.models import (
     AggregationType,
@@ -37,20 +37,37 @@ logger = logging.getLogger(__name__)
 RIGOR_SOURCE = "rigor"
 
 
-def load_ontology_from_neo4j(database_name: str) -> CoreOntology:
-    """Read the existing Rigor ontology from Neo4j into a CoreOntology."""
+def load_ontology_from_neo4j(
+    database_name: str,
+    schema_name: str | None = None,
+) -> CoreOntology:
+    """Read the existing Rigor ontology from Neo4j into a CoreOntology.
+
+    Filters by *database_name* (and optionally *schema_name*) so only
+    terms belonging to that database are returned.
+    """
     conn = get_neo4j_conn()
     ontology = CoreOntology()
 
-    # 1. BusinessTerms
+    schema_filter = " {name: $schema_name}" if schema_name else ""
+    params: dict = {"source": RIGOR_SOURCE, "database_name": database_name}
+    if schema_name:
+        params["schema_name"] = schema_name
+
+    # 1. BusinessTerms — only those whose source table lives under this DB
     bt_rows = conn.query_read(
-        """
-        MATCH (bt:BusinessTerm {source: $source})
+        f"""
+        MATCH (db:Database {{name: $database_name}})
+              -[:CONTAINS]->(s:Schema{schema_filter})
+              -[:CONTAINS]->(t:Table)
+        WITH collect(t.name) AS db_tables
+        MATCH (bt:BusinessTerm {{source: $source}})
+        WHERE any(st IN bt.source_tables WHERE st IN db_tables)
         RETURN bt.id AS id, bt.name AS name,
                bt.description AS description,
                bt.source_tables AS source_tables
         """,
-        {"source": RIGOR_SOURCE},
+        params,
     )
     for r in bt_rows:
         source_tables = r.get("source_tables") or []
@@ -68,9 +85,11 @@ def load_ontology_from_neo4j(database_name: str) -> CoreOntology:
     logger.info("Loaded %d BusinessTerms from Neo4j", len(ontology.business_terms))
 
     # 2. ColumnAttributes
+    bt_ids = {bt.id for bt in ontology.business_terms}
     attr_rows = conn.query_read(
         """
         MATCH (a:ColumnAttribute {source: $source})-[:IS_PROPERTY_OF]->(bt:BusinessTerm)
+        WHERE bt.id IN $bt_ids
         RETURN a.id AS id, a.name AS name, a.datatype AS datatype,
                bt.name AS term_name, a.source_column AS source_column,
                a.description AS description, a.formula AS formula,
@@ -78,7 +97,7 @@ def load_ontology_from_neo4j(database_name: str) -> CoreOntology:
                a.is_primary_key AS is_primary_key,
                bt.source_tables AS source_tables
         """,
-        {"source": RIGOR_SOURCE},
+        {"source": RIGOR_SOURCE, "bt_ids": list(bt_ids)},
     )
     for r in attr_rows:
         source_tables = r.get("source_tables") or []
@@ -103,16 +122,21 @@ def load_ontology_from_neo4j(database_name: str) -> CoreOntology:
         )
     logger.info("Loaded %d ColumnAttributes from Neo4j", len(ontology.attributes))
 
-    # 3. SqlAttributes (Metrics)
+    # 3. SqlAttributes (Metrics) — filter by same db_tables
     metric_rows = conn.query_read(
-        """
-        MATCH (m:SqlAttribute {source: $source})
+        f"""
+        MATCH (db:Database {{name: $database_name}})
+              -[:CONTAINS]->(s:Schema{schema_filter})
+              -[:CONTAINS]->(t:Table)
+        WITH collect(t.name) AS db_tables
+        MATCH (m:SqlAttribute {{source: $source}})
+        WHERE any(st IN m.source_tables WHERE st IN db_tables)
         RETURN m.id AS id, m.name AS name,
                m.expression AS expression,
                m.aggregation_type AS aggregation_type,
                m.source_tables AS source_tables
         """,
-        {"source": RIGOR_SOURCE},
+        params,
     )
     for r in metric_rows:
         agg_str = r.get("aggregation_type") or "OTHER"
@@ -148,15 +172,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    ontology = load_ontology_from_neo4j(args.database_name)
-
-    total = (
-        len(ontology.business_terms) + len(ontology.attributes) + len(ontology.metrics)
-    )
-    if total == 0:
-        logger.warning("No ontology elements found in Neo4j — nothing to embed.")
-        return
-
     if args.schema_name:
         schemas = [args.schema_name]
     else:
@@ -164,19 +179,44 @@ def main() -> None:
         if not schemas:
             schemas = [args.database_name]
 
-    for schema in schemas:
-        logger.info(
-            "Embedding %d elements for %s.%s …",
-            total,
-            args.database_name,
-            schema,
-        )
-        count = embed_ontology(
-            ontology,
-            database_name=args.database_name,
-            schema_name=schema,
-        )
-        logger.info("Embedded %d elements for schema %r", count, schema)
+    logger.info(
+        "Re-embedding %d schema(s) for %r: %s",
+        len(schemas),
+        args.database_name,
+        schemas,
+    )
+
+    vdb = make_ontology_vdb()
+    try:
+        for schema in schemas:
+            ontology = load_ontology_from_neo4j(
+                args.database_name,
+                schema_name=schema,
+            )
+            total = (
+                len(ontology.business_terms)
+                + len(ontology.attributes)
+                + len(ontology.metrics)
+            )
+            if total == 0:
+                logger.info("No elements for schema %r — skipping.", schema)
+                continue
+
+            logger.info(
+                "Embedding %d elements for %s.%s …",
+                total,
+                args.database_name,
+                schema,
+            )
+            count = embed_ontology(
+                ontology,
+                database_name=args.database_name,
+                schema_name=schema,
+                vdb=vdb,
+            )
+            logger.info("Embedded %d elements for schema %r", count, schema)
+    finally:
+        vdb.close()
 
 
 if __name__ == "__main__":
