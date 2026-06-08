@@ -11,20 +11,18 @@ import type { Connection } from '@/types/connection';
 
 export type ConnectionInfoCardProps = {
 	connection: Connection;
-	onEdit?: (id: string) => void;
 	onDelete?: (id: string, name: string) => void;
 	disabled?: boolean;
 };
 
-const connectionIcon = (_type: string | null | undefined): IconName => IconName.Database;
+const connectionIcon = (_type: string): IconName => IconName.Database;
 
 export const ConnectionInfoCard = ({
 	connection,
-	onEdit,
 	onDelete,
 	disabled = false,
 }: ConnectionInfoCardProps) => {
-	const menuDisabled = disabled || (!onEdit && !onDelete);
+	const menuDisabled = disabled || !onDelete;
 
 	return (
 		<article className="flex h-fit flex-col rounded-lg border border-zinc-200/90 bg-white shadow-sm dark:border-zinc-700/90 dark:bg-zinc-950">
@@ -49,14 +47,9 @@ export const ConnectionInfoCard = ({
 							className="relative"
 							items={[
 								{
-									label: 'Edit',
-									icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
-									onClick: () => onEdit?.(connection.id),
-								},
-								{
 									label: 'Remove',
 									icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
-									onClick: () => onDelete?.(connection.id, connection.name),
+									onClick: () => onDelete(connection.id, connection.name),
 									danger: true,
 								},
 							]}

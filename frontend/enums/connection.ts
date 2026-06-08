@@ -13,5 +13,5 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 };
 
-/** BI connectors skip the third wizard step in illumex. */
-export const CONNECTION_TYPES_WITHOUT_SELECT_DATA: ConnectionType[] = [];
+export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
+	typeof value === 'string' && (Object.values(ConnectionType) as string[]).includes(value);

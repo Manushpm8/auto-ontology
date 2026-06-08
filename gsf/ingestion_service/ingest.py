@@ -17,11 +17,12 @@ from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import TabularExtractParams
 from gsf.vdb import get_vdb
 from gsf.connectors.registry import create_connector
+from gsf.server.connections import dal as connections_dal
 
 logger = logging.getLogger("ingestion_service.ingest")
 
 
-def run_ingest(connection_string: str) -> None:
+def run_ingest(connection_string: str, *, connection_id: str | None = None) -> None:
     TABULAR_PARAMS = TabularExtractParams(
         connector=create_connector(connection_string),
     )
@@ -29,24 +30,58 @@ def run_ingest(connection_string: str) -> None:
     if not TABULAR_PARAMS.connector:
         raise ValueError("Connector is not set")
 
-    database_name = TABULAR_PARAMS.connector.database_name
-    embed_params = get_embed_params()
+    try:
+        database_name = TABULAR_PARAMS.connector.database_name
+        embed_params = get_embed_params()
 
-    graph = (
-        Graph()
-        >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-        >> TabularFetchEmbeddingsOp(database_name=database_name)
-        >> _BatchEmbedActor(params=embed_params)
+        graph = (
+            Graph()
+            >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
+            >> TabularFetchEmbeddingsOp(database_name=database_name)
+            >> _BatchEmbedActor(params=embed_params)
+        )
+
+        results = graph.execute(None)
+        result_df = results[0] if results else None
+
+        if result_df is not None and not result_df.empty:
+            ingest_op = IngestVdbOperator(vdb=get_vdb(database_name=database_name))
+            ingest_op(result_df.to_dict(orient="records"))
+            logger.info(
+                f"Tabular ingest result: {len(result_df)} rows written to pgvector",
+            )
+        else:
+            logger.info("Tabular ingest result: no rows produced")
+
+        connections_dal.link_database_connection(
+            db_name=database_name,
+            connection_string=connection_string,
+        )
+
+        if connection_id is not None:
+            connections_dal.update_last_pulled_at(connection_id)
+    finally:
+        TABULAR_PARAMS.connector.close()
+
+
+def run_ingest_delete(database_name: str) -> None:
+    """Remove ingested catalog data and embeddings for a database."""
+    database_name = database_name.strip()
+    if not database_name:
+        raise ValueError("Database name is required")
+
+    analysis_ids = connections_dal.list_custom_analysis_ids_for_database(database_name)
+    connections_dal.delete_catalog_for_database(database_name)
+
+    vdb = get_vdb()
+    deleted_tabular = vdb.delete_by_database(database_name)
+    logger.info(
+        f"Tabular ingest delete: removed {len(deleted_tabular)} pgvector rows "
+        f"for database {database_name}",
     )
 
-    results = graph.execute(None)
-    result_df = results[0] if results else None
-
-    if result_df is not None and not result_df.empty:
-        ingest_op = IngestVdbOperator(vdb=get_vdb(database_name=database_name))
-        ingest_op(result_df.to_dict(orient="records"))
+    for analysis_id in analysis_ids:
+        vdb.delete_by_id(analysis_id)
         logger.info(
-            f"Tabular ingest result: {len(result_df)} rows written to pgvector",
+            f"Tabular ingest delete: removed custom analysis embedding {analysis_id}",
         )
-    else:
-        logger.info("Tabular ingest result: no rows produced")

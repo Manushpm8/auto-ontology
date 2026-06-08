@@ -24,8 +24,8 @@ export const ConnectionSelectDataStep = ({
 					No databases to select
 				</p>
 				<p className="max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
-					After the connection API is wired, databases discovered during connect will
-					appear here for selection.
+					No databases were discovered for this connection. You can still create it and
+					run ingest later.
 				</p>
 			</div>
 		);

@@ -147,11 +147,12 @@ def list_custom_analyses() -> list[dict[str, Any]]:
 
 
 def _get_dialects() -> list[str]:
-    """Return the SQL dialects from the active connectors (all dialects supported by sqlglot)."""
+    """Return SQL dialects from active connectors (NeMo multi-connector order)."""
     connectors = get_connectors()
-    if not len(connectors):
+    dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
+    if not dialects:
         return ["generic", "ansi", "postgres"]
-    return [connector.dialect for connector in connectors]
+    return dialects
 
 
 def _get_schemas() -> dict:

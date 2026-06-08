@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from urllib.parse import urlparse
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
@@ -25,7 +24,19 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "snowflake": SnowflakeDatabase,
 }
 
-_connectors: dict[str, SQLDatabase] | None = None
+_connectors: list[SQLDatabase] | None = None
+
+
+def invalidate_connectors_cache() -> None:
+    """Drop cached connectors so the next :func:`get_connectors` reloads."""
+    global _connectors
+    if _connectors is not None:
+        for connector in _connectors:
+            try:
+                connector.close()
+            except Exception:
+                logger.exception("Failed to close connector during cache invalidation")
+    _connectors = None
 
 
 def create_connector(connection_string: str) -> SQLDatabase:
@@ -57,28 +68,40 @@ def create_connector(connection_string: str) -> SQLDatabase:
 
 
 def get_connectors() -> list[SQLDatabase]:
-    """Return cached connectors from ``CONNECTION_STRINGS``.
+    """Return cached connectors for all configured connections.
 
-    One instance per database (keyed internally by ``database_name``). The
-    return value is a list because NeMo text-to-SQL agents expect
-    ``list[SQLDatabase]``, not a mapping.
-
-    Reads ``CONNECTION_STRINGS`` from the environment (set in ``.env``).
+    NeMo text-to-SQL resolves the execution connector from
+    ``relevant_tables[*].database_name`` (see
+    ``nemo_retriever.tabular_data.retrieval.text_to_sql.connector_routing``).
+    Each connector's ``database_name`` must therefore be unique across the
+    returned list — use ``metadata_database`` on Snowflake URLs (or distinct
+    physical databases) when wiring multiple connections.
     """
     global _connectors
     if _connectors is None:
-        raw = os.environ.get("CONNECTION_STRINGS", "")
-        connection_strings = [cs.strip() for cs in raw.split(",") if cs.strip()]
+        from gsf.server.connections import dal as connections_dal
+
+        connection_strings = connections_dal.get_all_connection_strings()
         if not connection_strings:
             logger.warning(
-                "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
-                "    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
+                "No connections configured. Add CONNECTION_STRINGS to your .env "
+                "or create a connection in Settings → Connections."
             )
             return []
 
-        loaded: dict[str, SQLDatabase] = {}
+        loaded: list[SQLDatabase] = []
+        seen_database_names: set[str] = set()
         for cs in connection_strings:
             connector = create_connector(cs)
-            loaded[connector.database_name] = connector
+            db_name = connector.database_name
+            if db_name in seen_database_names:
+                logger.warning(
+                    "Duplicate connector database_name %r — NeMo routes SQL by "
+                    "database_name, so only one connector per name can be used. "
+                    "Set metadata_database on the connection string to disambiguate.",
+                    db_name,
+                )
+            seen_database_names.add(db_name)
+            loaded.append(connector)
         _connectors = loaded
-    return list(_connectors.values())
+    return list(_connectors)

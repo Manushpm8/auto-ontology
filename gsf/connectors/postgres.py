@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import os
 from typing import Optional
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 import psycopg
@@ -28,6 +30,14 @@ class PostgresDatabase(SQLDatabase):
 
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
+        parsed = urlparse(connection_string)
+        query = parse_qs(parsed.query)
+        metadata_database = query.get("metadata_database", [None])[0]
+        if metadata_database:
+            self._database_name = unquote(metadata_database)
+        else:
+            env_metadata = os.environ.get("METADATA_DATABASE", "").strip()
+            self._database_name = env_metadata or ""
         # Pool transparently replaces connections killed by server timeouts or
         # network middleboxes. `check_connection` runs a quick liveness probe
         # before handing a connection out; `max_idle`/`max_lifetime` cap how
@@ -43,7 +53,10 @@ class PostgresDatabase(SQLDatabase):
             check=ConnectionPool.check_connection,
             open=True,
         )
-        self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
+        if not self._database_name:
+            self._database_name = str(
+                self.execute("SELECT current_database()").iloc[0, 0]
+            )
 
     @property
     def dialect(self) -> str:

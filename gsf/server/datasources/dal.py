@@ -312,7 +312,8 @@ def _get_tables_and_columns_by_node_ids(
         conn.query_read(
             f"""
             UNWIND $ids AS id
-            MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
             WHERE t.id = id OR c.id = id
             RETURN DISTINCT
                    c.id AS id,
@@ -322,7 +323,7 @@ def _get_tables_and_columns_by_node_ids(
                    c.data_type AS data_type,
                    c.description AS description,
                    c.sample_values AS sample_values,
-                   t.db_name AS db_name
+                   db.name AS database_name
             """,
             {"ids": node_ids},
         ),
@@ -331,12 +332,13 @@ def _get_tables_and_columns_by_node_ids(
         conn.query_read(
             f"""
             UNWIND $ids AS id
-            MATCH (t:{Labels.TABLE} {{id: id}})
+            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{id: id}})
             RETURN t.id AS id,
                    t.name AS table_name,
                    t.schema_name AS table_schema,
                    t.description AS description,
-                   t.db_name AS db_name
+                   db.name AS database_name
             """,
             {"ids": node_ids},
         ),
@@ -344,8 +346,8 @@ def _get_tables_and_columns_by_node_ids(
 
     database_name = ""
     if not tables_df.empty:
-        database_name = str(tables_df.iloc[0].get("db_name") or "")
+        database_name = str(tables_df.iloc[0].get("database_name") or "")
     elif not columns_df.empty:
-        database_name = str(columns_df.iloc[0].get("db_name") or "")
+        database_name = str(columns_df.iloc[0].get("database_name") or "")
 
     return tables_df, columns_df, database_name

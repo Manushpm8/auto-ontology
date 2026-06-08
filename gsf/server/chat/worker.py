@@ -315,3 +315,14 @@ def shutdown_pool() -> None:
         _pool = None
     if pool is not None:
         pool.shutdown()
+
+
+def refresh_chat_workers() -> None:
+    """Replace the warm standby worker so the next request loads fresh connectors."""
+    pool = get_pool()
+    with pool._lock:
+        standby = pool._standby
+        pool._standby = None
+    if standby is not None:
+        standby.kill()
+    pool._spawn_async()

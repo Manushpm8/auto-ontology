@@ -11,7 +11,6 @@ import type { Connection } from '@/types/connection';
 type ConnectionsInfoCardViewProps = {
 	connections: Connection[];
 	loading?: boolean;
-	onEdit?: (id: string) => void;
 	onDelete?: (id: string, name: string) => void;
 };
 
@@ -25,7 +24,6 @@ const SkeletonCard = () => (
 export const ConnectionsInfoCardView = ({
 	connections,
 	loading = false,
-	onEdit,
 	onDelete,
 }: ConnectionsInfoCardViewProps) => {
 	if (loading) {
@@ -52,7 +50,6 @@ export const ConnectionsInfoCardView = ({
 				<ConnectionInfoCard
 					key={connection.id}
 					connection={connection}
-					onEdit={onEdit}
 					onDelete={onDelete}
 				/>
 			))}

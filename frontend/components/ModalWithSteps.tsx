@@ -130,7 +130,7 @@ export const ModalWithSteps = ({
 
 			<div
 				ref={contentRef}
-				className="min-h-[405px] max-h-[min(70vh,520px)] overflow-y-auto p-3"
+				className="flex min-h-[405px] max-h-[min(70vh,520px)] flex-col overflow-y-auto p-3"
 			>
 				{children}
 			</div>

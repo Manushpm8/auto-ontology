@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Placeholders } from '@/assets/images/placeholders';
 import { ConnectionsInfoCardView } from '@/components/connectionsPage/ConnectionsInfoCardView';
 import { NewConnectionsModal } from '@/components/connectionsPage/NewConnectionsModal';
+import { ConfirmModal } from '@/components/ConfirmModal';
 import { Icon, IconName } from '@/components/icons';
 import { connectionsApi } from '@/api/connections';
 import type { Connection } from '@/types/connection';
@@ -17,7 +18,12 @@ export const ConnectionsView = () => {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [connectionModalOpen, setConnectionModalOpen] = useState(false);
-	const [editingConnectionId, setEditingConnectionId] = useState<string | undefined>();
+	const [deletingConnection, setDeletingConnection] = useState<{
+		id: string;
+		name: string;
+	} | null>(null);
+	const [deleting, setDeleting] = useState(false);
+	const [deleteError, setDeleteError] = useState<string | null>(null);
 
 	const fetchConnections = useCallback(async () => {
 		try {
@@ -44,18 +50,11 @@ export const ConnectionsView = () => {
 	}, [fetchConnections]);
 
 	const handleCreateConnection = () => {
-		setEditingConnectionId(undefined);
-		setConnectionModalOpen(true);
-	};
-
-	const handleEditConnection = (id: string) => {
-		setEditingConnectionId(id);
 		setConnectionModalOpen(true);
 	};
 
 	const handleConnectionModalClose = () => {
 		setConnectionModalOpen(false);
-		setEditingConnectionId(undefined);
 	};
 
 	const handleConnectionModalConfirm = () => {
@@ -63,8 +62,31 @@ export const ConnectionsView = () => {
 		void fetchConnections();
 	};
 
-	const handleDeleteConnection = (_id: string, _name: string) => {
-		// TODO: DeleteModal + API
+	const handleDeleteRequest = (id: string, name: string) => {
+		setDeleteError(null);
+		setDeletingConnection({ id, name });
+	};
+
+	const handleDeleteClose = () => {
+		if (deleting) return;
+		setDeletingConnection(null);
+		setDeleteError(null);
+	};
+
+	const handleDeleteConfirm = async () => {
+		if (deletingConnection == null) return;
+		setDeleting(true);
+		setDeleteError(null);
+		const res = await connectionsApi.delete(deletingConnection.id);
+		setDeleting(false);
+
+		if (res.error === true) {
+			setDeleteError(res.message ?? 'Failed to delete connection.');
+			return;
+		}
+
+		setConnections((prev) => prev.filter((c) => c.id !== deletingConnection.id));
+		setDeletingConnection(null);
 	};
 
 	if (loading) {
@@ -131,18 +153,36 @@ export const ConnectionsView = () => {
 					</div>
 					<ConnectionsInfoCardView
 						connections={connections}
-						onEdit={handleEditConnection}
-						onDelete={handleDeleteConnection}
+						onDelete={handleDeleteRequest}
 					/>
 				</div>
 			)}
 
+			<ConfirmModal
+				open={deletingConnection !== null}
+				title="Remove connection"
+				message={
+					deletingConnection ? (
+						<>
+							Are you sure you want to remove{' '}
+							<strong>{deletingConnection.name}</strong>? Its catalog data and
+							embeddings will be deleted. This action cannot be undone.
+						</>
+					) : null
+				}
+				confirmLabel="Remove"
+				onConfirm={handleDeleteConfirm}
+				onCancel={handleDeleteClose}
+				confirming={deleting}
+				error={deleteError}
+			/>
+
 			<NewConnectionsModal
-				key={`${editingConnectionId ?? 'create'}-${String(connectionModalOpen)}`}
+				key={String(connectionModalOpen)}
 				open={connectionModalOpen}
+				existingConnections={connections}
 				onConfirm={handleConnectionModalConfirm}
 				onCancel={handleConnectionModalClose}
-				connectionId={editingConnectionId}
 			/>
 		</div>
 	);

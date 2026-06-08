@@ -2,19 +2,104 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""API routes for catalog connections (``db`` nodes)."""
+"""API routes for UI-managed database connections."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+import logging
+from typing import Any
 
-from gsf.server.connections import dal
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from gsf.server.connections import dal, service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
+class ConnectionPublic(BaseModel):
+    id: str
+    name: str
+    type: str
+    create_date: str | None = None
+    last_pulled: str | None = None
+    num_of_schemas: int
+    database: str
+
+
+class ConnectionCreate(BaseModel):
+    name: str
+    type: str
+    connection_string: str = Field(default="", alias="connectionString")
+
+    model_config = {"populate_by_name": True}
+
+
+def _public_connections(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [ConnectionPublic.model_validate(row).model_dump() for row in rows]
+
+
+class ConnectionTest(BaseModel):
+    type: str
+    connection_string: str = Field(default="", alias="connectionString")
+
+    model_config = {"populate_by_name": True}
+
+
 @router.get("/connections")
 def list_connections() -> dict:
-    """All catalog databases — illumex-style list sourced from ``db`` nodes."""
-    rows = dal.list_connections()
+    rows = _public_connections(dal.list_connections())
     return {"data": rows, "count": len(rows)}
+
+
+@router.post("/connections/test")
+def test_connection(body: ConnectionTest) -> dict:
+    try:
+        datasources = service.test_connection(body.type, body.connection_string)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Connection test failed: {exc}",
+        ) from exc
+    return {"data": datasources}
+
+
+@router.post("/connections", status_code=201)
+def create_connection(body: ConnectionCreate) -> dict:
+    try:
+        row = service.create_connection(
+            name=body.name,
+            connection_type=body.type,
+            connection_string=body.connection_string,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to create connection: {exc}",
+        ) from exc
+
+    return {"data": ConnectionPublic.model_validate(row).model_dump()}
+
+
+@router.delete("/connections/{connection_id}")
+def delete_connection(connection_id: str) -> dict:
+    try:
+        row = service.delete_connection(connection_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to delete connection: {exc}",
+        ) from exc
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    return {"data": row}

@@ -7,6 +7,9 @@
 Runs ``ingest()`` once at startup, then every 24 hours at the same wall-clock
 time (anchored to startup) — independent of how long each run takes.
 
+Reloads connections from Neo4j on every pass so newly added connections are
+picked up without restarting this process.
+
 Usage::
 
     uv run --no-sync python gsf/ingestion_service/main.py
@@ -17,23 +20,38 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+
 from gsf.ingestion_service.ingest import run_ingest
-import os
+from gsf.server.connections import dal as connections_dal
 
 logger = logging.getLogger("gsf.ingestion_service")
 
 INGEST_INTERVAL = timedelta(hours=24)
 
 
-async def ingest(connection_strings: list[str]) -> None:
-    """Run one ingestion pass."""
-    logger.info("ingest: starting")
-    for connection_string in connection_strings:
-        run_ingest(connection_string)
+async def ingest() -> None:
+    """Run one ingestion pass for all configured connections."""
+    connections = connections_dal.list_connections_for_ingest()
+    if not connections:
+        logger.info(
+            "ingest: no connections configured. Add CONNECTION_STRINGS to your "
+            ".env or create a connection in Settings → Connections."
+        )
+        return
+
+    logger.info("ingest: starting (%s connection(s))", len(connections))
+    for connection_id, connection_string in connections:
+        try:
+            run_ingest(connection_string, connection_id=connection_id)
+        except Exception:
+            logger.exception(
+                "ingest: failed for connection %s",
+                connection_id or connection_string,
+            )
     logger.info("ingest: finished")
 
 
-async def _run_forever(connection_strings: list[str]) -> None:
+async def _run_forever() -> None:
     next_run = datetime.now(timezone.utc)
     while True:
         delay = (next_run - datetime.now(timezone.utc)).total_seconds()
@@ -44,7 +62,7 @@ async def _run_forever(connection_strings: list[str]) -> None:
             await asyncio.sleep(delay)
 
         try:
-            await ingest(connection_strings)
+            await ingest()
         except Exception:
             logger.exception("ingest: unhandled error; will retry on next tick")
 
@@ -65,17 +83,11 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    if not os.environ.get("CONNECTION_STRINGS"):
-        logger.warning(
-            "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
-        )
-    else:
-        connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
-        try:
-            asyncio.run(_run_forever(connection_strings))
-        except KeyboardInterrupt:
-            logger.info("ingestion_service: shutting down")
-            raise SystemExit(0)
+    try:
+        asyncio.run(_run_forever())
+    except KeyboardInterrupt:
+        logger.info("ingestion_service: shutting down")
+        raise SystemExit(0)
 
 
 if __name__ == "__main__":

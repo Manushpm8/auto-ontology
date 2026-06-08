@@ -4,128 +4,167 @@
 
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { connectionsApi } from '@/api/connections';
+import { parseConnectionDatabaseName } from '@/lib/parseConnectionDatabaseName';
 import { ModalWithSteps, type StepperFooterAction } from '@/components/ModalWithSteps';
 import { ConnectionConnectStep } from '@/components/connectionsPage/steps/ConnectionConnectStep';
-import { ConnectionSelectDataStep } from '@/components/connectionsPage/steps/ConnectionSelectDataStep';
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';
-import { CONNECTION_TYPES_WITHOUT_SELECT_DATA, ConnectionType } from '@/enums/connection';
-import type { ConnectionDraft } from '@/types/connectionDraft';
+import { ConnectionType, isConnectionType } from '@/enums/connection';
+import type { Connection } from '@/types/connection';
+import type { ConnectionInput } from '@/types/connectionInput';
 
-const NEW_CONNECTION_STEPS = ['Select Connector', 'Connect', 'Select Data'] as const;
+const NEW_CONNECTION_STEPS = ['Select Connector', 'Connect'] as const;
 
 export type NewConnectionsModalProps = {
 	open: boolean;
+	existingConnections?: Connection[];
 	onConfirm: () => void;
 	onCancel: () => void;
-	connectionId?: string;
 };
 
-const emptyDraft = (type: ConnectionType = ConnectionType.POSTGRESQL): ConnectionDraft => ({
+const emptyConnectionInput = (
+	type: ConnectionType = ConnectionType.POSTGRESQL,
+): ConnectionInput => ({
 	type,
-	name: '',
-	description: '',
 	connectionString: '',
-	databases: [],
 });
-
-const isConnectStepValid = (draft: ConnectionDraft): boolean =>
-	draft.name.trim().length > 0 && draft.connectionString.trim().length > 0;
 
 export const NewConnectionsModal = ({
 	open,
+	existingConnections = [],
 	onConfirm,
 	onCancel,
-	connectionId,
 }: NewConnectionsModalProps) => {
 	const [loading, setLoading] = useState(false);
-	const [activeStep, setActiveStep] = useState(connectionId ? 1 : 0);
+	const [testingConnection, setTestingConnection] = useState(false);
+	const [isConnectionTested, setIsConnectionTested] = useState(false);
+	const [testSuccessMessage, setTestSuccessMessage] = useState<string | null>(null);
+	const [activeStep, setActiveStep] = useState(0);
 	const [connectionType, setConnectionType] = useState<ConnectionType>(ConnectionType.POSTGRESQL);
-	const [draft, setDraft] = useState<ConnectionDraft>(emptyDraft());
-	const [availableDatabases, setAvailableDatabases] = useState<string[]>([]);
+	const [connectionInput, setConnectionInput] = useState<ConnectionInput>(emptyConnectionInput());
 	const [alert, setAlert] = useState<string | null>(null);
 
-	const skipSelectDataStep = CONNECTION_TYPES_WITHOUT_SELECT_DATA.includes(connectionType);
-
-	const steps = useMemo(() => {
-		if (activeStep === 0 && !connectionId) {
-			return [...NEW_CONNECTION_STEPS];
+	const disabledTypes = useMemo(() => {
+		const used = new Set<ConnectionType>();
+		for (const connection of existingConnections) {
+			if (isConnectionType(connection.type)) {
+				used.add(connection.type);
+			}
 		}
-		return skipSelectDataStep ? NEW_CONNECTION_STEPS.slice(0, -1) : [...NEW_CONNECTION_STEPS];
-	}, [activeStep, connectionId, skipSelectDataStep]);
+		return [...used];
+	}, [existingConnections]);
 
 	const canContinue = useMemo(() => {
 		if (activeStep === 0) return false;
-		if (activeStep === 1) return isConnectStepValid(draft);
-		if (activeStep === steps.length - 1 && !skipSelectDataStep) {
-			return availableDatabases.length === 0 || draft.databases.length > 0;
-		}
-		return true;
-	}, [activeStep, draft, steps.length, skipSelectDataStep, availableDatabases.length]);
+		return parseConnectionDatabaseName(connectionInput.connectionString) !== null;
+	}, [activeStep, connectionInput.connectionString]);
+
+	useEffect(() => {
+		if (!open) return;
+		setActiveStep(0);
+		setConnectionType(ConnectionType.POSTGRESQL);
+		setConnectionInput(emptyConnectionInput());
+		setAlert(null);
+		setIsConnectionTested(false);
+		setTestSuccessMessage(null);
+		setTestingConnection(false);
+	}, [open]);
 
 	const handleNext = useCallback((): void => {
 		setAlert(null);
-		setActiveStep((prev) => Math.min(prev + 1, steps.length - 1));
-	}, [steps.length]);
+		setActiveStep((prev) => Math.min(prev + 1, NEW_CONNECTION_STEPS.length - 1));
+	}, []);
 
 	const handleBack = useCallback((): void => {
 		setAlert(null);
-		setActiveStep((prev) => Math.max(prev - 1, connectionId ? 1 : 0));
-	}, [connectionId]);
+		setActiveStep((prev) => Math.max(prev - 1, 0));
+	}, []);
 
 	const handleSelectType = (type: ConnectionType): void => {
 		setConnectionType(type);
-		setDraft(emptyDraft(type));
-		setAvailableDatabases([]);
+		setConnectionInput(emptyConnectionInput(type));
 		setAlert(null);
+		setIsConnectionTested(false);
+		setTestSuccessMessage(null);
 		setActiveStep(1);
 	};
 
-	const handleDraftChange = (patch: Partial<ConnectionDraft>): void => {
-		setDraft((prev) => ({ ...prev, ...patch }));
+	const handleConnectionInputChange = (patch: Partial<ConnectionInput>): void => {
+		setConnectionInput((prev) => ({ ...prev, ...patch }));
+		if (patch.connectionString !== undefined) {
+			setIsConnectionTested(false);
+			setTestSuccessMessage(null);
+			setAlert(null);
+		}
 	};
+
+	const handleTestConnection = useCallback(async (): Promise<void> => {
+		setTestingConnection(true);
+		setAlert(null);
+		setTestSuccessMessage(null);
+
+		const res = await connectionsApi.test({
+			type: connectionType,
+			connectionString: connectionInput.connectionString,
+		});
+		setTestingConnection(false);
+
+		if ('error' in res && res.error === true) {
+			setIsConnectionTested(false);
+			setAlert(res.message ?? 'Connection test failed.');
+			return;
+		}
+
+		if (!('data' in res)) {
+			setIsConnectionTested(false);
+			setAlert('Connection test failed.');
+			return;
+		}
+
+		const schemaCount = res.data.reduce((total, item) => total + item.schemas.length, 0);
+		setIsConnectionTested(true);
+		setTestSuccessMessage(
+			schemaCount > 0
+				? `Connection successful. Found ${schemaCount} schema${schemaCount === 1 ? '' : 's'}.`
+				: 'Connection successful.',
+		);
+	}, [connectionType, connectionInput.connectionString]);
 
 	const handleCreate = useCallback(async (): Promise<void> => {
 		setLoading(true);
 		setAlert(null);
-		// TODO: connectionsApi.create(draft) when backend is ready
-		await new Promise((resolve) => {
-			window.setTimeout(resolve, 300);
+		const res = await connectionsApi.create({
+			type: connectionType,
+			connectionString: connectionInput.connectionString,
 		});
 		setLoading(false);
-		onConfirm();
-	}, [onConfirm]);
 
-	const handleEdit = useCallback(async (): Promise<void> => {
-		if (!connectionId) return;
-		setLoading(true);
-		setAlert(null);
-		// TODO: connectionsApi.update(connectionId, draft)
-		await new Promise((resolve) => {
-			window.setTimeout(resolve, 300);
-		});
-		setLoading(false);
+		if ('error' in res && res.error === true) {
+			setAlert(res.message ?? 'Failed to create connection.');
+			return;
+		}
+
 		onConfirm();
-	}, [connectionId, onConfirm]);
+	}, [connectionType, connectionInput, onConfirm]);
 
 	const renderStepContent = (step: number) => {
 		switch (step) {
 			case 0:
-				return <ConnectionTypeStep onSelect={handleSelectType} />;
+				return (
+					<ConnectionTypeStep onSelect={handleSelectType} disabledTypes={disabledTypes} />
+				);
 			case 1:
 				return (
 					<ConnectionConnectStep
-						draft={{ ...draft, type: connectionType }}
-						onChange={handleDraftChange}
-						loading={false}
-					/>
-				);
-			case 2:
-				return (
-					<ConnectionSelectDataStep
-						availableDatabases={availableDatabases}
-						selectedDatabases={draft.databases}
-						onSelectionChange={(databases) => handleDraftChange({ databases })}
+						connectionInput={{ ...connectionInput, type: connectionType }}
+						onChange={handleConnectionInputChange}
+						testSuccessMessage={testSuccessMessage}
+						onTestConnection={() => {
+							void handleTestConnection();
+						}}
+						testDisabled={!canContinue || loading}
+						testingConnection={testingConnection}
 					/>
 				);
 			default:
@@ -138,20 +177,18 @@ export const NewConnectionsModal = ({
 			return [{ label: 'Cancel', onClick: onCancel, variant: 'outline' }];
 		}
 
-		const actions: StepperFooterAction[] = [];
+		const actions: StepperFooterAction[] = [
+			{ label: 'Back', onClick: handleBack, variant: 'outline' },
+		];
 
-		if (!connectionId) {
-			actions.push({ label: 'Back', onClick: handleBack, variant: 'outline' });
-		}
-
-		const isLastStep = activeStep === steps.length - 1;
+		const isLastStep = activeStep === NEW_CONNECTION_STEPS.length - 1;
 		if (isLastStep) {
 			actions.push({
-				label: connectionId ? 'Update' : 'Create',
+				label: 'Create',
 				onClick: () => {
-					void (connectionId ? handleEdit() : handleCreate());
+					void handleCreate();
 				},
-				disabled: !canContinue || loading,
+				disabled: !canContinue || loading || testingConnection || !isConnectionTested,
 				loading,
 			});
 		} else {
@@ -167,27 +204,23 @@ export const NewConnectionsModal = ({
 	}, [
 		activeStep,
 		canContinue,
-		connectionId,
 		handleBack,
 		handleCreate,
-		handleEdit,
 		handleNext,
+		isConnectionTested,
 		loading,
 		onCancel,
-		steps.length,
+		testingConnection,
 	]);
-
-	const modalTitle = connectionId ? 'Edit Connection' : 'Create New Connection';
 
 	return (
 		<ModalWithSteps
 			open={open}
 			onClose={onCancel}
-			title={modalTitle}
-			steps={steps}
+			title="Create New Connection"
+			steps={[...NEW_CONNECTION_STEPS]}
 			activeStep={activeStep}
 			onActiveStepChange={setActiveStep}
-			disabledSteps={connectionId ? [0] : []}
 			footerActions={footerActions}
 			alert={alert}
 		>

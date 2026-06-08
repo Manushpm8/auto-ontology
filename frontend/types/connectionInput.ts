@@ -4,10 +4,8 @@
 
 import type { ConnectionType } from '@/enums/connection';
 
-export type ConnectionDraft = {
+/** User-provided fields for testing or creating a connection. */
+export type ConnectionInput = {
 	type: ConnectionType;
-	name: string;
-	description: string;
 	connectionString: string;
-	databases: string[];
 };
