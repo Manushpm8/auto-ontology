@@ -62,6 +62,12 @@ def visit_enter(
     table_id = table["id"]
     table_name = table["name"]
 
+    # TODO:
+    # 1. Extract more than one Term per table (optional).
+    # 2. User friendly term name and columns (specs) names.
+    # 3. Set on column nodes (neo4j) suspected as fk. pk columns are not fks.
+    # 4. Do not merge column attributes for fks.
+
     neo4j_dal.mark_table_reviewed(table_id)
 
     specs = column_attribute_specs(ctx.get("columns", []), ctx.get("fks", []))
