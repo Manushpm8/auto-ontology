@@ -180,8 +180,7 @@ def merge_role_edge(
     source_term: str,
     target_term: str,
     role_name: str,
-    path_data_layer: list[dict[str, Any]] | None,
-    path_semantic_layer: list[dict[str, Any]] | None,
+    join_path: list[dict[str, Any]] | None,
     source_table: str,
     target_table: str,
 ) -> None:
@@ -192,8 +191,7 @@ def merge_role_edge(
         MERGE (src)-[r:{REL_ROLE} {{name: $role_name}}]->(tgt)
         SET r.source_table = $source_table,
             r.target_table = $target_table,
-            r.path_data_layer = $path_data,
-            r.path_semantic_layer = $path_sem
+            r.join_path = $join_path
         """,
         {
             "source_term": source_term,
@@ -201,8 +199,7 @@ def merge_role_edge(
             "role_name": role_name,
             "source_table": source_table,
             "target_table": target_table,
-            "path_data": json.dumps(path_data_layer or []),
-            "path_sem": json.dumps(path_semantic_layer or []),
+            "join_path": json.dumps(join_path or []),
             "source": SEMANTIC_SOURCE,
         },
     )

@@ -8,11 +8,9 @@ from gsf.semantic.visit_finalize import visit_finalize, write_question_role_edge
 
 
 @patch("gsf.semantic.visit_finalize.neo4j_dal")
-@patch("gsf.semantic.visit_finalize.compute_semantic_layer_path")
-@patch("gsf.semantic.visit_finalize.compute_data_layer_path")
+@patch("gsf.semantic.visit_finalize.compute_join_path")
 def test_finalize_writes_fk_role_edges(
-    mock_data_path: MagicMock,
-    mock_sem_path: MagicMock,
+    mock_join_path: MagicMock,
     mock_dal: MagicMock,
 ) -> None:
     mock_dal.fetch_fk_role_pairs.return_value = [
@@ -26,8 +24,7 @@ def test_finalize_writes_fk_role_edges(
             "source_column": "customer_id",
         }
     ]
-    mock_data_path.return_value = [{"node": "orders"}, {"node": "customers"}]
-    mock_sem_path.return_value = [{"node": "Order"}, {"node": "Customer"}]
+    mock_join_path.return_value = [{"node": "orders"}, {"node": "customers"}]
 
     count = visit_finalize("t1")
     assert count == 1
@@ -35,11 +32,9 @@ def test_finalize_writes_fk_role_edges(
 
 
 @patch("gsf.semantic.visit_finalize.neo4j_dal")
-@patch("gsf.semantic.visit_finalize.compute_semantic_layer_path")
-@patch("gsf.semantic.visit_finalize.compute_data_layer_path")
+@patch("gsf.semantic.visit_finalize.compute_join_path")
 def test_write_question_role_edges(
-    mock_data_path: MagicMock,
-    mock_sem_path: MagicMock,
+    mock_join_path: MagicMock,
     mock_dal: MagicMock,
 ) -> None:
     from gsf.semantic.models import BusinessQuestionItem
@@ -47,8 +42,7 @@ def test_write_question_role_edges(
     mock_dal.get_table_for_term.side_effect = [
         {"id": "t2", "name": "customers"},
     ]
-    mock_data_path.return_value = [{"node": "orders"}, {"node": "customers"}]
-    mock_sem_path.return_value = [{"node": "Order"}, {"node": "Customer"}]
+    mock_join_path.return_value = [{"node": "orders"}, {"node": "customers"}]
 
     count = write_question_role_edges(
         "t1",
@@ -67,8 +61,7 @@ def test_write_question_role_edges(
         source_term="Order",
         target_term="Customer",
         role_name="placedBy",
-        path_data_layer=mock_data_path.return_value,
-        path_semantic_layer=mock_sem_path.return_value,
+        join_path=mock_join_path.return_value,
         source_table="orders",
         target_table="customers",
     )

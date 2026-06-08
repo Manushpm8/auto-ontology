@@ -6,7 +6,7 @@ import logging
 
 from gsf.semantic import neo4j_dal
 from gsf.semantic.models import BusinessQuestionItem
-from gsf.semantic.paths import compute_data_layer_path, compute_semantic_layer_path
+from gsf.semantic.paths import compute_join_path
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +48,12 @@ def write_question_role_edges(
             )
             continue
 
-        data_path = compute_data_layer_path(table_id, tgt_table["id"])
-        sem_path = compute_semantic_layer_path(src_term, tgt_term)
+        join_path = compute_join_path(table_id, tgt_table["id"])
         neo4j_dal.merge_role_edge(
             source_term=src_term,
             target_term=tgt_term,
             role_name=role_name,
-            path_data_layer=data_path,
-            path_semantic_layer=sem_path,
+            join_path=join_path,
             source_table=src_table_name,
             target_table=tgt_table["name"],
         )
@@ -73,18 +71,16 @@ def _write_fk_role_edges(table_id: str) -> int:
         tgt_term = pair["target_term"]
         role_name = _role_name_from_column(pair.get("source_column", ""))
 
-        data_path = compute_data_layer_path(
+        join_path = compute_join_path(
             pair["source_table_id"],
             pair["target_table_id"],
         )
-        sem_path = compute_semantic_layer_path(src_term, tgt_term)
 
         neo4j_dal.merge_role_edge(
             source_term=src_term,
             target_term=tgt_term,
             role_name=role_name,
-            path_data_layer=data_path,
-            path_semantic_layer=sem_path,
+            join_path=join_path,
             source_table=src_table,
             target_table=tgt_table,
         )
