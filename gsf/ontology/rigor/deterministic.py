@@ -66,10 +66,15 @@ def to_term_name(table_name: str) -> str:
     return "".join(p.capitalize() for p in parts if p)
 
 
+# Type alias for the PK resolution callback.
+ResolveTargetPK = Any  # Callable[[str], str | None]
+
+
 def run_deterministic(
     table: dict[str, Any],
     ctx: dict[str, Any],
     all_table_names: list[str] | None = None,
+    resolve_target_pk: ResolveTargetPK | None = None,
 ) -> DeterministicResult:
     """Run all deterministic detections for a single table.
 
@@ -77,6 +82,10 @@ def run_deterministic(
         table: Table metadata dict (name, id, schema_name, etc.)
         ctx: Table context from fetch_table_context() with columns, fks, sqls
         all_table_names: All table names in the database for implicit FK matching
+        resolve_target_pk: Optional callback ``(table_name) -> pk_column``
+            that resolves the PK column of a target table.  Used for implicit FK
+            detection so we store the correct ``target_column`` instead of
+            blindly reusing the FK column name.
     """
     table_name = table["name"]
     term_name = to_term_name(table_name)
@@ -164,11 +173,24 @@ def run_deterministic(
         matched_table = _find_table_match(prefix, known_tables, table_name)
         if matched_table:
             target_term = to_term_name(matched_table)
+            if resolve_target_pk is not None:
+                target_col = resolve_target_pk(matched_table)
+            else:
+                target_col = "id"
+            if target_col is None:
+                logger.warning(
+                    "  [det] Skipping implicit FK %s.%s -> %s "
+                    "(no PK column found on target)",
+                    table_name,
+                    col_name,
+                    matched_table,
+                )
+                continue
             prov = Provenance(
                 source_table=table_name,
                 source_column=col_name,
                 target_table=matched_table,
-                target_column=col_name,
+                target_column=target_col,
                 derivation="implicit_id_pattern",
             )
             edge_name = _infer_fk_edge_name(col_name, matched_table)
@@ -182,10 +204,11 @@ def run_deterministic(
             )
             result.fk_column_names.add(col_name)
             logger.info(
-                "  [det] Implicit FK: %s.%s -> %s (%s)",
+                "  [det] Implicit FK: %s.%s -> %s.%s (%s)",
                 table_name,
                 col_name,
                 matched_table,
+                target_col,
                 edge_name,
             )
 

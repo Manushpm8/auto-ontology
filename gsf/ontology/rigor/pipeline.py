@@ -49,11 +49,53 @@ from gsf.ontology.rigor.models import (
 )
 from gsf.ontology.rigor.neo4j_ops import write_ontology_to_neo4j
 from gsf.ontology.rigor.proposer import invoke_proposer
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
+    Edges,
+    Labels,
+)
+from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 logger = logging.getLogger(__name__)
 
 _CHECKPOINT_DIR = Path(".rigor_checkpoints")
 _INVALID_TERM_NAMES = {"unnamed", "unnamed term", "unknown", "none", ""}
+
+_RESOLVE_PK_FROM_TABLE = f"""
+MATCH (t:{Labels.TABLE} {{name: $table_name}})
+WHERE t.pk IS NOT NULL
+RETURN t.pk[0] AS pk_col
+"""
+
+_RESOLVE_PK_FALLBACK = f"""
+MATCH (t:{Labels.TABLE} {{name: $table_name}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{name: 'id'}})
+RETURN c.name AS pk_col LIMIT 1
+"""
+
+
+def _make_resolve_target_pk() -> Any:
+    """Build a callback that resolves the PK column of a target table.
+
+    Strategy:
+    1. Check ``Table.pk`` property (set during schema ingestion).
+    2. Fall back to a Column node named ``id``.
+    3. Return ``None`` if neither found — caller should skip the edge.
+    """
+    conn = get_neo4j_conn()
+
+    def resolve(table_name: str) -> str | None:
+        rows = conn.query_read(
+            _RESOLVE_PK_FROM_TABLE, {"table_name": table_name}
+        )
+        if rows and rows[0].get("pk_col"):
+            return rows[0]["pk_col"]
+        rows = conn.query_read(
+            _RESOLVE_PK_FALLBACK, {"table_name": table_name}
+        )
+        if rows and rows[0].get("pk_col"):
+            return rows[0]["pk_col"]
+        return None
+
+    return resolve
 
 
 # -----------------------------------------------------------------
@@ -184,6 +226,7 @@ def build_ontology(
         evidence = load_evidence(database_name, bird_root)
 
     vocab_service = ExternalVocabService(db_id=database_name, evidence=evidence)
+    resolve_target_pk = _make_resolve_target_pk()
 
     # -----------------------------------------------------------------
     # PHASE 1 — Per-table iterative construction
@@ -221,6 +264,7 @@ def build_ontology(
                 bird_root,
                 evidence,
                 vocab_service,
+                resolve_target_pk,
             )
         except Exception:
             logger.error(
@@ -301,6 +345,7 @@ def _process_one_table(
     bird_root: str | None,
     evidence: dict[str, list[str]],
     vocab_service: ExternalVocabService,
+    resolve_target_pk: Any = None,
 ) -> None:
     """Run deterministic + LLM steps for a single table.
 
@@ -330,7 +375,9 @@ def _process_one_table(
         enrich_context_with_bird(ctx, table["name"], evidence)
 
     # 3. Deterministic detection
-    det_result = run_deterministic(table, ctx, all_table_names)
+    det_result = run_deterministic(
+        table, ctx, all_table_names, resolve_target_pk
+    )
 
     # Add deterministic edges to ontology immediately, resolving term names
     # via table_to_term so we don't recreate renamed placeholders.
