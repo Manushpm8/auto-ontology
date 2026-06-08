@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { connectionsApi } from '@/api/connections';
 import { parseConnectionDatabaseName } from '@/lib/parseConnectionDatabaseName';
 import { ModalWithSteps, type StepperFooterAction } from '@/components/ModalWithSteps';
@@ -59,17 +59,6 @@ export const NewConnectionsModal = ({
 		if (activeStep === 0) return false;
 		return parseConnectionDatabaseName(connectionInput.connectionString) !== null;
 	}, [activeStep, connectionInput.connectionString]);
-
-	useEffect(() => {
-		if (!open) return;
-		setActiveStep(0);
-		setConnectionType(ConnectionType.POSTGRESQL);
-		setConnectionInput(emptyConnectionInput());
-		setAlert(null);
-		setIsConnectionTested(false);
-		setTestSuccessMessage(null);
-		setTestingConnection(false);
-	}, [open]);
 
 	const handleNext = useCallback((): void => {
 		setAlert(null);

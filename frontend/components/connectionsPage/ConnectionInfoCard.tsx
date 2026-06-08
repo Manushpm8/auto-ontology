@@ -15,8 +15,6 @@ export type ConnectionInfoCardProps = {
 	disabled?: boolean;
 };
 
-const connectionIcon = (_type: string): IconName => IconName.Database;
-
 export const ConnectionInfoCard = ({
 	connection,
 	onDelete,
@@ -28,10 +26,7 @@ export const ConnectionInfoCard = ({
 		<article className="flex h-fit flex-col rounded-lg border border-zinc-200/90 bg-white shadow-sm dark:border-zinc-700/90 dark:bg-zinc-950">
 			<header className="flex w-full items-center justify-between gap-2 px-4 py-5">
 				<div className="flex min-w-0 items-center gap-1">
-					<Icon
-						name={connectionIcon(connection.type)}
-						className="h-5 w-5 shrink-0 text-[#76b900]"
-					/>
+					<Icon name={IconName.Database} className="h-5 w-5 shrink-0 text-[#76b900]" />
 					<h3 className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{connection.name}
 					</h3>
