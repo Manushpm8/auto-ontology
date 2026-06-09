@@ -270,8 +270,8 @@ function TableBlock({
 				hasChildren={hasChildren}
 				loading={loading}
 				name={table.name}
-				icon={iconForCatalogNode(DataModels.TABLE, table.type)}
-				title={catalogNodeLabel(DataModels.TABLE, table.type)}
+				icon={iconForCatalogNode(DataModels.TABLE, table.table_type)}
+				title={catalogNodeLabel(DataModels.TABLE, table.table_type)}
 				selected={selectedId === tableFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(tableFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateTable : undefined}

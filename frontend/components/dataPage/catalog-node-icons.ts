@@ -35,16 +35,16 @@ function catalogKindForTableType(tableType: TableType | string | undefined): Dat
 	return tableTypeToCatalogKind[resolved as TableType] ?? DataModels.TABLE;
 }
 
-export function iconForCatalogNode(kind: DataModels, type?: string): IconName {
-	if (type) {
-		return catalogNodeIcons[catalogKindForTableType(type)];
+export function iconForCatalogNode(kind: DataModels, tableType?: string): IconName {
+	if (tableType) {
+		return catalogNodeIcons[catalogKindForTableType(tableType)];
 	}
 	return catalogNodeIcons[kind];
 }
 
-export function catalogNodeLabel(kind: DataModels, type?: string): string {
-	if (type) {
-		return getTableType(type);
+export function catalogNodeLabel(kind: DataModels, tableType?: string): string {
+	if (tableType) {
+		return getTableType(tableType);
 	}
 	return catalogNodeTitles[kind];
 }

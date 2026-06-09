@@ -221,7 +221,7 @@ def add_custom_analyses(
             logger.warning("Skipping custom analysis %r — no SQL provided.", name)
             continue
 
-        query_obj = parse_query_single(sql=sql, dialect=dialect, schemas=schemas)
+        query_obj = parse_query_single(sql=sql, dialects=[dialect], schemas=schemas)
         if query_obj is None:
             logger.warning(
                 "Could not resolve any tables for custom analysis %r — skipping.",
