@@ -98,7 +98,7 @@ def list_tables_for_schema(
               (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
         RETURN t.id AS id,
                t.name AS name,
-               t.type AS type,
+               t.type AS table_type,
                db.name AS database_name,
                s.name AS schema_name, t.description AS description,
                count(c) AS columns_count

@@ -195,7 +195,7 @@ def _validate_sql(sql: str, dialects: list[str], schemas: dict) -> Any:
     we can map it to a clearer message here without changing the API.
     """
     try:
-        query_obj = parse_query_single(sql=sql, dialect=dialects[0], schemas=schemas)
+        query_obj = parse_query_single(sql=sql, dialects=dialects, schemas=schemas)
     except Exception as exc:
         # `parse_query_single` -> sqlglot can raise a variety of
         # exception types for syntax / dialect issues; NeMo-Retriever's

@@ -38,6 +38,7 @@ def run_ingest(connection_string: str) -> None:
         >> TabularFetchEmbeddingsOp(database_name=database_name)
         >> _BatchEmbedActor(params=embed_params)
     )
+    
     results = graph.execute(None)
     result_df = results[0] if results else None
 

@@ -11,7 +11,11 @@ import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { DataModels } from '@/enums/datasources';
 import { Icon, IconName } from '@/components/icons';
 import { datasources } from '@/api/datasources';
-import { catalogNodeLabel, iconForCatalogNode } from '@/components/dataPage/catalog-node-icons';
+import {
+	catalogKindForTableType,
+	catalogNodeIcons,
+	catalogNodeTitles,
+} from '@/components/dataPage/catalog-node-utils';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { splitId } from '@/lib/data/catalog-ids';
 import {
@@ -205,8 +209,8 @@ function ColumnBlock({
 				onToggle={() => setOpen((o) => !o)}
 				hasChildren={false}
 				name={column.column_name}
-				icon={iconForCatalogNode(DataModels.COLUMN)}
-				title={catalogNodeLabel(DataModels.COLUMN)}
+				icon={catalogNodeIcons[DataModels.COLUMN]}
+				title={catalogNodeTitles[DataModels.COLUMN]}
 				selected={selectedId === columnFocusPath}
 				href={catalogPathFromFocusId(columnFocusPath, pathBase)}
 			/>
@@ -270,8 +274,8 @@ function TableBlock({
 				hasChildren={hasChildren}
 				loading={loading}
 				name={table.name}
-				icon={iconForCatalogNode(DataModels.TABLE, table.table_type)}
-				title={catalogNodeLabel(DataModels.TABLE, table.table_type)}
+				icon={catalogNodeIcons[catalogKindForTableType(table.table_type)]}
+				title={catalogNodeTitles[catalogKindForTableType(table.table_type)]}
 				selected={selectedId === tableFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(tableFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateTable : undefined}
@@ -357,8 +361,8 @@ function SchemaBlock({
 				hasChildren={hasChildren}
 				loading={loadingTables}
 				name={schema.schema_name}
-				icon={iconForCatalogNode(DataModels.SCHEMA)}
-				title={catalogNodeLabel(DataModels.SCHEMA)}
+				icon={catalogNodeIcons[DataModels.SCHEMA]}
+				title={catalogNodeTitles[DataModels.SCHEMA]}
 				selected={selectedId === schemaFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(schemaFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateSchemaBranch : undefined}
@@ -444,8 +448,8 @@ function DatabaseBlock({
 				hasChildren={hasChildren}
 				loading={loadingSchemas}
 				name={database.name}
-				icon={iconForCatalogNode(DataModels.DB)}
-				title={catalogNodeLabel(DataModels.DB)}
+				icon={catalogNodeIcons[DataModels.DB]}
+				title={catalogNodeTitles[DataModels.DB]}
 				selected={selectedId === database.id}
 				href={undefined}
 				onActivateBranch={activateDatabaseBranch}

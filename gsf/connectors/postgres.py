@@ -74,18 +74,18 @@ class PostgresDatabase(SQLDatabase):
     def get_tables(self) -> pd.DataFrame:
         # Filter tables that are part of partitioned tables.
         # relkind distinguishes materialized views (m) from ordinary tables (r).
-        view = TableTypes.VIEW
-        matview = TableTypes.MATERIALIZED_VIEW
-        base = TableTypes.BASE_TABLE
+        view_type = TableTypes.VIEW
+        materialized_view_type = TableTypes.MATERIALIZED_VIEW
+        base_table_type = TableTypes.BASE_TABLE
         return self.execute(f"""
             SELECT
                 t.table_schema AS table_schema,
                 t.table_name   AS table_name,
                 CASE c.relkind
-                    WHEN 'v' THEN '{view}'
-                    WHEN 'm' THEN '{matview}'
-                    ELSE '{base}'
-                END AS type
+                    WHEN 'v' THEN '{view_type}'
+                    WHEN 'm' THEN '{materialized_view_type}'
+                    ELSE '{base_table_type}'
+                END AS table_type
             FROM information_schema.tables t
             JOIN pg_namespace n ON n.nspname = t.table_schema
             JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
