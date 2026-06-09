@@ -14,7 +14,13 @@ from gsf.semantic.domain import DomainSummary
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.queue import TablesQueue
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
-from gsf.semantic.models import BusinessQuestionItem, ColumnAttributeSpec
+from gsf.semantic.models import (
+    BusinessQuestionItem,
+    ColumnAttributeSpec,
+    TableTermsResult,
+    TermAttributeAssignment,
+    TermProposal,
+)
 from gsf.semantic.vdb_discovery import (
     discover_tables_via_vdb,
     generate_business_questions,
@@ -50,6 +56,23 @@ def build_data_retriever(database_name: str) -> Retriever | None:
         return None
 
 
+def _terms_with_assignments(
+    term_result: TableTermsResult,
+    spec_by_column: dict[str, ColumnAttributeSpec],
+) -> list[tuple[TermProposal, list[TermAttributeAssignment]]]:
+    """Terms that have at least one resolvable column attribute."""
+    persisted: list[tuple[TermProposal, list[TermAttributeAssignment]]] = []
+    for term in term_result.terms:
+        assignments = [
+            assignment
+            for assignment in term.attributes
+            if assignment.source_column in spec_by_column
+        ]
+        if assignments:
+            persisted.append((term, assignments))
+    return persisted
+
+
 def visit_enter(
     table: dict[str, Any],
     ctx: dict[str, Any],
@@ -80,19 +103,18 @@ def visit_enter(
     spec_by_column: dict[str, ColumnAttributeSpec] = {
         spec.source_column: spec for spec in specs
     }
+    persisted_terms = _terms_with_assignments(term_result, spec_by_column)
     attr_count = 0
 
-    for term in term_result.terms:
+    for term, assignments in persisted_terms:
         neo4j_dal.merge_term(term.name, term.description, table_id)
         if term.is_a_parent:
             neo4j_dal.merge_is_a(term.name, term.is_a_parent)
         if term.part_of_target:
             neo4j_dal.merge_part_of(term.name, term.part_of_target)
 
-        for assignment in term.attributes:
-            spec = spec_by_column.get(assignment.source_column)
-            if spec is None:
-                continue
+        for assignment in assignments:
+            spec = spec_by_column[assignment.source_column]
             neo4j_dal.merge_column_attribute(
                 term_name=term.name,
                 table_id=table_id,
@@ -108,7 +130,7 @@ def visit_enter(
     question_items: list[BusinessQuestionItem] = []
     if retriever is not None:
         seen_questions: set[tuple[str, str, str]] = set()
-        for term in term_result.terms:
+        for term, _ in persisted_terms:
             term_questions = generate_business_questions(table, ctx, term.name)
             term_items: list[BusinessQuestionItem] = []
             for item in term_questions.items:
@@ -140,7 +162,7 @@ def visit_enter(
             term_items,
         )
 
-    term_names = [t.name for t in term_result.terms]
+    term_names = [term.name for term, _ in persisted_terms]
     logger.info(
         "Enter %s → Terms %s (%d attrs, %d suspected FKs, %d vdb neighbors, %d question ROLE)",
         table_name,

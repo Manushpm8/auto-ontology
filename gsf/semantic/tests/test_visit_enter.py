@@ -114,6 +114,7 @@ def test_enter_skips_question_roles_without_retriever(
     )
 
     mock_write_roles.assert_not_called()
+    mock_dal.merge_term.assert_not_called()
     mock_dal.merge_role_edge.assert_not_called()
 
 
@@ -136,14 +137,33 @@ def test_enter_unions_questions_from_all_terms(
         BusinessQuestionsResult,
         PotentialFkResult,
         TableTermsResult,
+        TermAttributeAssignment,
         TermProposal,
     )
 
     mock_fk_suggest.return_value = PotentialFkResult()
     mock_term.return_value = TableTermsResult(
         terms=[
-            TermProposal(name="Order", description="Order entity"),
-            TermProposal(name="OrderLine", description="Line item"),
+            TermProposal(
+                name="Order",
+                description="Order entity",
+                attributes=[
+                    TermAttributeAssignment(
+                        source_column="amount",
+                        display_name="Total Amount",
+                    )
+                ],
+            ),
+            TermProposal(
+                name="Order Line",
+                description="Line item",
+                attributes=[
+                    TermAttributeAssignment(
+                        source_column="quantity",
+                        display_name="Quantity",
+                    )
+                ],
+            ),
         ]
     )
 
@@ -167,7 +187,13 @@ def test_enter_unions_questions_from_all_terms(
     mock_write_roles.return_value = 1
 
     table = {"id": "t1", "name": "orders", "description": ""}
-    ctx = {"columns": [{"name": "amount", "data_type": "numeric"}], "fks": []}
+    ctx = {
+        "columns": [
+            {"name": "amount", "data_type": "numeric"},
+            {"name": "quantity", "data_type": "integer"},
+        ],
+        "fks": [],
+    }
     queue = TablesQueue({"orders": table}, join_edges=[])
 
     visit_enter(
@@ -184,3 +210,64 @@ def test_enter_unions_questions_from_all_terms(
     discovered_items = mock_vdb.call_args[0][0]
     assert len(discovered_items) == 2
     assert mock_write_roles.call_count == 2
+    assert mock_dal.merge_term.call_count == 2
+
+
+@patch("gsf.semantic.visit_enter.neo4j_dal")
+@patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("gsf.semantic.visit_enter.extract_term")
+def test_enter_skips_terms_without_attributes(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_dal: MagicMock,
+) -> None:
+    from gsf.semantic.models import (
+        PotentialFkResult,
+        TableTermsResult,
+        TermAttributeAssignment,
+        TermProposal,
+    )
+
+    mock_fk_suggest.return_value = PotentialFkResult()
+    mock_term.return_value = TableTermsResult(
+        terms=[
+            TermProposal(
+                name="Purchase Order",
+                description="Main entity",
+                attributes=[
+                    TermAttributeAssignment(
+                        source_column="amount",
+                        display_name="Total Amount",
+                    )
+                ],
+            ),
+            TermProposal(
+                name="Audit Metadata",
+                description="No columns assigned",
+                attributes=[],
+            ),
+        ]
+    )
+
+    table = {"id": "t1", "name": "purchase_orders", "description": ""}
+    ctx = {
+        "columns": [{"name": "amount", "data_type": "numeric"}],
+        "fks": [],
+    }
+    queue = TablesQueue({"purchase_orders": table}, join_edges=[])
+
+    visit_enter(
+        table,
+        ctx,
+        queue=queue,
+        hop=0,
+        retriever=None,
+        domain_summary=None,
+    )
+
+    mock_dal.merge_term.assert_called_once_with(
+        "Purchase Order",
+        "Main entity",
+        "t1",
+    )
+    mock_dal.merge_column_attribute.assert_called_once()
