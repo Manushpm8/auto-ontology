@@ -98,7 +98,7 @@ def list_tables_for_schema(
               (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
         RETURN t.id AS id,
                t.name AS name,
-               t.type AS table_type,
+               t.table_type AS table_type,
                db.name AS database_name,
                s.name AS schema_name, t.description AS description,
                count(c) AS columns_count
@@ -135,6 +135,7 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
                  sample_values: c.sample_values
              }}) AS columns
         RETURN t.name AS table_name,
+               t.table_type AS table_type,
                s.name AS schema_name,
                db.name AS database_name,
                size(columns) AS columns_count,
@@ -336,6 +337,7 @@ def _get_tables_and_columns_by_node_ids(
             RETURN t.id AS id,
                    t.name AS table_name,
                    t.schema_name AS table_schema,
+                   t.table_type AS table_type,
                    t.description AS description,
                    t.db_name AS db_name
             """,

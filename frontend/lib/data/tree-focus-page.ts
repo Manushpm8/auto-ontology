@@ -3,7 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SinglePageFormat } from '@/components/dataPage/SinglePageView';
-import { catalogNodeLabel } from '@/components/dataPage/catalog-node-icons';
+import {
+	catalogKindForTableType,
+	catalogNodeTitles,
+} from '@/components/dataPage/catalog-node-utils';
 import { ComposerSectionKind, DataModels, TreeFocusState } from '@/enums/datasources';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import type { ComposerSection } from '@/types/composer-section';
@@ -186,7 +189,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: database.name,
-						label: catalogNodeLabel(DataModels.DB),
+						label: catalogNodeTitles[DataModels.DB],
 						entityId: database.id,
 						parentId: workspaceDataId,
 					},
@@ -220,7 +223,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: schema.schema_name,
-						label: `${catalogNodeLabel(DataModels.SCHEMA)} · ${database.name}`,
+						label: `${catalogNodeTitles[DataModels.SCHEMA]} · ${database.name}`,
 						entityId: schema.id,
 						parentId: database.id,
 					},
@@ -229,7 +232,7 @@ export function buildTreeFocusPageFormat(
 		}
 		case DataModels.TABLE: {
 			const { database, schema, table } = resolvedFocus;
-			const tableTypeLabel = catalogNodeLabel(DataModels.TABLE, table.type);
+			const tableTypeLabel = catalogNodeTitles[catalogKindForTableType(table.table_type)];
 			sections.push(
 				...baseCardsForEntity(table.description ?? '', [
 					{ label: 'Type', value: tableTypeLabel },
@@ -303,7 +306,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: column.column_name,
-						label: `${catalogNodeLabel(DataModels.COLUMN)} · ${column.table_name}`,
+						label: `${catalogNodeTitles[DataModels.COLUMN]} · ${column.table_name}`,
 						entityId: column.id,
 						parentId: table.id,
 					},
