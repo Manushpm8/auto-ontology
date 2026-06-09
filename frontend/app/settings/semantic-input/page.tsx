@@ -417,7 +417,7 @@ const SettingsSection = ({
 	);
 };
 
-export default function CustomPropertiesSettingsPage() {
+export default function SemanticInputSettingsPage() {
 	const [prompts, setPrompts] = useState<Prompt[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);

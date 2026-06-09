@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 export const SETTINGS_NAV_ITEMS = [
-	{ label: 'Custom Properties', href: '/settings/custom-properties' },
+	{ label: 'Semantic Input', href: '/settings/semantic-input' },
 	{ label: 'Connections', href: '/settings/connections' },
 ] as const;
 
