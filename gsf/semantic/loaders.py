@@ -69,6 +69,24 @@ RETURN t.id AS id,
        t.pk as pk
 """
 
+_FETCH_TABLE_BY_NAME = f"""
+MATCH (t:{Labels.TABLE} {{name: $name}})
+OPTIONAL MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
+RETURN t.id AS id,
+       t.name AS name,
+       coalesce(s.name, '') AS schema_name,
+       t.description AS description,
+       t.pk as pk
+LIMIT 1
+"""
+
+_FETCH_JOIN_NEIGHBORS = f"""
+MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.JOIN}]-(other:{Labels.TABLE})
+RETURN DISTINCT other.id AS id,
+                other.name AS name,
+                other.description AS description
+"""
+
 
 def fetch_sorted_tables() -> list[dict[str, Any]]:
     """All tables in Neo4j ordered by query_count descending."""
@@ -89,6 +107,16 @@ def fetch_sorted_tables() -> list[dict[str, Any]]:
 def fetch_table_by_id(table_id: str) -> dict[str, Any] | None:
     rows = get_neo4j_conn().query_read(_FETCH_TABLE_BY_ID, {"table_id": table_id})
     return rows[0] if rows else None
+
+
+def fetch_table_by_name(name: str) -> dict[str, Any] | None:
+    rows = get_neo4j_conn().query_read(_FETCH_TABLE_BY_NAME, {"name": name})
+    return rows[0] if rows else None
+
+
+def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
+    """JOIN-adjacent tables (undirected), one row per neighbour."""
+    return get_neo4j_conn().query_read(_FETCH_JOIN_NEIGHBORS, {"table_id": table_id})
 
 
 def fetch_table_context(table_id: str) -> dict[str, Any]:

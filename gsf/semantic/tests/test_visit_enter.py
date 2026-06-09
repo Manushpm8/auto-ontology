@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
-from gsf.semantic.visit_enter import visit_enter
-from gsf.semantic.queue import TablesQueue
+from gsf.semantic.visit_enter import VisitContext, visit_enter
 
 
+def _make_vctx(*, retriever: Any = None) -> VisitContext:
+    return VisitContext(
+        retriever=retriever,
+        embedder=None,
+        domain_summary=None,
+    )
+
+
+@patch("gsf.semantic.visit_enter.fetch_join_neighbors", return_value=[])
+@patch("gsf.semantic.visit_enter.visit_finalize", return_value=0)
 @patch("gsf.semantic.visit_enter.neo4j_dal")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
 @patch("gsf.semantic.visit_enter.extract_term")
@@ -21,6 +31,8 @@ def test_enter_writes_question_roles_after_discovery(
     mock_term: MagicMock,
     mock_fk_suggest: MagicMock,
     mock_dal: MagicMock,
+    _mock_finalize: MagicMock,
+    _mock_join_nbrs: MagicMock,
 ) -> None:
     from gsf.semantic.models import (
         BusinessQuestionItem,
@@ -62,18 +74,9 @@ def test_enter_writes_question_roles_after_discovery(
         "columns": [{"name": "amount", "data_type": "numeric"}],
         "fks": [],
     }
-    queue = TablesQueue({"orders": table}, join_edges=[])
-    retriever = MagicMock()
+    vctx = _make_vctx(retriever=MagicMock())
 
-    visit_enter(
-        table,
-        ctx,
-        queue=queue,
-        hop=0,
-        retriever=retriever,
-        domain_summary=None,
-        embedder=None,
-    )
+    visit_enter(table, ctx, vctx=vctx, hop=0)
 
     mock_dal.merge_term.assert_called_once()
     mock_dal.mark_suspected_foreign_keys.assert_called_once_with("t1", [])
@@ -81,6 +84,8 @@ def test_enter_writes_question_roles_after_discovery(
     mock_dal.merge_role_edge.assert_not_called()
 
 
+@patch("gsf.semantic.visit_enter.fetch_join_neighbors", return_value=[])
+@patch("gsf.semantic.visit_enter.visit_finalize", return_value=0)
 @patch("gsf.semantic.visit_enter.neo4j_dal")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
 @patch("gsf.semantic.visit_enter.extract_term")
@@ -90,6 +95,8 @@ def test_enter_skips_question_roles_without_retriever(
     mock_term: MagicMock,
     mock_fk_suggest: MagicMock,
     mock_dal: MagicMock,
+    _mock_finalize: MagicMock,
+    _mock_join_nbrs: MagicMock,
 ) -> None:
     from gsf.semantic.models import PotentialFkResult, TableTermsResult, TermProposal
 
@@ -103,23 +110,17 @@ def test_enter_skips_question_roles_without_retriever(
         "columns": [{"name": "amount", "data_type": "numeric"}],
         "fks": [],
     }
-    queue = TablesQueue({"orders": table}, join_edges=[])
+    vctx = _make_vctx()
 
-    visit_enter(
-        table,
-        ctx,
-        queue=queue,
-        hop=0,
-        retriever=None,
-        domain_summary=None,
-        embedder=None,
-    )
+    visit_enter(table, ctx, vctx=vctx, hop=0)
 
     mock_write_roles.assert_not_called()
     mock_dal.merge_term.assert_not_called()
     mock_dal.merge_role_edge.assert_not_called()
 
 
+@patch("gsf.semantic.visit_enter.fetch_join_neighbors", return_value=[])
+@patch("gsf.semantic.visit_enter.visit_finalize", return_value=0)
 @patch("gsf.semantic.visit_enter.neo4j_dal")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
 @patch("gsf.semantic.visit_enter.extract_term")
@@ -133,6 +134,8 @@ def test_enter_unions_questions_from_all_terms(
     mock_term: MagicMock,
     mock_fk_suggest: MagicMock,
     mock_dal: MagicMock,
+    _mock_finalize: MagicMock,
+    _mock_join_nbrs: MagicMock,
 ) -> None:
     from gsf.semantic.models import (
         BusinessQuestionItem,
@@ -196,17 +199,9 @@ def test_enter_unions_questions_from_all_terms(
         ],
         "fks": [],
     }
-    queue = TablesQueue({"orders": table}, join_edges=[])
+    vctx = _make_vctx(retriever=MagicMock())
 
-    visit_enter(
-        table,
-        ctx,
-        queue=queue,
-        hop=0,
-        retriever=MagicMock(),
-        domain_summary=None,
-        embedder=None,
-    )
+    visit_enter(table, ctx, vctx=vctx, hop=0)
 
     assert mock_questions.call_count == 2
     mock_vdb.assert_called_once()
@@ -216,6 +211,8 @@ def test_enter_unions_questions_from_all_terms(
     assert mock_dal.merge_term.call_count == 2
 
 
+@patch("gsf.semantic.visit_enter.fetch_join_neighbors", return_value=[])
+@patch("gsf.semantic.visit_enter.visit_finalize", return_value=0)
 @patch("gsf.semantic.visit_enter.neo4j_dal")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
 @patch("gsf.semantic.visit_enter.extract_term")
@@ -223,6 +220,8 @@ def test_enter_skips_terms_without_attributes(
     mock_term: MagicMock,
     mock_fk_suggest: MagicMock,
     mock_dal: MagicMock,
+    _mock_finalize: MagicMock,
+    _mock_join_nbrs: MagicMock,
 ) -> None:
     from gsf.semantic.models import (
         PotentialFkResult,
@@ -257,17 +256,9 @@ def test_enter_skips_terms_without_attributes(
         "columns": [{"name": "amount", "data_type": "numeric"}],
         "fks": [],
     }
-    queue = TablesQueue({"purchase_orders": table}, join_edges=[])
+    vctx = _make_vctx()
 
-    visit_enter(
-        table,
-        ctx,
-        queue=queue,
-        hop=0,
-        retriever=None,
-        domain_summary=None,
-        embedder=None,
-    )
+    visit_enter(table, ctx, vctx=vctx, hop=0)
 
     mock_dal.merge_term.assert_called_once_with(
         "Purchase Order",

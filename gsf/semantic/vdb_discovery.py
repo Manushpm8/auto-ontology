@@ -161,7 +161,7 @@ def discover_tables_via_vdb(
     *,
     top_k: int = 5,
 ) -> list[str]:
-    """Return table names from data-layer VDB hits (catalog filtering is in TablesQueue)."""
+    """Return table names from data-layer VDB hits (catalog filtering is in _ordered_neighbours)."""
     discovered: list[str] = []
     where = _build_table_discovery_where(retriever)
     vdb_kwargs = {"where": where} if where else None
