@@ -11,22 +11,13 @@ const tableTypeToCatalogKind: Record<TableType, DataModels> = {
 	[TableType.MATERIALIZED_VIEW]: DataModels.MATERIALIZED_VIEW,
 };
 
-export const catalogNodeIcons: Record<DataModels, IconName> = {
-	[DataModels.DB]: IconName.Database,
-	[DataModels.SCHEMA]: IconName.Schema,
-	[DataModels.TABLE]: IconName.Table,
-	[DataModels.VIEW]: IconName.View,
-	[DataModels.MATERIALIZED_VIEW]: IconName.MaterializedView,
-	[DataModels.COLUMN]: IconName.Column,
-};
-
-export const catalogNodeTitles: Record<DataModels, string> = {
-	[DataModels.DB]: 'database',
-	[DataModels.SCHEMA]: 'schema',
-	[DataModels.TABLE]: 'table',
-	[DataModels.VIEW]: 'view',
-	[DataModels.MATERIALIZED_VIEW]: 'materialized view',
-	[DataModels.COLUMN]: 'column',
+export const catalogNodeInfo: Record<DataModels, { icon: IconName; title: string }> = {
+	[DataModels.DB]: { icon: IconName.Database, title: 'database' },
+	[DataModels.SCHEMA]: { icon: IconName.Schema, title: 'schema' },
+	[DataModels.TABLE]: { icon: IconName.Table, title: 'table' },
+	[DataModels.VIEW]: { icon: IconName.View, title: 'view' },
+	[DataModels.MATERIALIZED_VIEW]: { icon: IconName.MaterializedView, title: 'materialized view' },
+	[DataModels.COLUMN]: { icon: IconName.Column, title: 'column' },
 };
 
 export function catalogKindForTableType(tableType: TableType | string | undefined): DataModels {
