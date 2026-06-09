@@ -72,6 +72,7 @@ def test_enter_writes_question_roles_after_discovery(
         hop=0,
         retriever=retriever,
         domain_summary=None,
+        embedder=None,
     )
 
     mock_dal.merge_term.assert_called_once()
@@ -111,6 +112,7 @@ def test_enter_skips_question_roles_without_retriever(
         hop=0,
         retriever=None,
         domain_summary=None,
+        embedder=None,
     )
 
     mock_write_roles.assert_not_called()
@@ -203,6 +205,7 @@ def test_enter_unions_questions_from_all_terms(
         hop=0,
         retriever=MagicMock(),
         domain_summary=None,
+        embedder=None,
     )
 
     assert mock_questions.call_count == 2
@@ -263,6 +266,7 @@ def test_enter_skips_terms_without_attributes(
         hop=0,
         retriever=None,
         domain_summary=None,
+        embedder=None,
     )
 
     mock_dal.merge_term.assert_called_once_with(

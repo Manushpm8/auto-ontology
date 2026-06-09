@@ -11,6 +11,7 @@ from nemo_retriever.retriever import Retriever
 from gsf.semantic import neo4j_dal
 from gsf.semantic.deterministic import column_attribute_specs, fk_target_table_names
 from gsf.semantic.domain import DomainSummary
+from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.queue import TablesQueue
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
@@ -81,6 +82,7 @@ def visit_enter(
     hop: int,
     retriever: Retriever | None,
     domain_summary: DomainSummary | None,
+    embedder: SemanticEmbedder | None = None,
 ) -> None:
     """First visit: local semantic nodes, discovery, enqueue, question ROLE edges."""
     table_id = table["id"]
@@ -124,6 +126,26 @@ def visit_enter(
                 description=spec.description,
             )
             attr_count += 1
+
+        if embedder is not None:
+            attrs_rows = [
+                {
+                    "name": spec_by_column[a.source_column].display_name,
+                    "term_name": term.name,
+                    "source_column": a.source_column,
+                    "description": spec_by_column[a.source_column].description,
+                }
+                for a in assignments
+            ]
+            try:
+                embedder.embed_term(
+                    {"name": term.name, "description": term.description},
+                    attrs_rows,
+                )
+            except Exception:
+                logger.warning(
+                    "Inline embed failed for %s.%s", table_name, term.name
+                )
 
     vdb_names: list[str] = []
     questions_by_term: list[tuple[str, list[BusinessQuestionItem]]] = []

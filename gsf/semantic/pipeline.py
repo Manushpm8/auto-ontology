@@ -7,6 +7,7 @@ from typing import Any
 
 from gsf.semantic import neo4j_dal
 from gsf.semantic.domain import DomainSummary, load_domain_summary
+from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.loaders import (
     build_tables_index,
     fetch_join_edges,
@@ -29,6 +30,7 @@ def _run_bfs_pass(
     join_edges: list[dict[str, Any]],
     domain_summary: DomainSummary | None,
     retriever: Any,
+    embedder: SemanticEmbedder | None,
     tree_index: int,
     pass_label: str,
 ) -> list[str]:
@@ -63,6 +65,7 @@ def _run_bfs_pass(
             hop=entry.hop,
             retriever=retriever,
             domain_summary=domain_summary,
+            embedder=embedder,
         )
         visit_order.append(table["id"])
 
@@ -87,6 +90,7 @@ def run_bfs_tree(
     join_edges: list[dict[str, Any]],
     domain_summary: DomainSummary | None,
     retriever: Any,
+    embedder: SemanticEmbedder | None,
     tree_index: int,
 ) -> list[str]:
     """Expand from seed; re-seed from orphans until none remain."""
@@ -103,6 +107,7 @@ def run_bfs_tree(
             join_edges=join_edges,
             domain_summary=domain_summary,
             retriever=retriever,
+            embedder=embedder,
             tree_index=tree_index,
             pass_label=pass_label,
         )
@@ -138,6 +143,7 @@ def compile_semantic_layer(
     *,
     resume: bool = True,
     domain_summary: DomainSummary | None = None,
+    embedder: SemanticEmbedder | None = None,
 ) -> int:
     """Run full semantic compilation over the entire Neo4j graph."""
     summary = domain_summary or load_domain_summary(database_name)
@@ -195,6 +201,7 @@ def compile_semantic_layer(
             join_edges=join_edges,
             domain_summary=summary,
             retriever=retriever,
+            embedder=embedder,
             tree_index=tree_index,
         )
         total_processed += len(visit_order)
