@@ -25,14 +25,14 @@ const toCreatePayload = (input: ConnectionInput) => {
 
 	if (!input.tested) return err('Connection must be tested before creating.');
 
-	const dbName = parseConnectionDatabaseName(connectionString);
-	if (!dbName) return err('Could not determine database name from connection string.');
+	const databaseName = parseConnectionDatabaseName(connectionString);
+	if (!databaseName) return err('Could not determine database name from connection string.');
 
 	return {
-		name: dbName,
+		name: databaseName,
 		type: input.type,
 		connectionString,
-		database: { dbName },
+		database: { databaseName },
 	};
 };
 
