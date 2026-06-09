@@ -32,7 +32,7 @@ const toCreatePayload = (input: ConnectionInput) => {
 		name: databaseName,
 		type: input.type,
 		connectionString,
-		database: { databaseName },
+		database: { dbName: databaseName },
 	};
 };
 

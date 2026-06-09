@@ -2,7 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Data access for UI-managed database connections (Neo4j only)."""
+"""Data access for UI-managed database connections (Neo4j only).
+
+Connection metadata is stored directly on ``Labels.DB`` nodes so that the UI
+connection and the catalog database share a single node.  The connection-specific
+fields are prefixed with ``connection_`` to avoid collisions with the built-in
+``name`` / ``id`` fields of the DB node.
+"""
 
 from __future__ import annotations
 
@@ -34,15 +40,13 @@ def _schema_counts_by_database_name() -> dict[str, int]:
 def _connection_node_to_public(
     props: dict[str, Any], schema_counts: dict[str, int]
 ) -> dict[str, Any]:
-    catalog_db = catalog_database_name(props)
-    last_pulled = props.get("last_pulled")
-    create_date = props.get("create_date")
+    catalog_db = str(props.get("name") or "").strip()
     return {
-        "id": str(props["id"]),
-        "name": props["name"],
-        "type": props["type"],
-        "create_date": create_date,
-        "last_pulled": last_pulled,
+        "id": str(props["connection_id"]),
+        "name": props["connection_name"],
+        "type": props["connection_type"],
+        "create_date": props.get("connection_create_date"),
+        "last_pulled": props.get("connection_last_pulled"),
         "num_of_schemas": schema_counts.get(catalog_db, 0),
         "database": catalog_db,
     }
@@ -52,10 +56,11 @@ def list_connections() -> list[dict[str, Any]]:
     """Return all connections for the settings UI (no credentials)."""
     schema_counts = _schema_counts_by_database_name()
     rows = get_neo4j_conn().query_read(
-        """
-        MATCH (c:connection)
-        RETURN properties(c) AS props
-        ORDER BY c.name
+        f"""
+        MATCH (db:{Labels.DB})
+        WHERE db.connection_id IS NOT NULL
+        RETURN properties(db) AS props
+        ORDER BY db.connection_name
         """
     )
     return [
@@ -69,13 +74,13 @@ def list_connections_for_ingest() -> list[tuple[str | None, str]]:
     seen_databases: set[str] = set()
     try:
         rows = get_neo4j_conn().query_read(
-            """
-            MATCH (c:connection)
-            WHERE c.connection_string IS NOT NULL
-            RETURN c.id AS id,
-                   c.connection_string AS connection_string,
-                   c.database_name AS database_name
-            ORDER BY c.name
+            f"""
+            MATCH (db:{Labels.DB})
+            WHERE db.connection_string IS NOT NULL AND db.connection_id IS NOT NULL
+            RETURN db.connection_id AS id,
+                   db.connection_string AS connection_string,
+                   db.name AS database_name
+            ORDER BY db.connection_name
             """
         )
         for row in rows:
@@ -103,8 +108,8 @@ def get_all_connection_strings() -> list[str]:
         rows = get_neo4j_conn().query_read(
             f"""
             MATCH (db:{Labels.DB})
-            WHERE db.connection IS NOT NULL
-            RETURN DISTINCT db.connection AS connection_string
+            WHERE db.connection_string IS NOT NULL
+            RETURN DISTINCT db.connection_string AS connection_string
             """
         )
         for row in rows:
@@ -118,19 +123,16 @@ def get_all_connection_strings() -> list[str]:
     if strings:
         return strings
 
-    return [
-        connection_string
-        for _, connection_string in list_connections_for_ingest()
-        if connection_string and connection_string not in seen
-    ]
+    raw = os.environ.get("CONNECTION_STRINGS", "")
+    return [cs.strip() for cs in raw.split(",") if cs.strip()]
 
 
 def update_last_pulled_at(connection_id: str) -> None:
     """Record a successful ingest pass for a UI-managed connection."""
     get_neo4j_conn().query_write(
-        """
-        MATCH (c:connection {id: $connection_id})
-        SET c.last_pulled = $last_pulled
+        f"""
+        MATCH (db:{Labels.DB} {{connection_id: $connection_id}})
+        SET db.connection_last_pulled = $last_pulled
         """,
         {
             "connection_id": connection_id,
@@ -140,12 +142,12 @@ def update_last_pulled_at(connection_id: str) -> None:
 
 
 def find_connection_for_database(database_name: str) -> str | None:
-    """Return the name of an existing UI connection for *database_name*, if any."""
+    """Return the display name of an existing UI connection for *database_name*, if any."""
     rows = get_neo4j_conn().query_read(
-        """
-        MATCH (c:connection)
-        WHERE c.database_name = $database_name
-        RETURN c.name AS name
+        f"""
+        MATCH (db:{Labels.DB} {{name: $database_name}})
+        WHERE db.connection_id IS NOT NULL
+        RETURN db.connection_name AS name
         LIMIT 1
         """,
         {"database_name": database_name},
@@ -163,26 +165,25 @@ def insert_connection(
     connection_string: str,
     database_name: str,
 ) -> dict[str, Any]:
-    """Create a connection node in Neo4j and return the public payload."""
+    """Attach connection metadata to the catalog DB node and return the public payload."""
     now = _utc_now().isoformat()
     rows = get_neo4j_conn().query_write(
-        """
-        CREATE (c:connection {
-            id: $id,
-            name: $name,
-            type: $type,
-            connection_string: $connection_string,
-            database_name: $database_name,
-            create_date: $create_date
-        })
-        RETURN properties(c) AS props
+        f"""
+        MERGE (db:{Labels.DB} {{name: $database_name}})
+        ON CREATE SET db.id = randomUUID()
+        SET db.connection_id = $connection_id,
+            db.connection_name = $name,
+            db.connection_type = $type,
+            db.connection_string = $connection_string,
+            db.connection_create_date = $create_date
+        RETURN properties(db) AS props
         """,
         {
-            "id": connection_id,
+            "database_name": database_name,
+            "connection_id": connection_id,
             "name": name,
             "type": connection_type,
             "connection_string": connection_string,
-            "database_name": database_name,
             "create_date": now,
         },
     )
@@ -193,23 +194,23 @@ def insert_connection(
 
 
 def link_database_connection(*, db_name: str, connection_string: str) -> None:
-    """Attach a connection string to a catalog database node."""
+    """Attach a connection string to a catalog database node (idempotent)."""
     get_neo4j_conn().query_write(
         f"""
         MERGE (db:{Labels.DB} {{name: $db_name}})
         ON CREATE SET db.id = randomUUID()
-        SET db.connection = $connection
+        SET db.connection_string = $connection_string
         """,
-        {"db_name": db_name, "connection": connection_string},
+        {"db_name": db_name, "connection_string": connection_string},
     )
 
 
 def get_connection_by_id(connection_id: str) -> dict[str, Any] | None:
-    """Return raw connection node properties, or ``None`` when missing."""
+    """Return raw DB node properties for a connection, or ``None`` when missing."""
     rows = get_neo4j_conn().query_read(
-        """
-        MATCH (c:connection {id: $connection_id})
-        RETURN properties(c) AS props
+        f"""
+        MATCH (db:{Labels.DB} {{connection_id: $connection_id}})
+        RETURN properties(db) AS props
         LIMIT 1
         """,
         {"connection_id": connection_id},
@@ -221,14 +222,7 @@ def get_connection_by_id(connection_id: str) -> dict[str, Any] | None:
 
 def catalog_database_name(props: dict[str, Any]) -> str:
     """Return the catalog ``Database`` name linked to a connection node."""
-    database_name = str(props.get("database_name") or "").strip()
-    if database_name:
-        return database_name
-
-    selected = props.get("selected_databases") or []
-    if selected:
-        return str(selected[0])
-    return ""
+    return str(props.get("name") or "").strip()
 
 
 def list_custom_analysis_ids_for_database(database_name: str) -> list[str]:
@@ -268,11 +262,16 @@ def delete_catalog_for_database(database_name: str) -> None:
 
 
 def delete_connection(connection_id: str) -> None:
-    """Remove a connection node."""
+    """Remove connection metadata from the catalog DB node.
+
+    The DB node itself is kept so that ``delete_catalog_for_database`` can
+    still clean up the schema subtree in a subsequent call.
+    """
     get_neo4j_conn().query_write(
-        """
-        MATCH (c:connection {id: $connection_id})
-        DETACH DELETE c
+        f"""
+        MATCH (db:{Labels.DB} {{connection_id: $connection_id}})
+        REMOVE db.connection_id, db.connection_name, db.connection_type,
+               db.connection_string, db.connection_create_date, db.connection_last_pulled
         """,
         {"connection_id": connection_id},
     )
