@@ -20,6 +20,6 @@ export const catalogNodeInfo: Record<DataModels, { icon: IconName; title: string
 	[DataModels.COLUMN]: { icon: IconName.Column, title: 'column' },
 };
 
-export function catalogKindForTableType(tableType: TableType | string | undefined): DataModels {
-	return tableTypeToCatalogKind[tableType as TableType] ?? DataModels.TABLE;
+export function catalogKindForTableType(tableType: TableType): DataModels {
+	return tableTypeToCatalogKind[tableType] ?? DataModels.TABLE;
 }

@@ -23,7 +23,7 @@ export type Table = {
 	schema_name: string;
 	columns_count: number;
 	columns: Column[];
-	table_type?: TableType;
+	table_type: TableType;
 	description?: string;
 };
 
