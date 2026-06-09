@@ -244,17 +244,21 @@ def get_parent_table_id_for_column(column_id: str) -> str | None:
 
 
 def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
-    """Delete stale VDB rows, re-embed, and append Table/Column rows."""
-    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    """Delete stale VDB rows, re-embed, and append Table/Column rows.
+
+    Embeddings are computed BEFORE any VDB rows are deleted so that a failure
+    in the embedding service leaves the existing rows intact (stale but
+    searchable) rather than removing them with nothing to replace them.
+    """
+    from gsf.utils import get_embed_params
     from gsf.vdb import get_vdb
     from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
     from nemo_retriever.vdb import IngestVdbOperator
 
+    EMBED_PARAMS = get_embed_params()
     unique_ids = set(dict.fromkeys(node_ids))
-    vdb = get_vdb()
-    for nid in unique_ids:
-        vdb.delete_by_id(nid)
 
+    # ── Step 1: build text representations from Neo4j ───────────────────────
     tables_df, columns_df, database_name = _get_tables_and_columns_by_node_ids(
         node_ids,
     )
@@ -281,6 +285,7 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     if not records:
         return
 
+    # ── Step 2: compute embeddings (may raise if service is unavailable) ─────
     embedded = embed_text_main_text_embed(
         pd.DataFrame(records),
         model_name=EMBED_PARAMS.model_name,
@@ -298,6 +303,10 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
             f"Embedding step produced 0/{len(embedded)} tabular rows with embeddings."
         )
 
+    # ── Step 3: replace VDB rows only after embeddings are ready ────────────
+    vdb = get_vdb()
+    for nid in unique_ids:
+        vdb.delete_by_id(nid)
     IngestVdbOperator(vdb=vdb)(rows)
 
 
