@@ -48,7 +48,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 
 from gsf.connectors import get_connectors
 from gsf.server.env import load_server_env
-from gsf.vdb import get_data_vdb
+from gsf.vdb import get_data_vdb, get_semantic_vdb
 
 load_server_env()
 
@@ -103,6 +103,19 @@ def _build_retriever() -> Retriever:
     return Retriever(
         top_k=15,
         vdb_kwargs={"vdb": get_data_vdb()},
+        embed_kwargs={
+            "model_name": EMBED_PARAMS.model_name,
+            "embed_invoke_url": EMBED_PARAMS.embed_invoke_url,
+            "api_key": EMBED_PARAMS.api_key,
+        },
+    )
+
+
+def _build_ontology_retriever() -> Retriever:
+    """Build a retriever for the semantic-layer ontology collection."""
+    return Retriever(
+        top_k=15,
+        vdb_kwargs={"vdb": get_semantic_vdb()},
         embed_kwargs={
             "model_name": EMBED_PARAMS.model_name,
             "embed_invoke_url": EMBED_PARAMS.embed_invoke_url,
@@ -420,6 +433,7 @@ def evaluate(
 
     connectors = _build_connectors()
     retriever = _build_retriever()
+    ontology_retriever = _build_ontology_retriever()
 
     resuming = start_index > 0 and output_path.exists()
     mode = "a" if resuming else "w"
@@ -462,6 +476,7 @@ def evaluate(
                 payload: AgentPayload = {
                     "question": question,
                     "retriever": retriever,
+                    "ontology_retriever": ontology_retriever,
                     "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
@@ -610,6 +625,7 @@ def evaluate_consistency(
 
     connectors = _build_connectors()
     retriever = _build_retriever()
+    ontology_retriever = _build_ontology_retriever()
 
     results: Dict[int, list] = {i: [] for i in range(len(questions))}
 
@@ -627,6 +643,7 @@ def evaluate_consistency(
                 payload: AgentPayload = {
                     "question": question,
                     "retriever": retriever,
+                    "ontology_retriever": ontology_retriever,
                     "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
@@ -697,10 +714,12 @@ def run_single_query(question: str) -> None:
     """Run a single question through the agent and print the result."""
     connectors = _build_connectors()
     retriever = _build_retriever()
+    ontology_retriever = _build_ontology_retriever()
 
     payload: AgentPayload = {
         "question": question,
         "retriever": retriever,
+        "ontology_retriever": ontology_retriever,
         "connectors": connectors,
         "path_state": {},
         "custom_prompts": "",
