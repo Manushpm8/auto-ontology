@@ -6,16 +6,23 @@ from pydantic import BaseModel, Field
 
 
 class TermColumnRef(BaseModel):
-    """LLM output: assign an existing ColumnAttribute by physical column name."""
+    """LLM output: column assignment with a user-friendly display label."""
 
     source_column: str = Field(
         ...,
-        description="Physical column name — must match a candidate attribute.",
+        description="Physical column name — must match a candidate column.",
+    )
+    display_name: str = Field(
+        ...,
+        description=(
+            "User-friendly ColumnAttribute label with spaces between words "
+            "(e.g. Order Date, Total Amount)."
+        ),
     )
 
 
 class TermAttributeAssignment(BaseModel):
-    """Resolved column assignment on a Term (display name from ColumnAttributeSpec)."""
+    """Resolved column assignment on a Term."""
 
     source_column: str
     display_name: str
@@ -24,7 +31,13 @@ class TermAttributeAssignment(BaseModel):
 class RawTermProposal(BaseModel):
     """LLM output: one business Term with column assignments only."""
 
-    name: str = Field(..., description="User-friendly CamelCase business Term name.")
+    name: str = Field(
+        ...,
+        description=(
+            "User-friendly business Term name with spaces between words "
+            "(e.g. Purchase Order)."
+        ),
+    )
     description: str = Field(default="", description="Short business definition.")
     is_a_parent: str | None = Field(
         default=None, description="Parent Term name for IS_A, if applicable."
@@ -34,7 +47,9 @@ class RawTermProposal(BaseModel):
     )
     attributes: list[TermColumnRef] = Field(
         default_factory=list,
-        description="Candidate attributes assigned to this Term (source_column only).",
+        description=(
+            "Candidate columns assigned to this Term with user-friendly display names."
+        ),
     )
 
 
@@ -104,12 +119,26 @@ class SeedSelectionResult(BaseModel):
 
 
 class ColumnAttributeSpec(BaseModel):
-    """Deterministic column → ColumnAttribute mapping (pre-write)."""
+    """Column candidate for Term assignment; display_name set by extract_term."""
 
     source_column: str
     name: str
+    display_name: str = ""
     datatype: str = ""
     description: str | None = None
+
+
+class SingleHopJoin(BaseModel):
+    """LLM output: whether two tables can be joined in one hop."""
+
+    possible: bool = Field(
+        ..., description="True when a direct key join can be inferred."
+    )
+    src_column: str = Field(
+        default="", description="Source table column used for the join."
+    )
+    tgt_column: str = Field(default="", description="Target table PK column joined to.")
+    rationale: str = Field(default="", description="Brief reasoning.")
 
 
 class PotentialFkSuggestion(BaseModel):

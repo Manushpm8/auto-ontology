@@ -79,20 +79,20 @@ def get_term_for_table(table_id: str) -> str | None:
     return rows[0]["name"] if rows else None
 
 
-def get_table_for_term(term_name: str) -> dict[str, str] | None:
+def get_table_for_term(term_name: str) -> dict[str, Any] | None:
     """Physical table mapped to a semantic Term (for ROLE path resolution)."""
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
               (term:{LABEL_TERM} {{name: $term_name, source: $source}})
-        RETURN t.id AS id, t.name AS name
+        RETURN t.id AS id, t.name AS name, t.pk AS pk
         LIMIT 1
         """,
         {"term_name": term_name, "source": SEMANTIC_SOURCE},
     )
     if not rows:
         return None
-    return {"id": rows[0]["id"], "name": rows[0]["name"]}
+    return {"id": rows[0]["id"], "name": rows[0]["name"], "pk": rows[0].get("pk")}
 
 
 def mark_suspected_foreign_keys(
@@ -285,6 +285,23 @@ def fetch_fk_role_pairs(table_id: str) -> list[dict[str, Any]]:
         """,
         {"table_id": table_id, "source": SEMANTIC_SOURCE},
     )
+
+
+def find_shortest_role_path(src_term: str, tgt_term: str) -> list[str] | None:
+    """Shortest path through existing ROLE edges; returns join_path JSON per hop."""
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (src:{LABEL_TERM} {{name: $src, source: $source}}),
+              (tgt:{LABEL_TERM} {{name: $tgt, source: $source}})
+        MATCH p = shortestPath((src)-[:{REL_ROLE}*..8]->(tgt))
+        RETURN [r IN relationships(p) | r.join_path] AS join_paths
+        LIMIT 1
+        """,
+        {"src": src_term, "tgt": tgt_term, "source": SEMANTIC_SOURCE},
+    )
+    if not rows or not rows[0].get("join_paths"):
+        return None
+    return rows[0]["join_paths"]
 
 
 def fetch_all_terms_and_attributes() -> tuple[

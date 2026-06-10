@@ -1,25 +1,38 @@
-"""Enter phase: reviewed → ColumnAttributes + Term + weave → discovery → enqueue."""
+"""Enter phase + recursive post-order DFS driver for semantic compilation."""
 
 from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
+from enum import IntEnum
 from typing import Any
 
 from nemo_retriever.retriever import Retriever
 
 from gsf.semantic import neo4j_dal
-from gsf.semantic.deterministic import column_attribute_specs, fk_target_table_names
+from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
+from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
-from gsf.semantic.queue import TablesQueue
-from gsf.semantic.term_extractor import extract_term
-from gsf.semantic.models import BusinessQuestionItem, ColumnAttributeSpec
+from gsf.semantic.loaders import (
+    fetch_join_neighbors,
+    fetch_table_by_name,
+    fetch_table_context,
+)
+from gsf.semantic.models import (
+    BusinessQuestionItem,
+    ColumnAttributeSpec,
+    TableTermsResult,
+    TermAttributeAssignment,
+    TermProposal,
+)
+from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
 from gsf.semantic.vdb_discovery import (
     discover_tables_via_vdb,
     generate_business_questions,
 )
-from gsf.semantic.visit_finalize import write_question_role_edges
+from gsf.semantic.visit_finalize import resolve_question_roles_two_phase, visit_finalize
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +41,23 @@ _EMBED_ENDPOINT = os.environ.get(
 )
 _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+
+
+class _Priority(IntEnum):
+    """Lower value = visited first within one parent's direct neighbours."""
+
+    JOIN = 1
+    FK = 2
+    VDB = 3
+
+
+@dataclass
+class VisitContext:
+    """Per-compilation traversal config. State lives in Neo4j (reviewed flag)."""
+
+    retriever: Retriever | None
+    embedder: SemanticEmbedder | None
+    domain_summary: DomainSummary | None
 
 
 def build_data_retriever(database_name: str) -> Retriever | None:
@@ -50,24 +80,33 @@ def build_data_retriever(database_name: str) -> Retriever | None:
         return None
 
 
+def _terms_with_assignments(
+    term_result: TableTermsResult,
+    spec_by_column: dict[str, ColumnAttributeSpec],
+) -> list[tuple[TermProposal, list[TermAttributeAssignment]]]:
+    """Terms that have at least one resolvable column attribute."""
+    persisted: list[tuple[TermProposal, list[TermAttributeAssignment]]] = []
+    for term in term_result.terms:
+        assignments = [
+            assignment
+            for assignment in term.attributes
+            if assignment.source_column in spec_by_column
+        ]
+        if assignments:
+            persisted.append((term, assignments))
+    return persisted
+
+
 def visit_enter(
     table: dict[str, Any],
     ctx: dict[str, Any],
     *,
-    queue: TablesQueue,
+    vctx: VisitContext,
     hop: int,
-    retriever: Retriever | None,
-    domain_summary: DomainSummary | None,
 ) -> None:
-    """First visit: local semantic nodes, discovery, enqueue, question ROLE edges."""
+    """Merge Terms, recurse into neighbours, then post-order write ROLE edges."""
     table_id = table["id"]
     table_name = table["name"]
-
-    # TODO:
-    # 1. Extract more than one Term per table (optional).
-    # 2. User friendly term name and columns (specs) names.
-    # 3. Set on column nodes (neo4j) suspected as fk. pk columns are not fks.
-    # 4. Do not merge column attributes for fks.
 
     neo4j_dal.mark_table_reviewed(table_id)
     fk_suggestions = suggest_potential_foreign_keys(table, ctx)
@@ -81,39 +120,57 @@ def visit_enter(
         ctx.get("fks", []),
         suggested_fk_columns=suggested_fk_names,
     )
-    term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
+    term_result = extract_term(table, ctx, specs, domain_summary=vctx.domain_summary)
+    apply_display_names_to_specs(term_result, specs)
     spec_by_column: dict[str, ColumnAttributeSpec] = {
         spec.source_column: spec for spec in specs
     }
+    persisted_terms = _terms_with_assignments(term_result, spec_by_column)
     attr_count = 0
 
-    for term in term_result.terms:
+    for term, assignments in persisted_terms:
         neo4j_dal.merge_term(term.name, term.description, table_id)
         if term.is_a_parent:
             neo4j_dal.merge_is_a(term.name, term.is_a_parent)
         if term.part_of_target:
             neo4j_dal.merge_part_of(term.name, term.part_of_target)
 
-        for assignment in term.attributes:
-            spec = spec_by_column.get(assignment.source_column)
-            if spec is None:
-                continue
+        for assignment in assignments:
+            spec = spec_by_column[assignment.source_column]
             neo4j_dal.merge_column_attribute(
                 term_name=term.name,
                 table_id=table_id,
                 source_column=spec.source_column,
-                attr_name=assignment.display_name,
+                attr_name=spec.display_name,
                 datatype=spec.datatype,
                 description=spec.description,
             )
             attr_count += 1
 
+        if vctx.embedder is not None:
+            attrs_rows = [
+                {
+                    "name": spec_by_column[a.source_column].display_name,
+                    "term_name": term.name,
+                    "source_column": a.source_column,
+                    "description": spec_by_column[a.source_column].description,
+                }
+                for a in assignments
+            ]
+            try:
+                vctx.embedder.embed_term(
+                    {"name": term.name, "description": term.description},
+                    attrs_rows,
+                )
+            except Exception:
+                logger.warning("Inline embed failed for %s.%s", table_name, term.name)
+
     vdb_names: list[str] = []
     questions_by_term: list[tuple[str, list[BusinessQuestionItem]]] = []
     question_items: list[BusinessQuestionItem] = []
-    if retriever is not None:
+    if vctx.retriever is not None:
         seen_questions: set[tuple[str, str, str]] = set()
-        for term in term_result.terms:
+        for term, _ in persisted_terms:
             term_questions = generate_business_questions(table, ctx, term.name)
             term_items: list[BusinessQuestionItem] = []
             for item in term_questions.items:
@@ -125,33 +182,97 @@ def visit_enter(
                 question_items.append(item)
             if term_items:
                 questions_by_term.append((term.name, term_items))
-        vdb_names = discover_tables_via_vdb(question_items, retriever)
+        vdb_names = discover_tables_via_vdb(question_items, vctx.retriever)
 
-    fk_targets = fk_target_table_names(ctx.get("fks", []))
-    queue.discover_neighbors(
+    _process_neighbors(
         table_id,
-        table_name,
-        hop,
-        vdb_table_names=vdb_names,
-        fk_targets=fk_targets,
+        hop=hop,
+        fks=ctx.get("fks", []),
+        vdb_names=vdb_names,
+        vctx=vctx,
     )
 
-    role_count = 0
-    for anchor_term, term_items in questions_by_term:
-        role_count += write_question_role_edges(
+    all_role_intents: list[tuple[str, BusinessQuestionItem]] = [
+        (anchor_term, item)
+        for anchor_term, term_items in questions_by_term
+        for item in term_items
+    ]
+    role_count = (
+        resolve_question_roles_two_phase(
             table_id,
-            anchor_term,
             table_name,
-            term_items,
+            all_role_intents,
+            src_table=table,
+            src_ctx=ctx,
+            suggested_fk_names=suggested_fk_names,
         )
+        if all_role_intents
+        else 0
+    )
 
-    term_names = [t.name for t in term_result.terms]
+    finalize_count = visit_finalize(table_id)
+
+    term_names = [term.name for term, _ in persisted_terms]
     logger.info(
-        "Enter %s → Terms %s (%d attrs, %d suspected FKs, %d vdb neighbors, %d question ROLE)",
+        "Enter %s -> Terms %s (%d attrs, %d suspected FKs, %d vdb neighbors, "
+        "%d question ROLE, %d FK ROLE)",
         table_name,
         term_names,
         attr_count,
         len(fk_suggestions.suggestions),
         len(vdb_names),
         role_count,
+        finalize_count,
     )
+
+
+def _process_neighbors(
+    table_id: str,
+    *,
+    hop: int,
+    fks: list[dict[str, Any]],
+    vdb_names: list[str],
+    vctx: VisitContext,
+) -> None:
+    """Recursively visit this table's direct neighbours in JOIN/FK/VDB order."""
+    for nbr in _collect_neighbours(table_id, fks, vdb_names):
+        if nbr["id"] == table_id:
+            continue
+        nbr_ctx = fetch_table_context(nbr["id"])
+        if nbr_ctx.get("reviewed"):
+            logger.debug("Skip %s — already reviewed", nbr["name"])
+            continue
+        if not nbr_ctx.get("columns"):
+            logger.warning("Table %s has no columns — skipping", nbr["name"])
+            neo4j_dal.mark_table_reviewed(nbr["id"])
+            continue
+        visit_enter(nbr, nbr_ctx, vctx=vctx, hop=hop + 1)
+
+
+def _collect_neighbours(
+    table_id: str,
+    fks: list[dict[str, Any]],
+    vdb_names: list[str],
+) -> list[dict[str, Any]]:
+    """Dedup + priority-sort direct neighbours as full table dicts."""
+    best: dict[str, tuple[int, dict[str, Any]]] = {}
+
+    def _record(nbr: dict[str, Any] | None, priority: _Priority) -> None:
+        if not nbr or not nbr.get("id") or not nbr.get("name"):
+            return
+        current = best.get(nbr["id"])
+        if current is None or int(priority) < current[0]:
+            best[nbr["id"]] = (int(priority), nbr)
+
+    for nbr in fetch_join_neighbors(table_id):
+        _record(nbr, _Priority.JOIN)
+    for fk in fks:
+        target_id = fk.get("target_table_id")
+        target_name = fk.get("target_table")
+        if target_id and target_name:
+            _record({"id": target_id, "name": target_name}, _Priority.FK)
+    for name in vdb_names:
+        row = fetch_table_by_name(name)
+        _record(row, _Priority.VDB)
+
+    return [info[1] for _, info in sorted(best.items(), key=lambda kv: kv[1][0])]
