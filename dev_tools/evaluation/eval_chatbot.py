@@ -46,7 +46,7 @@ from nemo_retriever.retriever import Retriever
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 
-from gsf.connectors.postgres import PostgresDatabase
+from gsf.connectors import get_connectors
 from gsf.server.env import load_server_env
 from gsf.vdb import get_data_vdb
 
@@ -87,21 +87,15 @@ _DEFAULT_INPUT = Path(__file__).parent / "chatbot_evaluation.json"
 _DEFAULT_OUTPUT = Path(__file__).parent / "chatbot_evaluation_scores.csv"
 
 
-def _build_connector() -> PostgresDatabase:
-    """Build the source-DB connector against ``CONNECTION_STRINGS`` (single URL)."""
-    raw = os.environ.get("CONNECTION_STRINGS", "")
-    if not raw:
+def _build_connectors() -> list:
+    """Build source-DB connectors from ``CONNECTION_STRINGS``."""
+    connectors = get_connectors()
+    if not connectors:
         raise EnvironmentError(
             "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
-            "    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
+            "    CONNECTION_STRINGS=snowflake://user:pass@account?warehouse=WH&database=DB"
         )
-    parts = [p for p in raw.split(",") if p.strip()]
-    if len(parts) != 1:
-        raise EnvironmentError(
-            f"CONNECTION_STRINGS must be exactly one URL for eval (got {len(parts)}); "
-            "multi-connector eval isn't supported yet."
-        )
-    return PostgresDatabase(parts[0])
+    return connectors
 
 
 def _build_retriever() -> Retriever:
@@ -162,7 +156,7 @@ def _canonical(value: Any) -> Any:
 
 
 def _execute_sql(
-    connector: PostgresDatabase, sql: str
+    connector: Any, sql: str
 ) -> Tuple[Optional[pd.DataFrame], str]:
     if not sql or not sql.strip():
         return None, "empty SQL"
@@ -176,7 +170,7 @@ def _execute_sql(
 
 
 def _score_sql(
-    connector: PostgresDatabase, expected: str, actual: str
+    connector: Any, expected: str, actual: str
 ) -> Dict[str, Any]:
     text_sim = _sql_text_similarity(expected, actual)
     expected_df, expected_err = _execute_sql(connector, expected)
@@ -424,7 +418,7 @@ def evaluate(
         input_path,
     )
 
-    connector = _build_connector()
+    connectors = _build_connectors()
     retriever = _build_retriever()
 
     resuming = start_index > 0 and output_path.exists()
@@ -468,7 +462,7 @@ def evaluate(
                 payload: AgentPayload = {
                     "question": question,
                     "retriever": retriever,
-                    "connector": connector,
+                    "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
                     "acronyms": [],
@@ -482,12 +476,11 @@ def evaluate(
                 row["returned_sql"] = returned_sql
                 row["returned_answer"] = returned_db_str
 
-                row.update(_score_sql(connector, expected_sql, returned_sql))
+                row.update(_score_sql(connectors[0], expected_sql, returned_sql))
                 row.update(_score_answer(expected_answer, returned_db_str))
             except Exception as exc:
                 logger.exception("Question %s failed", qid)
                 row["error"] = f"{type(exc).__name__}: {exc}"
-                # Truncate traceback into the cell to keep the CSV diff-friendly.
                 row["error"] += (
                     " | " + traceback.format_exc().replace("\n", " | ")[:1000]
                 )
@@ -615,7 +608,7 @@ def evaluate_consistency(
         output_path,
     )
 
-    connector = _build_connector()
+    connectors = _build_connectors()
     retriever = _build_retriever()
 
     results: Dict[int, list] = {i: [] for i in range(len(questions))}
@@ -634,7 +627,7 @@ def evaluate_consistency(
                 payload: AgentPayload = {
                     "question": question,
                     "retriever": retriever,
-                    "connector": connector,
+                    "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
                     "acronyms": [],
@@ -702,13 +695,13 @@ def evaluate_consistency(
 
 def run_single_query(question: str) -> None:
     """Run a single question through the agent and print the result."""
-    connector = _build_connector()
+    connectors = _build_connectors()
     retriever = _build_retriever()
 
     payload: AgentPayload = {
         "question": question,
         "retriever": retriever,
-        "connector": connector,
+        "connectors": connectors,
         "path_state": {},
         "custom_prompts": "",
         "acronyms": [],
@@ -723,7 +716,7 @@ def run_single_query(question: str) -> None:
 
 SINGLE_QUERY = "list all actors"
 
-START_INDEX = 0
+START_INDEX = 1
 END_INDEX = None  # None = run to the end
 CONSISTENCY_RUNS = 10
 RUN_CONSISTENCY = False
