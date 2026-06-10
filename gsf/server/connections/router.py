@@ -21,21 +21,19 @@ router = APIRouter()
 
 class ConnectionPublic(BaseModel):
     id: str
-    name: str
     type: str
     create_date: str | None = None
     last_pulled: str | None = None
-    database: str
+    database_name: str
 
 
 class ConnectionDatabase(BaseModel):
-    db_name: str = Field(alias="dbName")
+    db_name: str = Field(alias="databaseName")
 
     model_config = {"populate_by_name": True}
 
 
 class ConnectionCreate(BaseModel):
-    name: str
     type: str
     connection_string: str = Field(default="", alias="connectionString")
     database: ConnectionDatabase
@@ -78,7 +76,6 @@ def test_connection(body: ConnectionTest) -> dict:
 def create_connection(body: ConnectionCreate) -> dict:
     try:
         row = service.create_connection(
-            name=body.name,
             connection_type=body.type,
             connection_string=body.connection_string,
             database=body.database.model_dump(by_alias=False),

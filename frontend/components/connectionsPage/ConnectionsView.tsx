@@ -20,7 +20,7 @@ export const ConnectionsView = () => {
 	const [connectionModalOpen, setConnectionModalOpen] = useState(false);
 	const [deletingConnection, setDeletingConnection] = useState<{
 		id: string;
-		name: string;
+		databaseName: string;
 	} | null>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -62,9 +62,9 @@ export const ConnectionsView = () => {
 		void fetchConnections();
 	};
 
-	const handleDeleteRequest = (id: string, name: string) => {
+	const handleDeleteRequest = (id: string, databaseName: string) => {
 		setDeleteError(null);
-		setDeletingConnection({ id, name });
+		setDeletingConnection({ id, databaseName });
 	};
 
 	const handleDeleteClose = () => {
@@ -165,7 +165,7 @@ export const ConnectionsView = () => {
 					deletingConnection ? (
 						<>
 							Are you sure you want to remove{' '}
-							<strong>{deletingConnection.name}</strong>? Its catalog data and
+							<strong>{deletingConnection.databaseName}</strong>? Its catalog data and
 							embeddings will be deleted. This action cannot be undone.
 						</>
 					) : null

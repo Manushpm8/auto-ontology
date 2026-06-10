@@ -28,14 +28,12 @@ def _utc_now() -> datetime:
 
 
 def _connection_node_to_public(props: dict[str, Any]) -> dict[str, Any]:
-    catalog_db = str(props.get("name") or "").strip()
     return {
         "id": str(props["connection_id"]),
-        "name": props["connection_name"],
         "type": props["connection_type"],
         "create_date": props.get("connection_create_date"),
         "last_pulled": props.get("connection_last_pulled"),
-        "database": catalog_db,
+        "database_name": str(props.get("name") or "").strip(),
     }
 
 

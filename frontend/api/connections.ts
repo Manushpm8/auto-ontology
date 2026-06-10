@@ -29,10 +29,9 @@ const toCreatePayload = (input: ConnectionInput) => {
 	if (!databaseName) return err('Could not determine database name from connection string.');
 
 	return {
-		name: databaseName,
 		type: input.type,
 		connectionString,
-		database: { dbName: databaseName },
+		database: { databaseName },
 	};
 };
 

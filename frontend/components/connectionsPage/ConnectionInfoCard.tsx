@@ -28,7 +28,7 @@ export const ConnectionInfoCard = ({
 				<div className="flex min-w-0 items-center gap-1">
 					<Icon name={IconName.Database} className="h-5 w-5 shrink-0 text-[#76b900]" />
 					<h3 className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-						{connection.name}
+						{connection.database_name}
 					</h3>
 				</div>
 				<div className="relative shrink-0">
@@ -44,7 +44,8 @@ export const ConnectionInfoCard = ({
 								{
 									label: 'Remove',
 									icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
-									onClick: () => onDelete(connection.id, connection.name),
+									onClick: () =>
+										onDelete(connection.id, connection.database_name),
 									danger: true,
 								},
 							]}
@@ -53,7 +54,7 @@ export const ConnectionInfoCard = ({
 									type="button"
 									onClick={toggle}
 									className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-									aria-label={`Actions for ${connection.name}`}
+									aria-label={`Actions for ${connection.database_name}`}
 								>
 									<Icon name={IconName.DotsVertical} className="h-4 w-4" />
 								</button>

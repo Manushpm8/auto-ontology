@@ -87,16 +87,11 @@ def _trigger_ingest(connection_id: str, connection_string: str) -> None:
 
 def create_connection(
     *,
-    name: str,
     connection_type: str,
     connection_string: str,
     database: DataSource,
 ) -> dict[str, Any]:
     """Create a UI-managed connection stored in Neo4j."""
-    name = name.strip()
-    if not name:
-        raise ValueError("Connection name is required")
-
     connection_string = connection_string.strip()
     if not connection_string:
         raise ValueError("Connection string is required")
@@ -116,7 +111,7 @@ def create_connection(
     try:
         row = dal.insert_connection(
             connection_id=connection_id,
-            name=name,
+            name=database_name,
             connection_type=connection_type,
             connection_string=connection_string,
             database_name=database_name,
