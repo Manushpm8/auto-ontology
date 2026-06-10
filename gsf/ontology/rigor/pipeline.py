@@ -311,7 +311,7 @@ def build_ontology(
         logger.info("-" * 40)
         logger.info("Writing ontology to Neo4j")
         logger.info("-" * 40)
-        stats = write_ontology_to_neo4j(ontology)
+        stats = write_ontology_to_neo4j(ontology, schema_name=schema_name)
         logger.info("Write stats: %s", stats)
 
     # -----------------------------------------------------------------

@@ -30,14 +30,54 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _extract_join_pairs(sql_text: str) -> list[tuple[str, str]]:
-    """Parse a SQL query and extract (source_table, target_table) JOIN pairs."""
-    pairs: list[tuple[str, str]] = []
+class _JoinInfo:
+    """Parsed JOIN details: tables and columns from the ON clause."""
+
+    __slots__ = ("source_table", "target_table", "source_column", "target_column")
+
+    def __init__(
+        self,
+        source_table: str,
+        target_table: str,
+        source_column: str = "",
+        target_column: str = "",
+    ) -> None:
+        self.source_table = source_table
+        self.target_table = target_table
+        self.source_column = source_column
+        self.target_column = target_column
+
+
+def _resolve_column_table(col: exp.Column, aliases: dict[str, str]) -> tuple[str, str]:
+    """Return (table_name, column_name) for a Column expression."""
+    col_name = col.name
+    tbl = col.table
+    if tbl:
+        tbl = aliases.get(tbl, tbl)
+    return tbl, col_name
+
+
+def _collect_table_aliases(node: exp.Expression) -> dict[str, str]:
+    """Map alias -> real table name for FROM/JOIN tables."""
+    aliases: dict[str, str] = {}
+    for tbl in node.find_all(exp.Table):
+        real = tbl.name
+        alias = tbl.alias
+        if real and alias:
+            aliases[alias] = real
+    return aliases
+
+
+def _extract_join_pairs(sql_text: str) -> list[_JoinInfo]:
+    """Parse a SQL query and extract JOIN details including columns."""
+    results: list[_JoinInfo] = []
     try:
         parsed = sqlglot.parse_one(sql_text, dialect="postgres")
     except sqlglot.errors.ParseError:
         logger.debug("Failed to parse SQL: %.100s", sql_text)
-        return pairs
+        return results
+
+    aliases = _collect_table_aliases(parsed)
 
     for join in parsed.find_all(exp.Join):
         join_table = join.find(exp.Table)
@@ -56,10 +96,27 @@ def _extract_join_pairs(sql_text: str) -> list[tuple[str, str]]:
             continue
         source = source_tbl.name
 
-        if source and target and source != target:
-            pairs.append((source, target))
+        if not source or not target or source == target:
+            continue
 
-    return pairs
+        src_col = ""
+        tgt_col = ""
+        on_clause = join.find(exp.EQ)
+        if on_clause is not None:
+            cols = list(on_clause.find_all(exp.Column))
+            if len(cols) == 2:
+                t0, c0 = _resolve_column_table(cols[0], aliases)
+                t1, c1 = _resolve_column_table(cols[1], aliases)
+                if t0 == source and t1 == target:
+                    src_col, tgt_col = c0, c1
+                elif t1 == source and t0 == target:
+                    src_col, tgt_col = c1, c0
+                else:
+                    src_col, tgt_col = c0, c1
+
+        results.append(_JoinInfo(source, target, src_col, tgt_col))
+
+    return results
 
 
 def _to_term_name(table_name: str) -> str:
@@ -84,10 +141,10 @@ def extract_join_edges(
         if not sql:
             continue
 
-        pairs = _extract_join_pairs(sql)
-        for source, target in pairs:
-            src_term = ontology.resolve_term(source)
-            tgt_term = ontology.resolve_term(target)
+        joins = _extract_join_pairs(sql)
+        for info in joins:
+            src_term = ontology.resolve_term(info.source_table)
+            tgt_term = ontology.resolve_term(info.target_table)
 
             pair_key = (src_term, tgt_term)
             reverse_key = (tgt_term, src_term)
@@ -106,7 +163,10 @@ def extract_join_edges(
                     source_term=src_term,
                     target_term=tgt_term,
                     provenance=Provenance(
-                        source_table=source,
+                        source_table=info.source_table,
+                        source_column=info.source_column or None,
+                        target_table=info.target_table or None,
+                        target_column=info.target_column or None,
                         derivation="sql_join_inferred",
                     ),
                 )

@@ -110,8 +110,19 @@ RETURN m.name AS sql_attr, bt.name AS term
 # ---------------------------------------------------------------------------
 
 
-def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
+def _qualify_table(table: str, schema: str) -> str:
+    """Return ``SCHEMA.TABLE`` if *schema* is non-empty, else *table* as-is."""
+    return f"{schema}.{table}" if schema else table
+
+
+def write_ontology_to_neo4j(
+    ontology: CoreOntology,
+    schema_name: str = "",
+) -> dict[str, int]:
     """Write the entire CoreOntology to Neo4j.
+
+    *schema_name* is used to qualify ``source_tables`` entries on
+    BusinessTerm and SqlAttribute nodes (e.g. ``"SALES.CUSTOMERS"``).
 
     Returns a summary of how many elements were written.
     """
@@ -128,7 +139,9 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
     # 1. Write BusinessTerm nodes
     for term in ontology.business_terms:
         node_id = str(uuid.uuid4())
-        source_tables = sorted({p.source_table for p in term.provenance})
+        source_tables = sorted(
+            {_qualify_table(p.source_table, schema_name) for p in term.provenance}
+        )
         rows = conn.query_write(
             _MERGE_BUSINESS_TERM,
             {
@@ -201,6 +214,9 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
     # 4. Write SqlAttribute nodes + link to ColumnAttributes or BusinessTerms
     for metric in ontology.metrics:
         node_id = str(uuid.uuid4())
+        qualified_src = sorted(
+            _qualify_table(t, schema_name) for t in metric.source_tables
+        )
         rows = conn.query_write(
             _MERGE_SQL_ATTRIBUTE,
             {
@@ -208,7 +224,7 @@ def write_ontology_to_neo4j(ontology: CoreOntology) -> dict[str, int]:
                 "name": metric.name,
                 "expression": metric.expression,
                 "aggregation_type": metric.aggregation_type.value,
-                "source_tables": metric.source_tables,
+                "source_tables": qualified_src,
                 "source": RIGOR_SOURCE,
             },
         )

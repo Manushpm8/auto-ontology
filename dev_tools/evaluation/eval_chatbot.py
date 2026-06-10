@@ -143,12 +143,17 @@ def _execute_sql(
 
 
 def _score_sql(
-    connector: SQLDatabase, expected: str, actual: str,
-    *, schema_name: str = "",
+    connector: SQLDatabase,
+    expected: str,
+    actual: str,
+    *,
+    schema_name: str = "",
 ) -> Dict[str, Any]:
     text_sim = _sql_text_similarity(expected, actual)
     expected_df, expected_err = _execute_sql(
-        connector, expected, schema_name=schema_name,
+        connector,
+        expected,
+        schema_name=schema_name,
     )
     actual_df, actual_err = _execute_sql(connector, actual)
     exec_match = 0
@@ -363,7 +368,10 @@ def _print_agent_result(
         if val is None:
             continue
         print(f"\n  [{key}]")
-        for line in str(val).splitlines():
+        text = str(val)
+        if key == "sql_response_from_db" and len(text) > 500:
+            text = text[:500] + f"... ({len(text)} chars total)"
+        for line in text.splitlines():
             print(f"    {line}")
     remaining = {
         k: v
@@ -456,7 +464,9 @@ def evaluate(
                 row["returned_answer"] = returned_db_str
 
                 score = _score_sql(
-                    connectors[0], expected_sql, returned_sql,
+                    connectors[0],
+                    expected_sql,
+                    returned_sql,
                     schema_name=db_id,
                 )
                 row.update(score)
