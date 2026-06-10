@@ -28,9 +28,12 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import EmbedParams, TabularExtractParams
 from gsf.vdb import get_data_vdb
-from gsf.connectors.postgres import PostgresDatabase
+from gsf.connectors import get_connectors
+from gsf.server.env import load_server_env
 
 from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
+
+load_server_env()
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
@@ -60,17 +63,15 @@ EMBED_PARAMS = EmbedParams(
     embed_modality="text",
 )
 
-# Remote source DB to extract tabular schema/embeddings from. Kept separate
-# from the local POSTGRES_* vars (which point at the pgvector store).
-_CONNECTION_STRINGS = os.environ.get("CONNECTION_STRINGS", "").split(",")
-if not _CONNECTION_STRINGS:
+_connectors = get_connectors()
+if not _connectors:
     raise EnvironmentError(
         "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
-        "    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
+        "    CONNECTION_STRINGS=snowflake://user:pass@account?warehouse=WH&database=DB"
     )
 
 TABULAR_PARAMS = TabularExtractParams(
-    connector=PostgresDatabase(_CONNECTION_STRINGS[0]),
+    connector=_connectors[0],
 )
 
 
@@ -139,10 +140,10 @@ def run_retrieve() -> None:
     payload: AgentPayload = {
         "question": question,
         "retriever": retriever,
-        "connector": TABULAR_PARAMS.connector,
+        "connectors": _connectors,
         "path_state": {},
         "custom_prompts": "",
-        "acronyms": "",
+        "acronyms": [],
     }
 
     agent_result = get_agent_response(payload)
