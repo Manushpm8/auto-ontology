@@ -71,7 +71,7 @@ def _trigger_ingest(connection_id: str, connection_string: str) -> None:
         try:
             from gsf.ingestion_service.ingest import run_ingest
 
-            run_ingest(connection_string, connection_id=connection_id)
+            run_ingest(connection_string)
         except Exception:
             logger.exception(
                 "Background ingest failed for connection %s",

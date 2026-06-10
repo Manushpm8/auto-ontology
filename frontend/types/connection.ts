@@ -8,7 +8,6 @@ export type Connection = {
 	id: string;
 	type: string;
 	create_date?: string | null;
-	last_pulled?: string | null;
 	database_name: string;
 };
 

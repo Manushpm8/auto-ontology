@@ -22,7 +22,7 @@ from gsf.server.connections import dal as connections_dal
 logger = logging.getLogger("ingestion_service.ingest")
 
 
-def run_ingest(connection_string: str, *, connection_id: str | None = None) -> None:
+def run_ingest(connection_string: str) -> None:
     TABULAR_PARAMS = TabularExtractParams(
         connector=create_connector(connection_string),
     )
@@ -58,8 +58,6 @@ def run_ingest(connection_string: str, *, connection_id: str | None = None) -> N
             connection_string=connection_string,
         )
 
-        if connection_id is not None:
-            connections_dal.update_last_pulled_at(connection_id)
     finally:
         TABULAR_PARAMS.connector.close()
 

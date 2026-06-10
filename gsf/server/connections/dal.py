@@ -32,7 +32,6 @@ def _connection_node_to_public(props: dict[str, Any]) -> dict[str, Any]:
         "id": str(props["connection_id"]),
         "type": props["connection_type"],
         "create_date": props.get("connection_create_date"),
-        "last_pulled": props.get("connection_last_pulled"),
         "database_name": str(props.get("name") or "").strip(),
     }
 
@@ -107,20 +106,6 @@ def get_all_connection_strings() -> list[str]:
 
     raw = os.environ.get("CONNECTION_STRINGS", "")
     return [cs.strip() for cs in raw.split(",") if cs.strip()]
-
-
-def update_last_pulled_at(connection_id: str) -> None:
-    """Record a successful ingest pass for a UI-managed connection."""
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (db:{Labels.DB} {{connection_id: $connection_id}})
-        SET db.connection_last_pulled = $last_pulled
-        """,
-        {
-            "connection_id": connection_id,
-            "last_pulled": _utc_now().isoformat(),
-        },
-    )
 
 
 def find_connection_for_database(database_name: str) -> str | None:
@@ -251,7 +236,7 @@ def delete_connection(connection_id: str) -> None:
         f"""
         MATCH (db:{Labels.DB} {{connection_id: $connection_id}})
         REMOVE db.connection_id, db.connection_name, db.connection_type,
-               db.connection_string, db.connection_create_date, db.connection_last_pulled
+               db.connection_string, db.connection_create_date
         """,
         {"connection_id": connection_id},
     )

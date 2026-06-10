@@ -42,7 +42,7 @@ async def ingest() -> None:
     logger.info("ingest: starting (%s connection(s))", len(connections))
     for connection_id, connection_string in connections:
         try:
-            run_ingest(connection_string, connection_id=connection_id)
+            run_ingest(connection_string)
         except Exception:
             logger.exception(
                 "ingest: failed for connection %s",

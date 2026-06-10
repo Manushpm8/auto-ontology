@@ -70,12 +70,6 @@ export const ConnectionInfoCard = ({
 						{formatConnectionTimestamp(connection.create_date)}
 					</span>
 				</div>
-				<div className="flex h-8 w-full items-center justify-between gap-4">
-					<span className="text-sm text-zinc-500 dark:text-zinc-400">Last Pulled</span>
-					<span className="text-sm text-zinc-800 dark:text-zinc-200">
-						{formatConnectionTimestamp(connection.last_pulled)}
-					</span>
-				</div>
 			</div>
 		</article>
 	);
