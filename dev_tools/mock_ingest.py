@@ -70,7 +70,7 @@ _TABLES: list[tuple[str, str, list[tuple[str, str]]]] = [
         "_customer",
         "_id",
         [
-            ("_id", "integer"),
+            ("_id", "uuid"),
             ("name1", "text"),
             ("_phone", "text"),
             ("email2", "text"),
@@ -80,8 +80,8 @@ _TABLES: list[tuple[str, str, list[tuple[str, str]]]] = [
         "orders1",
         "id1",
         [
-            ("id1", "integer"),
-            ("_customer_id", "integer"),
+            ("id1", "uuid"),
+            ("_customer_id", "uuid"),
             ("date2", "date"),
         ],
     ),
@@ -89,17 +89,17 @@ _TABLES: list[tuple[str, str, list[tuple[str, str]]]] = [
         "_orderline",
         "_id",
         [
-            ("_id", "integer"),
-            ("order_id1", "integer"),
+            ("_id", "uuid"),
+            ("order_id1", "uuid"),
             ("_price_paid", "numeric"),
-            ("product_id2", "integer"),
+            ("product_id2", "uuid"),
         ],
     ),
     (
         "products2",
         "_id",
         [
-            ("_id", "integer"),
+            ("_id", "uuid"),
             ("name1", "text"),
             ("_price", "numeric"),
             ("sinceDate2", "date"),
