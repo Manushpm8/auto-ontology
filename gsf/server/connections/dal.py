@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
@@ -23,15 +23,16 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 logger = logging.getLogger(__name__)
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+def _type_from_connection_string(connection_string: str) -> str:
+    """Derive the connector type from the URL scheme (e.g. ``postgresql``)."""
+    scheme = urlparse(connection_string).scheme
+    return scheme.split("+", 1)[0].lower() if scheme else ""
 
 
 def _connection_node_to_public(props: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(props["connection_id"]),
-        "type": props["connection_type"],
-        "create_date": props.get("connection_create_date"),
+        "type": _type_from_connection_string(str(props.get("connection_string") or "")),
         "database_name": str(props.get("name") or "").strip(),
     }
 
@@ -128,30 +129,24 @@ def insert_connection(
     *,
     connection_id: str,
     name: str,
-    connection_type: str,
     connection_string: str,
     database_name: str,
 ) -> dict[str, Any]:
     """Attach connection metadata to the catalog DB node and return the public payload."""
-    now = _utc_now().isoformat()
     rows = get_neo4j_conn().query_write(
         f"""
         MERGE (db:{Labels.DB} {{name: $database_name}})
         ON CREATE SET db.id = randomUUID()
         SET db.connection_id = $connection_id,
             db.connection_name = $name,
-            db.connection_type = $type,
-            db.connection_string = $connection_string,
-            db.connection_create_date = $create_date
+            db.connection_string = $connection_string
         RETURN properties(db) AS props
         """,
         {
             "database_name": database_name,
             "connection_id": connection_id,
             "name": name,
-            "type": connection_type,
             "connection_string": connection_string,
-            "create_date": now,
         },
     )
     assert rows
@@ -235,8 +230,7 @@ def delete_connection(connection_id: str) -> None:
     get_neo4j_conn().query_write(
         f"""
         MATCH (db:{Labels.DB} {{connection_id: $connection_id}})
-        REMOVE db.connection_id, db.connection_name, db.connection_type,
-               db.connection_string, db.connection_create_date
+        REMOVE db.connection_id, db.connection_name, db.connection_string
         """,
         {"connection_id": connection_id},
     )

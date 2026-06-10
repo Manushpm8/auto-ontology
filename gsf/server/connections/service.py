@@ -112,7 +112,6 @@ def create_connection(
         row = dal.insert_connection(
             connection_id=connection_id,
             name=database_name,
-            connection_type=connection_type,
             connection_string=connection_string,
             database_name=database_name,
         )

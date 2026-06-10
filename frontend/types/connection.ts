@@ -7,7 +7,6 @@ import type { ConnectionType } from '@/enums/connection';
 export type Connection = {
 	id: string;
 	type: string;
-	create_date?: string | null;
 	database_name: string;
 };
 

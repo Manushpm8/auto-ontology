@@ -22,7 +22,6 @@ router = APIRouter()
 class ConnectionPublic(BaseModel):
     id: str
     type: str
-    create_date: str | None = None
     database_name: str
 
 

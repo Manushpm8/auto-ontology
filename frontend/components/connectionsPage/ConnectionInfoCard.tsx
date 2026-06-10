@@ -6,7 +6,6 @@
 
 import { Icon, IconName } from '@/components/icons';
 import { PopoverMenu } from '@/components/PopoverMenu';
-import { formatConnectionTimestamp } from '@/lib/formatConnectionTimestamp';
 import type { Connection } from '@/types/connection';
 
 export type ConnectionInfoCardProps = {
@@ -63,14 +62,6 @@ export const ConnectionInfoCard = ({
 					)}
 				</div>
 			</header>
-			<div className="flex w-full flex-col gap-2 border-t border-zinc-200/90 px-5 pb-5 pt-0 dark:border-zinc-700/90">
-				<div className="flex h-8 w-full items-center justify-between gap-4">
-					<span className="text-sm text-zinc-500 dark:text-zinc-400">Created Date</span>
-					<span className="text-sm text-zinc-800 dark:text-zinc-200">
-						{formatConnectionTimestamp(connection.create_date)}
-					</span>
-				</div>
-			</div>
 		</article>
 	);
 };
