@@ -78,11 +78,8 @@ def apply_metadata(database_name: str) -> None:
     metadata_path = DEFAULT_DIR / f"{database_name}.json"
 
     if not metadata_path.exists():
-        raise SystemExit(
-            f"Metadata file not found: {metadata_path}\n"
-            f"Expected a JSON file describing tables/columns for database "
-            f"{database_name!r}."
-        )
+        logger.info("No metadata file at %s — skipping enrichment.", metadata_path)
+        return
 
     with metadata_path.open() as f:
         raw = json.load(f)
