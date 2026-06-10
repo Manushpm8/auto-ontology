@@ -110,6 +110,32 @@
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
+    },
+    {
+      "name": "Debug Mock Ingest",
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "module": "dev_tools.mock_ingest",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Semantic: compile mock_shop",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.semantic",
+      "args": [
+        "--database-name",
+        "mock_shop"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
   ]
 }
