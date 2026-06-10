@@ -32,7 +32,7 @@ from gsf.semantic.vdb_discovery import (
     discover_tables_via_vdb,
     generate_business_questions,
 )
-from gsf.semantic.visit_finalize import visit_finalize, write_question_role_edges
+from gsf.semantic.visit_finalize import resolve_question_roles_two_phase, visit_finalize
 
 logger = logging.getLogger(__name__)
 
@@ -163,9 +163,7 @@ def visit_enter(
                     attrs_rows,
                 )
             except Exception:
-                logger.warning(
-                    "Inline embed failed for %s.%s", table_name, term.name
-                )
+                logger.warning("Inline embed failed for %s.%s", table_name, term.name)
 
     vdb_names: list[str] = []
     questions_by_term: list[tuple[str, list[BusinessQuestionItem]]] = []
@@ -194,14 +192,23 @@ def visit_enter(
         vctx=vctx,
     )
 
-    role_count = 0
-    for anchor_term, term_items in questions_by_term:
-        role_count += write_question_role_edges(
+    all_role_intents: list[tuple[str, BusinessQuestionItem]] = [
+        (anchor_term, item)
+        for anchor_term, term_items in questions_by_term
+        for item in term_items
+    ]
+    role_count = (
+        resolve_question_roles_two_phase(
             table_id,
-            anchor_term,
             table_name,
-            term_items,
+            all_role_intents,
+            src_table=table,
+            src_ctx=ctx,
+            suggested_fk_names=suggested_fk_names,
         )
+        if all_role_intents
+        else 0
+    )
 
     finalize_count = visit_finalize(table_id)
 

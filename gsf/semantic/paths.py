@@ -18,10 +18,20 @@ _DATA_PATH = f"""
 MATCH (src:{Labels.TABLE} {{id: $src_table_id}}),
       (tgt:{Labels.TABLE} {{id: $tgt_table_id}})
 MATCH p = shortestPath(
-    (src)-[:{Edges.FOREIGN_KEY}|{Edges.JOIN}*..8]-(tgt)
+    (src)-[:{Edges.CONTAINS}|{Edges.FOREIGN_KEY}|{Edges.JOIN}*..14]-(tgt)
 )
-RETURN [n IN nodes(p) | n.name] AS path_nodes,
-       [r IN relationships(p) | type(r)] AS path_rels
+WITH p,
+     [n IN nodes(p) WHERE n:{Labels.TABLE} | n.name] AS path_nodes,
+     [i IN range(0, size(relationships(p)) - 1)
+      WHERE type(relationships(p)[i]) IN ['{Edges.FOREIGN_KEY}', '{Edges.JOIN}'] |
+      {{
+        via: type(relationships(p)[i]),
+        src_column: startNode(relationships(p)[i]).name,
+        tgt_column: endNode(relationships(p)[i]).name
+      }}
+     ] AS join_conditions
+WHERE size(path_nodes) >= 2
+RETURN path_nodes, join_conditions
 LIMIT 1
 """
 
@@ -41,13 +51,24 @@ def compute_join_path(
     )
     if not rows or not rows[0].get("path_nodes"):
         return None
-    nodes = rows[0]["path_nodes"]
-    rels = rows[0].get("path_rels") or []
-    steps: list[dict[str, Any]] = []
-    for i, node in enumerate(nodes):
-        step: dict[str, Any] = {"node": node, "type": "Table"}
-        if i < len(rels):
-            step["via"] = rels[i]
+    path_nodes: list[str] = rows[0]["path_nodes"]
+    join_conditions: list[dict[str, Any]] = rows[0].get("join_conditions") or []
+
+    last = len(path_nodes) - 1
+    steps: list[dict[str, Any]] = [
+        {"node": path_nodes[0], "type": "Table", "role": "source"}
+    ]
+    for i, table_name in enumerate(path_nodes[1:]):
+        step: dict[str, Any] = {
+            "node": table_name,
+            "type": "Table",
+            "role": "target" if i == last - 1 else "intermediate",
+        }
+        if i < len(join_conditions):
+            cond = join_conditions[i]
+            step["via"] = cond["via"]
+            step["src_column"] = cond["src_column"]
+            step["tgt_column"] = cond["tgt_column"]
         steps.append(step)
     return steps
 

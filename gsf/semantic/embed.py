@@ -81,18 +81,14 @@ def build_semantic_embedder(
     """Construct an embedder bound to the semantic VDB, or None when disabled."""
     api_key = os.environ.get("NVIDIA_API_KEY", "")
     if not api_key:
-        logger.warning(
-            "NVIDIA_API_KEY not set — semantic VDB embedding disabled"
-        )
+        logger.warning("NVIDIA_API_KEY not set — semantic VDB embedding disabled")
         return None
 
     embed_params = EmbedParams(
         embed_invoke_url=os.environ.get(
             "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
         ),
-        model_name=os.environ.get(
-            "EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2"
-        ),
+        model_name=os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2"),
         api_key=api_key,
         embed_modality="text",
     )

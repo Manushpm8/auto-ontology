@@ -128,6 +128,19 @@ class ColumnAttributeSpec(BaseModel):
     description: str | None = None
 
 
+class SingleHopJoin(BaseModel):
+    """LLM output: whether two tables can be joined in one hop."""
+
+    possible: bool = Field(
+        ..., description="True when a direct key join can be inferred."
+    )
+    src_column: str = Field(
+        default="", description="Source table column used for the join."
+    )
+    tgt_column: str = Field(default="", description="Target table PK column joined to.")
+    rationale: str = Field(default="", description="Brief reasoning.")
+
+
 class PotentialFkSuggestion(BaseModel):
     """One column the LLM suspects is a foreign key."""
 
