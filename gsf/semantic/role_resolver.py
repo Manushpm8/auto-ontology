@@ -60,6 +60,13 @@ def _src_col_lines(
     return "\n".join(lines)
 
 
+def _hop_has_columns(hop: dict[str, Any]) -> bool:
+    """A hop is complete only when both join columns are named."""
+    return bool(hop.get("source", {}).get("column")) and bool(
+        hop.get("target", {}).get("column")
+    )
+
+
 def resolve_single_hop_join(
     src_table_id: str,
     src_table_name: str,
@@ -68,16 +75,28 @@ def resolve_single_hop_join(
     suggested_fk_names: set[str],
     tgt_table: dict[str, Any],
 ) -> list[dict[str, Any]] | None:
-    """Return a join_path list for a single-hop join, or None if not possible.
+    """Return a hop-centric join_path or None.
 
-    First tries the deterministic FK/JOIN graph path; if absent, asks the LLM
-    to infer a join from column annotations and suggested foreign keys.
+    Each element: ``{"hop": N, "source": {"table": ..., "column": ...},
+                                "target": {"table": ..., "column": ...}}``
+
+    Priority:
+    1. Deterministic graph path (FK/JOIN edges) — compute_join_path already
+       returns None when any hop lacks column conditions.
+    2. LLM inference from column annotations and suggested foreign keys.
+    Returns None when neither resolves; caller falls through to Phase 2.
     """
     tgt_table_id = tgt_table["id"]
 
     path = compute_join_path(src_table_id, tgt_table_id)
-    if path:
+    if path is not None and all(_hop_has_columns(h) for h in path):
         return path
+    if path is not None:
+        logger.debug(
+            "Graph path %s → %s found but missing column conditions; trying LLM",
+            src_table_name,
+            tgt_table["name"],
+        )
 
     tgt_pk = _normalize_pk(tgt_table.get("pk"))
     src_pk_list = _normalize_pk(src_pk)
@@ -120,15 +139,11 @@ def resolve_single_hop_join(
         result.tgt_column,
     )
     return [
-        {"node": src_table_name, "type": "Table", "role": "source"},
         {
-            "node": tgt_table["name"],
-            "type": "Table",
-            "role": "target",
-            "via": "JOIN",
-            "src_column": result.src_column,
-            "tgt_column": result.tgt_column,
-        },
+            "hop": 1,
+            "source": {"table": src_table_name, "column": result.src_column},
+            "target": {"table": tgt_table["name"], "column": result.tgt_column},
+        }
     ]
 
 
@@ -136,7 +151,7 @@ def find_semantic_role_path(
     src_term: str,
     tgt_term: str,
 ) -> list[dict[str, Any]] | None:
-    """Concatenate join_paths along the shortest existing ROLE chain.
+    """Concatenate hop lists along the shortest existing ROLE chain, renumbering hops.
 
     Used in Phase 2 when no direct single-hop join exists between the source
     and target tables, but a multi-hop path through already-created ROLE edges
@@ -147,7 +162,7 @@ def find_semantic_role_path(
         return None
 
     merged: list[dict[str, Any]] = []
-    for i, jp_raw in enumerate(join_paths):
+    for jp_raw in join_paths:
         try:
             segment: list[dict[str, Any]] = (
                 json.loads(jp_raw) if isinstance(jp_raw, str) else jp_raw
@@ -157,11 +172,12 @@ def find_semantic_role_path(
                 "Could not parse join_path segment for %s→%s", src_term, tgt_term
             )
             continue
-        if not segment:
-            continue
-        if i == 0:
-            merged.extend(segment)
-        else:
-            merged.extend(segment[1:])
+        for hop in segment:
+            if not _hop_has_columns(hop):
+                logger.warning(
+                    "Skipping incomplete hop in ROLE path %s→%s", src_term, tgt_term
+                )
+                continue
+            merged.append({**hop, "hop": len(merged) + 1})
 
     return merged or None
