@@ -22,6 +22,19 @@ const nextConfig: NextConfig = {
 			},
 		},
 	},
+	webpack(config) {
+		const fileLoaderRule = config.module.rules.find(
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any -- webpack rule type is untyped
+			(rule: any) => rule.test instanceof RegExp && rule.test.test('.svg'),
+		);
+		if (fileLoaderRule) fileLoaderRule.exclude = /\.svg$/i;
+		config.module.rules.push({
+			test: /\.svg$/i,
+			issuer: /\.[jt]sx?$/,
+			use: [{ loader: '@svgr/webpack', options: { svgo: false } }],
+		});
+		return config;
+	},
 	async rewrites() {
 		return [
 			{
