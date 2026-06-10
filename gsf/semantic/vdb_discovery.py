@@ -32,7 +32,14 @@ def _build_table_discovery_where(retriever: Retriever) -> dict[str, Any] | str |
     )
 
 
-def _question_system_prompt(anchor_term: str) -> str:
+def _question_system_prompt(anchor_term: str, fk_targets: list[str]) -> str:
+    fk_exclusion = (
+        f"6. FK EXCLUSION: Do NOT generate an entity that corresponds to a direct FK "
+        f"target of this table ({', '.join(fk_targets)}). "
+        f"Those relationships are created automatically — focus on non-FK business angles."
+        if fk_targets
+        else ""
+    )
     return f"""\
 Generate exactly 3 simple business questions to discover related database tables.
 
@@ -42,13 +49,13 @@ Rules:
 1. COVERAGE: Each item explores a different business angle. Never repeat the same \
 theme (e.g. only one question about dates/creation, only one about counts, etc.).
 2. CROSS-ENTITY: Each question must involve the anchor Term plus one OTHER business \
-entity suggested by FK targets, column names, or domain context.
+entity suggested by column names or domain context.
 3. entity: REQUIRED CamelCase business entity Term — never "{anchor_term}" or variants. \
 Used for VDB table lookup and for the ROLE edge target at finalize.
 4. role: REQUIRED camelCase ontology ROLE edge name from the anchor Term ({anchor_term}) \
 to entity (e.g. placedBy, fulfilledBy, categorizedBy). Direction is anchor → entity.
 5. question: plain question text only — no "Question:" prefix.
-
+{fk_exclusion}
 Example (anchor Term = Order):
 {{
   "items": [
@@ -101,7 +108,7 @@ def _build_question_prompt(
         f"Columns: {cols}\n"
         f"FK target tables: {fk_block}\n"
         f"Known neighbor Terms: {neighbor_block}\n"
-        "Use FK targets and column semantics to invent plausible OTHER business entities."
+        "Use column semantics and domain context to invent plausible OTHER business entities."
     )
 
 
@@ -110,11 +117,12 @@ def generate_business_questions(
     ctx: dict[str, Any],
     term_name: str,
 ) -> BusinessQuestionsResult:
+    fk_targets = fk_target_table_names(ctx.get("fks", []))
     prompt = _build_question_prompt(table, ctx, term_name)
     try:
         return invoke_structured(
             [
-                SystemMessage(content=_question_system_prompt(term_name)),
+                SystemMessage(content=_question_system_prompt(term_name, fk_targets)),
                 HumanMessage(content=prompt),
             ],
             BusinessQuestionsResult,
