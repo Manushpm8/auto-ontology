@@ -27,19 +27,7 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _schema_counts_by_database_name() -> dict[str, int]:
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-        RETURN db.name AS name, count(s) AS schema_count
-        """
-    )
-    return {str(r["name"]): int(r["schema_count"]) for r in rows}
-
-
-def _connection_node_to_public(
-    props: dict[str, Any], schema_counts: dict[str, int]
-) -> dict[str, Any]:
+def _connection_node_to_public(props: dict[str, Any]) -> dict[str, Any]:
     catalog_db = str(props.get("name") or "").strip()
     return {
         "id": str(props["connection_id"]),
@@ -47,14 +35,12 @@ def _connection_node_to_public(
         "type": props["connection_type"],
         "create_date": props.get("connection_create_date"),
         "last_pulled": props.get("connection_last_pulled"),
-        "num_of_schemas": schema_counts.get(catalog_db, 0),
         "database": catalog_db,
     }
 
 
 def list_connections() -> list[dict[str, Any]]:
     """Return all connections for the settings UI (no credentials)."""
-    schema_counts = _schema_counts_by_database_name()
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (db:{Labels.DB})
@@ -63,9 +49,7 @@ def list_connections() -> list[dict[str, Any]]:
         ORDER BY db.connection_name
         """
     )
-    return [
-        _connection_node_to_public(dict(row["props"]), schema_counts) for row in rows
-    ]
+    return [_connection_node_to_public(dict(row["props"])) for row in rows]
 
 
 def list_connections_for_ingest() -> list[tuple[str | None, str]]:
@@ -188,9 +172,7 @@ def insert_connection(
         },
     )
     assert rows
-    return _connection_node_to_public(
-        dict(rows[0]["props"]), _schema_counts_by_database_name()
-    )
+    return _connection_node_to_public(dict(rows[0]["props"]))
 
 
 def link_database_connection(*, db_name: str, connection_string: str) -> None:

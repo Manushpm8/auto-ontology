@@ -8,6 +8,5 @@ export type Connection = {
 	type: string;
 	create_date?: string | null;
 	last_pulled?: string | null;
-	num_of_schemas: number;
 	database: string;
 };

@@ -392,19 +392,19 @@ function DatabaseBlock({
 	const router = useRouter();
 	const containsFocus = selectedId != null && databaseSubtreeContainsFocus(database, selectedId);
 	const [open, setOpen] = useOpenBranch(containsFocus, selectedId, false);
-	const hasChildren = (database.num_of_schemas ?? 0) > 0;
+	const hasChildren = database.schemas.length > 0 || !open;
 	const [loadingSchemas, setLoadingSchemas] = useState(false);
 	const syncDatabaseFocus = useCallback(() => {
 		router.replace(catalogPathFromFocusId(database.id, pathBase), { scroll: false });
 	}, [router, pathBase, database.id]);
 	const activateDatabaseBranch = useCallback(() => {
-		if (selectedId === database.id && (database.num_of_schemas ?? 0) > 0) {
+		if (selectedId === database.id) {
 			setOpen((o) => !o);
 			return;
 		}
 		setOpen(true);
 		syncDatabaseFocus();
-	}, [selectedId, database.id, database.num_of_schemas, setOpen, syncDatabaseFocus]);
+	}, [selectedId, database.id, setOpen, syncDatabaseFocus]);
 
 	useEffect(() => {
 		if (!open || database.schemas.length > 0) return;
@@ -422,7 +422,7 @@ function DatabaseBlock({
 		return () => {
 			cancelled = true;
 		};
-	}, [open, database.id, database.num_of_schemas, database.schemas.length, onLoadSchemas]);
+	}, [open, database.id, database.schemas.length, onLoadSchemas]);
 
 	return (
 		<div>

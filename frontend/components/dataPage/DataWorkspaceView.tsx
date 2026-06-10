@@ -119,7 +119,7 @@ export function DataWorkspaceView() {
 
 		let next = databasesRef.current;
 		const db = next.find((d) => d.id === dbId);
-		if (db && db.schemas.length === 0 && (db.num_of_schemas ?? 0) > 0) {
+		if (db && db.schemas.length === 0) {
 			const r = await datasources.getSchemasForDatabase(dbId);
 			if (r.error === true || !r.data) return;
 			next = mergeSchemasIntoDatabase(next, dbId, r.data);

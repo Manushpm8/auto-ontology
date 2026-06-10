@@ -25,7 +25,6 @@ class ConnectionPublic(BaseModel):
     type: str
     create_date: str | None = None
     last_pulled: str | None = None
-    num_of_schemas: int
     database: str
 
 

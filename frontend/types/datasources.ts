@@ -35,7 +35,6 @@ export type Schema = {
 export type Database = {
 	id: string;
 	name: string;
-	num_of_schemas: number;
 	schemas: Schema[];
 	description?: string;
 };
