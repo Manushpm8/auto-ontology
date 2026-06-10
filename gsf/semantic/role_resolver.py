@@ -47,7 +47,7 @@ def _col_lines(
     lines = []
     for col in columns:
         name = col.get("name", "")
-        dtype = col.get("data_type") or col.get("type", "")
+        dtype = col.get("data_type", "")
         tags = []
         if name in pk_cols:
             tags.append("[PK]")
@@ -104,7 +104,7 @@ def resolve_single_hop_join(
     explicit_fks_to_tgt = [
         fk["source_column"]
         for fk in src_ctx.get("fks", [])
-        if fk.get("target_table") == tgt_table_name and fk.get("source_column")
+        if fk.get("target_table") == tgt_table["name"] and fk.get("source_column")
     ]
 
     tgt_row = fetch_table_by_id(tgt_table_id)
@@ -123,10 +123,19 @@ def resolve_single_hop_join(
         f"Declared FK columns from source pointing at target: {explicit_str}"
     )
 
-    result: SingleHopJoin = invoke_structured(
-        messages=[SystemMessage(content=_SYSTEM), HumanMessage(content=user_msg)],
-        schema=SingleHopJoin,
-    )
+    try:
+        result: SingleHopJoin = invoke_structured(
+            messages=[SystemMessage(content=_SYSTEM), HumanMessage(content=user_msg)],
+            schema=SingleHopJoin,
+        )
+    except Exception:
+        logger.warning(
+            "LLM single-hop inference failed for %s → %s",
+            src_table_name,
+            tgt_table["name"],
+            exc_info=True,
+        )
+        return None
     if not result.possible or not result.src_column:
         logger.debug(
             "LLM: no single-hop join %s → %s (%s)",

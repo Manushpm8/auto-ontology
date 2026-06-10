@@ -149,6 +149,13 @@ def visit_enter(
         spec.source_column: spec for spec in specs
     }
     persisted_terms = _terms_with_assignments(term_result, spec_by_column)
+    if not persisted_terms and specs:
+        logger.warning(
+            "Table %s has %d attribute candidate(s) but no Term was created "
+            "(LLM assigned no matching columns)",
+            table_name,
+            len(specs),
+        )
     attr_count = 0
 
     for term, assignments in persisted_terms:
