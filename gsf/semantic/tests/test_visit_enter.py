@@ -17,21 +17,17 @@ def _make_vctx(*, retriever: Any = None) -> VisitContext:
 
 
 @patch("gsf.semantic.visit_enter.fetch_join_neighbors", return_value=[])
-@patch("gsf.semantic.visit_enter.visit_finalize", return_value=0)
 @patch("gsf.semantic.visit_enter.neo4j_dal")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
 @patch("gsf.semantic.visit_enter.extract_term")
 @patch("gsf.semantic.visit_enter.generate_business_questions")
 @patch("gsf.semantic.visit_enter.discover_tables_via_vdb")
-@patch("gsf.semantic.visit_enter.resolve_question_roles_two_phase")
-def test_enter_writes_question_roles_after_discovery(
-    mock_resolve: MagicMock,
+def test_enter_accumulates_question_roles_after_discovery(
     mock_vdb: MagicMock,
     mock_questions: MagicMock,
     mock_term: MagicMock,
     mock_fk_suggest: MagicMock,
     mock_dal: MagicMock,
-    _mock_finalize: MagicMock,
     _mock_join_nbrs: MagicMock,
 ) -> None:
     from gsf.semantic.models import (
@@ -67,7 +63,6 @@ def test_enter_writes_question_roles_after_discovery(
     ]
     mock_questions.return_value = BusinessQuestionsResult(items=items)
     mock_vdb.return_value = []
-    mock_resolve.return_value = 1
 
     table = {"id": "t1", "name": "orders", "description": ""}
     ctx = {
@@ -80,29 +75,26 @@ def test_enter_writes_question_roles_after_discovery(
 
     mock_dal.merge_term.assert_called_once()
     mock_dal.mark_suspected_foreign_keys.assert_called_once_with("t1", [])
-    mock_resolve.assert_called_once_with(
-        "t1",
-        "orders",
-        [("Order", items[0])],
-        src_table=table,
-        src_ctx=ctx,
-        suggested_fk_names=set(),
-    )
+    # Role edge creation is deferred — nothing written to Neo4j yet.
     mock_dal.merge_role_edge.assert_not_called()
+    # Intent is accumulated in the context.
+    assert len(vctx.pending_question_roles) == 1
+    _tid, _tname, anchor_term, intent, _src_table, _src_ctx, _fk_names = (
+        vctx.pending_question_roles[0]
+    )
+    assert anchor_term == "Order"
+    assert intent.entity == "Customer"
+    assert intent.role == "placedBy"
 
 
 @patch("gsf.semantic.visit_enter.fetch_join_neighbors", return_value=[])
-@patch("gsf.semantic.visit_enter.visit_finalize", return_value=0)
 @patch("gsf.semantic.visit_enter.neo4j_dal")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
 @patch("gsf.semantic.visit_enter.extract_term")
-@patch("gsf.semantic.visit_enter.resolve_question_roles_two_phase")
 def test_enter_skips_question_roles_without_retriever(
-    mock_resolve: MagicMock,
     mock_term: MagicMock,
     mock_fk_suggest: MagicMock,
     mock_dal: MagicMock,
-    _mock_finalize: MagicMock,
     _mock_join_nbrs: MagicMock,
 ) -> None:
     from gsf.semantic.models import PotentialFkResult, TableTermsResult, TermProposal
@@ -121,27 +113,23 @@ def test_enter_skips_question_roles_without_retriever(
 
     visit_enter(table, ctx, vctx=vctx, hop=0)
 
-    mock_resolve.assert_not_called()
     mock_dal.merge_term.assert_not_called()
     mock_dal.merge_role_edge.assert_not_called()
+    assert vctx.pending_question_roles == []
 
 
 @patch("gsf.semantic.visit_enter.fetch_join_neighbors", return_value=[])
-@patch("gsf.semantic.visit_enter.visit_finalize", return_value=0)
 @patch("gsf.semantic.visit_enter.neo4j_dal")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
 @patch("gsf.semantic.visit_enter.extract_term")
 @patch("gsf.semantic.visit_enter.generate_business_questions")
 @patch("gsf.semantic.visit_enter.discover_tables_via_vdb")
-@patch("gsf.semantic.visit_enter.resolve_question_roles_two_phase")
 def test_enter_unions_questions_from_all_terms(
-    mock_resolve: MagicMock,
     mock_vdb: MagicMock,
     mock_questions: MagicMock,
     mock_term: MagicMock,
     mock_fk_suggest: MagicMock,
     mock_dal: MagicMock,
-    _mock_finalize: MagicMock,
     _mock_join_nbrs: MagicMock,
 ) -> None:
     from gsf.semantic.models import (
@@ -196,7 +184,6 @@ def test_enter_unions_questions_from_all_terms(
 
     mock_questions.side_effect = _questions_for_term
     mock_vdb.return_value = []
-    mock_resolve.return_value = 1
 
     table = {"id": "t1", "name": "orders", "description": ""}
     ctx = {
@@ -214,18 +201,14 @@ def test_enter_unions_questions_from_all_terms(
     mock_vdb.assert_called_once()
     discovered_items = mock_vdb.call_args[0][0]
     assert len(discovered_items) == 2
-    # Single call with all intents flattened across all terms
-    mock_resolve.assert_called_once()
-    call_intents = mock_resolve.call_args[0][2]
-    assert (
-        len(call_intents) == 2
-    )  # one intent per term (different questions, not deduped here)
-    assert {src for src, _ in call_intents} == {"Order", "Order Line"}
+    # Both intents are accumulated (one per term), no ROLE edges written yet.
+    assert len(vctx.pending_question_roles) == 2
+    anchor_terms = {entry[2] for entry in vctx.pending_question_roles}
+    assert anchor_terms == {"Order", "Order Line"}
     assert mock_dal.merge_term.call_count == 2
 
 
 @patch("gsf.semantic.visit_enter.fetch_join_neighbors", return_value=[])
-@patch("gsf.semantic.visit_enter.visit_finalize", return_value=0)
 @patch("gsf.semantic.visit_enter.neo4j_dal")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
 @patch("gsf.semantic.visit_enter.extract_term")
@@ -233,7 +216,6 @@ def test_enter_skips_terms_without_attributes(
     mock_term: MagicMock,
     mock_fk_suggest: MagicMock,
     mock_dal: MagicMock,
-    _mock_finalize: MagicMock,
     _mock_join_nbrs: MagicMock,
 ) -> None:
     from gsf.semantic.models import (

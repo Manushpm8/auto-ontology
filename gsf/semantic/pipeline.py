@@ -15,6 +15,7 @@ from gsf.semantic.loaders import (
 from gsf.semantic.orphan import pick_orphan_seed
 from gsf.semantic.seed import select_seed_table
 from gsf.semantic.visit_enter import VisitContext, build_data_retriever, visit_enter
+from gsf.semantic.visit_finalize import finalize_all_roles
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,9 @@ def compile_semantic_layer(
         visit_enter(seed, seed_ctx, vctx=vctx, hop=0)
         count += 1
         tree_index += 1
+
+    role_count = finalize_all_roles(vctx)
+    logger.info("Post-DFS: %d total ROLE edge(s) written", role_count)
 
     return count
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any
 
@@ -23,6 +23,7 @@ from gsf.semantic.loaders import (
 from gsf.semantic.models import (
     BusinessQuestionItem,
     ColumnAttributeSpec,
+    PotentialFkSuggestion,
     TableTermsResult,
     TermAttributeAssignment,
     TermProposal,
@@ -32,7 +33,6 @@ from gsf.semantic.vdb_discovery import (
     discover_tables_via_vdb,
     generate_business_questions,
 )
-from gsf.semantic.visit_finalize import resolve_question_roles_two_phase, visit_finalize
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,22 @@ class VisitContext:
     retriever: Retriever | None
     embedder: SemanticEmbedder | None
     domain_summary: DomainSummary | None
+    # (table_name, fk_suggestion) — one entry per PotentialFkSuggestion per table visit
+    pending_fk_entries: list[tuple[str, PotentialFkSuggestion]] = field(
+        default_factory=list
+    )
+    # (table_id, table_name, anchor_term, item, src_table, src_ctx, suggested_fk_names)
+    pending_question_roles: list[
+        tuple[
+            str,
+            str,
+            str,
+            BusinessQuestionItem,
+            dict[str, Any],
+            dict[str, Any],
+            set[str],
+        ]
+    ] = field(default_factory=list)
 
 
 def build_data_retriever(database_name: str) -> Retriever | None:
@@ -115,6 +131,21 @@ def visit_enter(
         [s.model_dump() for s in fk_suggestions.suggestions],
     )
     suggested_fk_names = {s.column_name for s in fk_suggestions.suggestions}
+    for fk in fk_suggestions.suggestions:
+        vctx.pending_fk_entries.append((table_name, fk))
+    # Also include declared schema FKs (data-layer edges in Neo4j) so that
+    # finalize_all_roles has the full picture of known join columns.
+    declared_fk_names = {s.column_name for s in fk_suggestions.suggestions}
+    for fk_dict in ctx.get("fks", []):
+        col = fk_dict.get("source_column", "")
+        if col and col not in declared_fk_names:
+            vctx.pending_fk_entries.append(
+                (
+                    table_name,
+                    PotentialFkSuggestion(column_name=col, rationale="declared"),
+                )
+            )
+            declared_fk_names.add(col)
     specs = column_attribute_specs(
         ctx.get("columns", []),
         ctx.get("fks", []),
@@ -203,32 +234,21 @@ def visit_enter(
         for anchor_term, term_items in questions_by_term
         for item in term_items
     ]
-    role_count = (
-        resolve_question_roles_two_phase(
-            table_id,
-            table_name,
-            all_role_intents,
-            src_table=table,
-            src_ctx=ctx,
-            suggested_fk_names=suggested_fk_names,
+    for anchor_term, item in all_role_intents:
+        vctx.pending_question_roles.append(
+            (table_id, table_name, anchor_term, item, table, ctx, suggested_fk_names)
         )
-        if all_role_intents
-        else 0
-    )
-
-    finalize_count = visit_finalize(table_id)
 
     term_names = [term.name for term, _ in persisted_terms]
     logger.info(
         "Enter %s -> Terms %s (%d attrs, %d suspected FKs, %d vdb neighbors, "
-        "%d question ROLE, %d FK ROLE)",
+        "%d pending question intents)",
         table_name,
         term_names,
         attr_count,
         len(fk_suggestions.suggestions),
         len(vdb_names),
-        role_count,
-        finalize_count,
+        len(all_role_intents),
     )
 
 
