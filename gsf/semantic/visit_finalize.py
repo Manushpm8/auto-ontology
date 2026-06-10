@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 from gsf.semantic import neo4j_dal
+from gsf.semantic.loaders import fetch_table_by_name
 from gsf.semantic.models import BusinessQuestionItem
 from gsf.semantic.paths import compute_join_path
 from gsf.semantic.role_resolver import find_semantic_role_path, resolve_single_hop_join
@@ -37,19 +38,14 @@ def resolve_single_hop_role_intents(
     table_id: str,
     src_table_name: str,
     role_intents: list[tuple[str, BusinessQuestionItem]],
-    *,
-    src_table: dict[str, Any],
-    src_ctx: dict[str, Any],
-    suggested_fk_names: set[str],
 ) -> tuple[int, list[tuple[str, BusinessQuestionItem]]]:
     """Attempt a single-hop FK/LLM join for each intent.
 
     Tries a deterministic FK/JOIN graph path first; falls back to LLM inference
-    from column annotations and suggested foreign keys.  Returns
+    using column metadata fetched directly from Neo4j.  Returns
     (written_count, unresolved_intents) where unresolved intents are those for
     which no direct join path could be found.
     """
-    src_pk = src_table.get("pk")
     tgt_cache: dict[str, dict[str, Any] | None] = {}
 
     def _tgt(term: str) -> dict[str, Any] | None:
@@ -75,9 +71,6 @@ def resolve_single_hop_role_intents(
         join_path = resolve_single_hop_join(
             table_id,
             src_table_name,
-            src_ctx,
-            src_pk,
-            suggested_fk_names,
             tgt_table,
         )
         if join_path is not None:
@@ -100,10 +93,6 @@ def resolve_question_roles_two_phase(
     table_id: str,
     src_table_name: str,
     role_intents: list[tuple[str, BusinessQuestionItem]],
-    *,
-    src_table: dict[str, Any],
-    src_ctx: dict[str, Any],
-    suggested_fk_names: set[str],
 ) -> int:
     """Create ROLE edges for a set of business-question intents.
 
@@ -117,9 +106,6 @@ def resolve_question_roles_two_phase(
         table_id,
         src_table_name,
         role_intents,
-        src_table=src_table,
-        src_ctx=src_ctx,
-        suggested_fk_names=suggested_fk_names,
     )
 
     tgt_cache: dict[str, dict[str, Any] | None] = {}
@@ -163,48 +149,46 @@ def finalize_all_roles(vctx: VisitContext) -> int:
 
     Returns total number of ROLE edges written.
     """
-    # Group FK entries by table_name → reconstruct suggested_fk_names per table.
+    # Group FK column names by table_name.
     fk_names_by_table: dict[str, set[str]] = defaultdict(set)
     for table_name, fk in vctx.pending_fk_entries:
         fk_names_by_table[table_name].add(fk.column_name)
 
-    # Group question roles by table_name for fast lookup.
-    intents_by_table: dict[
-        str,
-        list[
-            tuple[
-                str,
-                str,
-                str,
-                BusinessQuestionItem,
-                dict[str, Any],
-                dict[str, Any],
-                set[str],
-            ]
-        ],
-    ] = defaultdict(list)
-    for entry in vctx.pending_question_roles:
-        intents_by_table[entry[1]].append(entry)
-
+    # For each table with known FK columns, resolve a ROLE edge for every
+    # FK-linked term pair whose join column is among the accumulated FK names.
     written = 0
-    for table_name, suggested_fk_names in fk_names_by_table.items():
-        table_entries = intents_by_table.get(table_name, [])
-        if not table_entries:
+    for table_name, fk_col_names in fk_names_by_table.items():
+        table = fetch_table_by_name(table_name)
+        if not table:
             continue
-        # All entries for the same table share the same table_id / src_table / src_ctx.
-        table_id, _, _, _, src_table, src_ctx, _ = table_entries[0]
-        role_intents: list[tuple[str, BusinessQuestionItem]] = [
-            (anchor_term, item) for _, _, anchor_term, item, _, _, _ in table_entries
-        ]
-        phase1_written, _ = resolve_single_hop_role_intents(
-            table_id,
-            table_name,
-            role_intents,
-            src_table=src_table,
-            src_ctx=src_ctx,
-            suggested_fk_names=suggested_fk_names,
-        )
-        written += phase1_written
+        table_id = table["id"]
+
+        for pair in neo4j_dal.fetch_fk_role_pairs(table_id):
+            if pair.get("source_column") not in fk_col_names:
+                continue
+            tgt_table = {"id": pair["target_table_id"], "name": pair["target_table"]}
+            join_path = resolve_single_hop_join(
+                table_id,
+                table_name,
+                tgt_table,
+            )
+            if join_path is not None:
+                neo4j_dal.merge_role_edge(
+                    source_term=pair["source_term"],
+                    target_term=pair["target_term"],
+                    role_name=_role_name_from_column(pair.get("source_column", "")),
+                    join_path=join_path,
+                    source_table=table_name,
+                    target_table=pair["target_table"],
+                )
+                written += 1
+            else:
+                logger.debug(
+                    "No join path for FK %s.%s → %s",
+                    table_name,
+                    pair.get("source_column"),
+                    pair["target_table"],
+                )
 
     logger.info("finalize_all_roles single-hop: %d ROLE edge(s)", written)
 
@@ -217,7 +201,7 @@ def finalize_all_roles(vctx: VisitContext) -> int:
         return tgt_cache[term]
 
     seen: set[tuple[str, str, str]] = set()
-    for table_id, table_name, anchor_term, item, _, _, _ in vctx.pending_question_roles:
+    for table_id, table_name, anchor_term, item in vctx.pending_question_roles:
         if not item.entity or not item.role or item.entity == anchor_term:
             continue
         key = (anchor_term, item.entity, item.role)

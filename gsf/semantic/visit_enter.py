@@ -62,18 +62,10 @@ class VisitContext:
     pending_fk_entries: list[tuple[str, PotentialFkSuggestion]] = field(
         default_factory=list
     )
-    # (table_id, table_name, anchor_term, item, src_table, src_ctx, suggested_fk_names)
-    pending_question_roles: list[
-        tuple[
-            str,
-            str,
-            str,
-            BusinessQuestionItem,
-            dict[str, Any],
-            dict[str, Any],
-            set[str],
-        ]
-    ] = field(default_factory=list)
+    # (table_id, table_name, anchor_term, item)
+    pending_question_roles: list[tuple[str, str, str, BusinessQuestionItem]] = field(
+        default_factory=list
+    )
 
 
 def build_data_retriever(database_name: str) -> Retriever | None:
@@ -235,9 +227,7 @@ def visit_enter(
         for item in term_items
     ]
     for anchor_term, item in all_role_intents:
-        vctx.pending_question_roles.append(
-            (table_id, table_name, anchor_term, item, table, ctx, suggested_fk_names)
-        )
+        vctx.pending_question_roles.append((table_id, table_name, anchor_term, item))
 
     term_names = [term.name for term, _ in persisted_terms]
     logger.info(

@@ -10,6 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from gsf.semantic import neo4j_dal
 from gsf.semantic.llm import invoke_structured
+from gsf.semantic.loaders import fetch_table_by_id, fetch_table_context
 from gsf.semantic.models import SingleHopJoin
 from gsf.semantic.paths import compute_join_path
 
@@ -18,15 +19,15 @@ logger = logging.getLogger(__name__)
 _SYSTEM = """\
 Determine whether two relational tables can be joined in a single hop.
 
-You are given: source table columns (annotated [PK]/[FK]), declared FK columns
-pointing at the target, and the target table's PK column(s).
+You are given the full column lists for both tables (source annotated with
+[PK]/[FK]) and the set of declared foreign-key columns from source to target.
 
 Rules:
 1. Return possible=true only when a direct key-based join can be strongly inferred.
 2. Prefer explicit FK→PK pairs. Also accept clearly implicit joins
    (e.g. orders.customer_id → customers.id).
-3. src_column must name a column from the source table; tgt_column must be one of
-   the target PK columns listed (or empty if unknown).
+3. src_column must name a column from the source table; tgt_column must name a
+   column from the target table (or be empty if unknown).
 4. Return possible=false with empty column fields when no clear single-hop join exists."""
 
 
@@ -38,22 +39,19 @@ def _normalize_pk(pk: Any) -> list[str]:
     return [str(pk)]
 
 
-def _src_col_lines(
-    ctx: dict[str, Any],
-    src_pk: list[str],
-    suggested_fk_names: set[str],
+def _col_lines(
+    columns: list[dict[str, Any]],
+    pk_cols: set[str],
+    fk_cols: set[str],
 ) -> str:
-    explicit_fk_cols = {
-        fk["column_name"] for fk in ctx.get("fks", []) if fk.get("column_name")
-    }
     lines = []
-    for col in ctx.get("columns", []):
+    for col in columns:
         name = col.get("name", "")
-        dtype = col.get("type", "")
+        dtype = col.get("data_type") or col.get("type", "")
         tags = []
-        if name in src_pk:
+        if name in pk_cols:
             tags.append("[PK]")
-        if name in explicit_fk_cols or name in suggested_fk_names:
+        if name in fk_cols:
             tags.append("[FK]")
         tag_str = " ".join(tags)
         lines.append(f"  {name} ({dtype}){(' ' + tag_str) if tag_str else ''}")
@@ -70,9 +68,6 @@ def _hop_has_columns(hop: dict[str, Any]) -> bool:
 def resolve_single_hop_join(
     src_table_id: str,
     src_table_name: str,
-    src_ctx: dict[str, Any],
-    src_pk: Any,
-    suggested_fk_names: set[str],
     tgt_table: dict[str, Any],
 ) -> list[dict[str, Any]] | None:
     """Return a hop-centric join_path or None.
@@ -83,10 +78,12 @@ def resolve_single_hop_join(
     Priority:
     1. Deterministic graph path (FK/JOIN edges) — compute_join_path already
        returns None when any hop lacks column conditions.
-    2. LLM inference from column annotations and suggested foreign keys.
-    Returns None when neither resolves; caller falls through to Phase 2.
+    2. LLM inference: fetches full column metadata for both tables from Neo4j
+       and asks the LLM whether a direct key-based join can be inferred.
+    Returns None when neither resolves.
     """
     tgt_table_id = tgt_table["id"]
+    tgt_table_name = tgt_table["name"]
 
     path = compute_join_path(src_table_id, tgt_table_id)
     if path is not None and all(_hop_has_columns(h) for h in path):
@@ -95,27 +92,35 @@ def resolve_single_hop_join(
         logger.debug(
             "Graph path %s → %s found but missing column conditions; trying LLM",
             src_table_name,
-            tgt_table["name"],
+            tgt_table_name,
         )
 
-    tgt_pk = _normalize_pk(tgt_table.get("pk"))
-    src_pk_list = _normalize_pk(src_pk)
+    src_row = fetch_table_by_id(src_table_id)
+    src_pk = set(_normalize_pk(src_row.get("pk") if src_row else None))
+    src_ctx = fetch_table_context(src_table_id)
+    src_fk_cols = {
+        fk["source_column"] for fk in src_ctx.get("fks", []) if fk.get("source_column")
+    }
     explicit_fks_to_tgt = [
-        fk["column_name"]
+        fk["source_column"]
         for fk in src_ctx.get("fks", [])
-        if fk.get("target_table") == tgt_table["name"] and fk.get("column_name")
+        if fk.get("target_table") == tgt_table_name and fk.get("source_column")
     ]
 
-    col_lines = _src_col_lines(src_ctx, src_pk_list, suggested_fk_names)
-    tgt_pk_str = ", ".join(tgt_pk) if tgt_pk else "(unknown)"
+    tgt_row = fetch_table_by_id(tgt_table_id)
+    tgt_pk = set(_normalize_pk(tgt_row.get("pk") if tgt_row else None))
+    tgt_ctx = fetch_table_context(tgt_table_id)
+
+    src_lines = _col_lines(src_ctx.get("columns", []), src_pk, src_fk_cols)
+    tgt_lines = _col_lines(tgt_ctx.get("columns", []), tgt_pk, set())
     explicit_str = ", ".join(explicit_fks_to_tgt) if explicit_fks_to_tgt else "none"
 
     user_msg = (
         f"Source table: {src_table_name}\n"
-        f"Columns:\n{col_lines}\n\n"
-        f"Explicit FKs pointing at target: {explicit_str}\n\n"
-        f"Target table: {tgt_table['name']}\n"
-        f"Target PK columns: {tgt_pk_str}"
+        f"Columns:\n{src_lines}\n\n"
+        f"Target table: {tgt_table_name}\n"
+        f"Columns:\n{tgt_lines}\n\n"
+        f"Declared FK columns from source pointing at target: {explicit_str}"
     )
 
     result: SingleHopJoin = invoke_structured(
@@ -126,7 +131,7 @@ def resolve_single_hop_join(
         logger.debug(
             "LLM: no single-hop join %s → %s (%s)",
             src_table_name,
-            tgt_table["name"],
+            tgt_table_name,
             result.rationale,
         )
         return None
@@ -135,14 +140,14 @@ def resolve_single_hop_join(
         "LLM inferred join %s.%s → %s.%s",
         src_table_name,
         result.src_column,
-        tgt_table["name"],
+        tgt_table_name,
         result.tgt_column,
     )
     return [
         {
             "hop": 1,
             "source": {"table": src_table_name, "column": result.src_column},
-            "target": {"table": tgt_table["name"], "column": result.tgt_column},
+            "target": {"table": tgt_table_name, "column": result.tgt_column},
         }
     ]
 

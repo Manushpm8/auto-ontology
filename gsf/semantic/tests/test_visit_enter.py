@@ -79,9 +79,7 @@ def test_enter_accumulates_question_roles_after_discovery(
     mock_dal.merge_role_edge.assert_not_called()
     # Intent is accumulated in the context.
     assert len(vctx.pending_question_roles) == 1
-    _tid, _tname, anchor_term, intent, _src_table, _src_ctx, _fk_names = (
-        vctx.pending_question_roles[0]
-    )
+    _tid, _tname, anchor_term, intent = vctx.pending_question_roles[0]
     assert anchor_term == "Order"
     assert intent.entity == "Customer"
     assert intent.role == "placedBy"

@@ -64,9 +64,6 @@ def test_resolve_single_hop_writes_edge(
                 ),
             )
         ],
-        src_table={"id": "t1", "name": "orders", "pk": "id"},
-        src_ctx={"columns": [], "fks": []},
-        suggested_fk_names={"customer_id"},
     )
 
     assert written == 1
@@ -100,9 +97,6 @@ def test_resolve_single_hop_returns_unresolved(
         "t1",
         "orders",
         [("Order", item)],
-        src_table={"id": "t1", "name": "orders", "pk": "id"},
-        src_ctx={"columns": [], "fks": []},
-        suggested_fk_names=set(),
     )
 
     assert written == 0
