@@ -129,15 +129,16 @@ def visit_enter(
     attr_count = 0
 
     for term, assignments in persisted_terms:
-        neo4j_dal.merge_term(term.name, term.description, table_id)
+        term_id = neo4j_dal.merge_term(term.name, term.description, table_id)
         if term.is_a_parent:
             neo4j_dal.merge_is_a(term.name, term.is_a_parent)
         if term.part_of_target:
             neo4j_dal.merge_part_of(term.name, term.part_of_target)
 
+        attr_ids: dict[str, str | None] = {}
         for assignment in assignments:
             spec = spec_by_column[assignment.source_column]
-            neo4j_dal.merge_column_attribute(
+            attr_ids[assignment.source_column] = neo4j_dal.merge_column_attribute(
                 term_name=term.name,
                 table_id=table_id,
                 source_column=spec.source_column,
@@ -154,12 +155,17 @@ def visit_enter(
                     "term_name": term.name,
                     "source_column": a.source_column,
                     "description": spec_by_column[a.source_column].description,
+                    "id": attr_ids.get(a.source_column),
                 }
                 for a in assignments
             ]
             try:
                 vctx.embedder.embed_term(
-                    {"name": term.name, "description": term.description},
+                    {
+                        "name": term.name,
+                        "description": term.description,
+                        "id": term_id,
+                    },
                     attrs_rows,
                 )
             except Exception:

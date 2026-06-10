@@ -125,13 +125,16 @@ def mark_suspected_foreign_keys(
     )
 
 
-def merge_term(name: str, description: str, table_id: str) -> None:
-    get_neo4j_conn().query_write(
+def merge_term(name: str, description: str, table_id: str) -> str | None:
+    """Merge the Term node and return its persistent ``id`` (UUID)."""
+    rows = get_neo4j_conn().query_write(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})
         MERGE (term:{LABEL_TERM} {{name: $name, source: $source}})
+        ON CREATE SET term.id = randomUUID()
         SET term.description = $description
         MERGE (t)-[:{REL_REPRESENTS}]->(term)
+        RETURN term.id AS id
         """,
         {
             "table_id": table_id,
@@ -140,6 +143,7 @@ def merge_term(name: str, description: str, table_id: str) -> None:
             "source": SEMANTIC_SOURCE,
         },
     )
+    return rows[0]["id"] if rows else None
 
 
 def merge_column_attribute(
@@ -150,8 +154,9 @@ def merge_column_attribute(
     attr_name: str,
     datatype: str,
     description: str | None,
-) -> None:
-    get_neo4j_conn().query_write(
+) -> str | None:
+    """Merge the ColumnAttribute node and return its persistent ``id`` (UUID)."""
+    rows = get_neo4j_conn().query_write(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
               (col:{Labels.COLUMN} {{name: $source_column}})
@@ -162,10 +167,12 @@ def merge_column_attribute(
             term_name: $term_name,
             source: $source
         }})
+        ON CREATE SET attr.id = randomUUID()
         SET attr.datatype = $datatype,
             attr.description = coalesce($description, attr.description)
         MERGE (col)-[:{REL_HAS_ATTRIBUTE}]->(attr)
         MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
+        RETURN attr.id AS id
         """,
         {
             "table_id": table_id,
@@ -177,6 +184,7 @@ def merge_column_attribute(
             "source": SEMANTIC_SOURCE,
         },
     )
+    return rows[0]["id"] if rows else None
 
 
 def merge_is_a(child_term: str, parent_term: str) -> None:

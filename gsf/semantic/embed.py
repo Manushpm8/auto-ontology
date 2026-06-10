@@ -40,8 +40,10 @@ class SemanticEmbedder:
     ) -> int:
         """Embed and ingest one Term and its attribute rows in a single batch.
 
-        ``term`` entries: ``{"name", "description"}``.
-        ``attrs`` entries: ``{"name", "term_name", "source_column", "description"}``.
+        ``term`` entries: ``{"name", "description", "id"}``.
+        ``attrs`` entries: ``{"name", "term_name", "source_column", "description", "id"}``.
+        ``id`` is the Neo4j node ``id`` property (UUID) and, when present, lands
+        in the embedded row's metadata.
         Returns the number of rows actually written to the VDB.
         """
         rows = _build_rows(self.database_name, term, attrs)
@@ -111,12 +113,14 @@ def _build_rows(
     if term_name:
         text = f"Term: {term_name}. {term.get('description') or ''}".strip()
         path = f"semantic:term:{term_name}"
-        fields = {
+        fields: dict[str, Any] = {
             "label": "Term",
             "name": term_name,
             "database_name": database_name,
             "source_path": path,
         }
+        if term.get("id"):
+            fields["id"] = term["id"]
         rows.append(
             {
                 "text": text,
@@ -145,6 +149,8 @@ def _build_rows(
             "database_name": database_name,
             "source_path": path,
         }
+        if a.get("id"):
+            fields["id"] = a["id"]
         rows.append(
             {
                 "text": text,
