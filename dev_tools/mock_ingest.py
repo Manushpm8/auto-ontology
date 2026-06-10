@@ -62,50 +62,56 @@ EMBED_PARAMS = EmbedParams(
 )
 
 
-# (table_name, [(column_name, data_type), ...])
-_TABLES: list[tuple[str, list[tuple[str, str]]]] = [
+# Intentionally non-user-friendly names (underscore prefixes, numeric suffixes)
+# so the semantic extractor has to actually clean them up.
+# (table_name, pk_column, [(column_name, data_type), ...])
+_TABLES: list[tuple[str, str, list[tuple[str, str]]]] = [
     (
-        "customer",
+        "_customer",
+        "_id",
         [
-            ("id", "integer"),
-            ("name", "text"),
-            ("phone", "text"),
-            ("email", "text"),
+            ("_id", "integer"),
+            ("name1", "text"),
+            ("_phone", "text"),
+            ("email2", "text"),
         ],
     ),
     (
-        "order",
+        "orders1",
+        "id1",
         [
-            ("id", "integer"),
-            ("customer_id", "integer"),
-            ("date", "date"),
+            ("id1", "integer"),
+            ("_customer_id", "integer"),
+            ("date2", "date"),
         ],
     ),
     (
-        "orderline",
+        "_orderline",
+        "_id",
         [
-            ("id", "integer"),
-            ("order_id", "integer"),
-            ("price_paid", "numeric"),
-            ("product_id", "integer"),
+            ("_id", "integer"),
+            ("order_id1", "integer"),
+            ("_price_paid", "numeric"),
+            ("product_id2", "integer"),
         ],
     ),
     (
-        "products",
+        "products2",
+        "_id",
         [
-            ("id", "integer"),
-            ("name", "text"),
-            ("price", "numeric"),
-            ("sinceDate", "date"),
+            ("_id", "integer"),
+            ("name1", "text"),
+            ("_price", "numeric"),
+            ("sinceDate2", "date"),
         ],
     ),
 ]
 
 # (source_table, source_column, target_table, target_column)
 _FKS: list[tuple[str, str, str, str]] = [
-    ("order", "customer_id", "customer", "id"),
-    ("orderline", "order_id", "order", "id"),
-    ("orderline", "product_id", "products", "id"),
+    ("orders1", "_customer_id", "_customer", "_id"),
+    ("_orderline", "order_id1", "orders1", "id1"),
+    ("_orderline", "product_id2", "products2", "_id"),
 ]
 
 
@@ -133,13 +139,13 @@ class MockDatabase(SQLDatabase):
                 "table_name": name,
                 "table_type": "base table",
             }
-            for name, _ in _TABLES
+            for name, _, _ in _TABLES
         ]
         return pd.DataFrame(rows)
 
     def get_columns(self) -> pd.DataFrame:
         rows: list[dict[str, object]] = []
-        for table_name, columns in _TABLES:
+        for table_name, pk_column, columns in _TABLES:
             for ordinal, (col_name, data_type) in enumerate(columns, start=1):
                 rows.append(
                     {
@@ -147,7 +153,7 @@ class MockDatabase(SQLDatabase):
                         "table_name": table_name,
                         "column_name": col_name,
                         "data_type": data_type,
-                        "is_nullable": "YES" if col_name != "id" else "NO",
+                        "is_nullable": "NO" if col_name == pk_column else "YES",
                         "ordinal_position": ordinal,
                     }
                 )
@@ -158,10 +164,10 @@ class MockDatabase(SQLDatabase):
             {
                 "table_schema": MOCK_SCHEMA,
                 "table_name": table_name,
-                "column_name": "id",
+                "column_name": pk_column,
                 "ordinal_position": 1,
             }
-            for table_name, _ in _TABLES
+            for table_name, pk_column, _ in _TABLES
         ]
         return pd.DataFrame(rows)
 
