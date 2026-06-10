@@ -12,7 +12,7 @@ import { ConnectionConnectStep } from '@/components/connectionsPage/steps/Connec
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';
 import { ConnectionType, isConnectionType } from '@/enums/connection';
 import type { Connection } from '@/types/connection';
-import type { ConnectionInput } from '@/types/connectionInput';
+import type { ConnectionInput } from '@/types/connection';
 
 const NEW_CONNECTION_STEPS = ['Select Connector', 'Connect'] as const;
 

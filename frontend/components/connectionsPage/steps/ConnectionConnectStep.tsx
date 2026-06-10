@@ -7,7 +7,7 @@
 import type { ChangeEvent } from 'react';
 import { connectionDisplayName } from '@/enums/connection';
 import { parseConnectionDatabaseName } from '@/lib/parseConnectionDatabaseName';
-import type { ConnectionInput } from '@/types/connectionInput';
+import type { ConnectionInput } from '@/types/connection';
 
 export type ConnectionConnectStepProps = {
 	connectionInput: ConnectionInput;

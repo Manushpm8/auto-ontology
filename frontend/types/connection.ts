@@ -2,10 +2,20 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ConnectionType } from '@/enums/connection';
+
 export type Connection = {
 	id: string;
 	type: string;
 	create_date?: string | null;
 	last_pulled?: string | null;
 	database_name: string;
+};
+
+/** User-provided fields for testing or creating a connection. */
+export type ConnectionInput = {
+	type: ConnectionType;
+	connectionString: string;
+	/** Set after a successful test action in the create-connection wizard. */
+	tested?: boolean;
 };

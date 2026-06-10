@@ -5,7 +5,7 @@
 import { parseConnectionDatabaseName } from '@/lib/parseConnectionDatabaseName';
 import { requests } from './requests';
 import type { Connection } from '@/types/connection';
-import type { ConnectionInput } from '@/types/connectionInput';
+import type { ConnectionInput } from '@/types/connection';
 import type { ApiError, ApiResponse, ResponseWithCount } from './types';
 
 type CreateResponse = ApiError | { data: Connection };
