@@ -184,27 +184,30 @@ class SnowflakeDatabase(SQLDatabase):
 
     def get_queries(self, hours: int = 24) -> pd.DataFrame:
         """Return recent queries from ``INFORMATION_SCHEMA.QUERY_HISTORY``."""
+        # try:
+        #     df = self.execute(f"""
+        #         SELECT
+        #             END_TIME   AS end_time,
+        #             QUERY_TEXT AS query_text
+        #         FROM TABLE(
+        #             INFORMATION_SCHEMA.QUERY_HISTORY(
+        #                 DATEADD(hour, -{hours}, CURRENT_TIMESTAMP()),
+        #                 CURRENT_TIMESTAMP(),
+        #                 RESULT_LIMIT => 10000
+        #             )
+        #         )
+        #         WHERE QUERY_TYPE NOT IN (
+        #             'USE', 'SHOW', 'GRANT', 'CREATE_USER', 'CREATE_ROLE',
+        #             'DROP', 'COMMIT', 'ALTER_SESSION', 'CALL'
+        #         )
+        #           AND EXECUTION_STATUS = 'SUCCESS'
+        #           AND LOWER(QUERY_TEXT) NOT LIKE '%information_schema%'
+        #         ORDER BY END_TIME DESC
+        #     """)
+        #     return df[["end_time", "query_text"]]
         try:
-            df = self.execute(f"""
-                SELECT
-                    END_TIME   AS end_time,
-                    QUERY_TEXT AS query_text
-                FROM TABLE(
-                    INFORMATION_SCHEMA.QUERY_HISTORY(
-                        DATEADD(hour, -{hours}, CURRENT_TIMESTAMP()),
-                        CURRENT_TIMESTAMP(),
-                        RESULT_LIMIT => 10000
-                    )
-                )
-                WHERE QUERY_TYPE NOT IN (
-                    'USE', 'SHOW', 'GRANT', 'CREATE_USER', 'CREATE_ROLE',
-                    'DROP', 'COMMIT', 'ALTER_SESSION', 'CALL'
-                )
-                  AND EXECUTION_STATUS = 'SUCCESS'
-                  AND LOWER(QUERY_TEXT) NOT LIKE '%information_schema%'
-                ORDER BY END_TIME DESC
-            """)
-            return df[["end_time", "query_text"]]
+            return pd.DataFrame(columns=["end_time", "query_text"])
+
         except snowflake.connector.errors.Error:
             logger.exception("Failed to fetch Snowflake query history")
             return pd.DataFrame(columns=["end_time", "query_text"])

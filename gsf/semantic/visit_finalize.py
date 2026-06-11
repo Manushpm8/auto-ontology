@@ -192,42 +192,20 @@ def finalize_all_roles(vctx: VisitContext) -> int:
 
     logger.info("finalize_all_roles single-hop: %d ROLE edge(s)", written)
 
-    semantic_written = 0
-    tgt_cache: dict[str, dict[str, Any] | None] = {}
-
-    def _tgt(term: str) -> dict[str, Any] | None:
-        if term not in tgt_cache:
-            tgt_cache[term] = neo4j_dal.get_table_for_term(term)
-        return tgt_cache[term]
-
-    seen: set[tuple[str, str, str]] = set()
+    # Group pending question-role intents by (table_id, table_name) so each
+    # source table goes through the full two-phase resolution: single-hop
+    # FK/LLM first (which also handles multi-hop FK graph paths via
+    # compute_join_path), then semantic ROLE-graph search for the remainder.
+    intents_by_table: dict[
+        tuple[str, str], list[tuple[str, BusinessQuestionItem]]
+    ] = defaultdict(list)
     for table_id, table_name, anchor_term, item in vctx.pending_question_roles:
-        if not item.entity or not item.role or item.entity == anchor_term:
-            continue
-        key = (anchor_term, item.entity, item.role)
-        if key in seen:
-            continue
-        seen.add(key)
+        intents_by_table[(table_id, table_name)].append((anchor_term, item))
 
-        tgt_table = _tgt(item.entity)
-        join_path = find_semantic_role_path(anchor_term, item.entity)
-        if join_path is not None and tgt_table:
-            neo4j_dal.merge_role_edge(
-                source_term=anchor_term,
-                target_term=item.entity,
-                role_name=item.role,
-                join_path=join_path,
-                source_table=table_name,
-                target_table=tgt_table["name"],
-            )
-            semantic_written += 1
-        else:
-            logger.debug(
-                "No semantic path: %s -[%s]-> %s",
-                anchor_term,
-                item.role,
-                item.entity,
-            )
+    semantic_written = 0
+    for (tbl_id, tbl_name), intents in intents_by_table.items():
+        q_written = resolve_question_roles_two_phase(tbl_id, tbl_name, intents)
+        semantic_written += q_written
 
     logger.info("finalize_all_roles semantic: %d ROLE edge(s)", semantic_written)
     written += semantic_written

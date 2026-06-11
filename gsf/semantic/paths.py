@@ -21,19 +21,29 @@ MATCH p = shortestPath(
     (src)-[:{Edges.CONTAINS}|{Edges.FOREIGN_KEY}|{Edges.JOIN}*..14]-(tgt)
 )
 WITH p,
-     [n IN nodes(p) WHERE n:{Labels.TABLE} | n.name] AS path_nodes,
-     [i IN range(0, size(relationships(p)) - 1)
-      WHERE type(relationships(p)[i]) IN ['{Edges.FOREIGN_KEY}', '{Edges.JOIN}'] |
-      {{
-        via: type(relationships(p)[i]),
-        src_column: CASE WHEN startNode(relationships(p)[i]):{Labels.COLUMN}
-                         THEN startNode(relationships(p)[i]).name ELSE null END,
-        tgt_column: CASE WHEN endNode(relationships(p)[i]):{Labels.COLUMN}
-                         THEN endNode(relationships(p)[i]).name ELSE null END,
-        join_columns: relationships(p)[i].join_columns
-      }}
-     ] AS join_conditions
+     [n IN nodes(p) WHERE n:{Labels.TABLE} | n.name] AS path_nodes
 WHERE size(path_nodes) >= 2
+UNWIND range(0, size(relationships(p)) - 1) AS i
+WITH path_nodes, i, relationships(p)[i] AS r
+WHERE type(r) IN ['{Edges.FOREIGN_KEY}', '{Edges.JOIN}']
+WITH path_nodes, i, r, startNode(r) AS r_start, endNode(r) AS r_end
+OPTIONAL MATCH (r_start)<-[:{Edges.CONTAINS}]-(src_tbl:{Labels.TABLE})
+WITH path_nodes,
+     i,
+     type(r) AS via,
+     CASE WHEN r_start:{Labels.COLUMN} THEN r_start.name ELSE null END AS src_column,
+     CASE WHEN r_end:{Labels.COLUMN} THEN r_end.name ELSE null END AS tgt_column,
+     src_tbl.name AS src_col_table,
+     r.join_columns AS join_columns
+ORDER BY i
+WITH path_nodes,
+     collect({{
+       via: via,
+       src_column: src_column,
+       tgt_column: tgt_column,
+       src_col_table: src_col_table,
+       join_columns: join_columns
+     }}) AS join_conditions
 RETURN path_nodes, join_conditions
 LIMIT 1
 """
@@ -98,12 +108,22 @@ def compute_join_path(
         cond = join_conditions[i]
 
         if cond.get("src_column") and cond.get("tgt_column"):
-            # FK edge between Column nodes
+            # FK edge between Column nodes.  The edge's stored direction may be
+            # the reverse of the traversal direction, so use src_col_table to
+            # assign columns to the correct hop endpoints.
+            fk_start_col = cond["src_column"]
+            fk_end_col = cond["tgt_column"]
+            fk_start_table = cond.get("src_col_table")
+            if fk_start_table == src_name:
+                hop_src_col, hop_tgt_col = fk_start_col, fk_end_col
+            else:
+                # Edge traversed in reverse — swap columns
+                hop_src_col, hop_tgt_col = fk_end_col, fk_start_col
             hops.append(
                 {
                     "hop": i + 1,
-                    "source": {"table": src_name, "column": cond["src_column"]},
-                    "target": {"table": tgt_name, "column": cond["tgt_column"]},
+                    "source": {"table": src_name, "column": hop_src_col},
+                    "target": {"table": tgt_name, "column": hop_tgt_col},
                 }
             )
         else:
