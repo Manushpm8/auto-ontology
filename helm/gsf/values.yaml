@@ -83,7 +83,7 @@ neo4j:
 # ------------------------------------------------------------------
 backend:
   image:
-    repository: nvcr.io/nvstaging/gsf
+    repository: nvcr.io/nvstaging/gsf/gsf
     tag: 0.0.1
   service:
     port: 3001
@@ -99,7 +99,7 @@ backend:
 ingestion:
   image:
     # Reuses the backend image with a different entrypoint arg.
-    repository: nvcr.io/nvstaging/gsf
+    repository: nvcr.io/nvstaging/gsf/gsf
     tag: 0.0.1
   replicas: 1
   resources:
@@ -112,7 +112,7 @@ ingestion:
 # ------------------------------------------------------------------
 frontend:
   image:
-    repository: nvcr.io/nvstaging/gsf-frontend
+    repository: nvcr.io/nvstaging/gsf/gsf-frontend
     tag: 0.0.1
   service:
     port: 3000

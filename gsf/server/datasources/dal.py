@@ -98,6 +98,7 @@ def list_tables_for_schema(
               (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
         RETURN t.id AS id,
                t.name AS name,
+               t.table_type AS table_type,
                db.name AS database_name,
                s.name AS schema_name, t.description AS description,
                count(c) AS columns_count
@@ -134,6 +135,7 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
                  sample_values: c.sample_values
              }}) AS columns
         RETURN t.name AS table_name,
+               t.table_type AS table_type,
                s.name AS schema_name,
                db.name AS database_name,
                size(columns) AS columns_count,
@@ -248,11 +250,10 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
     from nemo_retriever.vdb import IngestVdbOperator
 
+    EMBED_PARAMS = get_embed_params()
     unique_ids = set(dict.fromkeys(node_ids))
-    vdb = get_vdb()
-    for nid in unique_ids:
-        vdb.delete_by_id(nid)
 
+    # ── Step 1: build text representations from Neo4j ───────────────────────
     tables_df, columns_df, database_name = _get_tables_and_columns_by_node_ids(
         node_ids,
     )
@@ -297,6 +298,10 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
             f"Embedding step produced 0/{len(embedded)} tabular rows with embeddings."
         )
 
+    # ── Step 3: replace VDB rows only after embeddings are ready ────────────
+    vdb = get_vdb()
+    for nid in unique_ids:
+        vdb.delete_by_id(nid)
     IngestVdbOperator(vdb=vdb)(rows)
 
 
@@ -338,6 +343,7 @@ def _get_tables_and_columns_by_node_ids(
             RETURN t.id AS id,
                    t.name AS table_name,
                    t.schema_name AS table_schema,
+                   t.table_type AS table_type,
                    t.description AS description,
                    db.name AS database_name
             """,
