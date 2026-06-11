@@ -59,11 +59,7 @@ def list_connections_for_ingest() -> list[tuple[str | None, str]]:
     except Exception:
         logger.exception("Failed to load connection strings from Neo4j")
 
-    if pairs:
-        return pairs
-
-    raw = os.environ.get("CONNECTION_STRINGS", "")
-    return [(None, cs.strip()) for cs in raw.split(",") if cs.strip()]
+    return pairs
 
 
 def get_all_connection_strings() -> list[str]:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from gsf.ingestion_service.ingest import run_ingest
@@ -33,9 +34,12 @@ async def ingest() -> None:
     """Run one ingestion pass for all configured connections."""
     connections = connections_dal.list_connections_for_ingest()
     if not connections:
+        raw = os.environ.get("CONNECTION_STRINGS", "")
+        connections = [(None, cs.strip()) for cs in raw.split(",") if cs.strip()]
+    if not connections:
         logger.info(
-            "ingest: no connections configured. Add CONNECTION_STRINGS to your "
-            ".env or create a connection in Settings → Connections."
+            "ingest: no connections configured. "
+            "Add a connection in Settings → Connections or set CONNECTION_STRINGS in your .env."
         )
         return
 
