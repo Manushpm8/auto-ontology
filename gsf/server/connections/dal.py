@@ -199,8 +199,8 @@ def list_custom_analysis_ids_for_database(database_name: str) -> list[str]:
     return [str(row["id"]) for row in rows]
 
 
-def delete_catalog_for_database(database_name: str) -> None:
-    """Remove a catalog database, its schema subtree, and related Sql/CustomAnalysis nodes."""
+def delete_database_and_analyses(database_name: str) -> None:
+    """Remove a Database node, its schema subtree, and related Sql/CustomAnalysis nodes."""
     conn = get_neo4j_conn()
     conn.query_write(
         f"""
@@ -224,7 +224,7 @@ def delete_catalog_for_database(database_name: str) -> None:
 def delete_connection(connection_id: str) -> None:
     """Remove connection metadata from the catalog DB node.
 
-    The DB node itself is kept so that ``delete_catalog_for_database`` can
+    The DB node itself is kept so that ``delete_database_and_analyses`` can
     still clean up the schema subtree in a subsequent call.
     """
     get_neo4j_conn().query_write(

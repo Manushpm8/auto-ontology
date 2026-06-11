@@ -69,7 +69,7 @@ def run_ingest_delete(database_name: str) -> None:
         raise ValueError("Database name is required")
 
     analysis_ids = connections_dal.list_custom_analysis_ids_for_database(database_name)
-    connections_dal.delete_catalog_for_database(database_name)
+    connections_dal.delete_database_and_analyses(database_name)
 
     vdb = get_vdb()
     deleted_tabular = vdb.delete_by_database(database_name)
