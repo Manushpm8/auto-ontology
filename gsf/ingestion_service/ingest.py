@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 from gsf.utils import get_embed_params
 from nemo_retriever.graph import Graph
@@ -60,6 +61,44 @@ def run_ingest(connection_string: str) -> None:
 
     finally:
         TABULAR_PARAMS.connector.close()
+
+
+def trigger_ingest(connection_id: str, connection_string: str) -> None:
+    """Run ingest for a new connection without blocking the caller."""
+
+    def _run() -> None:
+        try:
+            run_ingest(connection_string)
+        except Exception:
+            logger.exception(
+                "Background ingest failed for connection %s",
+                connection_id,
+            )
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"ingest-{connection_id}",
+    ).start()
+
+
+def trigger_ingest_delete(database_name: str) -> None:
+    """Remove ingested database graph and embeddings without blocking the caller."""
+
+    def _run() -> None:
+        try:
+            run_ingest_delete(database_name)
+        except Exception:
+            logger.exception(
+                "Background ingest delete failed for database %s",
+                database_name,
+            )
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"ingest-delete-{database_name}",
+    ).start()
 
 
 def run_ingest_delete(database_name: str) -> None:

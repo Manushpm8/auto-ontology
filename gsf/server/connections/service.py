@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 import uuid
 from typing import Any
 
@@ -41,48 +40,6 @@ def test_connection(connection_type: str, connection_string: str) -> None:
     del connection_type  # scheme is resolved from the connection string
     connector = _validate_connection_string(connection_string)
     connector.close()
-
-
-def _trigger_ingest_delete(database_name: str) -> None:
-    """Remove ingested database graph and embeddings without blocking the API response."""
-
-    def _run() -> None:
-        try:
-            from gsf.ingestion_service.ingest import run_ingest_delete
-
-            run_ingest_delete(database_name)
-        except Exception:
-            logger.exception(
-                "Background ingest delete failed for database %s",
-                database_name,
-            )
-
-    threading.Thread(
-        target=_run,
-        daemon=True,
-        name=f"ingest-delete-{database_name}",
-    ).start()
-
-
-def _trigger_ingest(connection_id: str, connection_string: str) -> None:
-    """Run ingest for a new connection without blocking the API response."""
-
-    def _run() -> None:
-        try:
-            from gsf.ingestion_service.ingest import run_ingest
-
-            run_ingest(connection_string)
-        except Exception:
-            logger.exception(
-                "Background ingest failed for connection %s",
-                connection_id,
-            )
-
-    threading.Thread(
-        target=_run,
-        daemon=True,
-        name=f"ingest-{connection_id}",
-    ).start()
 
 
 def create_connection(
@@ -134,7 +91,9 @@ def create_connection(
     except Exception:
         logger.exception("Failed to refresh chat workers after connection create")
 
-    _trigger_ingest(connection_id, connection_string)
+    from gsf.ingestion_service.ingest import trigger_ingest
+
+    trigger_ingest(connection_id, connection_string)
 
     return row
 
@@ -159,6 +118,8 @@ def delete_connection(connection_id: str) -> dict[str, str] | None:
     except Exception:
         logger.exception("Failed to refresh chat workers after connection delete")
 
-    _trigger_ingest_delete(database_name)
+    from gsf.ingestion_service.ingest import trigger_ingest_delete
+
+    trigger_ingest_delete(database_name)
 
     return {"id": connection_id}
