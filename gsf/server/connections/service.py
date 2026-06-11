@@ -29,7 +29,7 @@ def _validate_connection_string(connection_string: str) -> SQLDatabase:
 
     connector = create_connector(connection_string)
     try:
-        connector.execute("SELECT 1")
+        connector.ping()
     except Exception:
         connector.close()
         raise

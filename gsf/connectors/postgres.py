@@ -184,6 +184,11 @@ class PostgresDatabase(SQLDatabase):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def ping(self) -> None:
+        """Verify connectivity at the driver level (TCP + auth, no SQL)."""
+        conn = psycopg.connect(self._connection_string)
+        conn.close()
+
     def close(self) -> None:
         if self._pool and not self._pool.closed:
             self._pool.close()

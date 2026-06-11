@@ -275,5 +275,10 @@ class SnowflakeDatabase(SQLDatabase):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def ping(self) -> None:
+        """Verify credentials via a driver-level auth handshake (no SQL)."""
+        with snowflake.connector.connect(**self._connect_kwargs):
+            pass
+
     def close(self) -> None:
         """No persistent connection to close (connections are per-query)."""
