@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TermColumnRef(BaseModel):
     """LLM output: column assignment with a user-friendly display label."""
+
+    model_config = ConfigDict(extra="forbid")
 
     source_column: str = Field(
         ...,
@@ -30,6 +32,8 @@ class TermAttributeAssignment(BaseModel):
 
 class RawTermProposal(BaseModel):
     """LLM output: one business Term with column assignments only."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str = Field(
         ...,
@@ -56,9 +60,10 @@ class RawTermProposal(BaseModel):
 class RawTableTermsResult(BaseModel):
     """LLM output: Terms and column assignments for a single physical table."""
 
+    model_config = ConfigDict(extra="forbid")
+
     terms: list[RawTermProposal] = Field(
         ...,
-        min_length=1,
         description=(
             "Usually one Term. Propose multiple only when columns clearly belong "
             "to distinct business concepts."
@@ -79,11 +84,13 @@ class TermProposal(BaseModel):
 class TableTermsResult(BaseModel):
     """Sanitized Terms and column assignments for a single physical table."""
 
-    terms: list[TermProposal] = Field(..., min_length=1)
+    terms: list[TermProposal] = Field(...)
 
 
 class BusinessQuestionItem(BaseModel):
     """One business question with its target entity and ontology ROLE for finalize."""
+
+    model_config = ConfigDict(extra="forbid")
 
     question: str = Field(..., description="Plain question text — no prefixes.")
     entity: str = Field(
@@ -105,6 +112,8 @@ class BusinessQuestionItem(BaseModel):
 class BusinessQuestionsResult(BaseModel):
     """LLM output: paired questions, entities, and ROLE names for VDB + finalize."""
 
+    model_config = ConfigDict(extra="forbid")
+
     items: list[BusinessQuestionItem] = Field(
         default_factory=list,
         description="Exactly 3 items — one per business angle.",
@@ -113,6 +122,8 @@ class BusinessQuestionsResult(BaseModel):
 
 class SeedSelectionResult(BaseModel):
     """LLM output: single seed table for BFS."""
+
+    model_config = ConfigDict(extra="forbid")
 
     table_name: str = Field(..., description="Physical table name.")
     rationale: str = Field(default="")
@@ -131,6 +142,8 @@ class ColumnAttributeSpec(BaseModel):
 class SingleHopJoin(BaseModel):
     """LLM output: whether two tables can be joined in one hop."""
 
+    model_config = ConfigDict(extra="forbid")
+
     possible: bool = Field(
         ..., description="True when a direct key join can be inferred."
     )
@@ -144,6 +157,8 @@ class SingleHopJoin(BaseModel):
 class PotentialFkSuggestion(BaseModel):
     """One column the LLM suspects is a foreign key."""
 
+    model_config = ConfigDict(extra="forbid")
+
     column_name: str = Field(
         ...,
         description="Physical column name that likely references another table.",
@@ -156,6 +171,8 @@ class PotentialFkSuggestion(BaseModel):
 
 class PotentialFkResult(BaseModel):
     """LLM output: columns that may be FKs but lack graph FOREIGN_KEY edges."""
+
+    model_config = ConfigDict(extra="forbid")
 
     suggestions: list[PotentialFkSuggestion] = Field(
         default_factory=list,
