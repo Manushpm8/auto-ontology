@@ -71,10 +71,6 @@ def create_connection(
             connection_string=connection_string,
             database_name=database_name,
         )
-        dal.link_database_connection(
-            db_name=database_name,
-            connection_string=connection_string,
-        )
     except Exception:
         logger.exception(
             "Failed to link connection %s in Neo4j; rolling back connection node",
