@@ -35,8 +35,13 @@ not purchase_orders or PurchaseOrder).
 3. Assign EVERY candidate column to exactly one Term. For each assignment return \
 source_column exactly as given and a display_name — a user-friendly ColumnAttribute \
 label with spaces between words (e.g. Order Date, Total Amount).
-4. Optionally propose IS_A parent or PART_OF container per Term when clearly implied. \
-Use the same user-friendly naming style for referenced Term names.
+4. Optionally propose IS_A or PART_OF per Term only when strongly implied:
+   - IS_A: this Term is a strict subtype/specialisation of the parent \
+(e.g. Purchase Order IS_A Document). Do NOT use for association or ownership.
+   - PART_OF: this Term is a structural component embedded inside the container \
+(e.g. Address PART_OF Customer). Do NOT use for transactional or activity \
+relationships — those belong in ROLE edges, not here.
+   - Only reference Terms listed under "Known neighbor Terms".
 5. Do not propose ROLE relationships here."""
 
 
@@ -98,10 +103,12 @@ def _sanitize_result(
     *,
     table: dict[str, Any],
     specs: list[ColumnAttributeSpec],
+    neighbor_terms: list[str],
 ) -> TableTermsResult:
     spec_by_column = {spec.source_column: spec for spec in specs}
     allowed_columns = set(spec_by_column)
     default_term = to_term_name(table["name"])
+    known_terms = set(neighbor_terms)
 
     sanitized_terms: list[TermProposal] = []
     seen_term_names: set[str] = set()
@@ -134,12 +141,24 @@ def _sanitize_result(
             )
             assigned_columns.add(source_column)
 
+        is_a = raw_term.is_a_parent
+        if is_a:
+            is_a = _normalize_label(is_a, fallback="")
+            if not is_a or is_a not in known_terms:
+                is_a = None
+
+        part_of = raw_term.part_of_target
+        if part_of:
+            part_of = _normalize_label(part_of, fallback="")
+            if not part_of or part_of not in known_terms:
+                part_of = None
+
         sanitized_terms.append(
             TermProposal(
                 name=term_name,
                 description=raw_term.description.strip(),
-                is_a_parent=raw_term.is_a_parent,
-                part_of_target=raw_term.part_of_target,
+                is_a_parent=is_a,
+                part_of_target=part_of,
                 attributes=attributes,
             )
         )
@@ -200,4 +219,4 @@ def extract_term(
     except Exception:
         return _fallback_result(table, specs)
 
-    return _sanitize_result(result, table=table, specs=specs)
+    return _sanitize_result(result, table=table, specs=specs, neighbor_terms=neighbor_terms)
