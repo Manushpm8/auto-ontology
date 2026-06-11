@@ -20,9 +20,11 @@ router = APIRouter()
 
 
 class ConnectionPublic(BaseModel):
-    id: str
-    type: str
-    database_name: str
+    id: str = Field(alias="connection_id")
+    database_name: str = Field(alias="name")
+    connection_string: str
+
+    model_config = {"populate_by_name": True}
 
 
 class ConnectionDatabase(BaseModel):

@@ -243,7 +243,7 @@ def get_parent_table_id_for_column(column_id: str) -> str | None:
 
 def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     """Delete stale VDB rows, re-embed, and append Table/Column rows."""
-    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    from gsf.utils import get_embed_params
     from gsf.vdb import get_vdb
     from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
     from nemo_retriever.vdb import IngestVdbOperator
@@ -279,12 +279,13 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     if not records:
         return
 
+    embed_params = get_embed_params()
     embedded = embed_text_main_text_embed(
         pd.DataFrame(records),
-        model_name=EMBED_PARAMS.model_name,
-        embed_invoke_url=EMBED_PARAMS.embed_invoke_url,
-        api_key=EMBED_PARAMS.api_key,
-        embed_modality=EMBED_PARAMS.embed_modality,
+        model_name=embed_params.model_name,
+        embed_invoke_url=embed_params.embed_invoke_url,
+        api_key=embed_params.api_key,
+        embed_modality=embed_params.embed_modality,
     )
     rows = [
         row

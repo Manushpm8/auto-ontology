@@ -48,8 +48,9 @@ export const NewConnectionsModal = ({
 	const disabledTypes = useMemo(() => {
 		const used = new Set<ConnectionType>();
 		for (const connection of existingConnections) {
-			if (isConnectionType(connection.type)) {
-				used.add(connection.type);
+			const scheme = connection.connection_string.split('://')[0].split('+')[0].toLowerCase();
+			if (isConnectionType(scheme)) {
+				used.add(scheme);
 			}
 		}
 		return [...used];

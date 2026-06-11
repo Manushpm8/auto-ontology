@@ -6,8 +6,8 @@ import type { ConnectionType } from '@/enums/connection';
 
 export type Connection = {
 	id: string;
-	type: string;
 	database_name: string;
+	connection_string: string;
 };
 
 /** User-provided fields for testing or creating a connection. */

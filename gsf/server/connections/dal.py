@@ -15,30 +15,14 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any
-from urllib.parse import urlparse
-
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 logger = logging.getLogger(__name__)
 
 
-def _type_from_connection_string(connection_string: str) -> str:
-    """Derive the connector type from the URL scheme (e.g. ``postgresql``)."""
-    scheme = urlparse(connection_string).scheme
-    return scheme.split("+", 1)[0].lower() if scheme else ""
-
-
-def _connection_node_to_public(props: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": str(props["connection_id"]),
-        "type": _type_from_connection_string(str(props.get("connection_string") or "")),
-        "database_name": str(props.get("name") or "").strip(),
-    }
-
-
 def list_connections() -> list[dict[str, Any]]:
-    """Return all connections for the settings UI (no credentials)."""
+    """Return all connections for the settings UI."""
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (db:{Labels.DB})
@@ -47,7 +31,7 @@ def list_connections() -> list[dict[str, Any]]:
         ORDER BY db.connection_name
         """
     )
-    return [_connection_node_to_public(dict(row["props"])) for row in rows]
+    return [dict(row["props"]) for row in rows]
 
 
 def list_connections_for_ingest() -> list[tuple[str | None, str]]:
@@ -128,7 +112,6 @@ def find_connection_for_database(database_name: str) -> str | None:
 def insert_connection(
     *,
     connection_id: str,
-    name: str,
     connection_string: str,
     database_name: str,
 ) -> dict[str, Any]:
@@ -138,19 +121,18 @@ def insert_connection(
         MERGE (db:{Labels.DB} {{name: $database_name}})
         ON CREATE SET db.id = randomUUID()
         SET db.connection_id = $connection_id,
-            db.connection_name = $name,
+            db.connection_name = $database_name,
             db.connection_string = $connection_string
         RETURN properties(db) AS props
         """,
         {
             "database_name": database_name,
             "connection_id": connection_id,
-            "name": name,
             "connection_string": connection_string,
         },
     )
     assert rows
-    return _connection_node_to_public(dict(rows[0]["props"]))
+    return dict(rows[0]["props"])
 
 
 def link_database_connection(*, db_name: str, connection_string: str) -> None:

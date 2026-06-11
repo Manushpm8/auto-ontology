@@ -44,7 +44,7 @@ def test_connection(connection_type: str, connection_string: str) -> None:
 
 
 def _trigger_ingest_delete(database_name: str) -> None:
-    """Remove ingested catalog data without blocking the API response."""
+    """Remove ingested database graph and embeddings without blocking the API response."""
 
     def _run() -> None:
         try:
@@ -111,7 +111,6 @@ def create_connection(
     try:
         row = dal.insert_connection(
             connection_id=connection_id,
-            name=database_name,
             connection_string=connection_string,
             database_name=database_name,
         )
@@ -141,7 +140,7 @@ def create_connection(
 
 
 def delete_connection(connection_id: str) -> dict[str, str] | None:
-    """Delete a UI-managed connection and tear down its ingested catalog."""
+    """Delete a UI-managed connection and tear down its ingested database graph."""
     props = dal.get_connection_by_id(connection_id)
     if props is None:
         return None

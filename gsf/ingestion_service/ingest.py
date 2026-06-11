@@ -63,7 +63,7 @@ def run_ingest(connection_string: str) -> None:
 
 
 def run_ingest_delete(database_name: str) -> None:
-    """Remove ingested catalog data and embeddings for a database."""
+    """Remove ingested database graph and embeddings for a database."""
     database_name = database_name.strip()
     if not database_name:
         raise ValueError("Database name is required")
