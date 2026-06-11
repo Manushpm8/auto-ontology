@@ -250,7 +250,6 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
     from nemo_retriever.vdb import IngestVdbOperator
 
-    EMBED_PARAMS = get_embed_params()
     unique_ids = set(dict.fromkeys(node_ids))
 
     # ── Step 1: build text representations from Neo4j ───────────────────────
@@ -279,6 +278,8 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     records = [r for r in records if _row_id(r) in unique_ids]
     if not records:
         return
+
+    # ── Step 2: compute embeddings (may raise if service is unavailable) ─────
 
     embed_params = get_embed_params()
     embedded = embed_text_main_text_embed(
