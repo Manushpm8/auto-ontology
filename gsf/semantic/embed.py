@@ -102,6 +102,85 @@ def build_semantic_embedder(
     )
 
 
+def embed_all_semantic_nodes(
+    embedder: SemanticEmbedder,
+) -> int:
+    """Embed every Term + ColumnAttribute currently in Neo4j in a single batch.
+
+    Fetches all semantic nodes, builds one combined DataFrame, makes a single
+    HTTP call to the embed endpoint, and writes all results to the VDB in one
+    pass.  Returns the total number of rows written.
+    """
+    from collections import defaultdict
+
+    from gsf.semantic import neo4j_dal
+
+    terms, attrs = neo4j_dal.fetch_all_terms_and_attributes()
+    if not terms and not attrs:
+        logger.info("embed_all_semantic_nodes: nothing to embed")
+        return 0
+
+    attrs_by_term: dict[str, list[dict]] = defaultdict(list)
+    for attr in attrs:
+        term_name = attr.get("term_name") or ""
+        if term_name:
+            attrs_by_term[term_name].append(attr)
+
+    all_rows: list[dict] = []
+    for term in terms:
+        term_name = term.get("name") or ""
+        if not term_name:
+            continue
+        all_rows.extend(
+            _build_rows(
+                embedder.database_name,
+                {"name": term_name, "description": term.get("description") or ""},
+                attrs_by_term.get(term_name, []),
+            )
+        )
+
+    if not all_rows:
+        logger.info("embed_all_semantic_nodes: no rows to embed")
+        return 0
+
+    results = embedder.embed_graph.execute(pd.DataFrame(all_rows))
+    embedded_df = results[0] if results else None
+    if embedded_df is None or embedded_df.empty:
+        logger.warning("embed_all_semantic_nodes: embed produced no rows")
+        return 0
+
+    with_embeddings = [
+        row
+        for row in embedded_df.to_dict(orient="records")
+        if (row.get("metadata") or {}).get("embedding")
+    ]
+    if not with_embeddings:
+        logger.warning(
+            "embed_all_semantic_nodes: 0/%d rows had embeddings", len(all_rows)
+        )
+        return 0
+
+    embedder.ingest_op(with_embeddings)
+    logger.info("embed_all_semantic_nodes: %d VDB row(s) written", len(with_embeddings))
+    return len(with_embeddings)
+
+
+def _format_sample_values(raw: str | None) -> str:
+    """Return a ' Sample values: ...' suffix string, or empty string if unavailable."""
+    if not raw:
+        return ""
+    try:
+        import json
+
+        values = json.loads(raw)
+        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
+        if not non_null:
+            return ""
+        return " Sample values: " + ", ".join(non_null) + "."
+    except Exception:
+        return ""
+
+
 def _build_rows(
     database_name: str,
     term: dict[str, Any],
@@ -136,9 +215,11 @@ def _build_rows(
         if not attr_name:
             continue
         owner = a.get("term_name") or term_name or ""
+        sample_block = _format_sample_values(a.get("sample_values"))
         text = (
             f"ColumnAttribute: {attr_name} of Term {owner}. "
             f"{a.get('description') or ''}"
+            f"{sample_block}"
         ).strip()
         path = f"semantic:attr:{owner}:{a.get('source_column')}"
         fields = {

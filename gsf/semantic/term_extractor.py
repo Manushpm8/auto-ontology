@@ -1,4 +1,4 @@
-"""LLM Term extraction and hierarchy proposals."""
+"""LLM Term extraction — names and column display-name assignments only."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from gsf.semantic.models import (
     TermAttributeAssignment,
     TermProposal,
 )
-from gsf.semantic import neo4j_dal
 
 _INVALID = {"unnamed", "unknown", "none", ""}
 _LABEL_RE = re.compile(r"^[A-Z][A-Za-z0-9]*(?: [A-Za-z][A-Za-z0-9]*)*$")
@@ -35,14 +34,7 @@ not purchase_orders or PurchaseOrder).
 3. Assign EVERY candidate column to exactly one Term. For each assignment return \
 source_column exactly as given and a display_name — a user-friendly ColumnAttribute \
 label with spaces between words (e.g. Order Date, Total Amount).
-4. Optionally propose IS_A or PART_OF per Term only when strongly implied:
-   - IS_A: this Term is a strict subtype/specialisation of the parent \
-(e.g. Purchase Order IS_A Document). Do NOT use for association or ownership.
-   - PART_OF: this Term is a structural component embedded inside the container \
-(e.g. Address PART_OF Customer). Do NOT use for transactional or activity \
-relationships — those belong in ROLE edges, not here.
-   - Only reference Terms listed under "Known neighbor Terms".
-5. Do not propose ROLE relationships here."""
+4. Do not propose IS_A, PART_OF, or ROLE relationships."""
 
 
 def _normalize_label(name: str, *, fallback: str) -> str:
@@ -103,12 +95,10 @@ def _sanitize_result(
     *,
     table: dict[str, Any],
     specs: list[ColumnAttributeSpec],
-    neighbor_terms: list[str],
 ) -> TableTermsResult:
     spec_by_column = {spec.source_column: spec for spec in specs}
     allowed_columns = set(spec_by_column)
     default_term = to_term_name(table["name"])
-    known_terms = set(neighbor_terms)
 
     sanitized_terms: list[TermProposal] = []
     seen_term_names: set[str] = set()
@@ -141,24 +131,10 @@ def _sanitize_result(
             )
             assigned_columns.add(source_column)
 
-        is_a = raw_term.is_a_parent
-        if is_a:
-            is_a = _normalize_label(is_a, fallback="")
-            if not is_a or is_a not in known_terms:
-                is_a = None
-
-        part_of = raw_term.part_of_target
-        if part_of:
-            part_of = _normalize_label(part_of, fallback="")
-            if not part_of or part_of not in known_terms:
-                part_of = None
-
         sanitized_terms.append(
             TermProposal(
                 name=term_name,
                 description=raw_term.description.strip(),
-                is_a_parent=is_a,
-                part_of_target=part_of,
                 attributes=attributes,
             )
         )
@@ -166,6 +142,7 @@ def _sanitize_result(
     if not sanitized_terms:
         return _fallback_result(table, specs)
 
+    # Any unassigned columns fall back to the first Term.
     primary = sanitized_terms[0]
     for spec in specs:
         if spec.source_column not in assigned_columns:
@@ -193,7 +170,6 @@ def extract_term(
     if not specs:
         return _fallback_result(table, specs)
 
-    neighbor_terms = neo4j_dal.fetch_neighbor_terms(table["id"])
     spec_lines = "\n".join(_format_spec_line(spec) for spec in specs[:40])
     domain_block = ""
     if domain_summary:
@@ -206,7 +182,6 @@ def extract_term(
         f"Description: {table.get('description') or ''}\n"
         f"Candidate columns (assign each to exactly one Term with a display_name):\n"
         f"{spec_lines}\n"
-        f"Known neighbor Terms: {', '.join(neighbor_terms) or '(none)'}\n"
         f"{domain_block}"
     )
     try:
@@ -219,4 +194,4 @@ def extract_term(
     except Exception:
         return _fallback_result(table, specs)
 
-    return _sanitize_result(result, table=table, specs=specs, neighbor_terms=neighbor_terms)
+    return _sanitize_result(result, table=table, specs=specs)

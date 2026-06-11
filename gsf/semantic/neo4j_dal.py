@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -16,11 +15,8 @@ from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_TERM,
     REL_HAS_ATTRIBUTE,
-    REL_IS_A,
-    REL_PART_OF,
     REL_PROPERTY_OF,
     REL_REPRESENTS,
-    REL_ROLE,
     SEMANTIC_SOURCE,
 )
 
@@ -77,52 +73,6 @@ def get_term_for_table(table_id: str) -> str | None:
         {"table_id": table_id, "source": SEMANTIC_SOURCE},
     )
     return rows[0]["name"] if rows else None
-
-
-def get_table_for_term(term_name: str) -> dict[str, Any] | None:
-    """Physical table mapped to a semantic Term (for ROLE path resolution)."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{name: $term_name, source: $source}})
-        RETURN t.id AS id, t.name AS name, t.pk AS pk
-        LIMIT 1
-        """,
-        {"term_name": term_name, "source": SEMANTIC_SOURCE},
-    )
-    if not rows:
-        return None
-    return {"id": rows[0]["id"], "name": rows[0]["name"], "pk": rows[0].get("pk")}
-
-
-def mark_suspected_foreign_keys(
-    table_id: str,
-    suggestions: list[dict[str, Any]],
-) -> None:
-    """Flag column nodes the LLM suspects are foreign keys."""
-    if not suggestions:
-        return
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
-              (col:{Labels.COLUMN})
-        UNWIND $suggestions AS s
-        WITH col, s
-        WHERE col.name = s.column_name
-        SET col.suspected_foreign_key = true,
-            col.suspected_fk_rationale = s.rationale
-        """,
-        {
-            "table_id": table_id,
-            "suggestions": [
-                {
-                    "column_name": item["column_name"],
-                    "rationale": item.get("rationale") or "",
-                }
-                for item in suggestions
-            ],
-        },
-    )
 
 
 def merge_term(name: str, description: str, table_id: str) -> str | None:
@@ -187,135 +137,15 @@ def merge_column_attribute(
     return rows[0]["id"] if rows else None
 
 
-def merge_is_a(child_term: str, parent_term: str) -> None:
-    if child_term == parent_term:
-        return
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (child:{LABEL_TERM} {{name: $child, source: $source}})
-        MATCH (parent:{LABEL_TERM} {{name: $parent, source: $source}})
-        MERGE (child)-[:{REL_IS_A}]->(parent)
-        """,
-        {"child": child_term, "parent": parent_term, "source": SEMANTIC_SOURCE},
-    )
-
-
-def merge_part_of(child_term: str, parent_term: str) -> None:
-    if child_term == parent_term:
-        return
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (child:{LABEL_TERM} {{name: $child, source: $source}})
-        MATCH (parent:{LABEL_TERM} {{name: $parent, source: $source}})
-        MERGE (child)-[:{REL_PART_OF}]->(parent)
-        """,
-        {"child": child_term, "parent": parent_term, "source": SEMANTIC_SOURCE},
-    )
-
-
-def merge_role_edge(
-    *,
-    source_term: str,
-    target_term: str,
-    role_name: str,
-    join_path: list[dict[str, Any]] | None,
-    source_table: str,
-    target_table: str,
-) -> None:
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (src:{LABEL_TERM} {{name: $source_term, source: $source}})
-        MATCH (tgt:{LABEL_TERM} {{name: $target_term, source: $source}})
-        MERGE (src)-[r:{REL_ROLE} {{name: $role_name}}]->(tgt)
-        SET r.source_table = $source_table,
-            r.target_table = $target_table,
-            r.join_path = $join_path
-        """,
-        {
-            "source_term": source_term,
-            "target_term": target_term,
-            "role_name": role_name,
-            "source_table": source_table,
-            "target_table": target_table,
-            "join_path": json.dumps(join_path or []),
-            "source": SEMANTIC_SOURCE,
-        },
-    )
-
-
-def list_orphan_tables() -> list[dict[str, Any]]:
-    """Tables with no REPRESENTS link to a Term."""
-    return get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE})
-        WHERE NOT (t)-[:{REL_REPRESENTS}]->(:{LABEL_TERM} {{source: $source}})
-        RETURN t.id AS id, t.name AS name
-        ORDER BY t.name
-        """,
-        {"source": SEMANTIC_SOURCE},
-    )
-
-
-def fetch_neighbor_terms(table_id: str, limit: int = 10) -> list[str]:
-    """Term names for FK-adjacent mapped tables (LLM context)."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
-              (src:{Labels.COLUMN})-[:{Edges.FOREIGN_KEY}]->
-              (:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-
-              (other:{Labels.TABLE})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
-        RETURN DISTINCT term.name AS name
-        LIMIT $limit
-        """,
-        {"table_id": table_id, "source": SEMANTIC_SOURCE, "limit": limit},
-    )
-    return [r["name"] for r in rows]
-
-
-def fetch_fk_role_pairs(table_id: str) -> list[dict[str, Any]]:
-    """FK relationships for ROLE synthesis at finalize."""
-    return get_neo4j_conn().query_read(
-        f"""
-        MATCH (src_table:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
-              (src_col:{Labels.COLUMN})-[:{Edges.FOREIGN_KEY}]->
-              (tgt_col:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-
-              (tgt_table:{Labels.TABLE})
-        MATCH (src_table)-[:{REL_REPRESENTS}]->(src_term:{LABEL_TERM} {{source: $source}})
-        MATCH (tgt_table)-[:{REL_REPRESENTS}]->(tgt_term:{LABEL_TERM} {{source: $source}})
-        RETURN src_table.id AS source_table_id,
-               tgt_table.id AS target_table_id,
-               src_table.name AS source_table,
-               tgt_table.name AS target_table,
-               src_term.name AS source_term,
-               tgt_term.name AS target_term,
-               src_col.name AS source_column
-        """,
-        {"table_id": table_id, "source": SEMANTIC_SOURCE},
-    )
-
-
-def find_shortest_role_path(src_term: str, tgt_term: str) -> list[str] | None:
-    """Shortest path through existing ROLE edges; returns join_path JSON per hop."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (src:{LABEL_TERM} {{name: $src, source: $source}}),
-              (tgt:{LABEL_TERM} {{name: $tgt, source: $source}})
-        MATCH p = shortestPath((src)-[:{REL_ROLE}*..8]->(tgt))
-        RETURN [r IN relationships(p) | r.join_path] AS join_paths
-        LIMIT 1
-        """,
-        {"src": src_term, "tgt": tgt_term, "source": SEMANTIC_SOURCE},
-    )
-    if not rows or not rows[0].get("join_paths"):
-        return None
-    return rows[0]["join_paths"]
-
-
 def fetch_all_terms_and_attributes() -> tuple[
     list[dict[str, Any]], list[dict[str, Any]]
 ]:
-    """Scan all semantic nodes in Neo4j for embedding."""
+    """Scan all semantic nodes in Neo4j for embedding.
+
+    Each attribute row includes ``sample_values`` (the JSON string stored on
+    the physical Column node by the ingestion pipeline), which is incorporated
+    into the embedding text.
+    """
     conn = get_neo4j_conn()
     params = {"source": SEMANTIC_SOURCE}
     terms = conn.query_read(
@@ -335,7 +165,8 @@ def fetch_all_terms_and_attributes() -> tuple[
                attr.description AS description,
                attr.term_name AS term_name,
                attr.source_column AS source_column,
-               col.name AS column_name
+               col.name AS column_name,
+               col.sampleValues AS sample_values
         """,
         params,
     )

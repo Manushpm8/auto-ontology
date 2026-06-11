@@ -43,12 +43,6 @@ class RawTermProposal(BaseModel):
         ),
     )
     description: str = Field(default="", description="Short business definition.")
-    is_a_parent: str | None = Field(
-        default=None, description="Parent Term name for IS_A, if applicable."
-    )
-    part_of_target: str | None = Field(
-        default=None, description="Container Term name for PART_OF, if applicable."
-    )
     attributes: list[TermColumnRef] = Field(
         default_factory=list,
         description=(
@@ -76,8 +70,6 @@ class TermProposal(BaseModel):
 
     name: str
     description: str = ""
-    is_a_parent: str | None = None
-    part_of_target: str | None = None
     attributes: list[TermAttributeAssignment] = Field(default_factory=list)
 
 
@@ -85,39 +77,6 @@ class TableTermsResult(BaseModel):
     """Sanitized Terms and column assignments for a single physical table."""
 
     terms: list[TermProposal] = Field(...)
-
-
-class BusinessQuestionItem(BaseModel):
-    """One business question with its target entity and ontology ROLE for finalize."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    question: str = Field(..., description="Plain question text — no prefixes.")
-    entity: str = Field(
-        ...,
-        description=(
-            "CamelCase business entity Term referenced in the question — never the "
-            "anchor Term of the current table."
-        ),
-    )
-    role: str = Field(
-        ...,
-        description=(
-            "camelCase ROLE edge name from the anchor Term to this entity Term "
-            "(e.g. placedBy, belongsTo, shippedVia)."
-        ),
-    )
-
-
-class BusinessQuestionsResult(BaseModel):
-    """LLM output: paired questions, entities, and ROLE names for VDB + finalize."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    items: list[BusinessQuestionItem] = Field(
-        default_factory=list,
-        description="Exactly 3 items — one per business angle.",
-    )
 
 
 class SeedSelectionResult(BaseModel):
@@ -137,21 +96,6 @@ class ColumnAttributeSpec(BaseModel):
     display_name: str = ""
     datatype: str = ""
     description: str | None = None
-
-
-class SingleHopJoin(BaseModel):
-    """LLM output: whether two tables can be joined in one hop."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    possible: bool = Field(
-        ..., description="True when a direct key join can be inferred."
-    )
-    src_column: str = Field(
-        default="", description="Source table column used for the join."
-    )
-    tgt_column: str = Field(default="", description="Target table PK column joined to.")
-    rationale: str = Field(default="", description="Brief reasoning.")
 
 
 class PotentialFkSuggestion(BaseModel):

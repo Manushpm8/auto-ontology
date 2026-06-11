@@ -19,7 +19,22 @@ def test_merge_term_uses_name_and_source(mock_conn: MagicMock) -> None:
 
 
 @patch("gsf.semantic.neo4j_dal.get_neo4j_conn")
-def test_merge_is_a_skips_self_edge(mock_conn: MagicMock) -> None:
+def test_store_column_sample_values_skips_empty(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
-    neo4j_dal.merge_is_a("Same", "Same")
+    neo4j_dal.store_column_sample_values("table-1", {})
     mock_conn.return_value.query_write.assert_not_called()
+
+
+@patch("gsf.semantic.neo4j_dal.get_neo4j_conn")
+def test_store_column_sample_values_writes_json(mock_conn: MagicMock) -> None:
+    import json
+
+    mock_conn.return_value = MagicMock()
+    neo4j_dal.store_column_sample_values("table-1", {"amount": [10, 20, 30]})
+    call = mock_conn.return_value.query_write.call_args
+    params = call[0][1]
+    assert params["table_id"] == "table-1"
+    entries = params["entries"]
+    assert len(entries) == 1
+    assert entries[0]["column_name"] == "amount"
+    assert json.loads(entries[0]["sample_values"]) == [10, 20, 30]

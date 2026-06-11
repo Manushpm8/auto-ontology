@@ -16,12 +16,12 @@ load_server_env()
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compile business semantic layer (Term, ColumnAttribute, ROLE)"
+        description="Compile business taxonomy (Term, ColumnAttribute, sample values)"
     )
     parser.add_argument(
         "--database-name",
         required=True,
-        help="VDB namespace for data/semantic embeddings (matches tabular ingest).",
+        help="Database name — must match the SQL connector and tabular ingest.",
     )
     parser.add_argument(
         "--no-resume",
@@ -31,7 +31,7 @@ def main() -> None:
     parser.add_argument(
         "--no-embed",
         action="store_true",
-        help="Skip semantic_layer VDB embedding.",
+        help="Skip semantic VDB embedding after compilation.",
     )
     parser.add_argument(
         "--log-level",
