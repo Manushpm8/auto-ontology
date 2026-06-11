@@ -31,6 +31,7 @@ Example
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator, Optional
 from urllib.parse import parse_qs, unquote, urlparse
@@ -57,6 +58,23 @@ _COLUMN_SCHEMA = [
     "is_nullable",
     "ordinal_position",
 ]
+
+# HeavyDB has no schemas, but the text-to-SQL agent (which treats this as a
+# PostgreSQL-compatible dialect) sometimes qualifies tables with a ``public.``
+# schema, which HeavyDB rejects with "Object 'PUBLIC' not found". Strip a
+# ``public.`` / ``"public".`` qualifier so such queries resolve to the default
+# namespace. The leading negative lookbehind keeps us from touching string
+# literals (``'public.html'``), other identifiers (``mypublic.x``), or an
+# already-qualified ``db.public.`` reference.
+_PUBLIC_SCHEMA_RE = re.compile(
+    r"""(?<![\w."'.])("?)public\1\s*\.\s*(?=["\w])""",
+    re.IGNORECASE,
+)
+
+
+def _strip_public_schema(sql: str) -> str:
+    """Remove an unsupported ``public.`` schema qualifier from *sql*."""
+    return _PUBLIC_SCHEMA_RE.sub("", sql)
 
 
 def _type_name(type_info: Any) -> str:
@@ -174,6 +192,7 @@ class HeavyDBDatabase(SQLDatabase):
         Note: HeavyDB uses *named* parameter style (``:name``), so
         ``parameters`` should be a mapping when supplied.
         """
+        sql = _strip_public_schema(sql)
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, parameters)
