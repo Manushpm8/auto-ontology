@@ -392,12 +392,12 @@ def create_custom_analysis(
 
     row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
 
-    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    from gsf.utils import get_embed_params
     from gsf.vdb import get_vdb
 
     vdb = get_vdb()
     _embed_custom_analyses(
-        embed_params=EMBED_PARAMS,
+        embed_params=get_embed_params(),
         vdb=vdb,
         analysis_id=row["id"],
     )
@@ -481,13 +481,13 @@ def update_custom_analysis(
     # `IngestVdbOperator` appends, so re-embedding without first dropping
     # the stale row would leave two VDB entries for this analysis_id and
     # double-weight it at retrieval time.
-    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    from gsf.utils import get_embed_params
     from gsf.vdb import get_vdb
 
     vdb = get_vdb()
     vdb.delete_by_id(analysis_id)
     _embed_custom_analyses(
-        embed_params=EMBED_PARAMS,
+        embed_params=get_embed_params(),
         vdb=vdb,
         analysis_id=analysis_id,
     )
