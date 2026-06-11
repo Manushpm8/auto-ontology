@@ -267,4 +267,4 @@ def add_custom_analyses(
         )
         return
 
-    _embed_custom_analyses(embed_params, vdb)
+    _embed_custom_analyses(embed_params, vdb, database_name=database_name)

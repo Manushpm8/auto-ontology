@@ -552,6 +552,7 @@ def _embed_custom_analyses(
     embed_params: "EmbedParams",
     vdb: "VDB",
     analysis_id: str | None = None,
+    database_name: str | None = None,
 ) -> None:
     """Fetch ``CustomAnalysis`` docs from Neo4j, embed them, and append to *vdb*.
 
@@ -627,6 +628,7 @@ def _embed_custom_analyses(
             "label": item.get("label", ""),
             "name": item.get("name", ""),
             "source_path": path,
+            "database_name": database_name,
         }
         rows.append(
             {
