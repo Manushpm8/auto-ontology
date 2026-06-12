@@ -9,9 +9,10 @@ Algorithm
       graph, look up the ColumnAttribute attached to the target Column and
       create SEMANTIC_FK directly.
    b. **LLM / VDB fallback** — if there is no declared FK, embed the column
-      context, search the data VDB for the top-5 most similar Column records,
-      ask the LLM to pick the best match, and create SEMANTIC_FK when a match
-      is found.
+      context, search the *semantic* VDB for the top-5 most similar
+      ColumnAttribute records, ask the LLM to pick the best match, and create
+      SEMANTIC_FK when a match is found.  The hit's ``metadata["id"]`` is the
+      ColumnAttribute Neo4j UUID directly — no additional graph lookup needed.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from nemo_retriever.retriever import Retriever
 from gsf.semantic import neo4j_dal
 from gsf.semantic.llm import invoke_structured
 from gsf.semantic.models import FkHitSelection
-from gsf.vdb import get_data_vdb
+from gsf.vdb import get_semantic_vdb
 
 logger = logging.getLogger(__name__)
 
@@ -143,11 +144,11 @@ def resolve_semantic_fks(database_name: str) -> int:
 
 
 def _build_retriever(database_name: str) -> Retriever | None:
-    """Build a Retriever backed by the data VDB, or None when the API key is absent."""
+    """Build a Retriever backed by the semantic VDB, or None when the API key is absent."""
     if not _NVIDIA_API_KEY:
         return None
     return Retriever(
-        vdb_kwargs={"vdb": get_data_vdb(database_name=database_name)},
+        vdb_kwargs={"vdb": get_semantic_vdb(database_name=database_name)},
         embed_kwargs={
             "model_name": _EMBED_MODEL,
             "embed_invoke_url": _EMBED_ENDPOINT,
@@ -185,7 +186,10 @@ def _format_sample_values(raw: str | None) -> str:
 
 
 def _resolve_via_vdb(col: dict[str, Any], retriever: Retriever) -> str | None:
-    """Search the data VDB for a matching PK column and return a ColumnAttribute id.
+    """Search the semantic VDB for a matching ColumnAttribute and return its id.
+
+    The hit's ``metadata["id"]`` is the ColumnAttribute Neo4j UUID directly —
+    no additional graph lookup is required.
 
     Returns the ColumnAttribute id if a confident LLM match is found, else None.
     """
@@ -193,16 +197,12 @@ def _resolve_via_vdb(col: dict[str, Any], retriever: Retriever) -> str | None:
     hits = retriever.query(
         query_text,
         top_k=5,
-        vdb_kwargs={"where": {"label": "Column"}},
+        vdb_kwargs={"where": {"label": "ColumnAttribute"}},
     )
     if not hits:
         return None
 
-    target_col_id = _llm_pick_hit(col, hits)
-    if not target_col_id:
-        return None
-
-    return neo4j_dal.find_column_attribute_by_column_id(target_col_id)
+    return _llm_pick_hit(col, hits)
 
 
 def _llm_pick_hit(
