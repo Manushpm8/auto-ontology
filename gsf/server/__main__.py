@@ -27,6 +27,7 @@ from gsf.server.chat.router import router as chat_router  # noqa: E402
 from gsf.server.chat.worker import get_pool, shutdown_pool  # noqa: E402
 from gsf.server.datasources.router import router as datasources_router  # noqa: E402
 from gsf.server.health.router import router as health_router  # noqa: E402
+from gsf.server.tools.router import router as tools_router  # noqa: E402
 
 
 @asynccontextmanager
@@ -63,6 +64,7 @@ def main() -> None:
         datasources_router, prefix="/api", tags=["datasources", "connectors"]
     )
     app.include_router(chat_router, prefix="/api", tags=["chat"])
+    app.include_router(tools_router, prefix="/api", tags=["tools"])
     app.include_router(health_router, prefix="/api", tags=["health"])
 
     uvicorn.run(
