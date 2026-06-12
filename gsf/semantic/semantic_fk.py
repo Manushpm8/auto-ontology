@@ -38,12 +38,13 @@ _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
-description and a numbered list of candidate primary-key columns retrieved \
-from a vector search. Your task is to decide which candidate (if any) is the \
-column that the foreign key references.
+description and a list of candidate primary-key columns retrieved from a \
+vector search. Each candidate is prefixed with its unique neo4j_id. \
+Your task is to decide which candidate (if any) is the column that the \
+foreign key references.
 
 Rules:
-- Return the 0-based index of the best matching candidate, or null if none fit.
+- Return the exact neo4j_id of the best matching candidate, or null if none fit.
 - Only pick a candidate when you are confident it is the PK being referenced.
 - Do NOT guess. If unsure, return null.
 """
@@ -197,24 +198,8 @@ def _resolve_via_vdb(col: dict[str, Any], retriever: Retriever) -> str | None:
     if not hits:
         return None
 
-    hit_index = _llm_pick_hit(col, hits)
-    if hit_index is None:
-        return None
-
-    if hit_index < 0 or hit_index >= len(hits):
-        logger.warning(
-            "resolve_semantic_fks: LLM returned out-of-range index %d for column %s",
-            hit_index,
-            col.get("id"),
-        )
-        return None
-
-    target_col_id: str | None = (hits[hit_index].get("metadata") or {}).get("id")
+    target_col_id = _llm_pick_hit(col, hits)
     if not target_col_id:
-        logger.debug(
-            "resolve_semantic_fks: VDB hit at index %d has no metadata.id — skipping",
-            hit_index,
-        )
         return None
 
     return neo4j_dal.find_column_attribute_by_column_id(target_col_id)
@@ -223,8 +208,12 @@ def _resolve_via_vdb(col: dict[str, Any], retriever: Retriever) -> str | None:
 def _llm_pick_hit(
     col: dict[str, Any],
     hits: list[dict[str, Any]],
-) -> int | None:
-    """Ask the LLM to select the best VDB hit index (0-based) or return None."""
+) -> str | None:
+    """Ask the LLM to select the Neo4j column ID of the best matching hit.
+
+    Returns the ``neo4j_id`` string from the chosen hit's metadata, or ``None``
+    when the LLM is not confident enough to pick any candidate.
+    """
     col_ctx = (
         f"Foreign-key column: {col.get('name', '')} "
         f"(table: {col.get('table_name', '')})\n"
@@ -233,16 +222,17 @@ def _llm_pick_hit(
     )
 
     candidates_lines: list[str] = []
-    for i, hit in enumerate(hits):
-        text = hit.get("text") or ""
-        candidates_lines.append(f"[{i}] {text[:300]}")
+    for hit in hits:
+        neo4j_id = (hit.get("metadata") or {}).get("id", "")
+        text = (hit.get("text") or "")[:300]
+        candidates_lines.append(f"neo4j_id={neo4j_id} | {text}")
     candidates_block = "\n".join(candidates_lines)
 
     human_text = (
         f"{col_ctx}\n\n"
         f"Candidate PK columns (from vector search):\n{candidates_block}\n\n"
-        "Which candidate (0-based index) does this FK column reference? "
-        "Return null if none are a confident match."
+        "Which candidate does this FK column reference? "
+        "Return its exact neo4j_id value, or null if none are a confident match."
     )
 
     result = invoke_structured(
@@ -250,4 +240,18 @@ def _llm_pick_hit(
         FkHitSelection,
         max_tokens=256,
     )
-    return result.hit_index
+
+    selected = result.selected_id
+    if not selected:
+        return None
+
+    valid_ids = {(hit.get("metadata") or {}).get("id") for hit in hits}
+    if selected not in valid_ids:
+        logger.warning(
+            "resolve_semantic_fks: LLM returned unknown id %r for column %s — discarding",
+            selected,
+            col.get("id"),
+        )
+        return None
+
+    return selected

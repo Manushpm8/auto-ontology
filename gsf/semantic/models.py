@@ -129,11 +129,12 @@ class FkHitSelection(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hit_index: int | None = Field(
+    selected_id: str | None = Field(
         ...,
         description=(
-            "0-based index of the VDB hit that is the primary-key column this FK "
-            "references, or null if none of the hits are a plausible match."
+            "The neo4j_id of the candidate that is the primary-key column this FK "
+            "references, exactly as shown in the candidate list. "
+            "Return null if none of the candidates are a confident match."
         ),
     )
     rationale: str = Field(default="")
