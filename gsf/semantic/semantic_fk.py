@@ -188,21 +188,34 @@ def _format_sample_values(raw: str | None) -> str:
 def _resolve_via_vdb(col: dict[str, Any], retriever: Retriever) -> str | None:
     """Search the semantic VDB for a matching ColumnAttribute and return its id.
 
+    Runs two queries and merges up to 6 unique hits:
+    - name + description query (top 3): captures semantic context
+    - name-only query (top 3): catches cases where description is noisy or absent
+
     The hit's ``metadata["id"]`` is the ColumnAttribute Neo4j UUID directly —
     no additional graph lookup is required.
 
     Returns the ColumnAttribute id if a confident LLM match is found, else None.
     """
-    query_text = _build_query_text(col)
-    hits = retriever.query(
-        query_text,
-        top_k=5,
-        vdb_kwargs={"where": {"label": "ColumnAttribute"}},
-    )
-    if not hits:
+    vdb_kwargs = {"where": {"label": "ColumnAttribute"}}
+    full_query = _build_query_text(col)
+    name_query = f"column_name: {col.get('name', '')}"
+
+    full_hits = retriever.query(full_query, top_k=3, vdb_kwargs=vdb_kwargs) or []
+    name_hits = retriever.query(name_query, top_k=3, vdb_kwargs=vdb_kwargs) or []
+
+    seen_ids: set[str] = set()
+    merged: list[dict[str, Any]] = []
+    for hit in full_hits + name_hits:
+        hit_id = (hit.get("metadata") or {}).get("id", "")
+        if hit_id and hit_id not in seen_ids:
+            seen_ids.add(hit_id)
+            merged.append(hit)
+
+    if not merged:
         return None
 
-    return _llm_pick_hit(col, hits)
+    return _llm_pick_hit(col, merged)
 
 
 def _llm_pick_hit(
