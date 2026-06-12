@@ -1,0 +1,253 @@
+"""Resolve SEMANTIC_FK edges after taxonomy compilation.
+
+Algorithm
+---------
+1. Find every Column node that has no SEMANTIC_FK edge and no HAS_ATTRIBUTE
+   edge (i.e. a FK column that the taxonomy pass skipped).
+2. For each such column:
+   a. **Declared FK fast path** — if a FOREIGN_KEY edge already exists in the
+      graph, look up the ColumnAttribute attached to the target Column and
+      create SEMANTIC_FK directly.
+   b. **LLM / VDB fallback** — if there is no declared FK, embed the column
+      context, search the data VDB for the top-5 most similar Column records,
+      ask the LLM to pick the best match, and create SEMANTIC_FK when a match
+      is found.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from nemo_retriever.retriever import Retriever
+
+from gsf.semantic import neo4j_dal
+from gsf.semantic.llm import invoke_structured
+from gsf.semantic.models import FkHitSelection
+from gsf.vdb import get_data_vdb
+
+logger = logging.getLogger(__name__)
+
+_EMBED_ENDPOINT = os.environ.get(
+    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
+)
+_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
+_NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+
+_SYSTEM_PROMPT = """\
+You are a database schema expert. You will be given a foreign-key column \
+description and a numbered list of candidate primary-key columns retrieved \
+from a vector search. Your task is to decide which candidate (if any) is the \
+column that the foreign key references.
+
+Rules:
+- Return the 0-based index of the best matching candidate, or null if none fit.
+- Only pick a candidate when you are confident it is the PK being referenced.
+- Do NOT guess. If unsure, return null.
+"""
+
+
+def resolve_semantic_fks(database_name: str) -> int:
+    """Create SEMANTIC_FK edges for all unlinked FK columns.
+
+    Runs after the taxonomy while-loop in ``compile_semantic_layer``.
+    Returns the total number of SEMANTIC_FK edges created.
+    """
+    candidates = neo4j_dal.find_unlinked_fk_columns()
+    if not candidates:
+        logger.info("resolve_semantic_fks: no unlinked FK columns found")
+        return 0
+
+    logger.info(
+        "resolve_semantic_fks: %d candidate column(s) to process", len(candidates)
+    )
+
+    declared_written = 0
+    llm_queue: list[dict[str, Any]] = []
+
+    for col in candidates:
+        fk_target_col_id: str | None = col.get("fk_target_col_id")
+        if fk_target_col_id:
+            attr_id = neo4j_dal.find_column_attribute_by_column_id(fk_target_col_id)
+            if attr_id:
+                neo4j_dal.merge_semantic_fk(col["id"], attr_id)
+                declared_written += 1
+                logger.debug(
+                    "resolve_semantic_fks [declared]: %s.%s → attr %s",
+                    col.get("table_name"),
+                    col.get("name"),
+                    attr_id,
+                )
+            else:
+                logger.debug(
+                    "resolve_semantic_fks [declared]: target column %s has no ColumnAttribute — queuing for LLM",
+                    fk_target_col_id,
+                )
+                llm_queue.append(col)
+        else:
+            llm_queue.append(col)
+
+    logger.info(
+        "resolve_semantic_fks: %d declared FK(s) resolved; %d queued for LLM",
+        declared_written,
+        len(llm_queue),
+    )
+
+    if not llm_queue:
+        return declared_written
+
+    retriever = _build_retriever(database_name)
+    if retriever is None:
+        logger.warning(
+            "resolve_semantic_fks: NVIDIA_API_KEY not set — skipping LLM/VDB path "
+            "for %d column(s)",
+            len(llm_queue),
+        )
+        return declared_written
+
+    llm_written = 0
+    for col in llm_queue:
+        try:
+            attr_id = _resolve_via_vdb(col, retriever)
+            if attr_id:
+                neo4j_dal.merge_semantic_fk(col["id"], attr_id)
+                llm_written += 1
+                logger.debug(
+                    "resolve_semantic_fks [llm]: %s.%s → attr %s",
+                    col.get("table_name"),
+                    col.get("name"),
+                    attr_id,
+                )
+        except Exception:
+            logger.exception(
+                "resolve_semantic_fks [llm]: unexpected error for column %s",
+                col.get("id"),
+            )
+
+    total = declared_written + llm_written
+    logger.info(
+        "resolve_semantic_fks: done — %d declared + %d LLM = %d total SEMANTIC_FK edge(s)",
+        declared_written,
+        llm_written,
+        total,
+    )
+    return total
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_retriever(database_name: str) -> Retriever | None:
+    """Build a Retriever backed by the data VDB, or None when the API key is absent."""
+    if not _NVIDIA_API_KEY:
+        return None
+    return Retriever(
+        vdb_kwargs={"vdb": get_data_vdb(database_name=database_name)},
+        embed_kwargs={
+            "model_name": _EMBED_MODEL,
+            "embed_invoke_url": _EMBED_ENDPOINT,
+            "api_key": _NVIDIA_API_KEY,
+        },
+    )
+
+
+def _build_query_text(col: dict[str, Any]) -> str:
+    """Build an embedding query string from a column's context."""
+    parts: list[str] = [f"column_name: {col.get('name', '')}"]
+    desc = (col.get("description") or "").strip()
+    if desc:
+        parts.append(f"description: {desc}")
+    sample_str = _format_sample_values(col.get("sample_values"))
+    if sample_str:
+        parts.append(sample_str)
+    return ", ".join(parts)
+
+
+def _format_sample_values(raw: str | None) -> str:
+    """Return a 'sample_values: ...' string, or empty when unavailable."""
+    if not raw:
+        return ""
+    try:
+        import json
+
+        values = json.loads(raw)
+        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
+        if not non_null:
+            return ""
+        return "sample_values: " + ", ".join(non_null)
+    except Exception:
+        return ""
+
+
+def _resolve_via_vdb(col: dict[str, Any], retriever: Retriever) -> str | None:
+    """Search the data VDB for a matching PK column and return a ColumnAttribute id.
+
+    Returns the ColumnAttribute id if a confident LLM match is found, else None.
+    """
+    query_text = _build_query_text(col)
+    hits = retriever.query(
+        query_text,
+        top_k=5,
+        vdb_kwargs={"where": {"label": "Column"}},
+    )
+    if not hits:
+        return None
+
+    hit_index = _llm_pick_hit(col, hits)
+    if hit_index is None:
+        return None
+
+    if hit_index < 0 or hit_index >= len(hits):
+        logger.warning(
+            "resolve_semantic_fks: LLM returned out-of-range index %d for column %s",
+            hit_index,
+            col.get("id"),
+        )
+        return None
+
+    target_col_id: str | None = (hits[hit_index].get("metadata") or {}).get("id")
+    if not target_col_id:
+        logger.debug(
+            "resolve_semantic_fks: VDB hit at index %d has no metadata.id — skipping",
+            hit_index,
+        )
+        return None
+
+    return neo4j_dal.find_column_attribute_by_column_id(target_col_id)
+
+
+def _llm_pick_hit(
+    col: dict[str, Any],
+    hits: list[dict[str, Any]],
+) -> int | None:
+    """Ask the LLM to select the best VDB hit index (0-based) or return None."""
+    col_ctx = (
+        f"Foreign-key column: {col.get('name', '')} "
+        f"(table: {col.get('table_name', '')})\n"
+        f"Description: {col.get('description') or '(none)'}\n"
+        f"Sample values: {_format_sample_values(col.get('sample_values')) or '(none)'}"
+    )
+
+    candidates_lines: list[str] = []
+    for i, hit in enumerate(hits):
+        text = hit.get("text") or ""
+        candidates_lines.append(f"[{i}] {text[:300]}")
+    candidates_block = "\n".join(candidates_lines)
+
+    human_text = (
+        f"{col_ctx}\n\n"
+        f"Candidate PK columns (from vector search):\n{candidates_block}\n\n"
+        "Which candidate (0-based index) does this FK column reference? "
+        "Return null if none are a confident match."
+    )
+
+    result = invoke_structured(
+        [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_text)],
+        FkHitSelection,
+        max_tokens=256,
+    )
+    return result.hit_index

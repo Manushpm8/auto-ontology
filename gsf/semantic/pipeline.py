@@ -60,4 +60,9 @@ def compile_semantic_layer(
         neo4j_dal.mark_table_reviewed(table_id)
         count += 1
 
+    from gsf.semantic.semantic_fk import resolve_semantic_fks
+
+    fk_count = resolve_semantic_fks(database_name)
+    logger.info("Semantic FK edges created: %d", fk_count)
+
     return count

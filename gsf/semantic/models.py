@@ -122,3 +122,18 @@ class PotentialFkResult(BaseModel):
         default_factory=list,
         description="Suspected FK columns; empty when none apply.",
     )
+
+
+class FkHitSelection(BaseModel):
+    """LLM output: selects the best matching Column hit from a VDB result list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hit_index: int | None = Field(
+        ...,
+        description=(
+            "0-based index of the VDB hit that is the primary-key column this FK "
+            "references, or null if none of the hits are a plausible match."
+        ),
+    )
+    rationale: str = Field(default="")
