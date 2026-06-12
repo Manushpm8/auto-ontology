@@ -36,6 +36,7 @@ RETURN coalesce(t.reviewed, false) AS reviewed,
        c.data_type AS data_type,
        c.description AS description,
        c.ordinal_position AS ordinal_position,
+       c.sample_values AS sample_values,
        fk IS NOT NULL AS is_foreign_key
 ORDER BY c.ordinal_position
 """
@@ -131,6 +132,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "data_type": r["data_type"],
             "description": r.get("description"),
             "ordinal_position": r.get("ordinal_position"),
+            "sample_values": r.get("sample_values"),
         }
         for r in rows
         if r.get("id") is not None

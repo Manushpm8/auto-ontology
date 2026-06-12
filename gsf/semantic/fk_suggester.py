@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -15,7 +16,10 @@ You review relational table metadata and identify columns that are likely foreig
 but are not already declared as FOREIGN_KEY or primary-key columns.
 
 A likely foreign key typically:
-- ends with _id, Id, or references another entity by name (e.g. customer_id, orderId)
+- ends with _id or Id and has a meaningful prefix naming a different entity (e.g. customer_id,
+  orderId) — NOT a bare "id"/"_id"/"Id" column or one whose prefix matches the table name
+- has a description that contains words like "references", "identifier of", or names another
+- non unique sample values
 - has an integer or string type consistent with identifiers
 - semantically points to a row in another table
 
@@ -41,9 +45,35 @@ def _candidate_columns(
     ]
 
 
+def _format_sample_values(raw: str | None) -> str:
+    """Return a 'samples: ...' string filtered to ≤30-char non-null values, or empty."""
+    if not raw:
+        return ""
+    try:
+        values = json.loads(raw)
+        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
+        return ("samples: " + ", ".join(non_null)) if non_null else ""
+    except Exception:
+        return ""
+
+
+def _has_unique_sample_values(raw: str | None) -> bool:
+    """Return True when all non-null sample values are distinct (no repeats)."""
+    if not raw:
+        return False
+    try:
+        str_values = [str(v) for v in json.loads(raw) if v is not None]
+        return len(str_values) > 1 and len(set(str_values)) == len(str_values)
+    except Exception:
+        return False
+
+
 def _format_column_line(col: dict[str, Any]) -> str:
     desc = col.get("description") or ""
     suffix = f" — {desc}" if desc else ""
+    sample_str = _format_sample_values(col.get("sample_values"))
+    if sample_str:
+        suffix += f" [{sample_str}]"
     return f"  - {col['name']} ({col.get('data_type', '')}){suffix}"
 
 
@@ -96,4 +126,19 @@ def suggest_potential_foreign_keys(
         filtered.append(
             PotentialFkSuggestion(column_name=name, rationale=item.rationale.strip())
         )
+    for col in candidates:
+        name = col.get("name", "")
+        if name in seen:
+            continue
+        if (col.get("data_type") or "").lower() == "uuid" and not _has_unique_sample_values(
+            col.get("sample_values")
+        ):
+            seen.add(name)
+            filtered.append(
+                PotentialFkSuggestion(
+                    column_name=name,
+                    rationale="uuid type with repeated sample values (likely FK reference)",
+                )
+            )
+
     return PotentialFkResult(suggestions=filtered)
