@@ -19,7 +19,16 @@ _MODEL_NAME = os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b")
 _API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
 
-def _get_llm(*, temperature: float = 0.0, max_tokens: int = 1024) -> BaseChatModel:
+_IS_REASONING_MODEL = any(
+    _MODEL_NAME.startswith(prefix)
+    for prefix in ("openai/o", "openai/gpt-5", "nvidia/llama-3.1-nemotron-ultra")
+)
+_DEFAULT_MAX_TOKENS = 8192 if _IS_REASONING_MODEL else 1024
+
+
+def _get_llm(
+    *, temperature: float = 0.0, max_tokens: int = _DEFAULT_MAX_TOKENS
+) -> BaseChatModel:
     if _MODEL_NAME.startswith("openai/"):
         from langchain_openai import ChatOpenAI
 
@@ -47,7 +56,7 @@ def invoke_structured(
     schema: type[T],
     *,
     temperature: float = 0.0,
-    max_tokens: int = 1024,
+    max_tokens: int = _DEFAULT_MAX_TOKENS,
 ) -> T:
     """Call the configured chat model with structured output."""
     if not _API_KEY:
