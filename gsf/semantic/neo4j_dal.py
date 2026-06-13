@@ -25,9 +25,11 @@ logger = logging.getLogger(__name__)
 
 
 def fetch_all_tables() -> list[dict[str, Any]]:
+    """Return tables that have not yet been assigned a Term."""
     return get_neo4j_conn().query_read(
         f"""
         MATCH (t:{Labels.TABLE})
+        WHERE NOT (t)-[:{REL_REPRESENTS}]->()
         RETURN t.id AS id, t.name AS name, t.description AS description
         ORDER BY t.name
         """
