@@ -51,4 +51,12 @@ def run_semantic_compilation(
             vdb_rows = embed_all_semantic_nodes(embedder)
             logger.info("Embedding complete — %d VDB row(s) written", vdb_rows)
 
+    from gsf.semantic.semantic_fk import resolve_semantic_fks
+
+    logger.info("=" * 60)
+    logger.info("Resolving semantic FK edges…")
+    logger.info("=" * 60)
+    fk_count = resolve_semantic_fks(database_name)
+    logger.info("Semantic FK edges created: %d", fk_count)
+
     return count

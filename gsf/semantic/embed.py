@@ -134,7 +134,11 @@ def embed_all_semantic_nodes(
         all_rows.extend(
             _build_rows(
                 embedder.database_name,
-                {"name": term_name, "description": term.get("description") or ""},
+                {
+                    "name": term_name,
+                    "description": term.get("description") or "",
+                    "id": term.get("id"),
+                },
                 attrs_by_term.get(term_name, []),
             )
         )

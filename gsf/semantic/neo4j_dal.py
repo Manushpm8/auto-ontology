@@ -153,7 +153,7 @@ def fetch_all_terms_and_attributes() -> tuple[
         f"""
         MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
               (term:{LABEL_TERM} {{source: $source}})
-        RETURN DISTINCT term.name AS name, term.description AS description
+        RETURN DISTINCT term.name AS name, term.description AS description, term.id AS id
         """,
         params,
     )
@@ -167,7 +167,8 @@ def fetch_all_terms_and_attributes() -> tuple[
                attr.term_name AS term_name,
                attr.source_column AS source_column,
                col.name AS column_name,
-               col.sample_values AS sample_values
+               col.sample_values AS sample_values,
+               attr.id AS id
         """,
         params,
     )
