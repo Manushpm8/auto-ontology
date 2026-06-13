@@ -130,8 +130,9 @@ def suggest_potential_foreign_keys(
         name = col.get("name", "")
         if name in seen:
             continue
-        if (col.get("data_type") or "").lower() == "uuid" and not _has_unique_sample_values(
-            col.get("sample_values")
+        sample_values = col.get("sample_values")
+        if (col.get("data_type") or "").lower() == "uuid" and sample_values and not _has_unique_sample_values(
+            sample_values
         ):
             seen.add(name)
             filtered.append(
