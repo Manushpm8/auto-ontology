@@ -40,3 +40,6 @@ dev_tools/evaluation/*.json
 # Local OpenMetadata evaluation environment (Docker volume + rendered configs
 # with secrets); local scratch state, never commit.
 openmetadata-eval/
+
+# AI-Q demo runtime logs (regenerated on every run_demo.sh run)
+demo-logs/
