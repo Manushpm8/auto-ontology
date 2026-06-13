@@ -17,16 +17,16 @@ import logging
 import os
 
 from nemo_retriever.graph import Graph
-from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
-from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
+from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import TabularSchemaExtractOp
+from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
-from nemo_retriever.text_embed.operators import _BatchEmbedActor
-from nemo_retriever.retriever import Retriever
+from nemo_retriever.operators.embed.operators import _BatchEmbedActor
+from nemo_retriever.graph.retriever import Retriever
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
-from nemo_retriever.vdb import IngestVdbOperator
-from nemo_retriever.params import EmbedParams, TabularExtractParams
+from nemo_retriever.operators.vdb import IngestVdbOperator
+from nemo_retriever.common.params.models import EmbedParams, TabularExtractParams
 from gsf.vdb import get_data_vdb
 from gsf.connectors import get_connectors
 from gsf.server.env import load_server_env

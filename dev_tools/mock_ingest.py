@@ -25,14 +25,14 @@ from typing import Optional
 
 import pandas as pd
 from nemo_retriever.graph import Graph
-from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
+from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
-from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
-from nemo_retriever.params import EmbedParams, TabularExtractParams
+from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import TabularSchemaExtractOp
+from nemo_retriever.common.params.models import EmbedParams, TabularExtractParams
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
-from nemo_retriever.text_embed.operators import _BatchEmbedActor
-from nemo_retriever.vdb import IngestVdbOperator
+from nemo_retriever.operators.embed.operators import _BatchEmbedActor
+from nemo_retriever.operators.vdb import IngestVdbOperator
 
 from gsf.vdb import get_data_vdb
 

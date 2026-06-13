@@ -38,12 +38,14 @@ from nemo_retriever.tabular_data.retrieval.data_access.graph_schemas import (
     get_all_schemas_ids,
     get_schemas_by_ids,
 )
+from nemo_retriever.operators.vdb import IngestVdbOperator
+from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
 
 from gsf.connectors import get_connectors
 
 if TYPE_CHECKING:
-    from nemo_retriever.params import EmbedParams
-    from nemo_retriever.vdb import VDB
+    from nemo_retriever.common.params.models import EmbedParams
+    from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
 
@@ -580,9 +582,6 @@ def _embed_custom_analyses(
     row first.
     """
     import pandas as pd
-
-    from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
-    from nemo_retriever.vdb import IngestVdbOperator
 
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})

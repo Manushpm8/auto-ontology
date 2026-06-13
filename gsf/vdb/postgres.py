@@ -19,7 +19,7 @@ import psycopg
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
-from nemo_retriever.vdb import VDB
+from nemo_retriever.common.vdb.adt_vdb import VDB
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 logger = logging.getLogger(__name__)

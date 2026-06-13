@@ -22,7 +22,7 @@ import os
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from nemo_retriever.retriever import Retriever
+from nemo_retriever.graph.retriever import Retriever
 
 from gsf.semantic import neo4j_dal
 from gsf.semantic.llm import invoke_structured
