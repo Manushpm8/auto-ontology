@@ -24,16 +24,6 @@ def main() -> None:
         help="Database name — must match the SQL connector and tabular ingest.",
     )
     parser.add_argument(
-        "--no-resume",
-        action="store_true",
-        help="Clear reviewed flags and start fresh.",
-    )
-    parser.add_argument(
-        "--no-embed",
-        action="store_true",
-        help="Skip semantic VDB embedding after compilation.",
-    )
-    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -48,11 +38,7 @@ def main() -> None:
 
     from gsf.semantic.compile import run_semantic_compilation
 
-    run_semantic_compilation(
-        args.database_name,
-        embed=not args.no_embed,
-        resume=not args.no_resume,
-    )
+    run_semantic_compilation(args.database_name)
 
 
 if __name__ == "__main__":

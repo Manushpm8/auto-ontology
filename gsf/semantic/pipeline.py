@@ -15,15 +15,10 @@ logger = logging.getLogger(__name__)
 def compile_semantic_layer(
     database_name: str,
     *,
-    resume: bool = True,
     domain_summary: DomainSummary | None = None,
 ) -> int:
     """Run full taxonomy compilation over every unreviewed table in Neo4j."""
     summary = domain_summary or load_domain_summary(database_name)
-
-    if not resume:
-        neo4j_dal.clear_reviewed_flags()
-        logger.info("Cleared reviewed flags for fresh run")
 
     count = 0
 

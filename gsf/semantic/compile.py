@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from gsf.semantic import neo4j_dal
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.pipeline import compile_semantic_layer
 
@@ -13,15 +14,15 @@ logger = logging.getLogger(__name__)
 def run_semantic_compilation(
     database_name: str,
     *,
-    embed: bool = True,
-    resume: bool = True,
     domain_summary: DomainSummary | None = None,
 ) -> int:
-    """Compile semantic taxonomy then embed all nodes into the VDB.
+    """Compile semantic taxonomy, embed all nodes into the VDB, then resolve FK edges.
 
     Returns the number of tables processed.
     """
     summary = domain_summary or load_domain_summary(database_name)
+
+    neo4j_dal.clear_reviewed_flags()
 
     logger.info("=" * 60)
     logger.info(
@@ -32,7 +33,6 @@ def run_semantic_compilation(
 
     count = compile_semantic_layer(
         database_name,
-        resume=resume,
         domain_summary=summary,
     )
 
@@ -40,16 +40,15 @@ def run_semantic_compilation(
     logger.info("Semantic compilation finished — %d table visits", count)
     logger.info("=" * 60)
 
-    if embed:
-        from gsf.semantic.embed import build_semantic_embedder, embed_all_semantic_nodes
+    from gsf.semantic.embed import build_semantic_embedder, embed_all_semantic_nodes
 
-        embedder = build_semantic_embedder(database_name, reset=not resume)
-        if embedder is not None:
-            logger.info("=" * 60)
-            logger.info("Embedding semantic nodes into VDB…")
-            logger.info("=" * 60)
-            vdb_rows = embed_all_semantic_nodes(embedder)
-            logger.info("Embedding complete — %d VDB row(s) written", vdb_rows)
+    embedder = build_semantic_embedder(database_name, reset=True)
+    if embedder is not None:
+        logger.info("=" * 60)
+        logger.info("Embedding semantic nodes into VDB…")
+        logger.info("=" * 60)
+        vdb_rows = embed_all_semantic_nodes(embedder)
+        logger.info("Embedding complete — %d VDB row(s) written", vdb_rows)
 
     from gsf.semantic.semantic_fk import resolve_semantic_fks
 
