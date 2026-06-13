@@ -23,33 +23,15 @@ from gsf.semantic.constants import (
 
 logger = logging.getLogger(__name__)
 
-REVIEWED_SOURCE = "semantic"
 
-
-def mark_table_reviewed(table_id: str) -> None:
-    get_neo4j_conn().query_write(
-        f"MATCH (t:{Labels.TABLE} {{id: $table_id}}) "
-        "SET t.reviewed = true, t.reviewed_source = $source",
-        {"table_id": table_id, "source": REVIEWED_SOURCE},
-    )
-
-
-def clear_reviewed_flags() -> None:
-    get_neo4j_conn().query_write(
-        f"MATCH (t:{Labels.TABLE}) SET t.reviewed = false REMOVE t.reviewed_source",
-    )
-
-
-def discover_unreviewed_tables() -> list[dict[str, Any]]:
-    rows = get_neo4j_conn().query_read(
+def fetch_all_tables() -> list[dict[str, Any]]:
+    return get_neo4j_conn().query_read(
         f"""
         MATCH (t:{Labels.TABLE})
-        WHERE coalesce(t.reviewed, false) = false
         RETURN t.id AS id, t.name AS name, t.description AS description
         ORDER BY t.name
         """
     )
-    return rows
 
 
 def table_has_term(table_id: str) -> bool:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 
-from gsf.semantic import neo4j_dal
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.pipeline import compile_semantic_layer
 
@@ -21,8 +20,6 @@ def run_semantic_compilation(
     Returns the number of tables processed.
     """
     summary = domain_summary or load_domain_summary(database_name)
-
-    neo4j_dal.clear_reviewed_flags()
 
     logger.info("=" * 60)
     logger.info(

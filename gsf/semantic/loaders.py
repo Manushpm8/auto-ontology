@@ -30,8 +30,7 @@ _FETCH_COLUMNS_QUERY = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})
 OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
 OPTIONAL MATCH (c)-[fk:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})
-RETURN coalesce(t.reviewed, false) AS reviewed,
-       c.id AS id,
+RETURN c.id AS id,
        c.name AS name,
        c.data_type AS data_type,
        c.description AS description,
@@ -121,10 +120,9 @@ def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
 
 
 def fetch_table_context(table_id: str) -> dict[str, Any]:
-    """Columns, FKs, and reviewed flag for one table."""
+    """Columns and FKs for one table."""
     conn = get_neo4j_conn()
     rows = conn.query_read(_FETCH_COLUMNS_QUERY, {"table_id": table_id})
-    reviewed = bool(rows[0]["reviewed"]) if rows else False
     columns = [
         {
             "id": r["id"],
@@ -138,7 +136,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
         if r.get("id") is not None
     ]
     fks = conn.query_read(_FETCH_FKS_QUERY, {"table_id": table_id})
-    return {"columns": columns, "fks": fks, "reviewed": reviewed}
+    return {"columns": columns, "fks": fks}
 
 
 def fetch_join_edges() -> list[dict[str, Any]]:
