@@ -416,7 +416,10 @@ def _print_agent_result(
         if val is None:
             continue
         print(f"\n  [{key}]")
-        for line in str(val).splitlines():
+        text = str(val)
+        if key == "sql_response_from_db" and len(text) > 300:
+            text = text[:300] + f"  ... ({len(text)} chars total)"
+        for line in text.splitlines():
             print(f"    {line}")
     if returned_sql_result:
         print("\n  [returned_sql_result]")
@@ -570,6 +573,18 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Run a single hardcoded query (edit SINGLE_QUERY in the script).",
+    )
+    parser.add_argument(
+        "--start",
+        type=int,
+        default=None,
+        help="1-based index of the first question to run (inclusive).",
+    )
+    parser.add_argument(
+        "--end",
+        type=int,
+        default=None,
+        help="1-based index of the last question to run (inclusive).",
     )
     return parser.parse_args()
 
@@ -778,6 +793,8 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = _parse_args()
+    _start = (args.start - 1) if args.start is not None else START_INDEX
+    _end = args.end if args.end is not None else END_INDEX
     if args.single:
         run_single_query(SINGLE_QUERY)
     elif RUN_CONSISTENCY or args.consistency:
@@ -786,14 +803,14 @@ if __name__ == "__main__":
         evaluate_consistency(
             input_path=args.input,
             output_path=consistency_output,
-            start_index=START_INDEX,
-            end_index=END_INDEX,
+            start_index=_start,
+            end_index=_end,
             runs=num_runs,
         )
     else:
         evaluate(
             input_path=args.input,
             output_path=args.output,
-            start_index=START_INDEX,
-            end_index=END_INDEX,
+            start_index=_start,
+            end_index=_end,
         )

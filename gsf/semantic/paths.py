@@ -21,7 +21,12 @@ MATCH p = shortestPath(
     (src)-[:{Edges.CONTAINS}|{Edges.FOREIGN_KEY}|{Edges.JOIN}*..14]-(tgt)
 )
 WITH p,
-     [n IN nodes(p) WHERE n:{Labels.TABLE} | n.name] AS path_nodes
+     [n IN nodes(p) WHERE n:{Labels.TABLE} |
+       {{
+         name: n.name,
+         schema: [(n)<-[:{Edges.CONTAINS}]-(s:{Labels.SCHEMA}) | s.name][0]
+       }}
+     ] AS path_nodes
 WHERE size(path_nodes) >= 2
 UNWIND range(0, size(relationships(p)) - 1) AS i
 WITH path_nodes, i, relationships(p)[i] AS r
@@ -94,11 +99,15 @@ def compute_join_path(
     if not rows or not rows[0].get("path_nodes"):
         return None
 
-    path_nodes: list[str] = rows[0]["path_nodes"]
+    path_nodes: list[dict[str, str]] = rows[0]["path_nodes"]
     join_conditions: list[dict[str, Any]] = rows[0].get("join_conditions") or []
 
     hops: list[dict[str, Any]] = []
-    for i, (src_name, tgt_name) in enumerate(zip(path_nodes, path_nodes[1:])):
+    for i, (src_node, tgt_node) in enumerate(zip(path_nodes, path_nodes[1:])):
+        src_name = src_node["name"]
+        tgt_name = tgt_node["name"]
+        src_schema = src_node.get("schema")
+        tgt_schema = tgt_node.get("schema")
         if i >= len(join_conditions):
             logger.debug(
                 "No join condition for hop %d (%s→%s)", i + 1, src_name, tgt_name
@@ -119,13 +128,11 @@ def compute_join_path(
             else:
                 # Edge traversed in reverse — swap columns
                 hop_src_col, hop_tgt_col = fk_end_col, fk_start_col
-            hops.append(
-                {
-                    "hop": i + 1,
-                    "source": {"table": src_name, "column": hop_src_col},
-                    "target": {"table": tgt_name, "column": hop_tgt_col},
-                }
-            )
+            hops.append({
+                "hop": i + 1,
+                "source": {"schema": src_schema, "table": src_name, "column": hop_src_col},
+                "target": {"schema": tgt_schema, "table": tgt_name, "column": hop_tgt_col},
+            })
         else:
             # JOIN edge between Table nodes — column info lives on the edge property
             cols = _parse_join_columns(cond.get("join_columns"))
@@ -135,16 +142,14 @@ def compute_join_path(
                 )
                 return None  # incomplete — let LLM try
             # one hop per column pair (composite keys produce multiple hops over same tables)
-            for j, pair in enumerate(cols):
+            for pair in cols:
                 if not pair.get("src") or not pair.get("tgt"):
                     return None
-                hops.append(
-                    {
-                        "hop": len(hops) + 1,
-                        "source": {"table": src_name, "column": pair["src"]},
-                        "target": {"table": tgt_name, "column": pair["tgt"]},
-                    }
-                )
+                hops.append({
+                    "hop": len(hops) + 1,
+                    "source": {"schema": src_schema, "table": src_name, "column": pair["src"]},
+                    "target": {"schema": tgt_schema, "table": tgt_name, "column": pair["tgt"]},
+                })
 
     return hops or None
 
