@@ -5,17 +5,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-	PaginationArrowButton,
-	PaginationItemRangeText,
-	PaginationNavigationGroup,
-	PaginationPageList,
-	PaginationRoot,
-} from '@nvidia/foundations-react-core';
 
 import { Icon, IconName } from '@/components/icons';
+import { Table } from '@/components/Table';
 import { analyticsApi } from '@/api/analytics';
 import type { MessageAnalytic } from '@/types/analytics';
+import type { TableColumn } from '@/types/table';
 
 const formatDate = (iso: string) =>
 	new Intl.DateTimeFormat(undefined, {
@@ -27,6 +22,40 @@ const PAGE_SIZE = 10;
 
 const CSV_HEADERS = ['Timestamp', 'Question', 'Reasoning', 'Response SQL'];
 const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
+
+const COLUMNS: TableColumn<MessageAnalytic>[] = [
+	{
+		key: 'createdAt',
+		header: 'Timestamp',
+		width: 'w-44',
+		nowrap: true,
+		className: 'text-zinc-600 dark:text-zinc-300',
+		cell: (row) => formatDate(row.createdAt),
+	},
+	{
+		key: 'question',
+		header: 'Question',
+		truncate: true,
+		className: 'text-zinc-700 dark:text-zinc-300',
+		cell: (row) => row.question,
+		title: (row) => row.question ?? '',
+	},
+	{
+		key: 'reasoning',
+		header: 'Reasoning',
+		truncate: true,
+		className: 'text-zinc-700 dark:text-zinc-300',
+		cell: (row) => row.reasoning,
+		title: (row) => row.reasoning ?? '',
+	},
+	{
+		key: 'responseSql',
+		header: 'Response SQL',
+		truncate: true,
+		cell: (row) => row.responseSql,
+		title: (row) => row.responseSql ?? '',
+	},
+];
 
 export const AnalyticsView = () => {
 	const [rows, setRows] = useState<MessageAnalytic[]>([]);
@@ -146,82 +175,17 @@ export const AnalyticsView = () => {
 				)}
 
 				{!loading && error == null && rows.length > 0 && (
-					<div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-						<table className="w-full table-fixed text-sm">
-							<thead>
-								<tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/60">
-									<th className="w-44 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-										Timestamp
-									</th>
-									<th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-										Question
-									</th>
-									<th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-										Reasoning
-									</th>
-									<th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-										Response SQL
-									</th>
-								</tr>
-							</thead>
-							<tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-								{pageRows.map((row) => (
-									<tr
-										key={row.id}
-										className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
-									>
-										<td className="whitespace-nowrap px-4 py-3 text-zinc-600 dark:text-zinc-300">
-											{formatDate(row.createdAt)}
-										</td>
-										<td className="max-w-0 px-4 py-3 text-zinc-700 dark:text-zinc-300">
-											<span
-												className="block truncate"
-												title={row.question ?? ''}
-											>
-												{row.question}
-											</span>
-										</td>
-										<td className="max-w-0 px-4 py-3 text-zinc-700 dark:text-zinc-300">
-											<span
-												className="block truncate"
-												title={row.reasoning ?? ''}
-											>
-												{row.reasoning}
-											</span>
-										</td>
-										<td className="max-w-0 px-4 py-3">
-											<span
-												className="block truncate"
-												title={row.responseSql ?? ''}
-											>
-												{row.responseSql}
-											</span>
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-						<PaginationRoot
-							totalItems={rows.length}
-							pageSize={PAGE_SIZE}
-							page={currentPage}
-							onPageChange={setPage}
-							className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800"
-						>
-							<PaginationNavigationGroup withTabs>
-								<PaginationArrowButton direction="previous" />
-								<PaginationPageList />
-								<PaginationArrowButton direction="next" />
-							</PaginationNavigationGroup>
-							<PaginationItemRangeText
-								rangeTextFormatFn={({
-									firstItemIndex,
-									lastItemIndex,
-									totalItems,
-								}) => `${firstItemIndex}-${lastItemIndex} out of ${totalItems}`}
-							/>
-						</PaginationRoot>
-					</div>
+					<Table
+						columns={COLUMNS}
+						rows={pageRows}
+						rowKey={(row) => row.id}
+						pagination={{
+							page: currentPage,
+							pageSize: PAGE_SIZE,
+							totalItems: rows.length,
+							onPageChange: setPage,
+						}}
+					/>
 				)}
 			</div>
 		</div>
