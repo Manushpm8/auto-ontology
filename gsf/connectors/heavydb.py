@@ -59,22 +59,46 @@ _COLUMN_SCHEMA = [
     "ordinal_position",
 ]
 
-# HeavyDB has no schemas, but the text-to-SQL agent (which treats this as a
-# PostgreSQL-compatible dialect) sometimes qualifies tables with a ``public.``
-# schema, which HeavyDB rejects with "Object 'PUBLIC' not found". Strip a
-# ``public.`` / ``"public".`` qualifier so such queries resolve to the default
-# namespace. The leading negative lookbehind keeps us from touching string
-# literals (``'public.html'``), other identifiers (``mypublic.x``), or an
-# already-qualified ``db.public.`` reference.
-_PUBLIC_SCHEMA_RE = re.compile(
-    r"""(?<![\w."'.])("?)public\1\s*\.\s*(?=["\w])""",
-    re.IGNORECASE,
-)
+# HeavyDB has a flat namespace: it accepts only bare table names, never
+# ``schema.table`` or ``database.schema.table``. The text-to-SQL agent treats
+# HeavyDB as PostgreSQL (see ``dialect``) and therefore qualifies tables with a
+# schema. Two flavours show up:
+#   * ``public.flights`` — a literal ``public`` schema, rejected with
+#     "Object 'PUBLIC' not found".
+#   * ``flights.flights`` / ``flights.flights.flights`` — because this connector
+#     reports ``table_schema`` (and the implied catalog) as the *database name*,
+#     the agent qualifies with the database name, rejected with
+#     "Object '<table>' not found".
+# Strip both so the query resolves to the default namespace.
+#
+# The negative lookbehind keeps us from touching string literals
+# (``'public.html'``), dotted identifiers, or table aliases (``f.col``). The
+# pattern removes one qualifier segment per pass; applied as a fixpoint (see
+# ``_strip_schema_qualifiers``) a multi-part chain like ``flights.flights.flights``
+# collapses to the bare ``flights`` over successive passes.
 
 
-def _strip_public_schema(sql: str) -> str:
-    """Remove an unsupported ``public.`` schema qualifier from *sql*."""
-    return _PUBLIC_SCHEMA_RE.sub("", sql)
+def _build_schema_qualifier_re(database_name: str) -> "re.Pattern[str]":
+    """Compile the schema/catalog-qualifier strip regex for *database_name*."""
+    names = "|".join(re.escape(n) for n in ("public", database_name))
+    return re.compile(
+        rf"""(?<![\w."'.])("?)(?:{names})\1\s*\.\s*(?=["\w])""",
+        re.IGNORECASE,
+    )
+
+
+def _strip_schema_qualifiers(sql: str, pattern: "re.Pattern[str]") -> str:
+    """Remove unsupported ``public.`` / ``<database>.`` qualifiers from *sql*.
+
+    Runs *pattern* to a fixpoint so multi-part qualifier chains (e.g.
+    ``flights.flights.flights``) are fully stripped, not just their first
+    segment.
+    """
+    previous = ""
+    while previous != sql:
+        previous = sql
+        sql = pattern.sub("", sql)
+    return sql
 
 
 def _type_name(type_info: Any) -> str:
@@ -157,6 +181,9 @@ class HeavyDBDatabase(SQLDatabase):
     def __init__(self, connection_string: str) -> None:
         self._connect_kwargs = _parse_connection_string(connection_string)
         self._database_name: str = self._connect_kwargs["dbname"]
+        # HeavyDB is flat-namespaced; strip schema/catalog qualifiers the
+        # text-to-SQL agent emits (``public.`` and ``<database_name>.``).
+        self._schema_qualifier_re = _build_schema_qualifier_re(self._database_name)
 
     @property
     def dialect(self) -> str:
@@ -192,7 +219,7 @@ class HeavyDBDatabase(SQLDatabase):
         Note: HeavyDB uses *named* parameter style (``:name``), so
         ``parameters`` should be a mapping when supplied.
         """
-        sql = _strip_public_schema(sql)
+        sql = _strip_schema_qualifiers(sql, self._schema_qualifier_re)
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, parameters)
