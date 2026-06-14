@@ -168,23 +168,19 @@ def _canonical(value: Any) -> Any:
     return str(value).strip().lower()
 
 
-def _execute_sql(
-    connector: Any, sql: str
-) -> Tuple[Optional[pd.DataFrame], str]:
+def _execute_sql(connector: Any, sql: str) -> Tuple[Optional[pd.DataFrame], str]:
     if not sql or not sql.strip():
         return None, "empty SQL"
     try:
         df = connector.execute(sql)
         if not isinstance(df, pd.DataFrame):
             df = pd.DataFrame(df)
-        return df, ""
+        return df.head(_MAX_RESULT_ROWS), ""
     except Exception as exc:  # pragma: no cover - tooling script
         return None, f"{type(exc).__name__}: {exc}"
 
 
-def _score_sql(
-    connector: Any, expected: str, actual: str
-) -> Dict[str, Any]:
+def _score_sql(connector: Any, expected: str, actual: str) -> Dict[str, Any]:
     text_sim = _sql_text_similarity(expected, actual)
     expected_df, expected_err = _execute_sql(connector, expected)
     actual_df, actual_err = _execute_sql(connector, actual)
@@ -342,19 +338,30 @@ def _load_questions(path: Path) -> List[Dict[str, Any]]:
     return data
 
 
+_MAX_RESULT_ROWS = 50
+
+
 def _stringify_db_result(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, pd.DataFrame):
-        return value.to_csv(index=False)
-    # Some agent paths return executed rows as a plain ``list[dict]`` — serialise
-    # as JSON so the downstream parser hits the JSON branch (rather than
-    # ``str(...)`` which uses single quotes and breaks json.loads).
-    if isinstance(value, list) and value and isinstance(value[0], dict):
+        total = len(value)
+        if total > _MAX_RESULT_ROWS:
+            value = value.head(_MAX_RESULT_ROWS)
+        text = value.to_csv(index=False)
+        if total > _MAX_RESULT_ROWS:
+            text += f"... truncated ({total} rows total)\n"
+        return text
+    if isinstance(value, list):
+        total = len(value)
+        items = value[:_MAX_RESULT_ROWS]
         try:
-            return json.dumps(value, default=str)
+            text = json.dumps(items, default=str)
         except (TypeError, ValueError):
-            return str(value)
+            text = str(items)
+        if total > _MAX_RESULT_ROWS:
+            text += f"\n... truncated ({total} rows total)"
+        return text
     return str(value)
 
 
@@ -380,7 +387,12 @@ CSV_FIELDS = [
 
 
 def _print_agent_result(
-    qid: Any, question: str, agent_result: Dict[str, Any] | None, expected_sql: str = ""
+    qid: Any,
+    question: str,
+    agent_result: Dict[str, Any] | None,
+    expected_sql: str = "",
+    expected_sql_result: str = "",
+    returned_sql_result: str = "",
 ) -> None:
     """Pretty-print the agent result to stdout for quick visual inspection."""
     sep = "=" * 80
@@ -391,16 +403,24 @@ def _print_agent_result(
         print("\n  [expected_sql]")
         for line in expected_sql.splitlines():
             print(f"    {line}")
+    if expected_sql_result:
+        print("\n  [expected_sql_result]")
+        for line in expected_sql_result.splitlines():
+            print(f"    {line}")
     if not agent_result:
         print("  (no result)")
         print(sep)
         return
-    for key in ("sql_code", "response", "sql_response_from_db"):
+    for key in ("sql_code", "response"):
         val = agent_result.get(key)
         if val is None:
             continue
         print(f"\n  [{key}]")
         for line in str(val).splitlines():
+            print(f"    {line}")
+    if returned_sql_result:
+        print("\n  [returned_sql_result]")
+        for line in returned_sql_result.splitlines():
             print(f"    {line}")
     remaining = {
         k: v
@@ -483,15 +503,27 @@ def evaluate(
                     "acronyms": [],
                 }
                 agent_result = get_agent_response(payload)
-                _print_agent_result(qid, question, agent_result, expected_sql)
+
                 returned_sql = (agent_result or {}).get("sql_code", "") or ""
                 returned_db = (agent_result or {}).get(_DB_RESULT_KEY)
                 returned_db_str = _stringify_db_result(returned_db)
 
+                score = _score_sql(connectors[0], expected_sql, returned_sql)
+                expected_result_str = score.get("expected_sql_result", "")
+
+                _print_agent_result(
+                    qid,
+                    question,
+                    agent_result,
+                    expected_sql,
+                    expected_sql_result=expected_result_str,
+                    returned_sql_result=returned_db_str,
+                )
+
                 row["returned_sql"] = returned_sql
                 row["returned_answer"] = returned_db_str
 
-                row.update(_score_sql(connectors[0], expected_sql, returned_sql))
+                row.update(score)
                 row.update(_score_answer(expected_answer, returned_db_str))
             except Exception as exc:
                 logger.exception("Question %s failed", qid)
@@ -735,7 +767,7 @@ def run_single_query(question: str) -> None:
 
 SINGLE_QUERY = "list all actors"
 
-START_INDEX = 1
+START_INDEX = 0
 END_INDEX = None  # None = run to the end
 CONSISTENCY_RUNS = 10
 RUN_CONSISTENCY = False
