@@ -41,8 +41,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from nemo_retriever.params import EmbedParams
-from nemo_retriever.retriever import Retriever
+from nemo_retriever.common.params.models import EmbedParams
+from nemo_retriever.graph.retriever import Retriever
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
 

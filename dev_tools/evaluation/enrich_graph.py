@@ -49,8 +49,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from nemo_retriever.params import EmbedParams
-    from nemo_retriever.vdb import VDB
+    from nemo_retriever.common.params.models import EmbedParams
+    from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
 

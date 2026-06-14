@@ -9,9 +9,9 @@ from typing import Any
 
 import pandas as pd
 from nemo_retriever.graph import Graph
-from nemo_retriever.params import EmbedParams
-from nemo_retriever.text_embed.operators import _BatchEmbedActor
-from nemo_retriever.vdb import IngestVdbOperator
+from nemo_retriever.common.params.models import EmbedParams
+from nemo_retriever.operators.embed.operators import _BatchEmbedActor
+from nemo_retriever.operators.vdb import IngestVdbOperator
 
 from gsf.vdb import get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
