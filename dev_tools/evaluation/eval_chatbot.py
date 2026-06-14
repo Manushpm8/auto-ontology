@@ -44,7 +44,7 @@ import pandas as pd
 from nemo_retriever.common.params.models import EmbedParams
 from nemo_retriever.graph.retriever import Retriever
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
-from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import TextToSQLPayload
 
 from gsf.connectors import get_connectors
 from gsf.server.env import load_server_env
@@ -473,10 +473,10 @@ def evaluate(
 
             t0 = time.perf_counter()
             try:
-                payload: AgentPayload = {
+                payload: TextToSQLPayload = {
                     "question": question,
-                    "retriever": retriever,
-                    "ontology_retriever": ontology_retriever,
+                    "data_retriever": retriever,
+                    "taxonomies_retriever": ontology_retriever,
                     "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
@@ -640,10 +640,10 @@ def evaluate_consistency(
             logger.info("[Run %d] q%s: %s", run_num, qid, question)
 
             try:
-                payload: AgentPayload = {
+                payload: TextToSQLPayload = {
                     "question": question,
-                    "retriever": retriever,
-                    "ontology_retriever": ontology_retriever,
+                    "data_retriever": retriever,
+                    "taxonomies_retriever": ontology_retriever,
                     "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
@@ -716,10 +716,10 @@ def run_single_query(question: str) -> None:
     retriever = _build_retriever()
     ontology_retriever = _build_ontology_retriever()
 
-    payload: AgentPayload = {
+    payload: TextToSQLPayload = {
         "question": question,
-        "retriever": retriever,
-        "ontology_retriever": ontology_retriever,
+        "data_retriever": retriever,
+        "taxonomies_retriever": ontology_retriever,
         "connectors": connectors,
         "path_state": {},
         "custom_prompts": "",

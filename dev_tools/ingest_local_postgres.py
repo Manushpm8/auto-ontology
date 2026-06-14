@@ -24,7 +24,7 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.graph.retriever import Retriever
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
-from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import TextToSQLPayload
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import EmbedParams, TabularExtractParams
 from gsf.vdb import get_data_vdb
@@ -137,9 +137,9 @@ def run_retrieve() -> None:
 
     question = "List actors"
 
-    payload: AgentPayload = {
+    payload: TextToSQLPayload = {
         "question": question,
-        "retriever": retriever,
+        "data_retriever": retriever,
         "connectors": _connectors,
         "path_state": {},
         "custom_prompts": "",
