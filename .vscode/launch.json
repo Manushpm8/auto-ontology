@@ -112,6 +112,38 @@
       "justMyCode": false
     },
     {
+      "name": "Semantic: compile BIRD",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.semantic",
+      "args": [
+        "--database-name",
+        "bird"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Eval BIRD",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": [
+        "--input",
+        "dev_tools/evaluation/bird_evaluation.json",
+        "--output",
+        "dev_tools/evaluation/bird_evaluation_scores.csv"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "Debug Mock Ingest",
       "type": "debugpy",
       "request": "launch",

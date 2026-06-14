@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 import duckdb
 import pandas as pd
 from typing import Optional
@@ -35,6 +36,14 @@ from typing import Optional
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_db_path(connection_string: str) -> str:
+    """Extract the file path from a ``duckdb://…`` URI or plain path."""
+    parsed = urlparse(connection_string)
+    if parsed.scheme in ("duckdb", "duckdb+file"):
+        return parsed.path or ":memory:"
+    return connection_string
 
 
 class DuckDBDatabase(SQLDatabase):
@@ -52,7 +61,8 @@ class DuckDBDatabase(SQLDatabase):
     """
 
     def __init__(self, connection_string: str, *, read_only: bool = True) -> None:
-        self.conn = duckdb.connect(database=connection_string, read_only=read_only)
+        db_path = _parse_db_path(connection_string)
+        self.conn = duckdb.connect(database=db_path, read_only=read_only)
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
         logger.debug(
             "DuckDB connected (database=%r, read_only=%s).",
