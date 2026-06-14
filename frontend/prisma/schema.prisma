@@ -47,3 +47,13 @@ model Acronym {
 
   @@map("acronyms")
 }
+
+model MessageAnalytic {
+  id         String   @id @default(uuid()) @db.Uuid
+  questionId String   @unique @map("question_id") @db.Uuid
+  answerId   String?  @map("answer_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("message_analytics")
+}
