@@ -5,9 +5,10 @@
 	"type": "module",
 	"scripts": {
 		"postinstall": "prisma generate",
-		"dev": "next dev -p 3000",
+		"db:push": "prisma db push",
+		"dev": "prisma db push && next dev -p 3000",
 		"build": "prisma generate && next build",
-		"start": "next start",
+		"start": "prisma db push && next start",
 		"lint": "eslint .",
 		"format": "prettier --write .",
 		"format:check": "prettier --check ."
