@@ -11,6 +11,7 @@ import { ComposerSectionKind } from '@/enums/datasources';
 import { isComposerSection, type ComposerSection } from '@/types/composer-section';
 import { Icon, IconName } from '@/components/icons';
 import { TagInput } from '@/components/TagInput';
+import { Table } from '@/components/Table';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import { Toast } from '@/components/Toast';
@@ -205,39 +206,23 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 						{section.title}
 					</h2>
-					<div className="mt-4 overflow-x-auto rounded-md border border-zinc-200/90 dark:border-zinc-700">
-						<table className="w-full min-w-[28rem] text-left text-sm">
-							<thead className="border-b border-zinc-200 bg-zinc-100/95 dark:border-zinc-700 dark:bg-zinc-800/90">
-								<tr>
-									{section.columns.map((col) => (
-										<th
-											key={col.key}
-											className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300"
-										>
-											{col.label}
-										</th>
-									))}
-								</tr>
-							</thead>
-							<tbody>
-								{section.rows.map((row, ri) => (
-									<tr
-										key={ri}
-										className="border-b border-zinc-100 transition-colors hover:bg-zinc-50/80 dark:border-zinc-800 dark:hover:bg-zinc-900/50"
-									>
-										{section.columns.map((col) => (
-											<td
-												key={col.key}
-												className="px-3 py-2 text-zinc-800 dark:text-zinc-200"
-											>
-												{row[col.key] ?? '—'}
-											</td>
-										))}
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
+					<Table
+						className="mt-4"
+						containerClassName="overflow-x-auto rounded-md border border-zinc-200/90 dark:border-zinc-700"
+						layout="auto"
+						minWidthClass="min-w-[28rem]"
+						cellClassName="px-3 py-2"
+						theadClassName="border-b border-zinc-200 bg-zinc-100/95 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/90 dark:text-zinc-300"
+						bodyClassName="text-zinc-800 dark:text-zinc-200"
+						rowClassName="border-b border-zinc-100 transition-colors hover:bg-zinc-50/80 dark:border-zinc-800 dark:hover:bg-zinc-900/50"
+						columns={section.columns.map((col) => ({
+							key: col.key,
+							header: col.label,
+							cell: (row: Record<string, string>) => row[col.key] || '—',
+						}))}
+						rows={section.rows}
+						rowKey={(_, index) => String(index)}
+					/>
 				</div>
 			);
 		case ComposerSectionKind.LOADING_PANEL:
