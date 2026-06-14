@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamChat } from '@/api/chat';
 import { conversationsApi } from '@/api/conversations';
+import { analyticsApi } from '@/api/analytics';
 import type { ChatMessage, GraphStep } from '@/types/chat';
 
 let nextId = 0;
@@ -38,6 +39,7 @@ export const useChat = () => {
 	const [error, setError] = useState<string | null>(null);
 	const controllerRef = useRef<AbortController | null>(null);
 	const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const analyticsIdRef = useRef<string | null>(null);
 
 	const clearErrorTimer = useCallback(() => {
 		if (errorTimerRef.current !== null) {
@@ -99,6 +101,14 @@ export const useChat = () => {
 						if (convId) {
 							conversationsApi
 								.addMessage(convId, { role: 'user', content: text })
+								.then((msg) =>
+									analyticsApi
+										.create(msg.id)
+										.then((row) => {
+											if (!row.error) analyticsIdRef.current = row.id ?? null;
+										})
+										.catch(() => {}),
+								)
 								.catch(() => {});
 						}
 					},
@@ -150,6 +160,13 @@ export const useChat = () => {
 									sqlCode: sql ?? null,
 									sqlResponse: sqlResponse ?? null,
 								})
+								.then((msg) => {
+									const aid = analyticsIdRef.current;
+									analyticsIdRef.current = null;
+									if (aid) {
+										analyticsApi.setAnswer(aid, msg.id).catch(() => {});
+									}
+								})
 								.catch(() => {});
 						}
 					},
@@ -177,6 +194,7 @@ export const useChat = () => {
 		controllerRef.current?.abort();
 		controllerRef.current = null;
 		clearErrorTimer();
+		analyticsIdRef.current = null;
 		setMessages([]);
 		setSteps([]);
 		setIsLoading(false);
