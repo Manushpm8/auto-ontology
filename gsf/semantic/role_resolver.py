@@ -155,8 +155,8 @@ def resolve_single_hop_join(
     return [
         {
             "hop": 1,
-            "source": {"table": src_table_name, "column": result.src_column},
-            "target": {"table": tgt_table_name, "column": result.tgt_column},
+            "source": {"schema": src_row.get("schema_name") if src_row else None, "table": src_table_name, "column": result.src_column},
+            "target": {"schema": tgt_row.get("schema_name") if tgt_row else None, "table": tgt_table_name, "column": result.tgt_column},
         }
     ]
 

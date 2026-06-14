@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+from pydantic import BaseModel, Field
 
 from nemo_retriever.params import EmbedParams
 from nemo_retriever.retriever import Retriever
@@ -54,6 +55,9 @@ load_server_env()
 
 # The text-to-SQL agent stores executed-DB rows under this key on its result dict.
 _DB_RESULT_KEY = "sql_response_from_db"
+
+# Maximum characters stored in the CSV for DB result columns (prevents huge files).
+_MAX_DB_RESULT_CHARS = 500
 
 logger = logging.getLogger("eval_chatbot")
 
@@ -168,11 +172,17 @@ def _canonical(value: Any) -> Any:
     return str(value).strip().lower()
 
 
-def _execute_sql(connector: Any, sql: str) -> Tuple[Optional[pd.DataFrame], str]:
+_EXEC_ROW_LIMIT = 500
+
+
+def _execute_sql(
+    connector: Any, sql: str
+) -> Tuple[Optional[pd.DataFrame], str]:
     if not sql or not sql.strip():
         return None, "empty SQL"
     try:
-        df = connector.execute(sql)
+        limited_sql = f"SELECT * FROM ({sql.rstrip(';')}) AS _eval_subq LIMIT {_EXEC_ROW_LIMIT}"
+        df = connector.execute(limited_sql)
         if not isinstance(df, pd.DataFrame):
             df = pd.DataFrame(df)
         return df.head(_MAX_RESULT_ROWS), ""
@@ -365,6 +375,116 @@ def _stringify_db_result(value: Any) -> str:
     return str(value)
 
 
+class SqlScore(BaseModel):
+    logic_match: float = Field(ge=0.0, le=1.0)
+    logic_issues: str
+    semantic_match: float = Field(ge=0.0, le=1.0)
+    final_weighted_score: float = Field(ge=0.0, le=1.0)
+    sql_compared_to_ground_truth_score: float = Field(ge=0.0, le=1.0)
+    is_valid_sql: bool
+    is_sql_returns_data: bool
+
+
+_SQL_SCORING_PROMPT = """\
+You are an expert SQL evaluator. Your task is to score SQL code based on three separate criteria:
+
+1. **Logic Match**: How well does the SQL logic answer the given question?
+2. **Semantic Match**: How well do the SQL response types match the expected types for the question?
+3. **Ground Truth Similarity**: How similar is the SQL to the provided ground truth SQL?
+
+**Logic Match Scoring Guidelines:**
+- Scores should be between 0.0 and 1.0
+- Evaluate ONLY based on the question — do NOT compare to the ground truth SQL.
+- Ask: does this SQL correctly answer the question on its own merits?
+  - Does the SQL use appropriate tables, columns, and filters?
+  - Does the query logic match the question's requirements?
+  - Are the joins, aggregations, and conditions correct?
+  - Does it capture the business logic behind the question?
+- Provide short text in logic_issues explaining what reduced the score (e.g., "Missing WHERE clause for date filter", "Wrong aggregation function", "Incorrect table join")
+
+**Semantic Match Scoring Guidelines:**
+- Scores should be between 0.0 and 1.0
+- Evaluate if the SQL response types match what the question expects:
+  - **Format Appropriateness**: Does the response format match what the question is asking for?
+    * Questions asking for "the earliest date" or "the maximum value" should return a single value, not a table of multiple values
+    * Questions asking for "top 5" should return exactly 5 rows (or fewer if data doesn't exist)
+    * Questions asking for specific single values should not return multiple rows
+  - **Data Completeness**: Does the response include all relevant information requested?
+    * Questions asking for "sales with and without discount" should include BOTH categories in results
+    * Questions asking for comparisons should include all relevant comparison groups
+    * Questions asking for detailed breakdowns should include all requested dimensions
+  - **Important**: If the SQL expected types include the user's question expected types, it is acceptable
+
+**Final Weighted Score:**
+- Calculate as: (logic_match * 0.5) + (semantic_match * 0.5)
+
+**Ground Truth Similarity Guidelines:**
+- Compare the SQL structure, logic, tables used, and expected results
+- Be lenient with minor syntax differences or equivalent approaches
+- Focus on semantic similarity rather than exact text matching
+
+**Question:** {question}
+
+**SQL Code to Evaluate:**
+{sql_code}
+
+**Ground Truth SQL:**
+{ground_truth_sql}
+
+**SQL Result Preview (if available):**
+{sql_result_preview}
+
+Please provide all scores, logic issues text, and boolean flags based on your comprehensive evaluation.
+"""
+
+_LLM_SCORE_MODEL = os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b")
+_LLM_SCORE_BASE_URL = os.environ.get("BASE_URL", "https://integrate.api.nvidia.com/v1")
+_LLM_SCORE_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+
+
+def _llm_score_sql(
+    question: str,
+    sql_code: str,
+    ground_truth_sql: str,
+    sql_result_preview: str,
+) -> SqlScore | None:
+    """Call the LLM to score SQL logic, semantic match, and ground truth similarity."""
+    if not sql_code:
+        return None
+    try:
+        prompt = _SQL_SCORING_PROMPT.format(
+            question=question,
+            sql_code=sql_code,
+            ground_truth_sql=ground_truth_sql or "(none provided)",
+            sql_result_preview=sql_result_preview[:500] if sql_result_preview else "(none)",
+        )
+        if _LLM_SCORE_MODEL.startswith("openai/"):
+            from langchain_openai import ChatOpenAI
+
+            llm = ChatOpenAI(
+                model=_LLM_SCORE_MODEL,
+                api_key=_LLM_SCORE_API_KEY,
+                base_url=_LLM_SCORE_BASE_URL,
+                max_tokens=8192,
+            )
+        else:
+            from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
+            llm = ChatNVIDIA(
+                model=_LLM_SCORE_MODEL,
+                api_key=_LLM_SCORE_API_KEY,
+                base_url=_LLM_SCORE_BASE_URL,
+                max_tokens=1024,
+            )
+        result = llm.with_structured_output(SqlScore).invoke(prompt)
+        if isinstance(result, SqlScore):
+            return result
+        return SqlScore.model_validate(result)
+    except Exception as exc:
+        logger.warning("LLM scoring failed: %s", exc)
+        return None
+
+
 CSV_FIELDS = [
     "row_index",
     "question_id",
@@ -381,6 +501,13 @@ CSV_FIELDS = [
     "returned_answer",
     "answer_text_similarity",
     "answer_numbers_match",
+    "llm_logic_match",
+    "llm_semantic_match",
+    "llm_final_weighted_score",
+    "llm_sql_vs_ground_truth",
+    "llm_is_valid_sql",
+    "llm_is_sql_returns_data",
+    "llm_logic_issues",
     "runtime_seconds",
     "error",
 ]
@@ -417,8 +544,8 @@ def _print_agent_result(
             continue
         print(f"\n  [{key}]")
         text = str(val)
-        if key == "sql_response_from_db" and len(text) > 300:
-            text = text[:300] + f"  ... ({len(text)} chars total)"
+        if key == "sql_response_from_db" and len(text) > 100:
+            text = text[:100] + f"  ... ({len(text)} chars total)"
         for line in text.splitlines():
             print(f"    {line}")
     if returned_sql_result:
@@ -442,17 +569,23 @@ def evaluate(
     output_path: Path,
     start_index: int = 0,
     end_index: int | None = None,
+    question_ids: list[int] | None = None,
 ) -> None:
     all_questions = _load_questions(input_path)
-    questions = all_questions[start_index:end_index]
-    logger.info(
-        "Running questions %d–%d (%d of %d total) from %s",
-        start_index,
-        start_index + len(questions) - 1,
-        len(questions),
-        len(all_questions),
-        input_path,
-    )
+    if question_ids is not None:
+        id_set = set(question_ids)
+        questions = [q for q in all_questions if q.get("question_id") in id_set]
+        logger.info("Running %d selected question(s) (ids: %s) from %s", len(questions), sorted(id_set), input_path)
+    else:
+        questions = all_questions[start_index:end_index]
+        logger.info(
+            "Running questions %d–%d (%d of %d total) from %s",
+            start_index,
+            start_index + len(questions) - 1,
+            len(questions),
+            len(all_questions),
+            input_path,
+        )
 
     connectors = _build_connectors()
     retriever = _build_retriever()
@@ -490,6 +623,13 @@ def evaluate(
                 "returned_answer": "",
                 "answer_text_similarity": 0.0,
                 "answer_numbers_match": 0,
+                "llm_logic_match": "",
+                "llm_semantic_match": "",
+                "llm_final_weighted_score": "",
+                "llm_sql_vs_ground_truth": "",
+                "llm_is_valid_sql": "",
+                "llm_is_sql_returns_data": "",
+                "llm_logic_issues": "",
                 "runtime_seconds": "",
                 "error": "",
             }
@@ -524,10 +664,25 @@ def evaluate(
                 )
 
                 row["returned_sql"] = returned_sql
-                row["returned_answer"] = returned_db_str
+                row["returned_answer"] = returned_db_str[:_MAX_DB_RESULT_CHARS]
 
                 row.update(score)
                 row.update(_score_answer(expected_answer, returned_db_str))
+
+                llm_score = _llm_score_sql(
+                    question=question,
+                    sql_code=returned_sql,
+                    ground_truth_sql=expected_sql,
+                    sql_result_preview=returned_db_str,
+                )
+                if llm_score:
+                    row["llm_logic_match"] = llm_score.logic_match
+                    row["llm_semantic_match"] = llm_score.semantic_match
+                    row["llm_final_weighted_score"] = llm_score.final_weighted_score
+                    row["llm_sql_vs_ground_truth"] = llm_score.sql_compared_to_ground_truth_score
+                    row["llm_is_valid_sql"] = llm_score.is_valid_sql
+                    row["llm_is_sql_returns_data"] = llm_score.is_sql_returns_data
+                    row["llm_logic_issues"] = llm_score.logic_issues
             except Exception as exc:
                 logger.exception("Question %s failed", qid)
                 row["error"] = f"{type(exc).__name__}: {exc}"
@@ -540,6 +695,40 @@ def evaluate(
                 f.flush()
 
     logger.info("Wrote scores to %s", output_path)
+    _print_summary(output_path)
+
+
+def _print_summary(output_path: Path) -> None:
+    """Read the scores CSV and print average metrics to stdout."""
+    try:
+        import pandas as pd
+
+        df = pd.read_csv(output_path)
+        n = len(df)
+
+        def _avg(col: str) -> float:
+            return pd.to_numeric(df[col], errors="coerce").mean() if col in df.columns else float("nan")
+
+        avg_exec = _avg("sql_exec_match")
+        avg_duration = _avg("runtime_seconds")
+        avg_logic = _avg("llm_logic_match")
+        avg_semantic = _avg("llm_semantic_match")
+        avg_weighted = _avg("llm_final_weighted_score")
+        avg_vs_gt = _avg("llm_sql_vs_ground_truth")
+
+        sep = "=" * 50
+        print(f"\n{sep}")
+        print(f"  EVALUATION SUMMARY  ({n} questions)")
+        print(sep)
+        print(f"  SQL exec match (exact)     : {avg_exec:.4f}")
+        print(f"  LLM logic match            : {avg_logic:.4f}")
+        print(f"  LLM semantic match         : {avg_semantic:.4f}")
+        print(f"  LLM final weighted score   : {avg_weighted:.4f}")
+        print(f"  LLM SQL vs ground truth    : {avg_vs_gt:.4f}")
+        print(f"  Average duration (s)       : {avg_duration:.3f}")
+        print(sep)
+    except Exception as exc:
+        logger.warning("Could not compute summary: %s", exc)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -585,6 +774,12 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="1-based index of the last question to run (inclusive).",
+    )
+    parser.add_argument(
+        "--questions",
+        type=str,
+        default=None,
+        help="Comma-separated list of question_ids to run (e.g. 1,40,41). Overrides --start/--end.",
     )
     return parser.parse_args()
 
@@ -701,7 +896,7 @@ def evaluate_consistency(
                     (agent_result or {}).get("sql_code", "") or ""
                 )
                 returned_db = (agent_result or {}).get(_DB_RESULT_KEY)
-                returned_db_str = _stringify_db_result(returned_db)
+                returned_db_str = _stringify_db_result(returned_db)[:_MAX_DB_RESULT_CHARS]
             except Exception as exc:
                 logger.exception("Run %d, question %s failed", run_num, qid)
                 returned_sql = f"ERROR: {exc}"
@@ -795,6 +990,7 @@ if __name__ == "__main__":
     args = _parse_args()
     _start = (args.start - 1) if args.start is not None else START_INDEX
     _end = args.end if args.end is not None else END_INDEX
+    _qids = [int(x.strip()) for x in args.questions.split(",")] if args.questions else None
     if args.single:
         run_single_query(SINGLE_QUERY)
     elif RUN_CONSISTENCY or args.consistency:
@@ -813,4 +1009,5 @@ if __name__ == "__main__":
             output_path=args.output,
             start_index=_start,
             end_index=_end,
+            question_ids=_qids,
         )
