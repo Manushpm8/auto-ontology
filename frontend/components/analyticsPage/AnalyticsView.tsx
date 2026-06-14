@@ -9,14 +9,9 @@ import { useEffect, useState } from 'react';
 import { Icon, IconName } from '@/components/icons';
 import { Table } from '@/components/Table';
 import { analyticsApi } from '@/api/analytics';
+import { formatDate } from '@/common/date';
 import type { MessageAnalytic } from '@/types/analytics';
 import type { TableColumn } from '@/types/table';
-
-const formatDate = (iso: string) =>
-	new Intl.DateTimeFormat(undefined, {
-		dateStyle: 'medium',
-		timeStyle: 'short',
-	}).format(new Date(iso));
 
 const PAGE_SIZE = 10;
 
@@ -107,9 +102,7 @@ export const AnalyticsView = () => {
 
 		const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
 		const url = URL.createObjectURL(blob);
-		const now = new Date();
-		const month = String(now.getMonth() + 1).padStart(2, '0');
-		const filename = `gsf-analytics-${now.getFullYear()}-${month}.csv`;
+		const filename = `gsf-analytics-${formatDate(Date.now(), 'YYYY-MM')}.csv`;
 		const anchor = document.createElement('a');
 		anchor.href = url;
 		anchor.download = filename;

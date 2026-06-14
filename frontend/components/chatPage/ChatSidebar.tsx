@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
+import { formatDate } from '@/common/date';
 import { Icon, IconName } from '@/components/icons';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { PopoverMenu } from '@/components/PopoverMenu';
@@ -94,7 +95,7 @@ function ConversationItem({
 			>
 				<span className="line-clamp-1">{conv.title}</span>
 				<span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">
-					{new Date(conv.createdAt).toLocaleDateString()}
+					{formatDate(conv.createdAt)}
 				</span>
 			</button>
 
