@@ -164,7 +164,7 @@ export const useChat = () => {
 									const aid = analyticsIdRef.current;
 									analyticsIdRef.current = null;
 									if (aid) {
-										analyticsApi.setAnswer(aid, msg.id).catch(() => {});
+										analyticsApi.update(aid, msg.id).catch(() => {});
 									}
 								})
 								.catch(() => {});

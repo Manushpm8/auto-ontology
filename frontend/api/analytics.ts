@@ -17,7 +17,7 @@ export const analyticsApi = {
 	create: (questionId: string): Promise<RowResponse> =>
 		requests.post<MessageAnalytic>('analytics', { questionId }),
 
-	setAnswer: (analyticsId: string, answerId: string): Promise<RowResponse> =>
+	update: (analyticsId: string, answerId: string): Promise<RowResponse> =>
 		requests.patch<MessageAnalytic>(`analytics/${encodeURIComponent(analyticsId)}`, {
 			answerId,
 		}),
