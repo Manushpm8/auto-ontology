@@ -10,22 +10,22 @@ import { Icon, IconName } from '@/components/icons';
 import { Table } from '@/components/Table';
 import { analyticsApi } from '@/api/analytics';
 import { formatDate } from '@/common/date';
-import type { MessageAnalytic } from '@/types/analytics';
+import type { ConversationAnalytics } from '@/types/analytics';
 import type { TableColumn } from '@/types/table';
 
 const PAGE_SIZE = 10;
 
-const CSV_HEADERS = ['Timestamp', 'Question', 'Reasoning', 'Response SQL'];
+const CSV_HEADERS = ['Timestamp', 'Question', 'Response', 'SQL'];
 const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
-const COLUMNS: TableColumn<MessageAnalytic>[] = [
+const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 	{
-		key: 'createdAt',
+		key: 'questionTimestamp',
 		header: 'Timestamp',
 		width: 'w-44',
 		nowrap: true,
 		className: 'text-zinc-600 dark:text-zinc-300',
-		cell: (row) => formatDate(row.createdAt),
+		cell: (row) => formatDate(row.questionTimestamp),
 	},
 	{
 		key: 'question',
@@ -36,24 +36,24 @@ const COLUMNS: TableColumn<MessageAnalytic>[] = [
 		title: (row) => row.question ?? '',
 	},
 	{
-		key: 'reasoning',
+		key: 'response',
 		header: 'Reasoning',
 		truncate: true,
 		className: 'text-zinc-700 dark:text-zinc-300',
-		cell: (row) => row.reasoning,
-		title: (row) => row.reasoning ?? '',
+		cell: (row) => row.response,
+		title: (row) => row.response ?? '',
 	},
 	{
-		key: 'responseSql',
-		header: 'Response SQL',
+		key: 'sql',
+		header: 'SQL',
 		truncate: true,
-		cell: (row) => row.responseSql,
-		title: (row) => row.responseSql ?? '',
+		cell: (row) => row.sql,
+		title: (row) => row.sql ?? '',
 	},
 ];
 
 export const AnalyticsView = () => {
-	const [rows, setRows] = useState<MessageAnalytic[]>([]);
+	const [rows, setRows] = useState<ConversationAnalytics[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [page, setPage] = useState(1);
@@ -89,10 +89,10 @@ export const AnalyticsView = () => {
 			CSV_HEADERS.join(','),
 			...rows.map((row) =>
 				[
-					formatDate(row.createdAt),
+					formatDate(row.questionTimestamp),
 					row.question ?? '',
-					row.reasoning ?? '',
-					row.responseSql ?? '',
+					row.response ?? '',
+					row.sql ?? '',
 				]
 					.map(escapeCsv)
 					.join(','),

@@ -2,13 +2,13 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export type MessageAnalytic = {
+export type ConversationAnalytics = {
 	id: string;
-	questionId: string;
-	answerId: string | null;
-	createdAt: string;
-	updatedAt: string;
-	question: string | null;
-	reasoning: string | null;
-	responseSql: string | null;
+	questionMessageId: string;
+	question: string;
+	questionTimestamp: string;
+	response: string | null;
+	responseMessageId: string | null;
+	responseTimestamp: string | null;
+	sql: string | null;
 };
