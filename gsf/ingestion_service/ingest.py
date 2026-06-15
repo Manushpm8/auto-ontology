@@ -55,7 +55,7 @@ def run_ingest(connection_string: str) -> None:
             logger.info("Tabular ingest result: no rows produced")
 
         connections_dal.link_database_connection(
-            db_name=database_name,
+            database_name=database_name,
             connection_string=connection_string,
         )
 

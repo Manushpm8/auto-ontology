@@ -131,15 +131,15 @@ def insert_connection(
     return dict(rows[0]["props"])
 
 
-def link_database_connection(*, db_name: str, connection_string: str) -> None:
+def link_database_connection(*, database_name: str, connection_string: str) -> None:
     """Attach a connection string to a catalog database node (idempotent)."""
     get_neo4j_conn().query_write(
         f"""
-        MERGE (db:{Labels.DB} {{name: $db_name}})
+        MERGE (db:{Labels.DB} {{name: $database_name}})
         ON CREATE SET db.id = randomUUID()
         SET db.connection_string = $connection_string
         """,
-        {"db_name": db_name, "connection_string": connection_string},
+        {"database_name": database_name, "connection_string": connection_string},
     )
 
 

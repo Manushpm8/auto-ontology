@@ -8,8 +8,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 export const SETTINGS_NAV_ITEMS = [
+	{ label: 'Connections', href: '/settings' },
 	{ label: 'Semantic Input', href: '/settings/semantic-input' },
-	{ label: 'Connections', href: '/settings/connections' },
 ] as const;
 
 function rowClassName(selected: boolean) {

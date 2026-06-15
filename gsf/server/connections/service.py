@@ -53,7 +53,7 @@ def create_connection(
     if not connection_string:
         raise ValueError("Connection string is required")
 
-    database_name = str(database.get("db_name") or "").strip()
+    database_name = str(database.get("database_name") or "").strip()
     if not database_name:
         raise ValueError("Connection test result is required")
 

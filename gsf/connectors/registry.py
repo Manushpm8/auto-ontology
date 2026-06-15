@@ -95,15 +95,15 @@ def get_connectors() -> list[SQLDatabase]:
         seen_database_names: set[str] = set()
         for cs in connection_strings:
             connector = create_connector(cs)
-            db_name = connector.database_name
-            if db_name in seen_database_names:
+            database_name = connector.database_name
+            if database_name in seen_database_names:
                 logger.warning(
                     "Duplicate connector database_name %r — NeMo routes SQL by "
                     "database_name, so only one connector per name can be used. "
                     "Set metadata_database on the connection string to disambiguate.",
-                    db_name,
+                    database_name,
                 )
-            seen_database_names.add(db_name)
+            seen_database_names.add(database_name)
             loaded.append(connector)
         _connectors = loaded
     return list(_connectors)

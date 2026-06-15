@@ -5,5 +5,5 @@
 import { redirect } from 'next/navigation';
 
 export default function SettingsPage() {
-	redirect('/settings/semantic-input');
+	redirect('/settings/connections');
 }

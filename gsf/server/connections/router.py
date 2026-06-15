@@ -28,7 +28,7 @@ class ConnectionPublic(BaseModel):
 
 
 class ConnectionDatabase(BaseModel):
-    db_name: str = Field(alias="databaseName")
+    database_name: str = Field(alias="databaseName")
 
     model_config = {"populate_by_name": True}
 
