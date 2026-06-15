@@ -23,35 +23,14 @@ export async function GET(request: Request) {
 	const limit = limitParam != null ? parseIntParam(limitParam, 0) : null;
 
 	const cutoff = new Date(Date.now() - ANALYTICS_DAYS * 24 * 60 * 60 * 1000);
-	const where = { createdAt: { gte: cutoff } };
+	const where = { questionTimestamp: { gte: cutoff } };
 
-	const total = await prisma.messageAnalytic.count({ where });
-	const rows = await prisma.messageAnalytic.findMany({
+	const total = await prisma.conversationAnalytics.count({ where });
+	const data = await prisma.conversationAnalytics.findMany({
 		where,
-		orderBy: { createdAt: 'desc' },
+		orderBy: { questionTimestamp: 'desc' },
 		skip,
 		...(limit != null ? { take: limit } : {}),
-	});
-
-	const messageIds = rows.flatMap((row) =>
-		row.answerId != null ? [row.questionId, row.answerId] : [row.questionId],
-	);
-
-	const messages = await prisma.message.findMany({
-		where: { id: { in: messageIds } },
-		select: { id: true, content: true, sqlCode: true },
-	});
-	const messageById = new Map(messages.map((m) => [m.id, m]));
-
-	const data = rows.map((row) => {
-		const question = messageById.get(row.questionId);
-		const answer = row.answerId != null ? messageById.get(row.answerId) : undefined;
-		return {
-			...row,
-			question: question?.content ?? null,
-			reasoning: answer?.content ?? null,
-			responseSql: answer?.sqlCode ?? null,
-		};
 	});
 
 	return NextResponse.json({ data, total });
@@ -60,8 +39,11 @@ export async function GET(request: Request) {
 export async function POST(req: Request) {
 	const prisma = getPrisma();
 	const body = await req.json();
-	const row = await prisma.messageAnalytic.create({
-		data: { questionId: body.questionId },
+	const row = await prisma.conversationAnalytics.create({
+		data: {
+			questionMessageId: body.questionMessageId,
+			question: body.question ?? '',
+		},
 	});
 	return NextResponse.json(row, { status: 201 });
 }

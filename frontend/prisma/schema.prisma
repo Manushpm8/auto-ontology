@@ -53,12 +53,16 @@ model Acronym {
   @@schema("public")
 }
 
-model MessageAnalytic {
-  id         String   @id @default(uuid()) @db.Uuid
-  questionId String   @unique @map("question_id") @db.Uuid
-  answerId   String?  @map("answer_id") @db.Uuid
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+model ConversationAnalytics {
+  id                String    @id @default(uuid()) @db.Uuid
+  questionMessageId String    @unique @map("question_message_id") @db.Uuid
+  question          String    @default("")
+  questionTimestamp DateTime  @default(now()) @map("question_timestamp") @db.Timestamptz
+  response          String?
+  responseMessageId String?   @map("response_message_id") @db.Uuid
+  responseTimestamp DateTime? @map("response_timestamp") @db.Timestamptz
+  sql               String?
 
-  @@map("message_analytics")
+  @@map("conversation_analytics")
+  @@schema("public")
 }

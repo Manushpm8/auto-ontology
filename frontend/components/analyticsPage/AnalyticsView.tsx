@@ -15,7 +15,7 @@ import {
 
 import { Icon, IconName } from '@/components/icons';
 import { analyticsApi } from '@/api/analytics';
-import type { MessageAnalytic } from '@/types/analytics';
+import type { ConversationAnalytics } from '@/types/analytics';
 
 const formatDate = (iso: string) =>
 	new Intl.DateTimeFormat(undefined, {
@@ -29,7 +29,7 @@ const CSV_HEADERS = ['Timestamp', 'Question', 'Reasoning', 'Response SQL'];
 const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 export const AnalyticsView = () => {
-	const [rows, setRows] = useState<MessageAnalytic[]>([]);
+	const [rows, setRows] = useState<ConversationAnalytics[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [page, setPage] = useState(1);
@@ -65,10 +65,10 @@ export const AnalyticsView = () => {
 			CSV_HEADERS.join(','),
 			...rows.map((row) =>
 				[
-					formatDate(row.createdAt),
+					formatDate(row.questionTimestamp),
 					row.question ?? '',
-					row.reasoning ?? '',
-					row.responseSql ?? '',
+					row.response ?? '',
+					row.sql ?? '',
 				]
 					.map(escapeCsv)
 					.join(','),
@@ -157,10 +157,10 @@ export const AnalyticsView = () => {
 										Question
 									</th>
 									<th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-										Reasoning
+										Response
 									</th>
 									<th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-										Response SQL
+										SQL
 									</th>
 								</tr>
 							</thead>
@@ -171,7 +171,7 @@ export const AnalyticsView = () => {
 										className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
 									>
 										<td className="whitespace-nowrap px-4 py-3 text-zinc-600 dark:text-zinc-300">
-											{formatDate(row.createdAt)}
+											{formatDate(row.questionTimestamp)}
 										</td>
 										<td className="max-w-0 px-4 py-3 text-zinc-700 dark:text-zinc-300">
 											<span
@@ -184,17 +184,14 @@ export const AnalyticsView = () => {
 										<td className="max-w-0 px-4 py-3 text-zinc-700 dark:text-zinc-300">
 											<span
 												className="block truncate"
-												title={row.reasoning ?? ''}
+												title={row.response ?? ''}
 											>
-												{row.reasoning}
+												{row.response}
 											</span>
 										</td>
 										<td className="max-w-0 px-4 py-3">
-											<span
-												className="block truncate"
-												title={row.responseSql ?? ''}
-											>
-												{row.responseSql}
+											<span className="block truncate" title={row.sql ?? ''}>
+												{row.sql}
 											</span>
 										</td>
 									</tr>

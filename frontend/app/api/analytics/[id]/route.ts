@@ -9,9 +9,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 	const prisma = getPrisma();
 	const { id } = await params;
 	const body = await req.json();
-	const row = await prisma.messageAnalytic.update({
+	const row = await prisma.conversationAnalytics.update({
 		where: { id },
-		data: { answerId: body.answerId },
+		data: {
+			responseMessageId: body.responseMessageId,
+			response: body.response ?? null,
+			sql: body.sql ?? null,
+			responseTimestamp: new Date(),
+		},
 	});
 	return NextResponse.json(row);
 }
