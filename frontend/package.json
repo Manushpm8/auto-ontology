@@ -3,12 +3,13 @@
 	"version": "0.1.1",
 	"private": true,
 	"type": "module",
+	"packageManager": "pnpm@10.34.3",
 	"scripts": {
 		"postinstall": "prisma generate",
 		"db:push": "prisma db push",
-		"dev": "prisma db push && next dev -p 3000",
-		"build": "prisma generate && next build",
+		"dev": "pnpm db:push && next dev -p 3000",
 		"start": "prisma db push && next start",
+		"build": "prisma generate && next build",
 		"lint": "eslint .",
 		"format": "prettier --write .",
 		"format:check": "prettier --check ."
