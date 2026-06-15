@@ -15,7 +15,7 @@ import type { TableColumn } from '@/types/table';
 
 const PAGE_SIZE = 10;
 
-const CSV_HEADERS = ['Timestamp', 'Question', 'Response', 'SQL'];
+const CSV_HEADERS = ['Timestamp', 'Question', 'Reasoning', 'SQL'];
 const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 const COLUMNS: TableColumn<ConversationAnalytics>[] = [
