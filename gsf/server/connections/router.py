@@ -20,15 +20,8 @@ router = APIRouter()
 
 
 class ConnectionPublic(BaseModel):
-    id: str = Field(alias="connection_id")
     database_name: str = Field(alias="name")
     connection_string: str
-
-    model_config = {"populate_by_name": True}
-
-
-class ConnectionDatabase(BaseModel):
-    database_name: str = Field(alias="databaseName")
 
     model_config = {"populate_by_name": True}
 
@@ -36,7 +29,7 @@ class ConnectionDatabase(BaseModel):
 class ConnectionCreate(BaseModel):
     type: str
     connection_string: str = Field(default="", alias="connectionString")
-    database: ConnectionDatabase
+    database: str
 
     model_config = {"populate_by_name": True}
 
@@ -76,9 +69,8 @@ def test_connection(body: ConnectionTest) -> dict:
 def create_connection(body: ConnectionCreate) -> dict:
     try:
         row = service.create_connection(
-            connection_type=body.type,
             connection_string=body.connection_string,
-            database=body.database.model_dump(by_alias=False),
+            database_name=body.database,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -91,10 +83,10 @@ def create_connection(body: ConnectionCreate) -> dict:
     return {"data": ConnectionPublic.model_validate(row).model_dump()}
 
 
-@router.delete("/connections/{connection_id}")
-def delete_connection(connection_id: str) -> dict:
+@router.delete("/connections/{database_name}")
+def delete_connection(database_name: str) -> dict:
     try:
-        row = service.delete_connection(connection_id)
+        row = service.delete_connection(database_name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:

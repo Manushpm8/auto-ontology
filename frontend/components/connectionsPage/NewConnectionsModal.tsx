@@ -123,12 +123,18 @@ export const NewConnectionsModal = ({
 			return;
 		}
 
+		const database = parseConnectionDatabaseName(connectionInput.connectionString);
+		if (!database) {
+			setAlert('Could not determine database name from connection string.');
+			return;
+		}
+
 		setLoading(true);
 		setAlert(null);
 		const res = await connectionsApi.create({
 			type: connectionType,
 			connectionString: connectionInput.connectionString,
-			tested: true,
+			database,
 		});
 		setLoading(false);
 

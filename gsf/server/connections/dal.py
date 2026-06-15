@@ -5,15 +5,14 @@
 """Data access for UI-managed database connections (Neo4j only).
 
 Connection metadata is stored directly on ``Labels.DB`` nodes so that the UI
-connection and the catalog database share a single node.  The connection-specific
-fields are prefixed with ``connection_`` to avoid collisions with the built-in
-``name`` / ``id`` fields of the DB node.
+connection and the catalog database share a single node.  A DB node is treated
+as a UI-managed connection when it has a ``connection_string`` set; the catalog
+database name (``db.name``) doubles as the connection's identity and label.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
@@ -26,76 +25,21 @@ def list_connections() -> list[dict[str, Any]]:
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (db:{Labels.DB})
-        WHERE db.connection_id IS NOT NULL
+        WHERE db.connection_string IS NOT NULL
         RETURN properties(db) AS props
-        ORDER BY db.connection_name
+        ORDER BY db.name
         """
     )
     return [dict(row["props"]) for row in rows]
 
 
-def list_connections_for_ingest() -> list[tuple[str | None, str]]:
-    """Return ``(connection_id, connection_string)`` pairs for ingestion."""
-    pairs: list[tuple[str | None, str]] = []
-    seen_databases: set[str] = set()
-    try:
-        rows = get_neo4j_conn().query_read(
-            f"""
-            MATCH (db:{Labels.DB})
-            WHERE db.connection_string IS NOT NULL AND db.connection_id IS NOT NULL
-            RETURN db.connection_id AS id,
-                   db.connection_string AS connection_string,
-                   db.name AS database_name
-            ORDER BY db.connection_name
-            """
-        )
-        for row in rows:
-            database_name = str(row.get("database_name") or "")
-            if database_name and database_name in seen_databases:
-                continue
-            if database_name:
-                seen_databases.add(database_name)
-            pairs.append((str(row["id"]), str(row["connection_string"])))
-    except Exception:
-        logger.exception("Failed to load connection strings from Neo4j")
-
-    return pairs
-
-
-def get_all_connection_strings() -> list[str]:
-    """Return connection strings from Neo4j DB nodes plus env fallback."""
-    strings: list[str] = []
-    seen: set[str] = set()
-    try:
-        rows = get_neo4j_conn().query_read(
-            f"""
-            MATCH (db:{Labels.DB})
-            WHERE db.connection_string IS NOT NULL
-            RETURN DISTINCT db.connection_string AS connection_string
-            """
-        )
-        for row in rows:
-            connection_string = str(row["connection_string"])
-            if connection_string not in seen:
-                seen.add(connection_string)
-                strings.append(connection_string)
-    except Exception:
-        logger.exception("Failed to load connection strings from Neo4j DB nodes")
-
-    if strings:
-        return strings
-
-    raw = os.environ.get("CONNECTION_STRINGS", "")
-    return [cs.strip() for cs in raw.split(",") if cs.strip()]
-
-
 def find_connection_for_database(database_name: str) -> str | None:
-    """Return the display name of an existing UI connection for *database_name*, if any."""
+    """Return the name of an existing UI connection for *database_name*, if any."""
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (db:{Labels.DB} {{name: $database_name}})
-        WHERE db.connection_id IS NOT NULL
-        RETURN db.connection_name AS name
+        WHERE db.connection_string IS NOT NULL
+        RETURN db.name AS name
         LIMIT 1
         """,
         {"database_name": database_name},
@@ -107,7 +51,6 @@ def find_connection_for_database(database_name: str) -> str | None:
 
 def insert_connection(
     *,
-    connection_id: str,
     connection_string: str,
     database_name: str,
 ) -> dict[str, Any]:
@@ -116,14 +59,11 @@ def insert_connection(
         f"""
         MERGE (db:{Labels.DB} {{name: $database_name}})
         ON CREATE SET db.id = randomUUID()
-        SET db.connection_id = $connection_id,
-            db.connection_name = $database_name,
-            db.connection_string = $connection_string
+        SET db.connection_string = $connection_string
         RETURN properties(db) AS props
         """,
         {
             "database_name": database_name,
-            "connection_id": connection_id,
             "connection_string": connection_string,
         },
     )
@@ -143,15 +83,16 @@ def link_database_connection(*, database_name: str, connection_string: str) -> N
     )
 
 
-def get_connection_by_id(connection_id: str) -> dict[str, Any] | None:
+def get_connection_by_database_name(database_name: str) -> dict[str, Any] | None:
     """Return raw DB node properties for a connection, or ``None`` when missing."""
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (db:{Labels.DB} {{connection_id: $connection_id}})
+        MATCH (db:{Labels.DB} {{name: $database_name}})
+        WHERE db.connection_string IS NOT NULL
         RETURN properties(db) AS props
         LIMIT 1
         """,
-        {"connection_id": connection_id},
+        {"database_name": database_name},
     )
     if not rows:
         return None
@@ -199,7 +140,7 @@ def delete_database_and_analyses(database_name: str) -> None:
     )
 
 
-def delete_connection(connection_id: str) -> None:
+def delete_connection(database_name: str) -> None:
     """Remove connection metadata from the catalog DB node.
 
     The DB node itself is kept so that ``delete_database_and_analyses`` can
@@ -207,8 +148,8 @@ def delete_connection(connection_id: str) -> None:
     """
     get_neo4j_conn().query_write(
         f"""
-        MATCH (db:{Labels.DB} {{connection_id: $connection_id}})
-        REMOVE db.connection_id, db.connection_name, db.connection_string
+        MATCH (db:{Labels.DB} {{name: $database_name}})
+        REMOVE db.connection_string
         """,
-        {"connection_id": connection_id},
+        {"database_name": database_name},
     )

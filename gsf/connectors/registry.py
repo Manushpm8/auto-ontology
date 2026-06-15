@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from urllib.parse import urlparse
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
@@ -83,7 +84,21 @@ def get_connectors() -> list[SQLDatabase]:
     if _connectors is None:
         from gsf.server.connections import dal as connections_dal
 
-        connection_strings = connections_dal.get_all_connection_strings()
+        try:
+            connection_strings = [
+                cs
+                for cs in (
+                    str(conn.get("connection_string") or "")
+                    for conn in connections_dal.list_connections()
+                )
+                if cs
+            ]
+        except Exception:
+            logger.exception("Failed to load connection strings from Neo4j DB nodes")
+            connection_strings = []
+        if not connection_strings:
+            raw = os.environ.get("CONNECTION_STRINGS", "")
+            connection_strings = [cs.strip() for cs in raw.split(",") if cs.strip()]
         if not connection_strings:
             logger.warning(
                 "No connections configured. Add CONNECTION_STRINGS to your .env "

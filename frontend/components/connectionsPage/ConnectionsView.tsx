@@ -19,7 +19,6 @@ export const ConnectionsView = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [connectionModalOpen, setConnectionModalOpen] = useState(false);
 	const [deletingConnection, setDeletingConnection] = useState<{
-		id: string;
 		databaseName: string;
 	} | null>(null);
 	const [deleting, setDeleting] = useState(false);
@@ -62,9 +61,9 @@ export const ConnectionsView = () => {
 		void fetchConnections();
 	};
 
-	const handleDeleteRequest = (id: string, databaseName: string) => {
+	const handleDeleteRequest = (databaseName: string) => {
 		setDeleteError(null);
-		setDeletingConnection({ id, databaseName });
+		setDeletingConnection({ databaseName });
 	};
 
 	const handleDeleteClose = () => {
@@ -77,7 +76,7 @@ export const ConnectionsView = () => {
 		if (deletingConnection == null) return;
 		setDeleting(true);
 		setDeleteError(null);
-		const res = await connectionsApi.delete(deletingConnection.id);
+		const res = await connectionsApi.delete(deletingConnection.databaseName);
 		setDeleting(false);
 
 		if (res.error === true) {
@@ -85,7 +84,9 @@ export const ConnectionsView = () => {
 			return;
 		}
 
-		setConnections((prev) => prev.filter((c) => c.id !== deletingConnection.id));
+		setConnections((prev) =>
+			prev.filter((c) => c.database_name !== deletingConnection.databaseName),
+		);
 		setDeletingConnection(null);
 	};
 

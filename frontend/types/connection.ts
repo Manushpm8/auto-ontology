@@ -5,7 +5,6 @@
 import type { ConnectionType } from '@/enums/connection';
 
 export type Connection = {
-	id: string;
 	database_name: string;
 	connection_string: string;
 };
@@ -14,6 +13,4 @@ export type Connection = {
 export type ConnectionInput = {
 	type: ConnectionType;
 	connectionString: string;
-	/** Set after a successful test action in the create-connection wizard. */
-	tested?: boolean;
 };

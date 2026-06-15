@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Any
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
@@ -16,8 +15,6 @@ from gsf.connectors.registry import create_connector, invalidate_connectors_cach
 from gsf.server.connections import dal
 
 logger = logging.getLogger(__name__)
-
-DataSource = dict[str, Any]
 
 
 def _validate_connection_string(connection_string: str) -> SQLDatabase:
@@ -44,18 +41,17 @@ def test_connection(connection_type: str, connection_string: str) -> None:
 
 def create_connection(
     *,
-    connection_type: str,
     connection_string: str,
-    database: DataSource,
+    database_name: str,
 ) -> dict[str, Any]:
     """Create a UI-managed connection stored in Neo4j."""
     connection_string = connection_string.strip()
     if not connection_string:
         raise ValueError("Connection string is required")
 
-    database_name = str(database.get("database_name") or "").strip()
+    database_name = database_name.strip()
     if not database_name:
-        raise ValueError("Connection test result is required")
+        raise ValueError("Database name is required")
 
     existing = dal.find_connection_for_database(database_name)
     if existing is not None:
@@ -63,20 +59,17 @@ def create_connection(
             f"Database {database_name!r} already has connection {existing!r}"
         )
 
-    connection_id = str(uuid.uuid4())
-
     try:
         row = dal.insert_connection(
-            connection_id=connection_id,
             connection_string=connection_string,
             database_name=database_name,
         )
     except Exception:
         logger.exception(
-            "Failed to link connection %s in Neo4j; rolling back connection node",
-            connection_id,
+            "Failed to link connection for %s in Neo4j; rolling back connection node",
+            database_name,
         )
-        dal.delete_connection(connection_id)
+        dal.delete_connection(database_name)
         raise
 
     invalidate_connectors_cache()
@@ -89,14 +82,14 @@ def create_connection(
 
     from gsf.ingestion_service.ingest import trigger_ingest
 
-    trigger_ingest(connection_id, connection_string)
+    trigger_ingest(database_name, connection_string)
 
     return row
 
 
-def delete_connection(connection_id: str) -> dict[str, str] | None:
+def delete_connection(database_name: str) -> dict[str, str] | None:
     """Delete a UI-managed connection and tear down its ingested database graph."""
-    props = dal.get_connection_by_id(connection_id)
+    props = dal.get_connection_by_database_name(database_name)
     if props is None:
         return None
 
@@ -104,7 +97,7 @@ def delete_connection(connection_id: str) -> dict[str, str] | None:
     if not database_name:
         raise ValueError("Connection is missing a linked database name")
 
-    dal.delete_connection(connection_id)
+    dal.delete_connection(database_name)
 
     invalidate_connectors_cache()
     try:
@@ -118,4 +111,4 @@ def delete_connection(connection_id: str) -> dict[str, str] | None:
 
     trigger_ingest_delete(database_name)
 
-    return {"id": connection_id}
+    return {"database_name": database_name}

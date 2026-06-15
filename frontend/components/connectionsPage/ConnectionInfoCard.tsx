@@ -10,7 +10,7 @@ import type { Connection } from '@/types/connection';
 
 export type ConnectionInfoCardProps = {
 	connection: Connection;
-	onDelete?: (id: string, name: string) => void;
+	onDelete?: (databaseName: string) => void;
 	disabled?: boolean;
 };
 
@@ -43,8 +43,7 @@ export const ConnectionInfoCard = ({
 								{
 									label: 'Remove',
 									icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
-									onClick: () =>
-										onDelete(connection.id, connection.database_name),
+									onClick: () => onDelete(connection.database_name),
 									danger: true,
 								},
 							]}

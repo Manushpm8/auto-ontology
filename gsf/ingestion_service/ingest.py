@@ -63,7 +63,7 @@ def run_ingest(connection_string: str) -> None:
         TABULAR_PARAMS.connector.close()
 
 
-def trigger_ingest(connection_id: str, connection_string: str) -> None:
+def trigger_ingest(database_name: str, connection_string: str) -> None:
     """Run ingest for a new connection without blocking the caller."""
 
     def _run() -> None:
@@ -71,14 +71,14 @@ def trigger_ingest(connection_id: str, connection_string: str) -> None:
             run_ingest(connection_string)
         except Exception:
             logger.exception(
-                "Background ingest failed for connection %s",
-                connection_id,
+                "Background ingest failed for database %s",
+                database_name,
             )
 
     threading.Thread(
         target=_run,
         daemon=True,
-        name=f"ingest-{connection_id}",
+        name=f"ingest-{database_name}",
     ).start()
 
 

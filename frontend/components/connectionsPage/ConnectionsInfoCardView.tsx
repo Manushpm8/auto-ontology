@@ -11,7 +11,7 @@ import type { Connection } from '@/types/connection';
 type ConnectionsInfoCardViewProps = {
 	connections: Connection[];
 	loading?: boolean;
-	onDelete?: (id: string, name: string) => void;
+	onDelete?: (databaseName: string) => void;
 };
 
 const SkeletonCard = () => (
@@ -48,7 +48,7 @@ export const ConnectionsInfoCardView = ({
 		<div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
 			{connections.map((connection) => (
 				<ConnectionInfoCard
-					key={connection.id}
+					key={connection.database_name}
 					connection={connection}
 					onDelete={onDelete}
 				/>

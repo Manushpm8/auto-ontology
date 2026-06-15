@@ -32,10 +32,17 @@ INGEST_INTERVAL = timedelta(hours=24)
 
 async def ingest() -> None:
     """Run one ingestion pass for all configured connections."""
-    connections = connections_dal.list_connections_for_ingest()
+    try:
+        connections = [
+            (str(row.get("name") or ""), str(row.get("connection_string") or ""))
+            for row in connections_dal.list_connections()
+        ]
+    except Exception:
+        logger.exception("ingest: failed to load connections from Neo4j")
+        connections = []
     if not connections:
         raw = os.environ.get("CONNECTION_STRINGS", "")
-        connections = [(None, cs.strip()) for cs in raw.split(",") if cs.strip()]
+        connections = [("", cs.strip()) for cs in raw.split(",") if cs.strip()]
     if not connections:
         logger.info(
             "ingest: no connections configured. "
@@ -44,13 +51,13 @@ async def ingest() -> None:
         return
 
     logger.info("ingest: starting (%s connection(s))", len(connections))
-    for connection_id, connection_string in connections:
+    for database_name, connection_string in connections:
         try:
             run_ingest(connection_string)
         except Exception:
             logger.exception(
-                "ingest: failed for connection %s",
-                connection_id or connection_string,
+                "ingest: failed for database %s",
+                database_name or connection_string,
             )
     logger.info("ingest: finished")
 
