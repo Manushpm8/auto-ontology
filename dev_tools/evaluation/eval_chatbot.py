@@ -746,7 +746,7 @@ def run_single_query(question: str) -> None:
     print(f"\n  Runtime: {elapsed}s")
 
 
-SINGLE_QUERY = "list all actors"
+SINGLE_QUERY = "How many DORs were created in Q4 2025?"
 
 START_INDEX = 0
 END_INDEX = None  # None = run to the end
