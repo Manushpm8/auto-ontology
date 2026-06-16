@@ -18,9 +18,7 @@ export const ConnectionsView = () => {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [connectionModalOpen, setConnectionModalOpen] = useState(false);
-	const [deletingConnection, setDeletingConnection] = useState<{
-		databaseName: string;
-	} | null>(null);
+	const [deletingConnection, setDeletingConnection] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -63,7 +61,7 @@ export const ConnectionsView = () => {
 
 	const handleDeleteRequest = (databaseName: string) => {
 		setDeleteError(null);
-		setDeletingConnection({ databaseName });
+		setDeletingConnection(databaseName);
 	};
 
 	const handleDeleteClose = () => {
@@ -76,7 +74,7 @@ export const ConnectionsView = () => {
 		if (deletingConnection == null) return;
 		setDeleting(true);
 		setDeleteError(null);
-		const res = await connectionsApi.delete(deletingConnection.databaseName);
+		const res = await connectionsApi.delete(deletingConnection);
 		setDeleting(false);
 
 		if (res.error === true) {
@@ -84,9 +82,7 @@ export const ConnectionsView = () => {
 			return;
 		}
 
-		setConnections((prev) =>
-			prev.filter((c) => c.database_name !== deletingConnection.databaseName),
-		);
+		setConnections((prev) => prev.filter((c) => c.database_name !== deletingConnection));
 		setDeletingConnection(null);
 	};
 
@@ -165,9 +161,8 @@ export const ConnectionsView = () => {
 				message={
 					deletingConnection ? (
 						<>
-							Are you sure you want to remove{' '}
-							<strong>{deletingConnection.databaseName}</strong>? Its catalog data and
-							embeddings will be deleted. This action cannot be undone.
+							Are you sure you want to remove <strong>{deletingConnection}</strong>?
+							Its entire subgraph will be deleted. This action cannot be undone.
 						</>
 					) : null
 				}
@@ -181,7 +176,6 @@ export const ConnectionsView = () => {
 			<NewConnectionsModal
 				key={String(connectionModalOpen)}
 				open={connectionModalOpen}
-				existingConnections={connections}
 				onConfirm={handleConnectionModalConfirm}
 				onCancel={handleConnectionModalClose}
 			/>

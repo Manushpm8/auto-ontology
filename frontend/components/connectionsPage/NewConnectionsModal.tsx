@@ -10,7 +10,7 @@ import { ModalWithSteps, type StepperFooterAction } from '@/components/ModalWith
 import { ConnectionConnectStep } from '@/components/connectionsPage/steps/ConnectionConnectStep';
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';
 import { CONNECTION_FIELDS, ConnectionType, type ConnectionFieldKey } from '@/enums/connection';
-import type { Connection, ConnectionInput } from '@/types/connection';
+import type { ConnectionInput } from '@/types/connection';
 
 const NEW_CONNECTION_STEPS = ['Select Connector', 'Connect'] as const;
 
@@ -18,17 +18,11 @@ type FieldValues = Partial<Record<ConnectionFieldKey, string>>;
 
 export type NewConnectionsModalProps = {
 	open: boolean;
-	existingConnections?: Connection[];
 	onConfirm: () => void;
 	onCancel: () => void;
 };
 
-export const NewConnectionsModal = ({
-	open,
-	existingConnections = [],
-	onConfirm,
-	onCancel,
-}: NewConnectionsModalProps) => {
+export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnectionsModalProps) => {
 	const [loading, setLoading] = useState(false);
 	const [testingConnection, setTestingConnection] = useState(false);
 	const [isConnectionTested, setIsConnectionTested] = useState(false);
@@ -37,11 +31,6 @@ export const NewConnectionsModal = ({
 	const [connectionType, setConnectionType] = useState<ConnectionType>(ConnectionType.POSTGRESQL);
 	const [values, setValues] = useState<FieldValues>({});
 	const [alert, setAlert] = useState<string | null>(null);
-
-	const disabledTypes = useMemo(
-		() => existingConnections.map((connection) => connection.connection.type),
-		[existingConnections],
-	);
 
 	const buildConnection = useCallback((): ConnectionInput => {
 		const fields = CONNECTION_FIELDS[connectionType];
@@ -130,9 +119,7 @@ export const NewConnectionsModal = ({
 	const renderStepContent = (step: number) => {
 		switch (step) {
 			case 0:
-				return (
-					<ConnectionTypeStep onSelect={handleSelectType} disabledTypes={disabledTypes} />
-				);
+				return <ConnectionTypeStep onSelect={handleSelectType} />;
 			case 1:
 				return (
 					<ConnectionConnectStep

@@ -14,13 +14,28 @@ from gsf.connectors.connection import build_connection_string
 from gsf.connectors.registry import create_connector, invalidate_connectors_cache
 from gsf.connectors.vault import delete_secrets, is_vault_configured, write_secret
 from gsf.server.chat.worker import refresh_chat_workers
-from gsf.server.connections.dal import insert_connection
+from gsf.server.connections.dal import insert_connection, list_connections
 
 logger = logging.getLogger(__name__)
 
 
+def _database_already_connected(database_name: str) -> bool:
+    """True if a UI-managed connection already exists for this database."""
+    return any(
+        str(conn.get("database") or "").strip().lower() == database_name.lower()
+        for conn in list_connections()
+    )
+
+
 def test_connection(connection: dict[str, Any]) -> None:
     """Validate credentials for the settings UI test action."""
+    database_name = str(connection.get("database") or "").strip()
+    if not database_name:
+        raise ValueError("Database name is required")
+
+    if _database_already_connected(database_name):
+        raise ValueError(f"A connection for database {database_name!r} already exists")
+
     connection_string = build_connection_string(connection)
     connector = create_connector(connection_string)
     try:
@@ -38,6 +53,9 @@ def create_connection(
     database_name = str(connection.get("database") or "").strip()
     if not database_name:
         raise ValueError("Database name is required")
+
+    if _database_already_connected(database_name):
+        raise ValueError(f"A connection for database {database_name!r} already exists")
 
     # With Vault configured, store credentials in Vault and keep them off the
     # Neo4j node; otherwise fall back to persisting the JSON on the node.
