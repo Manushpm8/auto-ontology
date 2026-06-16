@@ -6,15 +6,15 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { connectionsApi } from '@/api/connections';
-import { parseConnectionDatabaseName } from '@/lib/parseConnectionDatabaseName';
 import { ModalWithSteps, type StepperFooterAction } from '@/components/ModalWithSteps';
 import { ConnectionConnectStep } from '@/components/connectionsPage/steps/ConnectionConnectStep';
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';
-import { ConnectionType, isConnectionType } from '@/enums/connection';
-import type { Connection } from '@/types/connection';
-import type { ConnectionInput } from '@/types/connection';
+import { CONNECTION_FIELDS, ConnectionType, type ConnectionFieldKey } from '@/enums/connection';
+import type { Connection, ConnectionInput } from '@/types/connection';
 
 const NEW_CONNECTION_STEPS = ['Select Connector', 'Connect'] as const;
+
+type FieldValues = Partial<Record<ConnectionFieldKey, string>>;
 
 export type NewConnectionsModalProps = {
 	open: boolean;
@@ -22,13 +22,6 @@ export type NewConnectionsModalProps = {
 	onConfirm: () => void;
 	onCancel: () => void;
 };
-
-const emptyConnectionInput = (
-	type: ConnectionType = ConnectionType.POSTGRESQL,
-): ConnectionInput => ({
-	type,
-	connectionString: '',
-});
 
 export const NewConnectionsModal = ({
 	open,
@@ -42,24 +35,27 @@ export const NewConnectionsModal = ({
 	const [testSuccessMessage, setTestSuccessMessage] = useState<string | null>(null);
 	const [activeStep, setActiveStep] = useState(0);
 	const [connectionType, setConnectionType] = useState<ConnectionType>(ConnectionType.POSTGRESQL);
-	const [connectionInput, setConnectionInput] = useState<ConnectionInput>(emptyConnectionInput());
+	const [values, setValues] = useState<FieldValues>({});
 	const [alert, setAlert] = useState<string | null>(null);
 
-	const disabledTypes = useMemo(() => {
-		const used = new Set<ConnectionType>();
-		for (const connection of existingConnections) {
-			const scheme = connection.connection_string.split('://')[0].split('+')[0].toLowerCase();
-			if (isConnectionType(scheme)) {
-				used.add(scheme);
-			}
-		}
-		return [...used];
-	}, [existingConnections]);
+	const disabledTypes = useMemo(
+		() => existingConnections.map((connection) => connection.connection.type),
+		[existingConnections],
+	);
+
+	const buildConnection = useCallback((): ConnectionInput => {
+		const fields = CONNECTION_FIELDS[connectionType];
+		const entries = fields.map((field) => [field.key, (values[field.key] ?? '').trim()]);
+		// The discriminated union maps 1:1 to the per-type field keys.
+		return { type: connectionType, ...Object.fromEntries(entries) } as ConnectionInput;
+	}, [connectionType, values]);
 
 	const canContinue = useMemo(() => {
 		if (activeStep === 0) return false;
-		return parseConnectionDatabaseName(connectionInput.connectionString) !== null;
-	}, [activeStep, connectionInput.connectionString]);
+		return CONNECTION_FIELDS[connectionType].every(
+			(field) => field.optional || (values[field.key] ?? '').trim().length > 0,
+		);
+	}, [activeStep, connectionType, values]);
 
 	const handleNext = useCallback((): void => {
 		setAlert(null);
@@ -73,20 +69,18 @@ export const NewConnectionsModal = ({
 
 	const handleSelectType = (type: ConnectionType): void => {
 		setConnectionType(type);
-		setConnectionInput(emptyConnectionInput(type));
+		setValues({});
 		setAlert(null);
 		setIsConnectionTested(false);
 		setTestSuccessMessage(null);
 		setActiveStep(1);
 	};
 
-	const handleConnectionInputChange = (patch: Partial<ConnectionInput>): void => {
-		setConnectionInput((prev) => ({ ...prev, ...patch }));
-		if (patch.connectionString !== undefined) {
-			setIsConnectionTested(false);
-			setTestSuccessMessage(null);
-			setAlert(null);
-		}
+	const handleFieldChange = (key: ConnectionFieldKey, value: string): void => {
+		setValues((prev) => ({ ...prev, [key]: value }));
+		setIsConnectionTested(false);
+		setTestSuccessMessage(null);
+		setAlert(null);
 	};
 
 	const handleTestConnection = useCallback(async (): Promise<void> => {
@@ -94,10 +88,7 @@ export const NewConnectionsModal = ({
 		setAlert(null);
 		setTestSuccessMessage(null);
 
-		const res = await connectionsApi.test({
-			type: connectionType,
-			connectionString: connectionInput.connectionString,
-		});
+		const res = await connectionsApi.test(buildConnection());
 		setTestingConnection(false);
 
 		if ('error' in res && res.error === true) {
@@ -115,7 +106,7 @@ export const NewConnectionsModal = ({
 		setIsConnectionTested(true);
 		setTestSuccessMessage('Connection successful.');
 		setAlert(null);
-	}, [connectionType, connectionInput.connectionString]);
+	}, [buildConnection]);
 
 	const handleCreate = useCallback(async (): Promise<void> => {
 		if (!isConnectionTested) {
@@ -123,19 +114,9 @@ export const NewConnectionsModal = ({
 			return;
 		}
 
-		const database = parseConnectionDatabaseName(connectionInput.connectionString);
-		if (!database) {
-			setAlert('Could not determine database name from connection string.');
-			return;
-		}
-
 		setLoading(true);
 		setAlert(null);
-		const res = await connectionsApi.create({
-			type: connectionType,
-			connectionString: connectionInput.connectionString,
-			database,
-		});
+		const res = await connectionsApi.create(buildConnection());
 		setLoading(false);
 
 		if ('error' in res && res.error === true) {
@@ -144,7 +125,7 @@ export const NewConnectionsModal = ({
 		}
 
 		onConfirm();
-	}, [connectionType, connectionInput.connectionString, isConnectionTested, onConfirm]);
+	}, [buildConnection, isConnectionTested, onConfirm]);
 
 	const renderStepContent = (step: number) => {
 		switch (step) {
@@ -155,8 +136,9 @@ export const NewConnectionsModal = ({
 			case 1:
 				return (
 					<ConnectionConnectStep
-						connectionInput={{ ...connectionInput, type: connectionType }}
-						onChange={handleConnectionInputChange}
+						connectionType={connectionType}
+						values={values}
+						onFieldChange={handleFieldChange}
 						testSuccessMessage={testSuccessMessage}
 						onTestConnection={() => {
 							void handleTestConnection();

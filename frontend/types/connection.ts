@@ -2,15 +2,34 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ConnectionType } from '@/enums/connection';
+import { ConnectionType } from '@/enums/connection';
 
+export type PostgresConnectionParams = {
+	type: ConnectionType.POSTGRESQL;
+	host: string;
+	port: string;
+	user: string;
+	password: string;
+	database: string;
+};
+
+export type SnowflakeConnectionParams = {
+	type: ConnectionType.SNOWFLAKE;
+	account: string;
+	warehouse: string;
+	user: string;
+	password: string;
+	database: string;
+};
+
+/** Structured connection form fields, discriminated by `type`. */
+export type ConnectionParams = PostgresConnectionParams | SnowflakeConnectionParams;
+
+/** A stored connection returned by the API. */
 export type Connection = {
 	database_name: string;
-	connection_string: string;
+	connection: ConnectionParams;
 };
 
 /** User-provided fields for testing or creating a connection. */
-export type ConnectionInput = {
-	type: ConnectionType;
-	connectionString: string;
-};
+export type ConnectionInput = ConnectionParams;

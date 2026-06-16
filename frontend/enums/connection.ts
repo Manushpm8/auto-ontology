@@ -15,3 +15,39 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 
 export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
 	typeof value === 'string' && (Object.values(ConnectionType) as string[]).includes(value);
+
+export type ConnectionFieldKey =
+	| 'host'
+	| 'port'
+	| 'account'
+	| 'warehouse'
+	| 'user'
+	| 'password'
+	| 'database';
+
+export type ConnectionField = {
+	key: ConnectionFieldKey;
+	label: string;
+	placeholder?: string;
+	secret?: boolean;
+	/** Optional fields are not required to enable Test/Create. */
+	optional?: boolean;
+};
+
+/** Form fields rendered per connector type. `database` is the connection identity. */
+export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
+	[ConnectionType.POSTGRESQL]: [
+		{ key: 'host', label: 'Host', placeholder: 'localhost' },
+		{ key: 'port', label: 'Port', placeholder: '5432', optional: true },
+		{ key: 'user', label: 'User', placeholder: 'postgres' },
+		{ key: 'password', label: 'Password', secret: true },
+		{ key: 'database', label: 'Database', placeholder: 'my_database' },
+	],
+	[ConnectionType.SNOWFLAKE]: [
+		{ key: 'account', label: 'Account', placeholder: 'xy12345.us-east-1' },
+		{ key: 'warehouse', label: 'Warehouse', placeholder: 'COMPUTE_WH' },
+		{ key: 'user', label: 'User' },
+		{ key: 'password', label: 'Password', secret: true },
+		{ key: 'database', label: 'Database', placeholder: 'MY_DATABASE' },
+	],
+};
