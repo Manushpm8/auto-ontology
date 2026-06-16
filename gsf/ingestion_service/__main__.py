@@ -22,8 +22,13 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from gsf.ingestion_service.ingest import run_ingest
-from gsf.server.connections import dal as connections_dal
+from gsf.server.env import load_server_env
+
+load_server_env()
+
+from gsf.connectors.connection import build_connection_string  # noqa: E402
+from gsf.ingestion_service.ingest import run_ingest  # noqa: E402
+from gsf.server.connections.dal import list_connections  # noqa: E402
 
 logger = logging.getLogger("gsf.ingestion_service")
 
@@ -33,16 +38,14 @@ INGEST_INTERVAL = timedelta(hours=24)
 async def ingest() -> None:
     """Run one ingestion pass for all configured connections."""
     try:
-        connections = [
-            (str(row.get("name") or ""), str(row.get("connection_string") or ""))
-            for row in connections_dal.list_connections()
-        ]
+        connections = [build_connection_string(conn) for conn in list_connections()]
     except Exception:
         logger.exception("ingest: failed to load connections from Neo4j")
         connections = []
+
     if not connections:
         raw = os.environ.get("CONNECTION_STRINGS", "")
-        connections = [("", cs.strip()) for cs in raw.split(",") if cs.strip()]
+        connections = [cs.strip() for cs in raw.split(",") if cs.strip()]
     if not connections:
         logger.info(
             "ingest: no connections configured. "
@@ -51,14 +54,11 @@ async def ingest() -> None:
         return
 
     logger.info("ingest: starting (%s connection(s))", len(connections))
-    for database_name, connection_string in connections:
+    for connection_string in connections:
         try:
             run_ingest(connection_string)
         except Exception:
-            logger.exception(
-                "ingest: failed for database %s",
-                database_name or connection_string,
-            )
+            logger.exception("ingest: failed for connection %s", connection_string)
     logger.info("ingest: finished")
 
 

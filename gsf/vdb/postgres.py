@@ -21,7 +21,6 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
 from nemo_retriever.vdb import VDB
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +274,6 @@ class PostgresVDB(VDB):
 
         filter = {
             _DATABASE_METADATA_COLUMN: database_name,
-            _LABEL_METADATA_COLUMN: {"$ne": Labels.CUSTOM_ANALYSIS},
         }
 
         existing = store.get(

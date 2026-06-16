@@ -126,7 +126,7 @@ class SnowflakeDatabase(SQLDatabase):
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
         with snowflake.connector.connect(**self._connect_kwargs) as conn:
             with conn.cursor() as cur:
-                cur.execute(f"USE WAREHOUSE {self._warehouse}")
+                cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")
                 if parameters:
                     cur.execute(sql, parameters)
                 else:
@@ -276,9 +276,15 @@ class SnowflakeDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def ping(self) -> None:
-        """Verify credentials via a driver-level auth handshake (no SQL)."""
-        with snowflake.connector.connect(**self._connect_kwargs):
-            pass
+        """Verify credentials and that the configured warehouse is usable.
+
+        Beyond the auth handshake, this runs ``USE WAREHOUSE`` so a missing or
+        misspelled warehouse fails at test time rather than during a later
+        background ingest.
+        """
+        with snowflake.connector.connect(**self._connect_kwargs) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")
 
     def close(self) -> None:
         """No persistent connection to close (connections are per-query)."""

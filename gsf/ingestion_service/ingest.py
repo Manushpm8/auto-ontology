@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from typing import Any
 
+from gsf.connectors.connection import build_connection_string
 from gsf.utils import get_embed_params
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
@@ -18,7 +20,7 @@ from nemo_retriever.vdb import IngestVdbOperator
 from nemo_retriever.params import TabularExtractParams
 from gsf.vdb import get_vdb
 from gsf.connectors.registry import create_connector
-from gsf.server.connections import dal as connections_dal
+from gsf.server.connections.dal import delete_database_subgraph
 
 logger = logging.getLogger("ingestion_service.ingest")
 
@@ -54,17 +56,14 @@ def run_ingest(connection_string: str) -> None:
         else:
             logger.info("Tabular ingest result: no rows produced")
 
-        connections_dal.link_database_connection(
-            database_name=database_name,
-            connection_string=connection_string,
-        )
-
     finally:
         TABULAR_PARAMS.connector.close()
 
 
-def trigger_ingest(database_name: str, connection_string: str) -> None:
+def trigger_ingest(connection: dict[str, Any]) -> None:
     """Run ingest for a new connection without blocking the caller."""
+    connection_string = build_connection_string(connection)
+    database_name = str(connection.get("database") or "")
 
     def _run() -> None:
         try:
@@ -107,8 +106,7 @@ def run_ingest_delete(database_name: str) -> None:
     if not database_name:
         raise ValueError("Database name is required")
 
-    analysis_ids = connections_dal.list_custom_analysis_ids_for_database(database_name)
-    connections_dal.delete_database_and_analyses(database_name)
+    delete_database_subgraph(database_name)
 
     vdb = get_vdb()
     deleted_tabular = vdb.delete_by_database(database_name)
@@ -116,9 +114,3 @@ def run_ingest_delete(database_name: str) -> None:
         f"Tabular ingest delete: removed {len(deleted_tabular)} pgvector rows "
         f"for database {database_name}",
     )
-
-    for analysis_id in analysis_ids:
-        vdb.delete_by_id(analysis_id)
-        logger.info(
-            f"Tabular ingest delete: removed custom analysis embedding {analysis_id}",
-        )

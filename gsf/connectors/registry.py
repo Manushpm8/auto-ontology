@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
+from gsf.connectors.connection import build_connection_string
 from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase
 from gsf.connectors.postgres import PostgresDatabase
@@ -20,8 +21,8 @@ from gsf.connectors.snowflake import SnowflakeDatabase
 logger = logging.getLogger(__name__)
 
 CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
-    "postgresql": PostgresDatabase,
     "postgres": PostgresDatabase,
+    "postgresql": PostgresDatabase,
     "duckdb": DuckDBDatabase,
     "snowflake": SnowflakeDatabase,
     "heavydb": HeavyDBDatabase,
@@ -51,12 +52,12 @@ def create_connector(connection_string: str) -> SQLDatabase:
         if not scheme:
             raise ValueError("Invalid connection string: No protocol scheme found.")
 
-        db_type = scheme.split("+", 1)[0].lower()
-        connector_class = CONNECTOR_REGISTRY.get(db_type)
+        connector_type = scheme.split("+", 1)[0].lower()
+        connector_class = CONNECTOR_REGISTRY.get(connector_type)
 
         if connector_class is None:
             raise ValueError(
-                f"Unsupported database type: {db_type!r}. "
+                f"Unsupported database type: {connector_type!r}. "
                 f"Connection string: {connection_string}"
             )
 
@@ -82,16 +83,11 @@ def get_connectors() -> list[SQLDatabase]:
     """
     global _connectors
     if _connectors is None:
-        from gsf.server.connections import dal as connections_dal
+        from gsf.server.connections.dal import list_connections
 
         try:
             connection_strings = [
-                cs
-                for cs in (
-                    str(conn.get("connection_string") or "")
-                    for conn in connections_dal.list_connections()
-                )
-                if cs
+                build_connection_string(conn) for conn in list_connections()
             ]
         except Exception:
             logger.exception("Failed to load connection strings from Neo4j DB nodes")

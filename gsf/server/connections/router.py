@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TypedDict
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from gsf.server.connections import dal, service
 
@@ -19,42 +19,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class ConnectionPublic(BaseModel):
-    database_name: str = Field(alias="name")
-    connection_string: str
-
-    model_config = {"populate_by_name": True}
+class ConnectionBody(BaseModel):
+    connection: dict[str, Any]
 
 
-class ConnectionCreate(BaseModel):
-    type: str
-    connection_string: str = Field(default="", alias="connectionString")
-    database: str
-
-    model_config = {"populate_by_name": True}
+class PublicConnection(TypedDict):
+    database_name: str
+    connection: dict[str, Any]
 
 
-def _public_connections(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [ConnectionPublic.model_validate(row).model_dump() for row in rows]
-
-
-class ConnectionTest(BaseModel):
-    type: str
-    connection_string: str = Field(default="", alias="connectionString")
-
-    model_config = {"populate_by_name": True}
+def _serialize_connection(connection: dict[str, Any]) -> PublicConnection:
+    """Shape a connection object into the public connection payload."""
+    return {
+        "database_name": str(connection.get("database") or ""),
+        "connection": connection,
+    }
 
 
 @router.get("/connections")
 def list_connections() -> dict:
-    rows = _public_connections(dal.list_connections())
+    rows = [_serialize_connection(conn) for conn in dal.list_connections()]
     return {"data": rows, "count": len(rows)}
 
 
 @router.post("/connections/test")
-def test_connection(body: ConnectionTest) -> dict:
+def test_connection(body: ConnectionBody) -> dict:
     try:
-        service.test_connection(body.type, body.connection_string)
+        service.test_connection(body.connection)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -66,12 +57,9 @@ def test_connection(body: ConnectionTest) -> dict:
 
 
 @router.post("/connections", status_code=201)
-def create_connection(body: ConnectionCreate) -> dict:
+def create_connection(body: ConnectionBody) -> dict:
     try:
-        row = service.create_connection(
-            connection_string=body.connection_string,
-            database_name=body.database,
-        )
+        row = service.create_connection(connection=body.connection)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -80,7 +68,7 @@ def create_connection(body: ConnectionCreate) -> dict:
             detail=f"Failed to create connection: {exc}",
         ) from exc
 
-    return {"data": ConnectionPublic.model_validate(row).model_dump()}
+    return {"data": _serialize_connection(row)}
 
 
 @router.delete("/connections/{database_name}")
