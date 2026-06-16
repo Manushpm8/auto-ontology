@@ -1,8 +1,10 @@
 {
   "version": "0.2.0",
   "configurations": [
+
+    // ── dor_prod ──────────────────────────────────────────────────────────
     {
-      "name": "Debug Ingest",
+      "name": "dor_prod: Ingest",
       "type": "debugpy",
       "request": "launch",
       "cwd": "${workspaceFolder}",
@@ -13,100 +15,120 @@
       "justMyCode": false
     },
     {
+      "name": "dor_prod: Semantic compile",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.semantic",
+      "args": ["--database-name", "dor_prod"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "dor_prod: Eval",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": [
+        "--input", "dev_tools/evaluation/chatbot_evaluation.json",
+        "--output", "dev_tools/evaluation/chatbot_evaluation_scores.csv"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "dor_prod: Eval (single query)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": ["--single"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "dor_prod: Eval (consistency)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": ["--consistency", "--runs", "10"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+
+    // ── WWI ───────────────────────────────────────────────────────────────
+    {
+      "name": "WWI: Ingest",
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "module": "dev_tools.ingest_local_postgres",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "WWI: Semantic compile",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.semantic",
+      "args": ["--database-name", "WIDEWORLDIMPORTERS"],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "WWI: Eval",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": [
+        "--input", "dev_tools/evaluation/wwi_evaluation.json",
+        "--output", "dev_tools/evaluation/wwi_evaluation_scores.csv"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "WWI: Eval (single query)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.evaluation.eval_chatbot",
+      "args": [
+        "--single",
+        "--input", "dev_tools/evaluation/wwi_evaluation.json"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+
+    // ── Infrastructure ────────────────────────────────────────────────────
+    {
       "name": "Debug API",
       "type": "debugpy",
       "request": "launch",
       "module": "gsf.server",
       "python": "${workspaceFolder}/.venv/bin/python",
       "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
-    {
-      "name": "Eval Chatbot",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "dev_tools.evaluation.eval_chatbot",
-      "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
-      "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
-    {
-      "name": "Eval Chatbot (consistency)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "dev_tools.evaluation.eval_chatbot",
-      "args": [
-        "--consistency",
-        "--runs",
-        "10"
-      ],
-      "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
-      "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
-    {
-      "name": "Eval Chatbot (single query)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "dev_tools.evaluation.eval_chatbot",
-      "args": [
-        "--single"
-      ],
-      "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
-      "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
-    {
-      "name": "Semantic: compile dor_prod",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "gsf.semantic",
-      "args": [
-        "--database-name",
-        "dor_prod"
-      ],
-      "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
-      "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
-    {
-      "name": "Semantic: compile WWI",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "gsf.semantic",
-      "args": [
-        "--database-name",
-        "WIDEWORLDIMPORTERS"
-      ],
-      "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
-      "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
-    {
-      "name": "Eval WWI",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "dev_tools.evaluation.eval_chatbot",
-      "args": [
-        "--input",
-        "dev_tools/evaluation/wwi_evaluation.json",
-        "--output",
-        "dev_tools/evaluation/wwi_evaluation_scores.csv"
-      ],
-      "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
@@ -127,10 +149,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "gsf.semantic",
-      "args": [
-        "--database-name",
-        "mock_shop"
-      ],
+      "args": ["--database-name", "mock_shop"],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",

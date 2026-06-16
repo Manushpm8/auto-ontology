@@ -168,6 +168,9 @@ def _canonical(value: Any) -> Any:
     return str(value).strip().lower()
 
 
+_SQL_ROW_LIMIT = 500
+
+
 def _execute_sql(
     connector: Any, sql: str
 ) -> Tuple[Optional[pd.DataFrame], str]:
@@ -177,6 +180,8 @@ def _execute_sql(
         df = connector.execute(sql)
         if not isinstance(df, pd.DataFrame):
             df = pd.DataFrame(df)
+        if len(df) > _SQL_ROW_LIMIT:
+            df = df.head(_SQL_ROW_LIMIT)
         return df, ""
     except Exception as exc:  # pragma: no cover - tooling script
         return None, f"{type(exc).__name__}: {exc}"
@@ -277,6 +282,9 @@ def _db_result_to_df(value: str) -> Optional[pd.DataFrame]:
     return None
 
 
+_SCORE_STR_LIMIT = 8000
+
+
 def _score_answer(expected_raw: str, returned_db_str: str) -> Dict[str, Any]:
     """Score the agent's answer against the expected ``answer_raw`` markdown table.
 
@@ -294,9 +302,11 @@ def _score_answer(expected_raw: str, returned_db_str: str) -> Dict[str, Any]:
     if expected_df is not None and actual_df is not None:
         structural_match = 1 if _df_values_equal(expected_df, actual_df) else 0
 
-    haystack = str(returned_db_str or "")
+    # Truncate large strings before expensive text operations
+    haystack = str(returned_db_str or "")[:_SCORE_STR_LIMIT]
+    expected_capped = str(expected_raw or "")[:_SCORE_STR_LIMIT]
 
-    expected_nums = sorted(round(n, 4) for n in _extract_numbers(expected_raw))
+    expected_nums = sorted(round(n, 4) for n in _extract_numbers(expected_capped))
     actual_nums = sorted(round(n, 4) for n in _extract_numbers(haystack))
     if not expected_nums and not actual_nums:
         nums_match = 1
@@ -305,9 +315,9 @@ def _score_answer(expected_raw: str, returned_db_str: str) -> Dict[str, Any]:
 
     sim = (
         difflib.SequenceMatcher(
-            None, _normalize_text(expected_raw), _normalize_text(haystack)
+            None, _normalize_text(expected_capped), _normalize_text(haystack)
         ).ratio()
-        if expected_raw and haystack
+        if expected_capped and haystack
         else 0.0
     )
     if structural_match:
@@ -342,20 +352,23 @@ def _load_questions(path: Path) -> List[Dict[str, Any]]:
     return data
 
 
+_STRINGIFY_ROW_LIMIT = 200
+
+
 def _stringify_db_result(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, pd.DataFrame):
-        return value.to_csv(index=False)
+        return value.head(_STRINGIFY_ROW_LIMIT).to_csv(index=False)
     # Some agent paths return executed rows as a plain ``list[dict]`` — serialise
     # as JSON so the downstream parser hits the JSON branch (rather than
     # ``str(...)`` which uses single quotes and breaks json.loads).
     if isinstance(value, list) and value and isinstance(value[0], dict):
         try:
-            return json.dumps(value, default=str)
+            return json.dumps(value[:_STRINGIFY_ROW_LIMIT], default=str)
         except (TypeError, ValueError):
-            return str(value)
-    return str(value)
+            return str(value[:_STRINGIFY_ROW_LIMIT])
+    return str(value)[:_SCORE_STR_LIMIT]
 
 
 CSV_FIELDS = [
@@ -735,7 +748,7 @@ def run_single_query(question: str) -> None:
 
 SINGLE_QUERY = "list all actors"
 
-START_INDEX = 1
+START_INDEX = 0
 END_INDEX = None  # None = run to the end
 CONSISTENCY_RUNS = 10
 RUN_CONSISTENCY = False

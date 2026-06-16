@@ -251,7 +251,7 @@ def _llm_pick_hit(
     result = invoke_structured(
         [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_text)],
         FkHitSelection,
-        max_tokens=256,
+        max_tokens=4096,
     )
 
     selected = result.selected_id

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import json
 from typing import Any
 
@@ -10,6 +11,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from gsf.semantic.deterministic import fk_source_columns
 from gsf.semantic.llm import invoke_structured
 from gsf.semantic.models import PotentialFkResult, PotentialFkSuggestion
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM = """\
 You review relational table metadata and identify columns that are likely foreign keys
@@ -112,7 +115,8 @@ def suggest_potential_foreign_keys(
             PotentialFkResult,
             temperature=0.0,
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("Error suggesting potential foreign keys: %s", e)
         return PotentialFkResult()
 
     allowed = {col["name"] for col in candidates}

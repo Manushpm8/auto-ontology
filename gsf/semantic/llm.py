@@ -47,7 +47,7 @@ def invoke_structured(
     schema: type[T],
     *,
     temperature: float = 0.0,
-    max_tokens: int = 1024,
+    max_tokens: int = 4096,
 ) -> T:
     """Call the configured chat model with structured output."""
     if not _API_KEY:
