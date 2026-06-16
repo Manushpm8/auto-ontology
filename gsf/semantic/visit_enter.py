@@ -75,7 +75,9 @@ def process_table(
 
     attr_count = 0
     for term, assignments in persisted_terms:
-        neo4j_dal.merge_term(term.name, term.description, table_id)
+        neo4j_dal.merge_term(
+            term.name, term.description, table_id, synonyms=term.synonyms
+        )
         for assignment in assignments:
             spec = spec_by_column[assignment.source_column]
             neo4j_dal.merge_column_attribute(

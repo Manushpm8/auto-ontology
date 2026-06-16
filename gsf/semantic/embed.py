@@ -137,6 +137,7 @@ def embed_all_semantic_nodes(
                 {
                     "name": term_name,
                     "description": term.get("description") or "",
+                    "synonyms": term.get("synonyms") or [],
                     "id": term.get("id"),
                 },
                 attrs_by_term.get(term_name, []),
@@ -214,6 +215,9 @@ def _build_rows(
             }
         )
 
+    term_synonyms: list[str] = term.get("synonyms") or []
+    synonym_suffix = f" ({', '.join(term_synonyms)})" if term_synonyms else ""
+
     for a in attrs:
         attr_name = a.get("name")
         if not attr_name:
@@ -221,7 +225,7 @@ def _build_rows(
         owner = a.get("term_name") or term_name or ""
         sample_block = _format_sample_values(a.get("sample_values"))
         text = (
-            f"ColumnAttribute: {attr_name} of Term {owner}. "
+            f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}. "
             f"{a.get('description') or ''}"
             f"{sample_block}"
         ).strip()

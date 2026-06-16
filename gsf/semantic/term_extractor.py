@@ -10,6 +10,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from gsf.semantic.deterministic import to_term_name
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.llm import invoke_structured
+from pydantic import BaseModel, ConfigDict, Field
+
 from gsf.semantic.models import (
     ColumnAttributeSpec,
     RawTableTermsResult,
@@ -35,6 +37,35 @@ not purchase_orders or PurchaseOrder).
 source_column exactly as given and a display_name — a user-friendly ColumnAttribute \
 label with spaces between words (e.g. Order Date, Total Amount).
 4. Do not propose IS_A, PART_OF, or ROLE relationships."""
+
+
+class _SynonymExtractionModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    synonyms: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Abbreviations, acronyms, or alternate names explicitly written in the "
+            "description. Empty list if none are stated."
+        ),
+    )
+
+
+_SYNONYM_SYSTEM = """\
+Your only task is to extract alternate names for a business entity from a table description.
+
+Look for abbreviations, acronyms, or aliases that are explicitly written — for example \
+through phrases like "also referred to as", "also known as", "abbreviated as", \
+"short for", "stands for", or a parenthetical directly after the entity name such as \
+"business unit (BU)".
+
+Return each alternate name verbatim as a separate entry in synonyms.
+Example: "business unit (BU)" → synonyms: ["BU"]
+Example: "also referred to as DORs which stands for Diag-on-Request" → \
+synonyms: ["DORs", "Diag-on-Request"]
+
+Return an empty list if no alternate names are explicitly stated. \
+Do NOT infer, guess, or add any name that is not directly written in the description."""
 
 
 def _normalize_label(name: str, *, fallback: str) -> str:
@@ -159,6 +190,25 @@ def _sanitize_result(
     return table_result
 
 
+def _extract_synonyms(description: str) -> list[str]:
+    """Dedicated LLM call to extract alternate names from a table description."""
+    if not description:
+        return []
+    try:
+        result = invoke_structured(
+            [
+                SystemMessage(content=_SYNONYM_SYSTEM),
+                HumanMessage(content=f"Description: {description}"),
+            ],
+            _SynonymExtractionModel,
+            temperature=0.0,
+            max_tokens=1024,
+        )
+        return [s.strip() for s in result.synonyms if s.strip()]
+    except Exception:
+        return []
+
+
 def extract_term(
     table: dict[str, Any],
     ctx: dict[str, Any],
@@ -170,6 +220,8 @@ def extract_term(
     if not specs:
         return _fallback_result(table, specs)
 
+    description = table.get("description") or ""
+
     spec_lines = "\n".join(_format_spec_line(spec) for spec in specs[:40])
     domain_block = ""
     if domain_summary:
@@ -179,7 +231,7 @@ def extract_term(
         )
     prompt = (
         f"Table: {table['name']}\n"
-        f"Description: {table.get('description') or ''}\n"
+        f"Description: {description}\n"
         f"Candidate columns (assign each to exactly one Term with a display_name):\n"
         f"{spec_lines}\n"
         f"{domain_block}"
@@ -189,9 +241,16 @@ def extract_term(
             [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
             RawTableTermsResult,
             temperature=0.0,
-            max_tokens=2048,
+            max_tokens=4096,
         )
     except Exception:
         return _fallback_result(table, specs)
 
-    return _sanitize_result(result, table=table, specs=specs)
+    table_result = _sanitize_result(result, table=table, specs=specs)
+
+    synonyms = _extract_synonyms(description)
+    if synonyms:
+        for term in table_result.terms:
+            term.synonyms = synonyms
+
+    return table_result

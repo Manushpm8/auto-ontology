@@ -60,14 +60,20 @@ def get_term_for_table(table_id: str) -> str | None:
     return rows[0]["name"] if rows else None
 
 
-def merge_term(name: str, description: str, table_id: str) -> str | None:
+def merge_term(
+    name: str,
+    description: str,
+    table_id: str,
+    synonyms: list[str] | None = None,
+) -> str | None:
     """Merge the Term node and return its persistent ``id`` (UUID)."""
     rows = get_neo4j_conn().query_write(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})
         MERGE (term:{LABEL_TERM} {{name: $name, source: $source}})
         ON CREATE SET term.id = randomUUID()
-        SET term.description = $description
+        SET term.description = $description,
+            term.synonyms = $synonyms
         MERGE (t)-[:{REL_REPRESENTS}]->(term)
         RETURN term.id AS id
         """,
@@ -75,6 +81,7 @@ def merge_term(name: str, description: str, table_id: str) -> str | None:
             "table_id": table_id,
             "name": name,
             "description": description,
+            "synonyms": synonyms or [],
             "source": SEMANTIC_SOURCE,
         },
     )
@@ -137,7 +144,8 @@ def fetch_all_terms_and_attributes() -> tuple[
         f"""
         MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
               (term:{LABEL_TERM} {{source: $source}})
-        RETURN DISTINCT term.name AS name, term.description AS description, term.id AS id
+        RETURN DISTINCT term.name AS name, term.description AS description,
+               term.synonyms AS synonyms, term.id AS id
         """,
         params,
     )
