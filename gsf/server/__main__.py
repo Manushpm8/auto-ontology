@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from nemo_retriever.tabular_data.neo4j import neo4j_connection
 import uvicorn
-from gsf.server.env import load_server_env
+from gsf.env import load_env
 
 import logging
 
@@ -21,7 +21,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
-load_server_env()
+load_env()
 
 from gsf.server.chat.router import router as chat_router  # noqa: E402
 from gsf.server.chat.worker import get_pool, shutdown_pool  # noqa: E402

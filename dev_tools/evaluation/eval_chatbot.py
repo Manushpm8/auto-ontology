@@ -47,9 +47,9 @@ from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 from gsf.connectors import get_connectors
 from gsf.utils import get_retriever
-from gsf.server.env import load_server_env
+from gsf.env import load_env
 
-load_server_env()
+load_env()
 
 # The text-to-SQL agent stores executed-DB rows under this key on its result dict.
 _DB_RESULT_KEY = "sql_response_from_db"
