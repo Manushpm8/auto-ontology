@@ -61,18 +61,21 @@ _CHECKPOINT_DIR = Path(".rigor_checkpoints")
 _INVALID_TERM_NAMES = {"unnamed", "unnamed term", "unknown", "none", ""}
 
 _RESOLVE_PK_FROM_TABLE = f"""
-MATCH (t:{Labels.TABLE} {{name: $table_name}})
+MATCH (:{Labels.SCHEMA} {{name: $schema_name}})-[:{Edges.CONTAINS}]->
+      (t:{Labels.TABLE} {{name: $table_name}})
 WHERE t.pk IS NOT NULL
 RETURN t.pk[0] AS pk_col
 """
 
 _RESOLVE_PK_FALLBACK = f"""
-MATCH (t:{Labels.TABLE} {{name: $table_name}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{name: 'id'}})
+MATCH (:{Labels.SCHEMA} {{name: $schema_name}})-[:{Edges.CONTAINS}]->
+      (t:{Labels.TABLE} {{name: $table_name}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+WHERE toLower(c.name) = 'id'
 RETURN c.name AS pk_col LIMIT 1
 """
 
 
-def _make_resolve_target_pk() -> Any:
+def _make_resolve_target_pk(schema_name: str) -> Any:
     """Build a callback that resolves the PK column of a target table.
 
     Strategy:
@@ -83,14 +86,11 @@ def _make_resolve_target_pk() -> Any:
     conn = get_neo4j_conn()
 
     def resolve(table_name: str) -> str | None:
-        rows = conn.query_read(
-            _RESOLVE_PK_FROM_TABLE, {"table_name": table_name}
-        )
+        params = {"table_name": table_name, "schema_name": schema_name}
+        rows = conn.query_read(_RESOLVE_PK_FROM_TABLE, params)
         if rows and rows[0].get("pk_col"):
             return rows[0]["pk_col"]
-        rows = conn.query_read(
-            _RESOLVE_PK_FALLBACK, {"table_name": table_name}
-        )
+        rows = conn.query_read(_RESOLVE_PK_FALLBACK, params)
         if rows and rows[0].get("pk_col"):
             return rows[0]["pk_col"]
         return None
@@ -103,19 +103,20 @@ def _make_resolve_target_pk() -> Any:
 # -----------------------------------------------------------------
 
 
-def _checkpoint_path(database_name: str) -> Path:
-    """Return the checkpoint file path for a database run."""
-    return _CHECKPOINT_DIR / f"{database_name}.json"
+def _checkpoint_path(database_name: str, schema_name: str) -> Path:
+    """Return the checkpoint file path for a database/schema run."""
+    return _CHECKPOINT_DIR / f"{database_name}__{schema_name}.json"
 
 
 def _save_checkpoint(
     database_name: str,
+    schema_name: str,
     ontology: CoreOntology,
     completed_tables: list[str],
 ) -> None:
     """Persist ontology + list of finished tables to disk."""
     _CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-    path = _checkpoint_path(database_name)
+    path = _checkpoint_path(database_name, schema_name)
     payload = {
         "completed_tables": completed_tables,
         "ontology": ontology.model_dump(mode="json"),
@@ -130,16 +131,24 @@ def _save_checkpoint(
 
 def _load_checkpoint(
     database_name: str,
+    schema_name: str,
 ) -> tuple[CoreOntology, list[str]] | None:
     """Load a previous checkpoint if one exists.
 
     Returns (ontology, completed_tables) or None.
     """
-    path = _checkpoint_path(database_name)
+    path = _checkpoint_path(database_name, schema_name)
     if not path.exists():
         return None
     try:
         data = json.loads(path.read_text())
+        if data.get("status") == "completed":
+            logger.info(
+                "[checkpoint] Schema %s.%s already completed — skipping",
+                database_name,
+                schema_name,
+            )
+            return "completed"  # type: ignore[return-value]
         ontology = CoreOntology.model_validate(data["ontology"])
         completed = data["completed_tables"]
         logger.info(
@@ -161,12 +170,12 @@ def _load_checkpoint(
         return None
 
 
-def _clear_checkpoint(database_name: str) -> None:
-    """Remove checkpoint file after a successful run."""
-    path = _checkpoint_path(database_name)
-    if path.exists():
-        path.unlink()
-        logger.info("[checkpoint] Cleared %s", path)
+def _mark_checkpoint_complete(database_name: str, schema_name: str) -> None:
+    """Replace checkpoint with a small completion marker."""
+    _CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    path = _checkpoint_path(database_name, schema_name)
+    path.write_text(json.dumps({"status": "completed"}))
+    logger.info("[checkpoint] Marked complete → %s", path)
 
 
 # -----------------------------------------------------------------
@@ -181,7 +190,7 @@ def build_ontology(
     write_to_neo4j: bool = True,
     resume: bool = True,
     schema_name: str | None = None,
-) -> CoreOntology:
+) -> CoreOntology | None:
     """Build a business ontology for a database.
 
     Args:
@@ -194,7 +203,7 @@ def build_ontology(
             Defaults to *database_name* for BIRD compatibility.
 
     Returns:
-        The constructed CoreOntology.
+        The constructed CoreOntology, or None if already completed.
     """
     if schema_name is None:
         schema_name = database_name
@@ -202,7 +211,9 @@ def build_ontology(
     completed_tables: list[str] = []
     ontology = CoreOntology()
     if resume:
-        loaded = _load_checkpoint(database_name)
+        loaded = _load_checkpoint(database_name, schema_name)
+        if loaded == "completed":
+            return None
         if loaded:
             ontology, completed_tables = loaded
 
@@ -226,7 +237,7 @@ def build_ontology(
         evidence = load_evidence(database_name, bird_root)
 
     vocab_service = ExternalVocabService(db_id=database_name, evidence=evidence)
-    resolve_target_pk = _make_resolve_target_pk()
+    resolve_target_pk = _make_resolve_target_pk(schema_name)
 
     # -----------------------------------------------------------------
     # PHASE 1 — Per-table iterative construction
@@ -275,7 +286,7 @@ def build_ontology(
 
         # Checkpoint after every table (even failed ones, so we don't retry)
         completed_tables.append(table["name"])
-        _save_checkpoint(database_name, ontology, completed_tables)
+        _save_checkpoint(database_name, schema_name, ontology, completed_tables)
 
         logger.info(
             "  -> Ontology now: %d terms, %d attrs, %d OPs",
@@ -311,13 +322,15 @@ def build_ontology(
         logger.info("-" * 40)
         logger.info("Writing ontology to Neo4j")
         logger.info("-" * 40)
-        stats = write_ontology_to_neo4j(ontology, schema_name=schema_name)
+        stats = write_ontology_to_neo4j(
+            ontology, schema_name=schema_name, database_name=database_name
+        )
         logger.info("Write stats: %s", stats)
 
     # -----------------------------------------------------------------
     # Summary
     # -----------------------------------------------------------------
-    _clear_checkpoint(database_name)
+    _mark_checkpoint_complete(database_name, schema_name)
 
     logger.info("=" * 60)
     logger.info("Rigor pipeline complete for %r", database_name)
@@ -375,19 +388,19 @@ def _process_one_table(
         enrich_context_with_bird(ctx, table["name"], evidence)
 
     # 3. Deterministic detection
-    det_result = run_deterministic(
-        table, ctx, all_table_names, resolve_target_pk
-    )
+    det_result = run_deterministic(table, ctx, all_table_names, resolve_target_pk)
 
     # Add deterministic edges to ontology immediately, resolving term names
     # via table_to_term so we don't recreate renamed placeholders.
     for edge in det_result.edges:
-        src = ontology.resolve_term(edge.provenance.source_table or table["name"])
-        tgt = ontology.resolve_term(edge.provenance.target_table or table["name"])
+        src_table = edge.provenance.source_table or table["name"]
+        tgt_table = edge.provenance.target_table or table["name"]
+        src = ontology.resolve_term(src_table)
+        tgt = ontology.resolve_term(tgt_table)
         edge.source_term = src
         edge.target_term = tgt
-        _ensure_term_exists(ontology, src, table)
-        _ensure_term_exists(ontology, tgt, table)
+        _ensure_term_exists(ontology, src, src_table)
+        _ensure_term_exists(ontology, tgt, tgt_table)
         if not ontology.has_edge(src, tgt, edge.name):
             ontology.object_properties.append(edge)
 
@@ -409,14 +422,24 @@ def _process_one_table(
 
     # Build lookup from source_column -> enriched info
     enriched_map = {ec.source_column: ec for ec in enriched_columns}
+    col_map = {c["name"]: c for c in columns}
 
     # Merge enriched attributes into ontology
     term_name = det_result.attributes[0].term_name if det_result.attributes else None
     if term_name:
-        _ensure_term_exists(ontology, term_name, table)
+        _ensure_term_exists(
+            ontology,
+            term_name,
+            table["name"],
+            table_description=table.get("description") or "",
+        )
         ontology.table_to_term[table["name"]] = term_name
     for attr in det_result.attributes:
         ec = enriched_map.get(attr.source_column)
+        neo4j_col = col_map.get(attr.source_column, {})
+        attr_desc = (
+            ec.description if ec and ec.description else None
+        ) or neo4j_col.get("description")
         ontology.attributes.append(
             Attribute(
                 name=ec.canonical_name if ec else attr.name,
@@ -428,7 +451,7 @@ def _process_one_table(
                     source_column=attr.source_column,
                     derivation="deterministic",
                 ),
-                description=ec.description if ec else None,
+                description=attr_desc,
                 formula=ec.formula if ec else None,
                 usage_hint=ec.usage_hint if ec else None,
                 is_primary_key=attr.is_primary_key,
@@ -475,7 +498,11 @@ def _process_one_table(
         cleaned_terms.append(bt)
     validated_delta.business_terms = cleaned_terms
 
-    ontology.merge(validated_delta, table["name"])
+    ontology.merge(
+        validated_delta,
+        source_table=table["name"],
+        source_schema=table.get("schema_name", ""),
+    )
 
     # 10. Rename provisional term if the LLM chose a better name
     if validated_delta.business_terms:
@@ -493,22 +520,35 @@ def _process_one_table(
 def _ensure_term_exists(
     ontology: CoreOntology,
     term_name: str,
-    table: dict[str, Any],
+    source_table: str,
+    table_description: str = "",
 ) -> None:
     """Create a placeholder business term if it doesn't exist yet.
 
-    Deterministic edges may reference terms not yet proposed by
-    the LLM. These placeholders will be enriched when the target
-    table is processed.
+    *source_table* should be the table this term represents (e.g. for
+    a FK edge ``request_tasks.user_id -> users``, the *target* term's
+    source_table is ``"users"``, NOT ``"request_tasks"``).
+
+    *table_description* is used as the initial description when available,
+    so the term carries meaningful context even before the LLM runs.
     """
-    if not ontology.has_term(term_name):
+    existing = ontology.get_term(term_name)
+    if existing:
+        if table_description and (
+            not existing.description
+            or existing.description.startswith("(auto-created")
+            or len(table_description) > len(existing.description)
+        ):
+            existing.description = table_description
+    else:
+        desc = table_description or f"(auto-created from table {source_table})"
         ontology.business_terms.append(
             BusinessTerm(
                 name=term_name,
-                description=f"(auto-created from table {table['name']})",
+                description=desc,
                 provenance=[
                     Provenance(
-                        source_table=table["name"],
+                        source_table=source_table,
                         derivation="declared_fk",
                     )
                 ],

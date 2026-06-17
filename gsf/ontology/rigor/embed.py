@@ -1,8 +1,8 @@
-"""Embed Rigor ontology elements into pgvector for semantic search.
+"""Embed ontology elements into pgvector for semantic search.
 
-Converts BusinessTerms, ColumnAttributes, and SqlAttributes from a CoreOntology into
+Converts Terms, ColumnAttributes, and SqlAttributes from a CoreOntology into
 composite text documents, embeds them via the NVIDIA NIM API, and writes
-the vectors into a dedicated pgvector collection (``rigor_ontology``).
+the vectors into the ``semantic_layer`` pgvector collection.
 """
 
 from __future__ import annotations
@@ -17,15 +17,14 @@ from nemo_retriever.params import EmbedParams
 from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
 from nemo_retriever.vdb import IngestVdbOperator
 
-from gsf.vdb.config import get_postgres_connection_string
+from gsf.vdb import SEMANTIC_VDB_COLLECTION, get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
 from gsf.ontology.rigor.models import CoreOntology
 
 logger = logging.getLogger(__name__)
 
-RIGOR_VDB_COLLECTION = "rigor_ontology"
-
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+_EMBED_API_KEY = os.environ.get("EMBED_API_KEY", _NVIDIA_API_KEY)
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
 )
@@ -36,14 +35,14 @@ def _get_embed_params() -> EmbedParams:
     return EmbedParams(
         embed_invoke_url=_EMBED_ENDPOINT,
         model_name=_EMBED_MODEL,
-        api_key=_NVIDIA_API_KEY,
+        api_key=_EMBED_API_KEY,
         embed_modality="text",
     )
 
 
 def _term_text(term_name: str, description: str, attr_names: list[str]) -> str:
-    """Composite text for a BusinessTerm embedding."""
-    parts = [f"business_term: {term_name}. {description}"]
+    """Composite text for a Term embedding."""
+    parts = [f"Term: {term_name}. {description}"]
     if attr_names:
         parts.append(f"Attributes: {', '.join(attr_names)}")
     return ". ".join(parts)
@@ -57,7 +56,7 @@ def _attribute_text(
     usage_hint: str | None,
 ) -> str:
     """Composite text for a ColumnAttribute embedding."""
-    parts = [f"column_attribute: {name} ({datatype}), property of {term_name}"]
+    parts = [f"ColumnAttribute: {name} ({datatype}), property of {term_name}"]
     if description:
         parts.append(description)
     if usage_hint:
@@ -104,10 +103,10 @@ def _build_records(
         source_tables = sorted(
             {_qualify_table(p.source_table, schema_name) for p in bt.provenance}
         )
-        node_id = bt.id or f"rigor:BusinessTerm:{bt.name}"
+        node_id = bt.id or f"semantic:term:{bt.name}"
         meta = {
             "id": node_id,
-            "label": "BusinessTerm",
+            "label": "Term",
             "name": bt.name,
             "source_tables": source_tables,
             "database_name": database_name,
@@ -130,10 +129,8 @@ def _build_records(
             attr.description,
             attr.usage_hint,
         )
-        node_id = attr.id or f"rigor:ColumnAttribute:{attr.term_name}.{attr.name}"
-        qualified_table = _qualify_table(
-            attr.provenance.source_table, schema_name
-        )
+        node_id = attr.id or f"semantic:attr:{attr.term_name}:{attr.source_column}"
+        qualified_table = _qualify_table(attr.provenance.source_table, schema_name)
         meta = {
             "id": node_id,
             "label": "ColumnAttribute",
@@ -161,7 +158,7 @@ def _build_records(
             m.aggregation_type.value,
             m.source_tables,
         )
-        node_id = m.id or f"rigor:SqlAttribute:{m.name}"
+        node_id = m.id or f"semantic:metric:{m.name}"
         qualified_tables = sorted(
             _qualify_table(t, schema_name) for t in m.source_tables
         )
@@ -183,15 +180,6 @@ def _build_records(
         )
 
     return records
-
-
-def make_ontology_vdb(*, skip_delete: bool = True) -> PostgresVDB:
-    """Create a :class:`PostgresVDB` for the rigor_ontology collection."""
-    return PostgresVDB(
-        connection_string=get_postgres_connection_string(),
-        collection_name=RIGOR_VDB_COLLECTION,
-        skip_delete=skip_delete,
-    )
 
 
 def embed_ontology(
@@ -241,7 +229,7 @@ def embed_ontology(
 
     owns_vdb = vdb is None
     if owns_vdb:
-        vdb = make_ontology_vdb()
+        vdb = get_semantic_vdb(database_name=database_name)
     try:
         IngestVdbOperator(vdb=vdb)(with_embeddings)
     finally:
@@ -253,7 +241,7 @@ def embed_ontology(
         "Embedded %d/%d ontology element(s) into %r in %.2fs.",
         len(with_embeddings),
         len(records),
-        RIGOR_VDB_COLLECTION,
+        SEMANTIC_VDB_COLLECTION,
         elapsed,
     )
     return len(with_embeddings)

@@ -35,12 +35,25 @@ DerivationType = Literal[
 ]
 
 
+class JoinHop(BaseModel):
+    """A single hop in a join path between two tables."""
+
+    source_table: str
+    source_schema: str = ""
+    source_column: str
+    target_table: str
+    target_schema: str = ""
+    target_column: str
+
+
 class Provenance(BaseModel):
     """Links an ontology element back to its physical source."""
 
     source_table: str
+    source_schema: str = ""
     source_column: str | None = None
     target_table: str | None = None
+    target_schema: str = ""
     target_column: str | None = None
     derivation: DerivationType
 
@@ -99,7 +112,7 @@ class Attribute(BaseModel):
 
 
 class ObjectProperty(BaseModel):
-    """A named directed edge between two BusinessTerms (e.g. PLACES)."""
+    """A named directed edge between two Terms written as a ROLE edge."""
 
     name: str = Field(
         ...,
@@ -108,6 +121,7 @@ class ObjectProperty(BaseModel):
     source_term: str
     target_term: str
     provenance: Provenance
+    join_path: list[JoinHop] = Field(default_factory=list)
 
 
 class AggregationType(str, Enum):
@@ -347,13 +361,27 @@ class CoreOntology(BaseModel):
     def rename_term(self, old_name: str, new_name: str) -> int:
         """Rename a business term and update all references.
 
+        If *new_name* already exists, merges the old term's provenance
+        into the existing one and removes the old term (avoids duplicates).
+
         Returns the number of references updated (edges + attributes).
         """
+        existing = self.get_term(new_name)
+        old_term = self.get_term(old_name)
+
+        if existing and old_term and existing is not old_term:
+            existing.provenance.extend(old_term.provenance)
+            if old_term.description and len(old_term.description) > len(
+                existing.description
+            ):
+                existing.description = old_term.description
+            self.business_terms = [
+                bt for bt in self.business_terms if bt is not old_term
+            ]
+        elif old_term:
+            old_term.name = new_name
+
         updated = 0
-        for bt in self.business_terms:
-            if bt.name == old_name:
-                bt.name = new_name
-                updated += 1
         for attr in self.attributes:
             if attr.term_name == old_name:
                 attr.term_name = new_name
@@ -370,9 +398,18 @@ class CoreOntology(BaseModel):
                 self.table_to_term[tbl] = new_name
         return updated
 
-    def merge(self, delta: DeltaOntology, source_table: str) -> None:
+    def merge(
+        self,
+        delta: DeltaOntology,
+        source_table: str,
+        source_schema: str = "",
+    ) -> None:
         """Integrate a validated DeltaOntology into the core ontology."""
-        prov = Provenance(source_table=source_table, derivation="llm_proposed")
+        prov = Provenance(
+            source_table=source_table,
+            source_schema=source_schema,
+            derivation="llm_proposed",
+        )
 
         for pt in delta.business_terms:
             existing = self.get_term(pt.name)
@@ -401,6 +438,7 @@ class CoreOntology(BaseModel):
                 )
             col_prov = Provenance(
                 source_table=source_table,
+                source_schema=source_schema,
                 source_column=attr.source_column,
                 derivation="llm_proposed",
             )
@@ -416,12 +454,63 @@ class CoreOntology(BaseModel):
 
         for op in delta.object_properties:
             if not self.has_edge(op.source_term, op.target_term, op.name):
+                target_table = ""
+                target_schema_resolved = ""
+                for tbl, term in self.table_to_term.items():
+                    if term == op.target_term:
+                        target_table = tbl
+                        break
+
+                if target_table:
+                    tgt_term = self.get_term(op.target_term)
+                    if tgt_term and tgt_term.provenance:
+                        for p in tgt_term.provenance:
+                            if p.source_table == target_table and p.source_schema:
+                                target_schema_resolved = p.source_schema
+                                break
+
+                source_col = ""
+                target_col = ""
+                target_lower = (target_table or op.target_term).lower()
+                for attr in self.attributes:
+                    if attr.provenance.source_table == source_table:
+                        col_lower = attr.source_column.lower()
+                        if (
+                            col_lower == f"{target_lower}id"
+                            or col_lower == f"{target_lower}_id"
+                        ):
+                            source_col = attr.source_column
+                            target_col = "Id"
+                            break
+
+                op_prov = Provenance(
+                    source_table=source_table,
+                    source_schema=source_schema,
+                    source_column=source_col,
+                    target_table=target_table,
+                    target_schema=target_schema_resolved,
+                    target_column=target_col,
+                    derivation="llm_proposed",
+                )
+                join_path: list[JoinHop] = []
+                if source_col:
+                    join_path.append(
+                        JoinHop(
+                            source_table=source_table,
+                            source_schema=source_schema,
+                            source_column=source_col,
+                            target_table=target_table,
+                            target_schema=target_schema_resolved,
+                            target_column=target_col,
+                        )
+                    )
                 self.object_properties.append(
                     ObjectProperty(
                         name=op.name,
                         source_term=op.source_term,
                         target_term=op.target_term,
-                        provenance=prov,
+                        provenance=op_prov,
+                        join_path=join_path,
                     )
                 )
 

@@ -41,19 +41,18 @@ logger = logging.getLogger("dev_tools.ingest_local_duckdb")
 
 _BENCHMARKS_DIR = Path(__file__).resolve().parent / "benchmarks" / "bird"
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+_EMBED_API_KEY = os.environ.get("EMBED_API_KEY", _NVIDIA_API_KEY)
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
 )
 _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
-_DUCKDB_PATH = os.environ.get(
-    "DUCKDB_PATH", str(_BENCHMARKS_DIR / "bird.duckdb")
-)
+_DUCKDB_PATH = os.environ.get("DUCKDB_PATH", str(_BENCHMARKS_DIR / "bird.duckdb"))
 
-if not _NVIDIA_API_KEY:
+if not _EMBED_API_KEY:
     raise EnvironmentError(
-        "NVIDIA_API_KEY is not set. "
-        "Export it before running:\n\n"
-        "    export NVIDIA_API_KEY='nvapi-...'\n\n"
+        "Neither EMBED_API_KEY nor NVIDIA_API_KEY is set. "
+        "Export one before running:\n\n"
+        "    export EMBED_API_KEY='nvapi-...'\n\n"
         "Get your key at https://build.nvidia.com"
     )
 
@@ -62,7 +61,7 @@ connector = DuckDBDatabase(_DUCKDB_PATH)
 EMBED_PARAMS = EmbedParams(
     embed_invoke_url=_EMBED_ENDPOINT,
     model_name=_EMBED_MODEL,
-    api_key=_NVIDIA_API_KEY,
+    api_key=_EMBED_API_KEY,
     embed_modality="text",
 )
 

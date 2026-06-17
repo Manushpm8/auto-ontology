@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""LLM utilities for ontology construction using ChatNVIDIA (LangChain)."""
+"""LLM utilities for ontology construction using ChatNVIDIA / ChatOpenAI."""
 
 from __future__ import annotations
 
@@ -12,36 +12,57 @@ import os
 import time
 from typing import Type, TypeVar
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, SystemMessage
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
-_DEFAULT_MODEL = "nvidia/nemotron-3-nano-30b-a3b"
+_BASE_URL = os.environ.get("BASE_URL", "https://integrate.api.nvidia.com/v1")
+_MODEL_NAME = os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b")
+_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 5  # seconds; actual delay = base * 2^attempt
 _DEFAULT_TIMEOUT = 120  # seconds per LLM call
 
+_IS_OPENAI_MODEL = _MODEL_NAME.startswith("openai/")
+_IS_REASONING_MODEL = any(
+    _MODEL_NAME.startswith(prefix)
+    for prefix in ("openai/o", "openai/gpt-5", "nvidia/llama-3.1-nemotron-ultra")
+)
+_DEFAULT_MAX_TOKENS = 16384 if _IS_REASONING_MODEL else 1024
+
 
 def get_llm(
     *,
-    temperature: float = 0.2,
-    max_tokens: int = 2048,
+    temperature: float = 0.0,
+    max_tokens: int = _DEFAULT_MAX_TOKENS,
     timeout: float = _DEFAULT_TIMEOUT,
-) -> ChatNVIDIA:
-    """Instantiate a ChatNVIDIA client from environment config."""
-    base_url = os.environ.get("BASE_URL", _DEFAULT_BASE_URL)
-    model = os.environ.get("MODEL_NAME", _DEFAULT_MODEL)
-    api_key = os.environ.get("NVIDIA_API_KEY", "")
+) -> BaseChatModel:
+    """Instantiate a chat model client from environment config."""
+    if _IS_REASONING_MODEL:
+        max_tokens = max(max_tokens, _DEFAULT_MAX_TOKENS)
+
+    if _IS_OPENAI_MODEL:
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=_MODEL_NAME,
+            api_key=_API_KEY,
+            base_url=_BASE_URL,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+    from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
     return ChatNVIDIA(
-        model=model,
-        base_url=base_url,
-        api_key=api_key,
+        model=_MODEL_NAME,
+        api_key=_API_KEY,
+        base_url=_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
@@ -71,13 +92,11 @@ def invoke_structured(
     for attempt in range(_MAX_RETRIES):
         t0 = time.monotonic()
         try:
-            model_llm = llm.with_structured_output(
-                schema, method="function_calling"
-            )
-            result = model_llm.invoke(current_messages)
+            structured_llm = llm.with_structured_output(schema)
+            raw_result = structured_llm.invoke(current_messages)
             elapsed = time.monotonic() - t0
 
-            if result is None:
+            if raw_result is None:
                 logger.warning(
                     "LLM returned None for %s (attempt %d/%d, %.1fs)",
                     schema_name,
@@ -98,6 +117,11 @@ def invoke_structured(
                     )
                     continue
                 return schema()
+
+            if isinstance(raw_result, schema):
+                result = raw_result
+            else:
+                result = schema.model_validate(raw_result)
 
             logger.debug(
                 "LLM call for %s succeeded in %.1fs", schema_name, elapsed

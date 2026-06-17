@@ -18,12 +18,13 @@ _EMBED_ENDPOINT = os.environ.get(
 )
 _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+_EMBED_API_KEY = os.environ.get("EMBED_API_KEY", _NVIDIA_API_KEY)
 
-if not _NVIDIA_API_KEY:
+if not _EMBED_API_KEY:
     raise EnvironmentError(
-        "NVIDIA_API_KEY is not set. "
-        "Export it before running:\n\n"
-        "    export NVIDIA_API_KEY='nvapi-...'\n\n"
+        "Neither EMBED_API_KEY nor NVIDIA_API_KEY is set. "
+        "Export one before running:\n\n"
+        "    export EMBED_API_KEY='nvapi-...'\n\n"
         "Get your key at https://build.nvidia.com"
     )
 
@@ -33,7 +34,7 @@ def get_embed_kwargs() -> dict[str, str]:
     return {
         "model_name": _EMBED_MODEL,
         "embed_invoke_url": _EMBED_ENDPOINT,
-        "api_key": _NVIDIA_API_KEY,
+        "api_key": _EMBED_API_KEY,
     }
 
 
@@ -41,6 +42,6 @@ def get_embed_params() -> EmbedParams:
     return EmbedParams(
         embed_invoke_url=_EMBED_ENDPOINT,
         model_name=_EMBED_MODEL,
-        api_key=_NVIDIA_API_KEY,
+        api_key=_EMBED_API_KEY,
         embed_modality="text",
     )

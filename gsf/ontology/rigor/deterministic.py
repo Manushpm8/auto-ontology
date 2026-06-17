@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from gsf.ontology.rigor.models import (
     DenormalizedCandidate,
+    JoinHop,
     ObjectProperty,
     ProposedAttribute,
     Provenance,
@@ -88,6 +89,7 @@ def run_deterministic(
             blindly reusing the FK column name.
     """
     table_name = table["name"]
+    source_schema = table.get("schema_name", "")
     term_name = to_term_name(table_name)
     fks = ctx.get("fks", [])
     columns = ctx.get("columns", [])
@@ -100,19 +102,31 @@ def run_deterministic(
     for fk in fks:
         src_col = fk["source_column"]
         tgt_table = fk["target_table"]
+        tgt_schema = fk.get("target_schema", source_schema)
         fk_source_cols.add(src_col)
 
         target_term = to_term_name(tgt_table)
 
         tgt_col = fk["target_column"]
 
+        hop = JoinHop(
+            source_table=table_name,
+            source_schema=source_schema,
+            source_column=src_col,
+            target_table=tgt_table,
+            target_schema=tgt_schema,
+            target_column=tgt_col,
+        )
+
         # 2. Self-referential detection
         if tgt_table == table_name:
             edge_name = _infer_self_ref_name(src_col)
             prov = Provenance(
                 source_table=table_name,
+                source_schema=source_schema,
                 source_column=src_col,
                 target_table=tgt_table,
+                target_schema=tgt_schema,
                 target_column=tgt_col,
                 derivation="self_referential",
             )
@@ -122,6 +136,7 @@ def run_deterministic(
                     source_term=term_name,
                     target_term=term_name,
                     provenance=prov,
+                    join_path=[hop],
                 )
             )
             logger.info(
@@ -134,8 +149,10 @@ def run_deterministic(
         else:
             prov = Provenance(
                 source_table=table_name,
+                source_schema=source_schema,
                 source_column=src_col,
                 target_table=tgt_table,
+                target_schema=tgt_schema,
                 target_column=tgt_col,
                 derivation="declared_fk",
             )
@@ -146,6 +163,7 @@ def run_deterministic(
                     source_term=term_name,
                     target_term=target_term,
                     provenance=prov,
+                    join_path=[hop],
                 )
             )
             logger.info(
@@ -188,10 +206,20 @@ def run_deterministic(
                 continue
             prov = Provenance(
                 source_table=table_name,
+                source_schema=source_schema,
                 source_column=col_name,
                 target_table=matched_table,
+                target_schema=source_schema,
                 target_column=target_col,
                 derivation="implicit_id_pattern",
+            )
+            hop = JoinHop(
+                source_table=table_name,
+                source_schema=source_schema,
+                source_column=col_name,
+                target_table=matched_table,
+                target_schema=source_schema,
+                target_column=target_col,
             )
             edge_name = _infer_fk_edge_name(col_name, matched_table)
             result.edges.append(
@@ -200,6 +228,7 @@ def run_deterministic(
                     source_term=term_name,
                     target_term=target_term,
                     provenance=prov,
+                    join_path=[hop],
                 )
             )
             result.fk_column_names.add(col_name)

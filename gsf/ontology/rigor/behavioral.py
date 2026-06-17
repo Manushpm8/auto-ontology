@@ -17,6 +17,7 @@ from sqlglot import exp
 from gsf.ontology.rigor.models import (
     AggregationType,
     CoreOntology,
+    JoinHop,
     Metric,
     ObjectProperty,
     Provenance,
@@ -33,7 +34,14 @@ logger = logging.getLogger(__name__)
 class _JoinInfo:
     """Parsed JOIN details: tables and columns from the ON clause."""
 
-    __slots__ = ("source_table", "target_table", "source_column", "target_column")
+    __slots__ = (
+        "source_table",
+        "source_schema",
+        "target_table",
+        "target_schema",
+        "source_column",
+        "target_column",
+    )
 
     def __init__(
         self,
@@ -41,9 +49,13 @@ class _JoinInfo:
         target_table: str,
         source_column: str = "",
         target_column: str = "",
+        source_schema: str = "",
+        target_schema: str = "",
     ) -> None:
         self.source_table = source_table
+        self.source_schema = source_schema
         self.target_table = target_table
+        self.target_schema = target_schema
         self.source_column = source_column
         self.target_column = target_column
 
@@ -84,6 +96,7 @@ def _extract_join_pairs(sql_text: str) -> list[_JoinInfo]:
         if join_table is None:
             continue
         target = join_table.name
+        target_schema = join_table.db or ""
 
         parent = join.parent
         if parent is None:
@@ -95,6 +108,7 @@ def _extract_join_pairs(sql_text: str) -> list[_JoinInfo]:
         if source_tbl is None:
             continue
         source = source_tbl.name
+        source_schema = source_tbl.db or ""
 
         if not source or not target or source == target:
             continue
@@ -114,7 +128,16 @@ def _extract_join_pairs(sql_text: str) -> list[_JoinInfo]:
                 else:
                     src_col, tgt_col = c0, c1
 
-        results.append(_JoinInfo(source, target, src_col, tgt_col))
+        results.append(
+            _JoinInfo(
+                source,
+                target,
+                src_col,
+                tgt_col,
+                source_schema=source_schema,
+                target_schema=target_schema,
+            )
+        )
 
     return results
 
@@ -157,6 +180,14 @@ def extract_join_edges(
                 continue
 
             seen_pairs.add(pair_key)
+            hop = JoinHop(
+                source_table=info.source_table,
+                source_schema=info.source_schema,
+                source_column=info.source_column or "",
+                target_table=info.target_table or "",
+                target_schema=info.target_schema,
+                target_column=info.target_column or "",
+            )
             new_edges.append(
                 ObjectProperty(
                     name=f"joinedWith{tgt_term}",
@@ -164,11 +195,14 @@ def extract_join_edges(
                     target_term=tgt_term,
                     provenance=Provenance(
                         source_table=info.source_table,
+                        source_schema=info.source_schema,
                         source_column=info.source_column or None,
                         target_table=info.target_table or None,
+                        target_schema=info.target_schema,
                         target_column=info.target_column or None,
                         derivation="sql_join_inferred",
                     ),
+                    join_path=[hop],
                 )
             )
 

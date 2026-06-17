@@ -107,13 +107,14 @@ def main() -> None:
         )
         targets = [(args.database_name, s) for s in schemas]
 
-    all_summaries: dict[str, dict] = {}
+    all_summaries: dict[str, dict | str] = {}
 
     vdb = None
     if not args.no_write and not args.no_embed:
-        from gsf.ontology.rigor.embed import embed_ontology, make_ontology_vdb
+        from gsf.ontology.rigor.embed import embed_ontology
+        from gsf.vdb import get_semantic_vdb
 
-        vdb = make_ontology_vdb()
+        vdb = get_semantic_vdb(database_name=args.database_name)
 
     try:
         for i, (db_name, schema) in enumerate(targets, 1):
@@ -135,6 +136,10 @@ def main() -> None:
                 resume=not args.no_resume,
                 schema_name=schema,
             )
+
+            if ontology is None:
+                all_summaries[label] = "already_completed"
+                continue
 
             if vdb is not None:
                 embed_ontology(

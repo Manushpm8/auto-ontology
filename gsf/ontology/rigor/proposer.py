@@ -78,7 +78,15 @@ context (e.g. hierarchy, composition, temporal ordering).
 - Be conservative with ObjectProperties: only propose edges with clear \
 evidence.
 - Names must be clear and business-friendly.
-- Every BusinessTerm must have a meaningful one-sentence description.
+- Every BusinessTerm must have a rich, detailed description. Use the \
+table's Description field as the foundation — rephrase it from a \
+business perspective (e.g. "This table stores customer orders" becomes \
+"Represents purchase orders placed by customers, tracking order dates, \
+delivery status, and financial totals"). Preserve ALL important details \
+from the table description; do not summarize away specifics. If the \
+table description is missing or generic, infer the description from \
+columns, FKs, and SQL usage. Add any business context that the table \
+description is missing (e.g. key relationships, typical use cases).
 - Use external ontology matches as naming hints — prefer established \
 vocabulary terms when they fit.
 - Use evidence strings to understand domain-specific value encodings \

@@ -102,14 +102,9 @@ class PostgresVDB(VDB):
 
         self._engine: Optional[PGEngine] = None
         self._store: Optional[PGVectorStore] = None
-        self.vector_size: Optional[int] = kwargs.get("vector_size", 2048)
-        # Resetting the database embeddings prior to ingestion
-        # In order to support without recreate:
-        # 1. The ingestion should return which tables/columns were added/updated/deleted
-        # 2. The implemtation should support be fault tolerant and support incremental ingestion, which is challenging.
+        self.vector_size: Optional[int] = kwargs.get("vector_size")
         self.database_name = kwargs.get("database_name")
-        skip_delete = kwargs.get("skip_delete", False)
-        if self.database_name and not skip_delete:
+        if kwargs.get("reset") and self.database_name:
             ids = self.delete_by_database(self.database_name)
             logger.info(
                 "PostgresVDB.delete_by_database: deleted %d rows for database %s",
@@ -143,24 +138,35 @@ class PostgresVDB(VDB):
                 )
                 return cur.fetchone() is not None
 
-    def _get_store(self) -> Optional[PGVectorStore]:
+    def _get_store(self, vector_size: int | None = None) -> Optional[PGVectorStore]:
         """Return the vector store, creating the table on first write.
 
-        If the table doesn't exist and ``vector_size`` is not provided (e.g.
-        on read paths), returns ``None`` so callers can short-circuit.
+        ``vector_size`` is auto-detected from the first embedding batch when
+        not supplied explicitly.  On read-only paths the table must already
+        exist; if it doesn't this returns ``None`` so callers can
+        short-circuit.
         """
         if self._store is not None:
             return self._store
 
+        effective_size = vector_size or self.vector_size
+
         engine = self._get_engine()
         if not self._table_exists():
+            if effective_size is None:
+                return None
             engine.init_vectorstore_table(
                 table_name=self.collection_name,
-                vector_size=self.vector_size,
+                vector_size=effective_size,
                 metadata_columns=[
                     Column(_DATABASE_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                     Column(_LABEL_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                 ],
+            )
+            logger.info(
+                "Created table %s with vector_size=%d",
+                self.collection_name,
+                effective_size,
             )
 
         self._store = PGVectorStore.create_sync(
@@ -214,8 +220,9 @@ class PostgresVDB(VDB):
             )
             return 0
 
-        store = self._get_store()
-        assert store is not None  # vector_size was provided
+        detected_size = len(embeddings[0])
+        store = self._get_store(vector_size=detected_size)
+        assert store is not None
 
         inserted = 0
         for start in range(0, len(documents), batch_size):

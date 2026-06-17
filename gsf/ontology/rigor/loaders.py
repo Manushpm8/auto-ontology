@@ -72,10 +72,11 @@ RETURN c.id              AS id,
 _FETCH_FKS_QUERY = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(src:{Labels.COLUMN})
       -[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-
-      (tgt_table:{Labels.TABLE})
-RETURN src.name       AS source_column,
-       tgt.name       AS target_column,
-       tgt_table.name AS target_table
+      (tgt_table:{Labels.TABLE})<-[:{Edges.CONTAINS}]-(tgt_schema:{Labels.SCHEMA})
+RETURN src.name        AS source_column,
+       tgt.name        AS target_column,
+       tgt_table.name  AS target_table,
+       tgt_schema.name AS target_schema
 """
 
 _FETCH_SQL_TEXTS_QUERY = f"""

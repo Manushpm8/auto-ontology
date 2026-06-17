@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 import duckdb
 import pandas as pd
 from typing import Optional
@@ -35,6 +36,14 @@ from typing import Optional
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_db_path(connection_string: str) -> str:
+    """Extract the file path from a ``duckdb://…`` URI or plain path."""
+    parsed = urlparse(connection_string)
+    if parsed.scheme in ("duckdb", "duckdb+file"):
+        return parsed.path or ":memory:"
+    return connection_string
 
 
 class DuckDBDatabase(SQLDatabase):
@@ -52,7 +61,8 @@ class DuckDBDatabase(SQLDatabase):
     """
 
     def __init__(self, connection_string: str, *, read_only: bool = True) -> None:
-        self.conn = duckdb.connect(database=connection_string, read_only=read_only)
+        db_path = _parse_db_path(connection_string)
+        self.conn = duckdb.connect(database=db_path, read_only=read_only)
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
         logger.debug(
             "DuckDB connected (database=%r, read_only=%s).",
@@ -137,6 +147,7 @@ class DuckDBDatabase(SQLDatabase):
             )
             return pd.DataFrame(columns=["query_text", "end_time"])
         df = pd.read_csv(csv_path)
+        df["query_text"] = df["query_text"].str.replace("`", '"')
         df["end_time"] = datetime.today()
         return df
 
@@ -154,10 +165,38 @@ class DuckDBDatabase(SQLDatabase):
         )
 
     def get_pks(self) -> pd.DataFrame:
-        return pd.DataFrame()
+        return self.execute("""
+            SELECT
+                kcu.table_schema     AS table_schema,
+                kcu.table_name       AS table_name,
+                kcu.column_name      AS column_name,
+                kcu.ordinal_position AS ordinal_position
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_schema = kcu.constraint_schema
+             AND tc.constraint_name   = kcu.constraint_name
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+            ORDER BY kcu.table_schema, kcu.table_name, kcu.ordinal_position
+        """)
 
     def get_fks(self) -> pd.DataFrame:
-        return pd.DataFrame()
+        return self.execute("""
+            SELECT
+                kcu.table_schema   AS table_schema,
+                kcu.table_name     AS table_name,
+                kcu.column_name    AS column_name,
+                rkcu.table_schema  AS referenced_schema,
+                rkcu.table_name    AS referenced_table,
+                rkcu.column_name   AS referenced_column
+            FROM information_schema.referential_constraints rc
+            JOIN information_schema.key_column_usage kcu
+              ON rc.constraint_schema = kcu.constraint_schema
+             AND rc.constraint_name   = kcu.constraint_name
+            JOIN information_schema.key_column_usage rkcu
+              ON rc.unique_constraint_schema = rkcu.constraint_schema
+             AND rc.unique_constraint_name   = rkcu.constraint_name
+            ORDER BY kcu.table_schema, kcu.table_name, kcu.column_name
+        """)
 
     # ------------------------------------------------------------------
     # Context manager / cleanup

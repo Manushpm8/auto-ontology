@@ -553,6 +553,7 @@ def _embed_custom_analyses(
     embed_params: "EmbedParams",
     vdb: "VDB",
     analysis_id: str | None = None,
+    database_name: str = "",
 ) -> None:
     """Fetch ``CustomAnalysis`` docs from Neo4j, embed them, and append to *vdb*.
 
@@ -587,7 +588,10 @@ def _embed_custom_analyses(
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
         WHERE $analysis_id IS NULL OR ca.id = $analysis_id
-        WITH DISTINCT ca, sql,
+        OPTIONAL MATCH (sql)-[:{Edges.SQL}]->(:{Labels.TABLE})
+                       <-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA})
+                       <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
+        WITH DISTINCT ca, sql, head(collect(db.name)) AS db_name,
              CASE
                  WHEN ca.description IS NOT NULL AND trim(toString(ca.description)) <> ''
                  THEN ca.description
@@ -604,12 +608,13 @@ def _embed_custom_analyses(
                   sql_text,
             name: ca.name,
             label: labels(ca)[0],
-            id: ca.id
+            id: ca.id,
+            database_name: coalesce(db_name, $database_name)
         }}) AS docs
     """
     result = get_neo4j_conn().query_read(
         query,
-        parameters={"analysis_id": analysis_id},
+        parameters={"analysis_id": analysis_id, "database_name": database_name},
     )
     docs = result[0].get("docs") if result else None
     if not docs:
@@ -627,6 +632,7 @@ def _embed_custom_analyses(
             "id": node_id,
             "label": item.get("label", ""),
             "name": item.get("name", ""),
+            "database_name": item.get("database_name", ""),
             "source_path": path,
         }
         rows.append(
