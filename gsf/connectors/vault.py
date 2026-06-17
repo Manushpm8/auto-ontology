@@ -15,9 +15,11 @@ entrypoints are responsible for loading the environment before use.
 from __future__ import annotations
 
 import json
+import logging
 import os
-
 import hvac
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_VAULT_ENV_VARS = (
     "VAULT_ADDR",
@@ -28,8 +30,19 @@ REQUIRED_VAULT_ENV_VARS = (
 
 
 def is_vault_configured() -> bool:
-    """Return True if the user provided all required Vault env vars."""
-    return all(os.environ.get(var) for var in REQUIRED_VAULT_ENV_VARS)
+    """Return True if the user provided all required Vault env vars.
+
+    Warn on partial configuration (some but not all set), which is almost
+    always a misconfiguration that would otherwise silently disable Vault.
+    """
+    missing = [var for var in REQUIRED_VAULT_ENV_VARS if not os.environ.get(var)]
+    if missing and len(missing) < len(REQUIRED_VAULT_ENV_VARS):
+        logger.warning(
+            "Vault is partially configured; ignoring Vault and treating "
+            "connections as unencrypted. Missing env vars: %s",
+            ", ".join(missing),
+        )
+    return not missing
 
 
 def get_client() -> hvac.Client:

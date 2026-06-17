@@ -109,7 +109,6 @@ class SnowflakeDatabase(SQLDatabase):
             self._warehouse,
             self._database_name,
         ) = _parse_connection_string(connection_string)
-        self._snowflake_database = self._database_name
 
     @property
     def dialect(self) -> str:
@@ -200,7 +199,7 @@ class SnowflakeDatabase(SQLDatabase):
             return pd.DataFrame(columns=["end_time", "query_text"])
 
     def get_views(self) -> pd.DataFrame:
-        db = _quoted_identifier(self._snowflake_database)
+        db = _quoted_identifier(self._database_name)
         df = self.execute(f"SHOW VIEWS IN DATABASE {db}")
         if df.empty:
             return pd.DataFrame(
@@ -217,7 +216,7 @@ class SnowflakeDatabase(SQLDatabase):
         )[["table_schema", "table_name", "view_definition"]]
 
     def get_pks(self) -> pd.DataFrame:
-        db = _quoted_identifier(self._snowflake_database)
+        db = _quoted_identifier(self._database_name)
         df = self.execute(f"SHOW PRIMARY KEYS IN DATABASE {db}")
         if df.empty:
             return pd.DataFrame(
@@ -237,7 +236,7 @@ class SnowflakeDatabase(SQLDatabase):
         )[["table_schema", "table_name", "column_name", "ordinal_position"]]
 
     def get_fks(self) -> pd.DataFrame:
-        db = _quoted_identifier(self._snowflake_database)
+        db = _quoted_identifier(self._database_name)
         df = self.execute(f"SHOW IMPORTED KEYS IN DATABASE {db}")
         if df.empty:
             return pd.DataFrame(
@@ -276,15 +275,11 @@ class SnowflakeDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def ping(self) -> None:
-        """Verify credentials and that the configured warehouse is usable.
-
-        Beyond the auth handshake, this runs ``USE WAREHOUSE`` so a missing or
-        misspelled warehouse fails at test time rather than during a later
-        background ingest.
-        """
+        """Verify credentials, the warehouse, and that schemas are visible."""
         with snowflake.connector.connect(**self._connect_kwargs) as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")
+            conn.execute_string(
+                f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}; SHOW SCHEMAS"
+            )
 
     def close(self) -> None:
         """No persistent connection to close (connections are per-query)."""

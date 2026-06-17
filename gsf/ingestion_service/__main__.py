@@ -26,7 +26,9 @@ from gsf.server.env import load_server_env
 
 load_server_env()
 
-from gsf.connectors.connection import build_connection_string  # noqa: E402
+from gsf.connectors.connection_string_factory import (  # noqa: E402
+    build_connection_string,
+)
 from gsf.ingestion_service.ingest import run_ingest  # noqa: E402
 from gsf.server.connections.dal import list_connections  # noqa: E402
 

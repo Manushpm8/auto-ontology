@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
-from gsf.connectors.connection import build_connection_string
+from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase
 from gsf.connectors.postgres import PostgresDatabase

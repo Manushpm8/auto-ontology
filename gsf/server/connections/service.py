@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Any
 
-from gsf.connectors.connection import build_connection_string
+from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.registry import create_connector, invalidate_connectors_cache
 from gsf.connectors.vault import delete_secrets, is_vault_configured, write_secret
 from gsf.server.chat.worker import refresh_chat_workers

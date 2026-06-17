@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from typing import Optional
-from urllib.parse import urlparse
 
 import pandas as pd
 import psycopg
@@ -33,8 +32,6 @@ class PostgresDatabase(SQLDatabase):
 
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
-        parsed = urlparse(connection_string)
-        self._database_name = parsed.path.lstrip("/")
         # Pool transparently replaces connections killed by server timeouts or
         # network middleboxes. `check_connection` runs a quick liveness probe
         # before handing a connection out; `max_idle`/`max_lifetime` cap how
@@ -50,6 +47,7 @@ class PostgresDatabase(SQLDatabase):
             check=ConnectionPool.check_connection,
             open=True,
         )
+        self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
 
     @property
     def dialect(self) -> str:
@@ -195,9 +193,9 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def ping(self) -> None:
-        """Verify connectivity at the driver level (TCP + auth, no SQL)."""
-        conn = psycopg.connect(self._connection_string)
-        conn.close()
+        """Verify connectivity and that the catalog is readable."""
+        with psycopg.connect(self._connection_string) as conn:
+            conn.execute("SELECT schema_name FROM information_schema.schemata")
 
     def close(self) -> None:
         if self._pool and not self._pool.closed:

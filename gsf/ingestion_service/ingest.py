@@ -8,7 +8,7 @@ import logging
 import threading
 from typing import Any
 
-from gsf.connectors.connection import build_connection_string
+from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.utils import get_embed_params
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.tabular_schema_extract_operator import TabularSchemaExtractOp
