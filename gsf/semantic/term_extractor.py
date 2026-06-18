@@ -36,7 +36,11 @@ not purchase_orders or PurchaseOrder).
 3. Assign EVERY candidate column to exactly one Term. For each assignment return \
 source_column exactly as given and a display_name — a user-friendly ColumnAttribute \
 label with spaces between words (e.g. Order Date, Total Amount).
-4. Do not propose IS_A, PART_OF, or ROLE relationships."""
+4. Do not propose IS_A, PART_OF, or ROLE relationships.
+5. If the table name contains a word that indicates it is a variant of another table \
+(e.g. ARC, ARCHIVE, HIST, HISTORY, STAGING, DELETED, TEMP), prefix every display_name \
+with a qualifying word derived from that suffix \
+(e.g. PEOPLE_ARC → "Archived Is Sales Person", ORDERS_HIST → "Historical Total Amount")."""
 
 
 class _SynonymExtractionModel(BaseModel):

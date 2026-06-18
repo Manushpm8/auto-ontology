@@ -107,6 +107,7 @@ def merge_column_attribute(
             name: $attr_name,
             source_column: $source_column,
             term_name: $term_name,
+            table_id: $table_id,
             source: $source
         }})
         ON CREATE SET attr.id = randomUUID()

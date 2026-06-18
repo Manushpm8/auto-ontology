@@ -229,7 +229,11 @@ def _build_rows(
             f"{a.get('description') or ''}"
             f"{sample_block}"
         ).strip()
-        path = f"semantic:attr:{owner}:{a.get('source_column')}"
+        path = (
+            f"semantic:attr:{a['id']}"
+            if a.get("id")
+            else f"semantic:attr:{owner}:{a.get('source_column')}"
+        )
         fields = {
             "label": "ColumnAttribute",
             "name": attr_name,
