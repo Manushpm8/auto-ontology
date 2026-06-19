@@ -125,6 +125,24 @@ class PotentialFkResult(BaseModel):
     )
 
 
+class FkAndPkResult(BaseModel):
+    """LLM output: FK suggestions plus columns that look like the table's own PK."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fk_suggestions: list[PotentialFkSuggestion] = Field(
+        default_factory=list,
+        description="Suspected FK columns; empty when none apply.",
+    )
+    pk_column_names: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Column names that appear to be the table's own primary key "
+            "even if not declared as such. Usually empty or one entry."
+        ),
+    )
+
+
 class FkHitSelection(BaseModel):
     """LLM output: selects the best matching Column hit from a VDB result list."""
 

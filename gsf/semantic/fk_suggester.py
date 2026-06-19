@@ -10,25 +10,32 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from gsf.semantic.deterministic import fk_source_columns
 from gsf.semantic.llm import invoke_structured
-from gsf.semantic.models import PotentialFkResult, PotentialFkSuggestion
+from gsf.semantic.models import FkAndPkResult, PotentialFkResult, PotentialFkSuggestion
 
 logger = logging.getLogger(__name__)
 
 _SYSTEM = """\
-You review relational table metadata and identify columns that are likely foreign keys
-but are not already declared as FOREIGN_KEY or primary-key columns.
+You review relational table metadata and produce two outputs:
 
-A likely foreign key typically:
-- ends with _id or Id and has a meaningful prefix naming a different entity (e.g. customer_id,
-  orderId) — NOT a bare "id"/"_id"/"Id" column or one whose prefix matches the table name
-- has a description that contains words like "references", "identifier of", or names another
-- non unique sample values
-- has an integer or string type consistent with identifiers
-- semantically points to a row in another table
+1. fk_suggestions — columns that are likely foreign keys but are not already declared as
+   FOREIGN_KEY or primary-key columns.
 
-Return only column names from the candidate list provided. Omit columns that are
-measures, timestamps, free text, flags, or otherwise unlikely to reference another table.
-Return an empty list when no column qualifies."""
+   A likely foreign key typically:
+   - ends with _id or Id and has a meaningful prefix naming a different entity (e.g. customer_id,
+     orderId) — NOT a bare "id"/"_id"/"Id" column or one whose prefix matches the table name
+   - has a description that contains words like "references", "identifier of", or names another table
+   - non-unique sample values
+   - has an integer or string type consistent with identifiers
+   - semantically points to a row in another table
+   - is UUID-typed and is not the table's own primary key
+
+   Omit columns that are measures, timestamps, free text, flags, or otherwise unlikely to
+   reference another table. Return an empty list when none qualify.
+
+2. pk_column_names — columns that appear to be the table's own primary key even if not
+   explicitly declared as such. These are typically a bare "id", "uuid", or "<table_name>_id"
+   column of integer or UUID type whose description or name conveys it identifies the table's
+   own records. Usually empty or one entry. Only list columns from the candidate list."""
 
 
 def _pk_column_names(table: dict[str, Any]) -> set[str]:
@@ -112,17 +119,18 @@ def suggest_potential_foreign_keys(
     try:
         result = invoke_structured(
             [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
-            PotentialFkResult,
+            FkAndPkResult,
             temperature=0.0,
         )
     except Exception as e:
         logger.warning("Error suggesting potential foreign keys: %s", e)
         return PotentialFkResult()
 
+    llm_pk_names = {n.strip() for n in result.pk_column_names if n.strip()}
     allowed = {col["name"] for col in candidates}
     filtered: list[PotentialFkSuggestion] = []
     seen: set[str] = set()
-    for item in result.suggestions:
+    for item in result.fk_suggestions:
         name = item.column_name.strip()
         if not name or name in seen or name not in allowed:
             continue
@@ -134,15 +142,12 @@ def suggest_potential_foreign_keys(
         name = col.get("name", "")
         if name in seen:
             continue
-        sample_values = col.get("sample_values")
-        if (col.get("data_type") or "").lower() == "uuid" and sample_values and not _has_unique_sample_values(
-            sample_values
-        ):
+        if (col.get("data_type") or "").lower() == "uuid" and name not in llm_pk_names:
             seen.add(name)
             filtered.append(
                 PotentialFkSuggestion(
                     column_name=name,
-                    rationale="uuid type with repeated sample values (likely FK reference)",
+                    rationale="uuid type, not a declared or inferred primary key — almost certainly references another entity",
                 )
             )
 
