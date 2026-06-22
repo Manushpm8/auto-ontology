@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator, Optional
 from urllib.parse import parse_qs, unquote, urlparse
@@ -49,6 +50,50 @@ logger = logging.getLogger(__name__)
 # HeavyDB auto-creates an implicit physical ``rowid`` column per table that is
 # not part of the user-facing schema; exclude it from column introspection.
 _IMPLICIT_COLUMNS = frozenset({"rowid"})
+
+# ``heavydb.connect`` performs the login RPC inline and exposes no timeout. A
+# misconfigured endpoint (classically a binary Thrift handshake against an
+# HTTP-only port) leaves the driver blocked on a socket read that never
+# returns. Bound it so connection attempts fail fast with a clear message
+# instead of hanging the request and surfacing as an opaque 500.
+_CONNECT_TIMEOUT_SECONDS = 15
+
+
+def _connect_with_timeout(
+    connect_kwargs: dict[str, Any], timeout: float
+) -> "Connection":
+    """Call ``heavydb.connect`` but give up after *timeout* seconds.
+
+    Runs the (potentially blocking) connect on a daemon thread so a hung
+    handshake never blocks the caller; the orphaned thread cannot keep the
+    process alive.
+    """
+    result: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            result["conn"] = heavydb.connect(**connect_kwargs)
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the caller thread
+            result["error"] = exc
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(timeout)
+
+    if thread.is_alive():
+        host = connect_kwargs.get("host")
+        port = connect_kwargs.get("port")
+        protocol = connect_kwargs.get("protocol")
+        raise TimeoutError(
+            f"Timed out after {timeout:g}s connecting to HeavyDB at "
+            f"{host}:{port} using protocol {protocol!r}. Verify the host and "
+            "port and that the protocol matches the server "
+            "(binary vs http/https)."
+        )
+    if "error" in result:
+        raise result["error"]
+    return result["conn"]
+
 
 _COLUMN_SCHEMA = [
     "table_schema",
@@ -203,7 +248,7 @@ class HeavyDBDatabase(SQLDatabase):
         Per-operation connections (rather than a long-lived pool) keep the
         connector resilient to server-side session timeouts.
         """
-        conn = heavydb.connect(**self._connect_kwargs)
+        conn = _connect_with_timeout(self._connect_kwargs, _CONNECT_TIMEOUT_SECONDS)
         try:
             yield conn
         finally:
