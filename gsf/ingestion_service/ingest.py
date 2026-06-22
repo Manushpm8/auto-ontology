@@ -109,7 +109,7 @@ def run_ingest_delete(database_name: str) -> None:
     delete_database_subgraph(database_name)
 
     vdb = get_vdb()
-    deleted_tabular = vdb.delete_by_database(database_name)
+    deleted_tabular = vdb.delete_by_database(database_name, preserve_semantic=False)
     logger.info(
         f"Tabular ingest delete: removed {len(deleted_tabular)} pgvector rows "
         f"for database {database_name}",

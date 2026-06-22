@@ -111,10 +111,7 @@ class PostgresVDB(VDB):
         # 2. The implemtation should support be fault tolerant and support incremental ingestion, which is challenging.
         self.database_name = kwargs.get("database_name")
         if self.database_name:
-            ids = self.delete_by_database(
-                self.database_name,
-                preserve_semantic=True,
-            )
+            ids = self.delete_by_database(self.database_name)
             logger.info(
                 "PostgresVDB.delete_by_database: deleted %d rows for database %s",
                 len(ids),
@@ -265,16 +262,16 @@ class PostgresVDB(VDB):
         self,
         database_name: str,
         *,
-        preserve_semantic: bool = False,
+        preserve_semantic: bool = True,
     ) -> list[str]:
         """Delete all rows whose ``database_name`` column matches ``database_name``.
 
         ``CustomAnalysis`` rows are a global, user-authored pool that must
         survive the nightly pre-ingest reset (see ``PostgresVDB.__init__``),
         but should be removed when the database connection itself is torn down.
-        Set ``preserve_semantic=True`` on the reset path to keep them;
-        leave it ``False`` on the delete-connection path to remove everything
-        matching ``database_name``.
+        ``preserve_semantic`` defaults to ``True`` so the reset path keeps them;
+        pass ``preserve_semantic=False`` on the delete-connection path to remove
+        everything matching ``database_name``.
 
         Returns the list of deleted row IDs (empty if the table doesn't exist
         or no rows match).
