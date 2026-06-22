@@ -22,8 +22,21 @@ export type SnowflakeConnectionParams = {
 	database: string;
 };
 
+export type HeavyDBConnectionParams = {
+	type: ConnectionType.HEAVYDB;
+	host: string;
+	port: string;
+	user: string;
+	password: string;
+	database: string;
+	protocol: string;
+};
+
 /** Structured connection form fields, discriminated by `type`. */
-export type ConnectionParams = PostgresConnectionParams | SnowflakeConnectionParams;
+export type ConnectionParams =
+	| PostgresConnectionParams
+	| SnowflakeConnectionParams
+	| HeavyDBConnectionParams;
 
 /** A stored connection returned by the API. */
 export type Connection = {

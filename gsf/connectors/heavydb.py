@@ -317,5 +317,16 @@ class HeavyDBDatabase(SQLDatabase):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def ping(self) -> None:
+        """Verify connectivity, credentials, and that the catalog is readable.
+
+        Uses the Thrift ``get_tables_meta`` metadata RPC rather than a SQL probe
+        like ``SELECT 1``: HeavyDB's Calcite dialect rejects FROM-less selects,
+        whereas the metadata RPC validates the session and catalog access
+        without depending on any table existing.
+        """
+        with self._connect() as conn:
+            conn._client.get_tables_meta(conn._session)
+
     def close(self) -> None:
         """No persistent connection to close (connections are per-operation)."""

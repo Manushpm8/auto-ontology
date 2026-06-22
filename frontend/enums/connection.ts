@@ -6,11 +6,13 @@
 export enum ConnectionType {
 	POSTGRESQL = 'postgresql',
 	SNOWFLAKE = 'snowflake',
+	HEAVYDB = 'heavydb',
 }
 
 export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.POSTGRESQL]: 'PostgreSQL',
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
+	[ConnectionType.HEAVYDB]: 'HeavyDB',
 };
 
 export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
@@ -23,7 +25,8 @@ export type ConnectionFieldKey =
 	| 'warehouse'
 	| 'user'
 	| 'password'
-	| 'database';
+	| 'database'
+	| 'protocol';
 
 export type ConnectionField = {
 	key: ConnectionFieldKey;
@@ -49,5 +52,13 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'user', label: 'User' },
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'MY_DATABASE' },
+	],
+	[ConnectionType.HEAVYDB]: [
+		{ key: 'host', label: 'Host', placeholder: 'localhost' },
+		{ key: 'port', label: 'Port', placeholder: '6274', optional: true },
+		{ key: 'user', label: 'User', placeholder: 'admin' },
+		{ key: 'password', label: 'Password', secret: true },
+		{ key: 'database', label: 'Database', placeholder: 'heavyai' },
+		{ key: 'protocol', label: 'Protocol', placeholder: 'binary', optional: true },
 	],
 };

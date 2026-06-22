@@ -16,6 +16,8 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 DEFAULT_POSTGRES_PORT = "5432"
+DEFAULT_HEAVYDB_PORT = "6274"
+DEFAULT_HEAVYDB_PROTOCOL = "binary"
 
 
 def _require(connection: Mapping[str, Any], key: str) -> str:
@@ -53,6 +55,20 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         return (
             f"snowflake://{_enc(user)}:{_enc(password)}@{account}"
             f"?warehouse={_enc(warehouse)}&database={_enc(database)}"
+        )
+
+    if conn_type == "heavydb":
+        host = _require(connection, "host")
+        user = _require(connection, "user")
+        password = _require(connection, "password")
+        database = _require(connection, "database")
+        port = str(connection.get("port") or "").strip() or DEFAULT_HEAVYDB_PORT
+        protocol = (
+            str(connection.get("protocol") or "").strip() or DEFAULT_HEAVYDB_PROTOCOL
+        )
+        return (
+            f"heavydb://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
+            f"?protocol={_enc(protocol)}"
         )
 
     raise ValueError(f"Unsupported connection type: {conn_type!r}")
