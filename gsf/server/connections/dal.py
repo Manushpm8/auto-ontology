@@ -41,8 +41,8 @@ def list_connections() -> list[dict[str, Any]]:
     connections: list[dict[str, Any]] = []
     for row in rows:
         props = dict(row["props"])
-        database_name = str(props.get("name") or "")
-        secret = read_secret(database_name) if database_name else ""
+        database_name = str(props.get("name"))
+        secret = read_secret(database_name)
         if secret:
             connections.append(secret)
             continue
