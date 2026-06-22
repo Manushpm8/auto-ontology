@@ -26,6 +26,16 @@ embedEndpoint: "https://integrate.api.nvidia.com/v1"
 embedModel: "nvidia/llama-nemotron-embed-1b-v2"
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
+# Better Auth signing key (sessions, CSRF, OIDC state). Leave empty to
+# auto-generate a stable random secret on first install and preserve it across
+# upgrades. Set explicitly to share one value across environments/replicas.
+authSecret: ""
+# Public origin of the app — REQUIRED by Better Auth (sessions, CSRF, OIDC
+# redirect URIs). It must match the URL you actually browse to, or auth
+# requests 404 / fail CSRF. The default works when reaching the frontend via
+# `kubectl port-forward svc/frontend 3000:3000`. For NodePort/ingress/https,
+# set this to that exact origin (e.g. https://gsf.example.com).
+appUrl: "http://localhost:3000"
 
 # ------------------------------------------------------------------
 # Postgres (pgvector)
@@ -83,8 +93,10 @@ neo4j:
 # ------------------------------------------------------------------
 backend:
   image:
-    repository: nvcr.io/nvstaging/gsf/gsf
-    tag: 0.0.1
+    # Locally-built image (see ./Dockerfile). Loaded into minikube via
+    # `minikube image load`; imagePullPolicy IfNotPresent uses it without pulling.
+    repository: gsf-backend
+    tag: local
   service:
     port: 3001
   replicas: 1
@@ -99,8 +111,8 @@ backend:
 ingestion:
   image:
     # Reuses the backend image with a different entrypoint arg.
-    repository: nvcr.io/nvstaging/gsf/gsf
-    tag: 0.0.1
+    repository: gsf-backend
+    tag: local
   replicas: 1
   resources:
     requests:
@@ -112,8 +124,9 @@ ingestion:
 # ------------------------------------------------------------------
 frontend:
   image:
-    repository: nvcr.io/nvstaging/gsf/gsf-frontend
-    tag: 0.0.1
+    # Locally-built image (see ./frontend/Dockerfile).
+    repository: gsf-frontend
+    tag: local
   service:
     port: 3000
     nodePort: 30000
