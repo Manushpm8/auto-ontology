@@ -46,38 +46,67 @@ def is_vault_configured() -> bool:
 
 
 def get_client() -> hvac.Client:
-    client = hvac.Client(
-        url=os.environ["VAULT_ADDR"],
-        namespace=os.environ["VAULT_NAMESPACE"],
-    )
-    client.auth.approle.login(
-        role_id=os.environ["VAULT_ROLE_ID"],
-        secret_id=os.environ["VAULT_SECRET_ID"],
-        mount_point=os.environ.get("VAULT_AUTH_MOUNT", "approle/nvdcs/dc1"),
-    )
+    addr = os.environ["VAULT_ADDR"]
+    auth_mount = os.environ.get("VAULT_AUTH_MOUNT", "approle/nvdcs/dc1")
+    try:
+        client = hvac.Client(
+            url=addr,
+            namespace=os.environ["VAULT_NAMESPACE"],
+        )
+        client.auth.approle.login(
+            role_id=os.environ["VAULT_ROLE_ID"],
+            secret_id=os.environ["VAULT_SECRET_ID"],
+            mount_point=auth_mount,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to authenticate to Vault at %s (auth_mount=%s)", addr, auth_mount
+        )
+        raise
+    logger.debug("Authenticated to Vault at %s (auth_mount=%s)", addr, auth_mount)
     return client
 
 
 def write_secret(database_name: str, secret: dict[str, str]) -> None:
-    client = get_client()
-    client.secrets.kv.v1.create_or_update_secret(
-        path=database_name,
-        secret={"connection": json.dumps(secret)},
-        mount_point=os.environ.get("VAULT_KV_MOUNT", "gsf"),
+    mount_point = os.environ.get("VAULT_KV_MOUNT", "gsf")
+    try:
+        client = get_client()
+        client.secrets.kv.v1.create_or_update_secret(
+            path=database_name,
+            secret={"connection": json.dumps(secret)},
+            mount_point=mount_point,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to write Vault secret for database %r (mount=%s)",
+            database_name,
+            mount_point,
+        )
+        raise
+    logger.info(
+        "Wrote Vault secret for database %r (mount=%s)", database_name, mount_point
     )
 
 
 def read_secret(database_name: str) -> dict[str, str] | str:
     if not is_vault_configured():
         return ""
+    mount_point = os.environ.get("VAULT_KV_MOUNT", "gsf")
     try:
         client = get_client()
         response = client.secrets.kv.v1.read_secret(
             path=database_name,
-            mount_point=os.environ.get("VAULT_KV_MOUNT", "gsf"),
+            mount_point=mount_point,
         )
         return json.loads(response["data"]["connection"])
     except Exception:
+        logger.warning(
+            "Could not read Vault secret for database %r (mount=%s); "
+            "treating as no secret",
+            database_name,
+            mount_point,
+            exc_info=True,
+        )
         return ""
 
 
@@ -90,7 +119,14 @@ def delete_secrets(database_name: str | None = None) -> None:
     mount_point = os.environ.get("VAULT_KV_MOUNT", "gsf")
 
     def delete(path: str) -> None:
-        client.secrets.kv.v1.delete_secret(path=path, mount_point=mount_point)
+        try:
+            client.secrets.kv.v1.delete_secret(path=path, mount_point=mount_point)
+        except Exception:
+            logger.exception(
+                "Failed to delete Vault secret %r (mount=%s)", path, mount_point
+            )
+            raise
+        logger.info("Deleted Vault secret %r (mount=%s)", path, mount_point)
 
     if database_name:
         delete(database_name)
@@ -106,8 +142,12 @@ def delete_secrets(database_name: str | None = None) -> None:
         keys = response["data"]["keys"]
     except hvac.exceptions.InvalidPath:
         # Nothing stored under this mount.
-        print(f"No secrets found under mount '{mount_point}'.")
+        logger.info("No secrets found under mount %r.", mount_point)
         return
+    except Exception:
+        logger.exception("Failed to list Vault secrets under mount %r", mount_point)
+        raise
 
+    logger.info("Deleting %d Vault secret(s) under mount %r", len(keys), mount_point)
     for key in keys:
         delete(key)
