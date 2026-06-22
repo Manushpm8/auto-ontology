@@ -13,6 +13,7 @@ from typing import Any
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.registry import create_connector, invalidate_connectors_cache
 from gsf.connectors.vault import delete_secrets, is_vault_configured, write_secret
+from gsf.ingestion_service.client import trigger_ingest, trigger_ingest_delete
 from gsf.server.chat.worker import refresh_chat_workers
 from gsf.server.connections.dal import insert_connection, list_connections
 
@@ -50,7 +51,7 @@ def create_connection(
 ) -> dict[str, Any]:
     """Create a UI-managed connection stored in Neo4j."""
 
-    database_name = str(connection.get("database") or "").strip()
+    database_name = str(connection.get("database"))
     if not database_name:
         raise ValueError("Database name is required")
 
@@ -70,10 +71,6 @@ def create_connection(
     invalidate_connectors_cache()
     refresh_chat_workers()
 
-    # Imported lazily: gsf.ingestion_service.ingest pulls in heavy nemo_retriever
-    # deps and requires NVIDIA_API_KEY at import time.
-    from gsf.ingestion_service.ingest import trigger_ingest
-
     trigger_ingest(connection)
 
     return connection
@@ -86,9 +83,6 @@ def delete_connection(database_name: str) -> dict[str, str]:
 
     invalidate_connectors_cache()
     refresh_chat_workers()
-
-    # Imported lazily: see note in create_connection above.
-    from gsf.ingestion_service.ingest import trigger_ingest_delete
 
     trigger_ingest_delete(database_name)
 

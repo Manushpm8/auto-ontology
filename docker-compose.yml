@@ -84,11 +84,14 @@ services:
     environment:
       POSTGRES_HOST: postgres
       NEO4J_URI: bolt://neo4j:7687
+      INGESTION_SERVICE_URL: http://ingestion-service:3002
     depends_on:
       postgres:
         condition: service_started
       neo4j:
         condition: service_healthy
+      ingestion-service:
+        condition: service_started
 
   ingestion-service:
     build:

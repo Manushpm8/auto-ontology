@@ -94,13 +94,15 @@ backend:
       memory: 256Mi
 
 # ------------------------------------------------------------------
-# Ingestion worker (no Service, no ingress; long-running pod)
+# Ingestion worker (exposes an HTTP API the backend calls to trigger ingest)
 # ------------------------------------------------------------------
 ingestion:
   image:
     # Reuses the backend image with a different entrypoint arg.
     repository: nvcr.io/nvstaging/gsf/gsf
     tag: 0.0.1
+  service:
+    port: 3002
   replicas: 1
   resources:
     requests:
