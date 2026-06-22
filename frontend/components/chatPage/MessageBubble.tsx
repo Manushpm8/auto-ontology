@@ -6,6 +6,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import type { ChatMessage } from '@/types/chat';
+import { formatDate } from '@/common/date';
 import { parseSqlResponse, type ParsedTable } from '@/lib/parseSqlResponse';
 import { SqlBlock } from '@/components/SqlBlock';
 import { DynamicTable } from './DynamicTable';
@@ -114,10 +115,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 				)}
 
 				<time className="mt-1.5 block text-right text-[10px] opacity-50">
-					{new Date(message.timestamp).toLocaleTimeString([], {
-						hour: '2-digit',
-						minute: '2-digit',
-					})}
+					{formatDate(message.timestamp, 'HH:mm')}
 				</time>
 			</div>
 		</div>
