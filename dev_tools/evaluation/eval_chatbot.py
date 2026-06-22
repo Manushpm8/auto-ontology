@@ -746,7 +746,7 @@ def run_single_query(question: str) -> None:
     print(f"\n  Runtime: {elapsed}s")
 
 
-SINGLE_QUERY = "what is the ratio of salesmen to employees?"
+SINGLE_QUERY = "What is the most frequently used GPU MODS version?"
 
 START_INDEX = 0
 END_INDEX = None  # None = run to the end
