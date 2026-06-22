@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from gsf.semantic.domain import DomainSummary, load_domain_summary
+from gsf.semantic.embed import build_semantic_embedder
 from gsf.semantic.pipeline import compile_semantic_layer
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,8 @@ def run_semantic_compilation(
     """
     summary = domain_summary or load_domain_summary(database_name)
 
+    embedder = build_semantic_embedder(database_name, reset=False)
+
     logger.info("=" * 60)
     logger.info(
         "Semantic compilation — full Neo4j graph (database=%r)",
@@ -31,21 +34,12 @@ def run_semantic_compilation(
     count = compile_semantic_layer(
         database_name,
         domain_summary=summary,
+        embedder=embedder,
     )
 
     logger.info("=" * 60)
     logger.info("Semantic compilation finished — %d table visits", count)
     logger.info("=" * 60)
-
-    from gsf.semantic.embed import build_semantic_embedder, embed_all_semantic_nodes
-
-    embedder = build_semantic_embedder(database_name, reset=True)
-    if embedder is not None:
-        logger.info("=" * 60)
-        logger.info("Embedding semantic nodes into VDB…")
-        logger.info("=" * 60)
-        vdb_rows = embed_all_semantic_nodes(embedder)
-        logger.info("Embedding complete — %d VDB row(s) written", vdb_rows)
 
     from gsf.semantic.semantic_fk import resolve_semantic_fks
 

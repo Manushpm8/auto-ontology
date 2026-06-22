@@ -6,6 +6,7 @@ import logging
 
 from gsf.semantic import neo4j_dal
 from gsf.semantic.domain import DomainSummary, load_domain_summary
+from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.loaders import fetch_table_context
 from gsf.semantic.visit_enter import process_table
 
@@ -16,6 +17,7 @@ def compile_semantic_layer(
     database_name: str,
     *,
     domain_summary: DomainSummary | None = None,
+    embedder: SemanticEmbedder | None = None,
 ) -> int:
     """Run full taxonomy compilation over every table in Neo4j."""
     summary = domain_summary or load_domain_summary(database_name)
@@ -34,7 +36,7 @@ def compile_semantic_layer(
         logger.info("[%d/%d] Processing table: %s", count + 1, len(tables), table_name)
 
         try:
-            process_table(table, ctx, domain_summary=summary)
+            process_table(table, ctx, domain_summary=summary, embedder=embedder)
             count += 1
         except Exception:
             logger.exception("Unexpected error processing table %s", table_name)

@@ -168,6 +168,38 @@ def fetch_all_terms_and_attributes() -> tuple[
     return terms, attrs
 
 
+def fetch_terms_and_attributes_for_table(
+    table_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (terms, attrs) written for a single table — used for inline embedding."""
+    conn = get_neo4j_conn()
+    params = {"table_id": table_id, "source": SEMANTIC_SOURCE}
+    terms = conn.query_read(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
+              (term:{LABEL_TERM} {{source: $source}})
+        RETURN term.name AS name, term.description AS description,
+               term.synonyms AS synonyms, term.id AS id
+        """,
+        params,
+    )
+    attrs = conn.query_read(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
+              (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
+              (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+        RETURN attr.name AS name,
+               attr.description AS description,
+               attr.term_name AS term_name,
+               attr.source_column AS source_column,
+               col.sample_values AS sample_values,
+               attr.id AS id
+        """,
+        params,
+    )
+    return terms, attrs
+
+
 def find_unlinked_fk_columns() -> list[dict[str, Any]]:
     """Return Column nodes that have no SEMANTIC_FK edge and no HAS_ATTRIBUTE edge.
 

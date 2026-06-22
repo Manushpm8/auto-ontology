@@ -8,6 +8,7 @@ from typing import Any
 from gsf.semantic import neo4j_dal
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
+from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.models import ColumnAttributeSpec
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
@@ -33,6 +34,7 @@ def process_table(
     ctx: dict[str, Any],
     *,
     domain_summary: DomainSummary | None,
+    embedder: SemanticEmbedder | None = None,
 ) -> None:
     """Build taxonomy nodes for one table: Term and ColumnAttributes."""
     table_id = table["id"]
@@ -98,3 +100,17 @@ def process_table(
         attr_count,
         len(all_fk_names),
     )
+
+    if embedder is not None:
+        try:
+            terms, attrs = neo4j_dal.fetch_terms_and_attributes_for_table(table_id)
+            from collections import defaultdict
+
+            attrs_by_term: dict[str, list[dict]] = defaultdict(list)
+            for attr in attrs:
+                if attr.get("term_name"):
+                    attrs_by_term[attr["term_name"]].append(attr)
+            for term in terms:
+                embedder.embed_term(term, attrs_by_term.get(term["name"], []))
+        except Exception:
+            logger.warning("Inline embed failed for table %s", table_name)
