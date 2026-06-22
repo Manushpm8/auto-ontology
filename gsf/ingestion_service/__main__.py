@@ -55,9 +55,7 @@ async def ingest() -> None:
         logger.info("ingest: using connections from CONNECTION_STRINGS")
     else:
         try:
-            connections = [
-                build_connection_string(conn) for conn in list_connections()
-            ]
+            connections = [build_connection_string(conn) for conn in list_connections()]
         except Exception:
             logger.exception("ingest: failed to load connections from Neo4j")
             connections = []

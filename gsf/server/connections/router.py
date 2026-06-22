@@ -39,9 +39,11 @@ def _serialize_connection(connection: dict[str, Any]) -> PublicConnection:
 
 @router.get("/connections/source")
 def is_env_source() -> bool:
-    """Report whether connections are managed via the ``CONNECTION_STRINGS`` env. """
+    """Report whether connections are managed via the ``CONNECTION_STRINGS`` env."""
     connection_strings = os.environ.get("CONNECTION_STRINGS", "")
-    connection_strings_exists = [cs.strip() for cs in connection_strings.split(",") if cs.strip()]
+    connection_strings_exists = [
+        cs.strip() for cs in connection_strings.split(",") if cs.strip()
+    ]
     return bool(connection_strings_exists)
 
 
@@ -96,6 +98,3 @@ def delete_connection(database_name: str) -> dict:
         raise HTTPException(status_code=404, detail="Connection not found")
 
     return {"data": row}
-
-
-
