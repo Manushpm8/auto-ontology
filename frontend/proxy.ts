@@ -4,14 +4,21 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { getSessionCookie } from 'better-auth/cookies';
+
+// Pages reachable without a session. Everything else requires authentication.
+const PUBLIC_PATHS = ['/login', '/signup'];
+
+const isPublicPath = (pathname: string): boolean =>
+	PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
 /**
- * Generic transform: for /api/* requests, moves the first `*_id` query
- * parameter into the URL path so the backend receives it as a path param.
+ * For /api/* requests, moves the first `*_id` query parameter into the URL path
+ * so the backend receives it as a path param.
  *
  * Example: GET /api/schemas?db_id=abc  →  GET /api/schemas/abc
  */
-export function proxy(request: NextRequest) {
+function rewriteApiIdParam(request: NextRequest): NextResponse {
 	const url = request.nextUrl.clone();
 
 	for (const [key, value] of url.searchParams.entries()) {
@@ -25,6 +32,42 @@ export function proxy(request: NextRequest) {
 	return NextResponse.next();
 }
 
+/**
+ * Optimistic, cookie-only auth gate (no DB call). Redirects unauthenticated
+ * users to /login and authenticated users away from the auth pages. Role-based
+ * gating of /admin/* happens in the pages themselves via requireAdmin(), since
+ * the role is not present in the session cookie.
+ */
+function guardPage(request: NextRequest): NextResponse {
+	const { pathname, search } = request.nextUrl;
+	const hasSession = getSessionCookie(request) != null;
+	const isPublic = isPublicPath(pathname);
+
+	if (!hasSession && !isPublic) {
+		const loginUrl = new URL('/login', request.url);
+		loginUrl.searchParams.set('next', `${pathname}${search}`);
+		return NextResponse.redirect(loginUrl);
+	}
+
+	if (hasSession && isPublic) {
+		return NextResponse.redirect(new URL('/chat', request.url));
+	}
+
+	return NextResponse.next();
+}
+
+export function proxy(request: NextRequest) {
+	// API requests (including Better Auth's own /api/auth/*) are not page-gated;
+	// auth is enforced on pages and in route handlers. Keep the `*_id` rewrite.
+	if (request.nextUrl.pathname.startsWith('/api/')) {
+		return rewriteApiIdParam(request);
+	}
+
+	return guardPage(request);
+}
+
 export const config = {
-	matcher: '/api/:path*',
+	// Run on API routes (for the _id rewrite) and all pages (for the auth gate),
+	// excluding Next internals and static assets.
+	matcher: ['/((?!_next/static|_next/image|favicon.svg|.*\\.svg$).*)'],
 };

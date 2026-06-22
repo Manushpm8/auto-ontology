@@ -12,6 +12,7 @@ type NavItem = {
 	icon: IconName;
 	href: string;
 	label: string;
+	adminOnly?: boolean;
 };
 
 const navItems: NavItem[] = [
@@ -20,15 +21,18 @@ const navItems: NavItem[] = [
 	{ icon: IconName.Database, href: '/data', label: 'Data Catalog' },
 	{ icon: IconName.ChartLine, href: '/analytics', label: 'Analytics' },
 	{ icon: IconName.Settings, href: '/settings', label: 'Settings' },
+	{ icon: IconName.Users, href: '/admin/users', label: 'Users', adminOnly: true },
+	{ icon: IconName.Key, href: '/admin/sso', label: 'Single Sign-On', adminOnly: true },
 ];
 
-export const NavRail = () => {
+export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {
 	const pathname = usePathname();
+	const visibleItems = navItems.filter((item) => !item.adminOnly || isAdmin);
 
 	return (
 		<nav className="flex h-full w-12 shrink-0 flex-col items-center border-r border-zinc-200 bg-white py-3 dark:border-zinc-800 dark:bg-zinc-950">
 			<div className="flex flex-1 flex-col items-center gap-2">
-				{navItems.map((item) => {
+				{visibleItems.map((item) => {
 					const isActive = pathname.startsWith(item.href);
 
 					return (

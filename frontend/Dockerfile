@@ -71,7 +71,17 @@ ENV PNPM_HOME=/pnpm \
     CI=1 \
     NEXT_TELEMETRY_DISABLED=1 \
     NEXT_OUTPUT=standalone \
-    PYTHON_API_URL=${PYTHON_API_URL}
+    PYTHON_API_URL=${PYTHON_API_URL} \
+    # Build-time placeholders only. `lib/auth.ts` constructs the Prisma client
+    # and Better Auth instance at module load, which `next build` evaluates, so
+    # these must be present (not valid) for the build to succeed. No database
+    # connection is made at build time — all routes are dynamic. Real values are
+    # injected at runtime by the Helm chart / container env.
+    POSTGRES_USER=build \
+    POSTGRES_PASSWORD=build \
+    POSTGRES_DATABASE=build \
+    AUTH_SECRET=build-time-placeholder-secret-not-used-at-runtime \
+    APP_URL=http://localhost:3000
 
 RUN npm install -g --silent corepack@latest \
  && corepack enable \
