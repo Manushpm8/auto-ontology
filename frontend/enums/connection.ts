@@ -41,7 +41,7 @@ export type ConnectionField = {
 export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 	[ConnectionType.POSTGRESQL]: [
 		{ key: 'host', label: 'Host', placeholder: 'localhost' },
-		{ key: 'port', label: 'Port', placeholder: '5432', optional: true },
+		{ key: 'port', label: 'Port', placeholder: '5432' },
 		{ key: 'user', label: 'User', placeholder: 'postgres' },
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'my_database' },
