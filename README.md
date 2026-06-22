@@ -8,49 +8,44 @@ Generative Semantic Fabric adds the structured-data ontology layer to any partne
 > [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). **This project
 > is currently not accepting external contributions.**
 
-## Deployment From NVStaging
+## Deployment
 
-1. Fetch the chart from NGC:
+### Kubernetes
 
-   ```bash
-   helm fetch https://helm.ngc.nvidia.com/nvstaging/gsf/charts/gsf-0.0.1.tgz \
-     --username='$oauthtoken' \
-     --password=<API-KEY>
-   ```
+To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 
-2. Create the nvcr.io image-pull secret:
+### Local (Docker Compose)
 
-   ```bash
-   kubectl create secret docker-registry nvcr-creds \
-     --docker-server=nvcr.io \
-     --docker-username='$oauthtoken' \
-     --docker-password=<API-KEY>
-   ```
+To run the full stack locally, clone the repo and use Docker Compose:
 
-3. Attach the pull secret to the default ServiceAccount so pods inherit it:
+1. Clone the repository:
 
    ```bash
-   kubectl patch serviceaccount default \
-     -p '{"imagePullSecrets":[{"name":"nvcr-creds"}]}'
+   git clone <repo-url> gsf && cd gsf
    ```
 
-4. Install the chart:
+2. Create your environment file (.env) from the template and fill in the values
+   (Postgres/Neo4j credentials, `NVIDIA_API_KEY`, `CONNECTION_STRINGS`, etc.).
+   See [`.env.example`](./.env.example) for the full list of variables:
 
    ```bash
-   helm install gsf gsf-0.0.1.tgz \
-     --set nvidiaApiKey=<API-KEY> \
-     --set neo4jPassword=<NEO4J-PASSWORD> \
-     --set postgresPassword=<POSTGRES-PASSWORD> \
-     --set connectionStrings=<CONNECTION-STRINGS>
+   cp .env.example .env
+   # edit .env
    ```
 
-5. Expose the UI:
-```bash
-kubectl port-forward frontend 3000:3000
-```
-End-to-end build, install and verification steps live in
-[`helm/gsf/README.md`](helm/gsf/README.md). TL;DR for a local Docker Desktop
-Kubernetes cluster:
+3. Build the images and start the stack:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   This builds the backend (`gsf`) and frontend (`gsf-frontend`) images, brings
+   up Postgres, Neo4j, and pgAdmin, runs the one-shot `frontend-migrate` job to
+   sync the database schema, and starts the app.
+
+4. Open the UI at <http://localhost:3000> (the backend API is on `:3001`,
+   pgAdmin on `:5050`).
+
 
 ## License
 
