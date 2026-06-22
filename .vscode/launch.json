@@ -27,6 +27,17 @@
       "justMyCode": false
     },
     {
+      "name": "Debug Ingestion Service",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.ingestion_service",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "Debug API",
       "type": "debugpy",
       "request": "launch",
