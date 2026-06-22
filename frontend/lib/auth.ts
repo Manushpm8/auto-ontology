@@ -14,13 +14,18 @@ import { Role } from '@/enums/auth';
 
 const prisma = getPrisma();
 
+// During `next build` the module is evaluated but no auth request is handled,
+// so a real secret/origin isn't needed. Fall back to a build-only placeholder
+// for the secret so construction doesn't fail; runtime values come from env.
+const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build';
+
 /** True once at least one SSO provider has been registered. */
 export const isSsoConfigured = async (): Promise<boolean> => (await prisma.ssoProvider.count()) > 0;
 
 export const auth = betterAuth({
 	// Project-scoped env var names, wired explicitly so they aren't tied to
 	// Better Auth's BETTER_AUTH_* defaults.
-	secret: process.env.AUTH_SECRET,
+	secret: process.env.AUTH_SECRET ?? (isBuildPhase ? 'next-build-time-placeholder' : undefined),
 	baseURL: process.env.APP_URL,
 	database: prismaAdapter(prisma, { provider: 'postgresql' }),
 	emailAndPassword: { enabled: true },
