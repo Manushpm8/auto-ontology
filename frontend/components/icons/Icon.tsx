@@ -17,6 +17,12 @@ import NvidiaLogoSvg from './svg/nvidia-logo.svg';
 import DatabaseSvg from './svg/database.svg';
 import SettingsSvg from './svg/settings.svg';
 import ChartBarSvg from './svg/chart-bar.svg';
+import TableSvg from './svg/table.svg';
+import ViewSvg from './svg/view.svg';
+import MaterializedViewSvg from './svg/materialized-view.svg';
+import SchemaSvg from './svg/schema.svg';
+import ColumnSvg from './svg/column.svg';
+import ChartLineSvg from './svg/chart-line.svg';
 
 export enum IconName {
 	Menu = 'menu',
@@ -32,6 +38,12 @@ export enum IconName {
 	Database = 'database',
 	Settings = 'settings',
 	ChartBar = 'chart-bar',
+	ChartLine = 'chart-line',
+	Table = 'table',
+	View = 'view',
+	MaterializedView = 'materialized-view',
+	Schema = 'schema',
+	Column = 'column',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -48,6 +60,12 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Database]: DatabaseSvg,
 	[IconName.Settings]: SettingsSvg,
 	[IconName.ChartBar]: ChartBarSvg,
+	[IconName.ChartLine]: ChartLineSvg,
+	[IconName.Table]: TableSvg,
+	[IconName.View]: ViewSvg,
+	[IconName.MaterializedView]: MaterializedViewSvg,
+	[IconName.Schema]: SchemaSvg,
+	[IconName.Column]: ColumnSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

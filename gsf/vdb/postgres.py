@@ -16,10 +16,11 @@ import logging
 from typing import Any, Iterable, Optional
 
 import psycopg
+from psycopg import sql
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
-from nemo_retriever.common.vdb.adt_vdb import VDB
+from nemo_retriever.vdb import VDB
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 logger = logging.getLogger(__name__)
@@ -98,13 +99,18 @@ class PostgresVDB(VDB):
         self.collection_name: str = kwargs.get(
             "collection_name", kwargs.get("index_name", "nv_ingest_tabular")
         )
+        self.schema_name: str = kwargs.get("schema_name", "public")
         self.embeddings: Embeddings = kwargs.get("embeddings") or _UnusableEmbeddings()
 
         self._engine: Optional[PGEngine] = None
         self._store: Optional[PGVectorStore] = None
-        self.vector_size: Optional[int] = kwargs.get("vector_size")
+        self.vector_size: Optional[int] = kwargs.get("vector_size", 2048)
+        # Resetting the database embeddings prior to ingestion
+        # In order to support without recreate:
+        # 1. The ingestion should return which tables/columns were added/updated/deleted
+        # 2. The implemtation should support be fault tolerant and support incremental ingestion, which is challenging.
         self.database_name = kwargs.get("database_name")
-        if kwargs.get("reset") and self.database_name:
+        if self.database_name:
             ids = self.delete_by_database(self.database_name)
             logger.info(
                 "PostgresVDB.delete_by_database: deleted %d rows for database %s",
@@ -132,47 +138,57 @@ class PostgresVDB(VDB):
                     """
                     SELECT 1
                     FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = %s
+                    WHERE table_schema = %s AND table_name = %s
                     """,
-                    (self.collection_name,),
+                    (self.schema_name, self.collection_name),
                 )
                 return cur.fetchone() is not None
 
-    def _get_store(self, vector_size: int | None = None) -> Optional[PGVectorStore]:
+    def _ensure_schema(self) -> None:
+        """Create the target schema if it doesn't exist.
+
+        ``init_vectorstore_table`` creates the table (and the pgvector
+        extension) but not its containing schema, so it must exist first.
+        """
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                # `schema_name` is internal config (defaults to 'public');
+                # psycopg can't parameterise identifiers, so it's interpolated
+                # via the identifier-safe quote. Not user input.
+                cur.execute(
+                    sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                        sql.Identifier(self.schema_name)
+                    )
+                )
+            conn.commit()
+
+    def _get_store(self) -> Optional[PGVectorStore]:
         """Return the vector store, creating the table on first write.
 
-        ``vector_size`` is auto-detected from the first embedding batch when
-        not supplied explicitly.  On read-only paths the table must already
-        exist; if it doesn't this returns ``None`` so callers can
-        short-circuit.
+        If the table doesn't exist and ``vector_size`` is not provided (e.g.
+        on read paths), returns ``None`` so callers can short-circuit.
         """
         if self._store is not None:
             return self._store
 
-        effective_size = vector_size or self.vector_size
-
         engine = self._get_engine()
         if not self._table_exists():
-            if effective_size is None:
-                return None
+            self._ensure_schema()
             engine.init_vectorstore_table(
                 table_name=self.collection_name,
-                vector_size=effective_size,
+                vector_size=self.vector_size,
+                schema_name=self.schema_name,
                 metadata_columns=[
                     Column(_DATABASE_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                     Column(_LABEL_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                 ],
-            )
-            logger.info(
-                "Created table %s with vector_size=%d",
-                self.collection_name,
-                effective_size,
             )
 
         self._store = PGVectorStore.create_sync(
             engine=engine,
             embedding_service=self.embeddings,
             table_name=self.collection_name,
+            schema_name=self.schema_name,
             metadata_columns=[_DATABASE_METADATA_COLUMN, _LABEL_METADATA_COLUMN],
         )
         return self._store
@@ -220,9 +236,8 @@ class PostgresVDB(VDB):
             )
             return 0
 
-        detected_size = len(embeddings[0])
-        store = self._get_store(vector_size=detected_size)
-        assert store is not None
+        store = self._get_store()
+        assert store is not None  # vector_size was provided
 
         inserted = 0
         for start in range(0, len(documents), batch_size):
@@ -297,14 +312,18 @@ class PostgresVDB(VDB):
 
         with psycopg.connect(self.connection_string) as conn:
             with conn.cursor() as cur:
-                # `collection_name` is internal config (defaults to
-                # 'nv_ingest_tabular'); psycopg can't parameterise table
-                # identifiers, so it's interpolated here. Not user input.
+                # `schema_name`/`collection_name` are internal config; psycopg
+                # can't parameterise identifiers, so they're composed via the
+                # identifier-safe API. Not user input.
                 cur.execute(
-                    f"""
-                    DELETE FROM {self.collection_name}
-                    WHERE langchain_metadata ->> 'id' = %s
-                    """,
+                    sql.SQL(
+                        """
+                        DELETE FROM {table}
+                        WHERE langchain_metadata ->> 'id' = %s
+                        """
+                    ).format(
+                        table=sql.Identifier(self.schema_name, self.collection_name)
+                    ),
                     (node_id,),
                 )
                 deleted = cur.rowcount

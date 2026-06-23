@@ -6,6 +6,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import type { ChatMessage } from '@/types/chat';
+import { formatDate } from '@/common/date';
 import { parseSqlResponse, type ParsedTable } from '@/lib/parseSqlResponse';
 import { SqlBlock } from '@/components/SqlBlock';
 import { DynamicTable } from './DynamicTable';
@@ -101,14 +102,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 						: 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
 				}`}
 			>
-				{isUser ? (
-					<p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
-				) : (
-					<FormattedContent
-						content={message.content}
-						className="text-sm leading-relaxed"
-					/>
-				)}
+				<FormattedContent content={message.content} className="text-sm leading-relaxed" />
 
 				{message.sql && <SqlBlock sql={message.sql} className="mt-3" />}
 
@@ -121,10 +115,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 				)}
 
 				<time className="mt-1.5 block text-right text-[10px] opacity-50">
-					{new Date(message.timestamp).toLocaleTimeString([], {
-						hour: '2-digit',
-						minute: '2-digit',
-					})}
+					{formatDate(message.timestamp, 'HH:mm')}
 				</time>
 			</div>
 		</div>

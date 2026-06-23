@@ -7,28 +7,32 @@
 from gsf.vdb.config import get_postgres_connection_string
 from gsf.vdb.postgres import PostgresVDB
 
-DATA_VDB_COLLECTION = "nv_ingest_tabular"
-SEMANTIC_VDB_COLLECTION = "semantic_layer"
+VDB_COLLECTION: str = "nv_ingest_tabular"
+SEMANTIC_VDB_COLLECTION: str = "semantic_layer"
+VDB_SCHEMA: str = "vdb"
 
-# Backward-compatible alias for tabular ingest and chat data retrieval.
-VDB_COLLECTION = DATA_VDB_COLLECTION
+# Backward-compatible alias
+DATA_VDB_COLLECTION = VDB_COLLECTION
 
 
-def get_data_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
-    """Build a PostgresVDB for the tabular data layer.
+def get_vdb(*, database_name: str | None = None) -> PostgresVDB:
+    """Build a PostgresVDB pointed at the local pgvector-enabled Postgres.
 
-    Pass ``database_name`` for query-time metadata filtering. Pass ``reset=True``
-    only when replacing ingest rows (tables/columns) for that database.
+    When database_name is provided, the VDB will use it to reset old embeddings for the given database.
     """
     kwargs: dict = {
         "connection_string": get_postgres_connection_string(),
-        "collection_name": DATA_VDB_COLLECTION,
+        "collection_name": VDB_COLLECTION,
+        "schema_name": VDB_SCHEMA,
     }
     if database_name:
         kwargs["database_name"] = database_name
-    if reset:
-        kwargs["reset"] = True
     return PostgresVDB(**kwargs)
+
+
+def get_data_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
+    """Backward-compatible alias for :func:`get_vdb` (tabular / data layer)."""
+    return get_vdb(database_name=database_name)
 
 
 def get_semantic_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
@@ -36,14 +40,8 @@ def get_semantic_vdb(*, database_name: str | None = None, reset: bool = False) -
     kwargs: dict = {
         "connection_string": get_postgres_connection_string(),
         "collection_name": SEMANTIC_VDB_COLLECTION,
+        "schema_name": VDB_SCHEMA,
     }
     if database_name:
         kwargs["database_name"] = database_name
-    if reset:
-        kwargs["reset"] = True
     return PostgresVDB(**kwargs)
-
-
-def get_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
-    """Alias for :func:`get_data_vdb` (tabular / data layer)."""
-    return get_data_vdb(database_name=database_name, reset=reset)

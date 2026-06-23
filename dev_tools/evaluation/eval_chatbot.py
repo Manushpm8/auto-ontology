@@ -41,13 +41,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from nemo_retriever.common.params.models import EmbedParams
-from nemo_retriever.graph.retriever import Retriever
+from nemo_retriever.retriever import Retriever
+from nemo_retriever.tabular_data.sql_database import SQLDatabase
+
 from gsf.retrieval.text_to_sql.main import get_agent_response
 from gsf.retrieval.text_to_sql.state import TextToSQLPayload
 
 from gsf.connectors import get_connectors
 from gsf.server.env import load_server_env
+from gsf.utils.embedding import get_embed_kwargs
 from gsf.vdb import get_data_vdb, get_semantic_vdb
 
 load_server_env()
@@ -66,20 +68,9 @@ if not _NVIDIA_API_KEY:
         "Get your key at https://build.nvidia.com"
     )
 
-# Match the chat server's wiring (gsf/server/chat/helpers.py): same embed
-# endpoint/model as ingest, same retriever, same pgvector store. Anything
-# else here and scoring stops being apples-to-apples with production.
-_EMBED_ENDPOINT = os.environ.get(
-    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
-)
-_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
-
-EMBED_PARAMS = EmbedParams(
-    embed_invoke_url=_EMBED_ENDPOINT,
-    model_name=_EMBED_MODEL,
-    api_key=_NVIDIA_API_KEY,
-    embed_modality="text",
-)
+# Match the chat server's wiring (gsf/server/chat/helpers.py): same retriever
+# and pgvector store. Anything else here and scoring stops being apples-to-apples
+# with production.
 
 _DEFAULT_INPUT = Path(__file__).parent / "chatbot_evaluation.json"
 
@@ -103,11 +94,7 @@ def _build_retriever() -> Retriever:
     return Retriever(
         top_k=15,
         vdb_kwargs={"vdb": get_data_vdb()},
-        embed_kwargs={
-            "model_name": EMBED_PARAMS.model_name,
-            "embed_invoke_url": EMBED_PARAMS.embed_invoke_url,
-            "api_key": EMBED_PARAMS.api_key,
-        },
+        embed_kwargs=get_embed_kwargs(),
     )
 
 
@@ -116,11 +103,7 @@ def _build_ontology_retriever() -> Retriever:
     return Retriever(
         top_k=15,
         vdb_kwargs={"vdb": get_semantic_vdb()},
-        embed_kwargs={
-            "model_name": EMBED_PARAMS.model_name,
-            "embed_invoke_url": EMBED_PARAMS.embed_invoke_url,
-            "api_key": EMBED_PARAMS.api_key,
-        },
+        embed_kwargs=get_embed_kwargs(),
     )
 
 
@@ -168,11 +151,8 @@ def _canonical(value: Any) -> Any:
     return str(value).strip().lower()
 
 
-_SQL_ROW_LIMIT = 500
-
-
 def _execute_sql(
-    connector: Any, sql: str
+    connector: SQLDatabase, sql: str
 ) -> Tuple[Optional[pd.DataFrame], str]:
     if not sql or not sql.strip():
         return None, "empty SQL"
@@ -180,16 +160,12 @@ def _execute_sql(
         df = connector.execute(sql)
         if not isinstance(df, pd.DataFrame):
             df = pd.DataFrame(df)
-        if len(df) > _SQL_ROW_LIMIT:
-            df = df.head(_SQL_ROW_LIMIT)
         return df, ""
     except Exception as exc:  # pragma: no cover - tooling script
         return None, f"{type(exc).__name__}: {exc}"
 
 
-def _score_sql(
-    connector: Any, expected: str, actual: str
-) -> Dict[str, Any]:
+def _score_sql(connector: SQLDatabase, expected: str, actual: str) -> Dict[str, Any]:
     text_sim = _sql_text_similarity(expected, actual)
     expected_df, expected_err = _execute_sql(connector, expected)
     actual_df, actual_err = _execute_sql(connector, actual)
@@ -241,7 +217,7 @@ def _parse_markdown_table(md: str) -> Optional[pd.DataFrame]:
             rows.append(cells)
     if not rows:
         return None
-    return pd.DataFrame(rows, columns=header)
+    return pd.DataFrame(rows, columns=pd.Index(header))
 
 
 def _db_result_to_df(value: str) -> Optional[pd.DataFrame]:
