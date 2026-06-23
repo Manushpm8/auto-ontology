@@ -43,8 +43,8 @@ import pandas as pd
 
 from nemo_retriever.common.params.models import EmbedParams
 from nemo_retriever.graph.retriever import Retriever
-from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
-from nemo_retriever.tabular_data.retrieval.text_to_sql.state import TextToSQLPayload
+from gsf.retrieval.text_to_sql.main import get_agent_response
+from gsf.retrieval.text_to_sql.state import TextToSQLPayload
 
 from gsf.connectors import get_connectors
 from gsf.server.env import load_server_env
