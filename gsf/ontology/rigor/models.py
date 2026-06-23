@@ -468,20 +468,48 @@ class CoreOntology(BaseModel):
                             if p.source_table == target_table and p.source_schema:
                                 target_schema_resolved = p.source_schema
                                 break
-
                 source_col = ""
                 target_col = ""
-                target_lower = (target_table or op.target_term).lower()
-                for attr in self.attributes:
-                    if attr.provenance.source_table == source_table:
-                        col_lower = attr.source_column.lower()
-                        if (
-                            col_lower == f"{target_lower}id"
-                            or col_lower == f"{target_lower}_id"
-                        ):
-                            source_col = attr.source_column
-                            target_col = "Id"
-                            break
+                join_path: list[JoinHop] = []
+
+                # Strategy 1: reuse join_path from an existing edge
+                # between the same terms (e.g. deterministic FK).
+                existing_edge = next(
+                    (
+                        e
+                        for e in self.object_properties
+                        if e.source_term == op.source_term
+                        and e.target_term == op.target_term
+                        and e.join_path
+                    ),
+                    None,
+                )
+                if existing_edge:
+                    join_path = list(existing_edge.join_path)
+                    source_col = existing_edge.provenance.source_column or ""
+                    target_col = existing_edge.provenance.target_column or ""
+                else:
+                    # Strategy 2: match a FK-like column in attributes
+                    target_lower = (target_table or op.target_term).lower()
+                    for attr in self.attributes:
+                        if attr.provenance.source_table == source_table:
+                            col_lower = attr.source_column.lower()
+                            if (
+                                col_lower == f"{target_lower}id"
+                                or col_lower == f"{target_lower}_id"
+                            ):
+                                source_col = attr.source_column
+                                target_col = attr.source_column
+                                break
+
+                # Strategy 3: BFS for a multi-hop path through
+                # existing deterministic edges.
+                if not source_col and not join_path:
+                    multi_hop = self.find_join_path(op.source_term, op.target_term)
+                    if multi_hop:
+                        join_path = multi_hop
+                        source_col = multi_hop[0].source_column
+                        target_col = multi_hop[-1].target_column
 
                 op_prov = Provenance(
                     source_table=source_table,
@@ -492,8 +520,7 @@ class CoreOntology(BaseModel):
                     target_column=target_col,
                     derivation="llm_proposed",
                 )
-                join_path: list[JoinHop] = []
-                if source_col:
+                if source_col and not join_path:
                     join_path.append(
                         JoinHop(
                             source_table=source_table,
@@ -513,6 +540,40 @@ class CoreOntology(BaseModel):
                         join_path=join_path,
                     )
                 )
+
+    def find_join_path(
+        self, source_term: str, target_term: str, max_hops: int = 3
+    ) -> list[JoinHop] | None:
+        """BFS for the shortest multi-hop join path between two terms.
+
+        Only follows edges that have a non-empty ``join_path`` (i.e.
+        deterministic FK edges with known columns).  Returns ``None``
+        when no path exists within *max_hops*.
+        """
+        from collections import deque
+
+        adj: dict[str, list[ObjectProperty]] = {}
+        for edge in self.object_properties:
+            if edge.join_path:
+                adj.setdefault(edge.source_term, []).append(edge)
+
+        queue: deque[tuple[str, list[JoinHop]]] = deque()
+        queue.append((source_term, []))
+        visited: set[str] = {source_term}
+
+        while queue:
+            current, hops = queue.popleft()
+            if len(hops) >= max_hops:
+                continue
+            for edge in adj.get(current, []):
+                next_term = edge.target_term
+                new_hops = hops + list(edge.join_path)
+                if next_term == target_term:
+                    return new_hops
+                if next_term not in visited:
+                    visited.add(next_term)
+                    queue.append((next_term, new_hops))
+        return None
 
     def snapshot_for_prompt(self) -> str:
         """Compact text representation for LLM context windows."""

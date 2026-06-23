@@ -173,7 +173,7 @@
       "module": "gsf.ontology.rigor",
       "args": [
         "--database-name",
-        "WIDEWORLDIMPORTERS"
+        "wideworldimporters"
       ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
@@ -262,6 +262,20 @@
       "args": [
         "--database-name",
         "bird"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Load WWI Postgres",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "dev_tools.load_wwi_postgres",
+      "args": [
+        "--drop"
       ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",

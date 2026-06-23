@@ -36,6 +36,9 @@ lancedb/*
 .env.docker
 
 
+# WWI CSV data (local only)
+dev_tools/wwi/data/
+
 # Evaluation data files
 dev_tools/evaluation/*csv
 dev_tools/evaluation/*.json

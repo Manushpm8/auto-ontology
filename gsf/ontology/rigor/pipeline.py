@@ -399,8 +399,18 @@ def _process_one_table(
         tgt = ontology.resolve_term(tgt_table)
         edge.source_term = src
         edge.target_term = tgt
-        _ensure_term_exists(ontology, src, src_table)
-        _ensure_term_exists(ontology, tgt, tgt_table)
+        _ensure_term_exists(
+            ontology,
+            src,
+            src_table,
+            source_schema=edge.provenance.source_schema,
+        )
+        _ensure_term_exists(
+            ontology,
+            tgt,
+            tgt_table,
+            source_schema=edge.provenance.target_schema,
+        )
         if not ontology.has_edge(src, tgt, edge.name):
             ontology.object_properties.append(edge)
 
@@ -432,6 +442,7 @@ def _process_one_table(
             term_name,
             table["name"],
             table_description=table.get("description") or "",
+            source_schema=table.get("schema_name", ""),
         )
         ontology.table_to_term[table["name"]] = term_name
     for attr in det_result.attributes:
@@ -448,6 +459,7 @@ def _process_one_table(
                 source_column=attr.source_column,
                 provenance=Provenance(
                     source_table=table["name"],
+                    source_schema=table.get("schema_name", ""),
                     source_column=attr.source_column,
                     derivation="deterministic",
                 ),
@@ -522,6 +534,7 @@ def _ensure_term_exists(
     term_name: str,
     source_table: str,
     table_description: str = "",
+    source_schema: str = "",
 ) -> None:
     """Create a placeholder business term if it doesn't exist yet.
 
@@ -540,6 +553,11 @@ def _ensure_term_exists(
             or len(table_description) > len(existing.description)
         ):
             existing.description = table_description
+        if source_schema:
+            for p in existing.provenance:
+                if p.source_table == source_table and not p.source_schema:
+                    p.source_schema = source_schema
+                    break
     else:
         desc = table_description or f"(auto-created from table {source_table})"
         ontology.business_terms.append(
@@ -549,6 +567,7 @@ def _ensure_term_exists(
                 provenance=[
                     Provenance(
                         source_table=source_table,
+                        source_schema=source_schema,
                         derivation="declared_fk",
                     )
                 ],
