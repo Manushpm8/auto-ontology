@@ -17,6 +17,7 @@ from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import TabularExtractParams
 from gsf.vdb import get_vdb
 from gsf.connectors.registry import create_connector
+from gsf.semantic.compile import run_semantic_compilation
 
 logger = logging.getLogger("ingestion_service.ingest")
 
@@ -50,3 +51,6 @@ def run_ingest(connection_string: str) -> None:
         )
     else:
         logger.info("Tabular ingest result: no rows produced")
+    
+    logger.info("Starting semantic compilation")
+    run_semantic_compilation(database_name)
