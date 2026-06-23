@@ -29,6 +29,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Literal
 
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+
 if TYPE_CHECKING:
     from nemo_retriever.graph.retriever import Retriever
 
@@ -40,8 +42,6 @@ logger = logging.getLogger(__name__)
 # Hard ceiling on how many candidate snippets we want to reason over for a single question.
 # Larger numbers tend to confuse the LLM and increase latency.
 MAX_CALCULATION_CANDIDATES = 15
-
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 DEFAULT_FETCH_LIMIT = 20
 PER_LABEL_LIMIT = 10
@@ -110,7 +110,12 @@ def _resolve_label_k(per_label_k: "int | dict[str, int]", label: str | None) -> 
 
 def _escape_like(value: str) -> str:
     """Escape a literal for use inside a LIKE pattern with ``ESCAPE '\\'``."""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace("'", "''")
+    return (
+        value.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+        .replace("'", "''")
+    )
 
 
 def _build_metadata_where_clause(
@@ -149,10 +154,19 @@ def _build_metadata_where_clause(
 
     parts: list[str] = []
     if labels:
-        label_preds = [f"""metadata LIKE '%"label":"{_escape_like(lab)}"%' ESCAPE '\\'""" for lab in labels]
-        parts.append("(" + " OR ".join(label_preds) + ")" if len(label_preds) > 1 else label_preds[0])
+        label_preds = [
+            f"""metadata LIKE '%"label":"{_escape_like(lab)}"%' ESCAPE '\\'"""
+            for lab in labels
+        ]
+        parts.append(
+            "(" + " OR ".join(label_preds) + ")"
+            if len(label_preds) > 1
+            else label_preds[0]
+        )
     if database_name:
-        parts.append(f"""metadata LIKE '%"database_name":"{_escape_like(database_name)}"%' ESCAPE '\\'""")
+        parts.append(
+            f"""metadata LIKE '%"database_name":"{_escape_like(database_name)}"%' ESCAPE '\\'"""
+        )
     return " AND ".join(parts) if parts else None
 
 
@@ -244,8 +258,14 @@ def search_semantic_index(
             fmt=fmt,
         )
         vdb_kwargs = {"where": where_clause} if where_clause else None
-        top_k = _resolve_label_k(per_label_k, label) if where_clause else DEFAULT_FETCH_LIMIT
+        top_k = (
+            _resolve_label_k(per_label_k, label)
+            if where_clause
+            else DEFAULT_FETCH_LIMIT
+        )
         hits = retriever.query(entity, top_k=top_k, vdb_kwargs=vdb_kwargs)
         all_hits.extend(hits)
 
-    return _hits_to_semantic_rows(all_hits, label_filter=allowed_labels, per_label_k=per_label_k)
+    return _hits_to_semantic_rows(
+        all_hits, label_filter=allowed_labels, per_label_k=per_label_k
+    )
