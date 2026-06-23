@@ -25,11 +25,24 @@ Generative Semantic Fabric adds the structured-data ontology layer to any partne
 |---|---|---|---|
 | Frontend | Next.js 16 (React 19, TypeScript, Tailwind CSS 4), Better Auth, Prisma | Web UI, authentication, API gateway | 3000 |
 | Backend | FastAPI (Python 3.12+), NeMo-Retriever, LangChain | Chat / NL-to-SQL, catalog, datasource APIs | 3001 |
-| Ingestion worker | Ingests tabular data and writes embeddings | 3002 |
-| Postgres + pgvector | App metadata and vector store | 5432 |
-| Neo4j | Catalog/ontology graph and connection metadata | 7474 / 7687 |
-| NVIDIA NIM | Hosted or self-hosted NIM endpoints | [NVIDIA nemotron-3-nano-30b-a3b](https://build.nvidia.com/nvidia/nemotron-3-nano-30b-a3b/modelcard) | [NVIDIA llama-nemotron-embed-vl-1b-v2](https://build.nvidia.com/nvidia/llama-nemotron-embed-vl-1b-v2) (embedding model)
+| Ingestion worker | FastAPI (Python 3.12+), NeMo-Retriever | Ingests tabular data and writes embeddings | 3002 |
+| Postgres + pgvector | Relational Database | App metadata and vector store | 5432 |
+| Neo4j | Graph Database | Ontology graph | 7474 / 7687 |
 | HashiCorp Vault | Optional | Secure storage of connection credentials | — |
+
+### NVIDIA NIM
+
+GSF uses NVIDIA NIM endpoints for inference — either the hosted endpoints on
+[build.nvidia.com](https://build.nvidia.com) or self-hosted NIMs:
+
+- **LLM:**
+  [nemotron-3-nano-30b-a3b](https://build.nvidia.com/nvidia/nemotron-3-nano-30b-a3b/modelcard)
+- **Embeddings:**
+  [llama-nemotron-embed-vl-1b-v2](https://build.nvidia.com/nvidia/llama-nemotron-embed-vl-1b-v2)
+
+The endpoints and models are configured via the `BASE_URL`, `MODEL_NAME`,
+`EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require an
+`NVIDIA_API_KEY`.
 
 ## Deployment
 
