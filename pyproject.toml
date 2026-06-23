@@ -22,7 +22,7 @@ dependencies = [
 package = false
 
 [tool.uv.sources]
-nemo-retriever = { git = "https://github.com/ftatiana-nv/NeMo-Retriever.git", subdirectory = "nemo_retriever", branch = "taxonomies_omni" }
+nemo-retriever = { git = "https://github.com/ftatiana-nv/NeMo-Retriever.git", subdirectory = "nemo_retriever", branch = "main" }
 
 [dependency-groups]
 dev = [
