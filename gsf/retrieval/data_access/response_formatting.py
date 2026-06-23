@@ -40,7 +40,6 @@ def _extract_entities_with_id_name_label(data):
         if isinstance(obj, dict):
             # Main entity case: id + name + (type or label)
             if "id" in obj and "name" in obj and ("type" in obj or "label" in obj):
-
                 final_label = obj["label"]
 
                 result[obj["id"]] = (
@@ -114,7 +113,9 @@ def _highlight_entity(items_present: dict, text: str) -> str:
             if item:
                 return f"<{_prepare_link(item['name'], eid, name_or_label)}>"
             else:
-                logger.warning(f"Entity ID mismatch or not found: {name_or_label}/{eid}")
+                logger.warning(
+                    f"Entity ID mismatch or not found: {name_or_label}/{eid}"
+                )
                 return f"*{display_name or name_or_label}*"
         else:
             logger.warning(f"No ID found in entity: {cleaned}")
@@ -129,7 +130,9 @@ def format_response(candidates, response):
     all_entities_present = _extract_entities_with_id_name_label(candidates)
 
     try:
-        final_response_highlighted = _highlight_entity(all_entities_present, final_response_formatted)
+        final_response_highlighted = _highlight_entity(
+            all_entities_present, final_response_formatted
+        )
     except Exception:
         return final_response_formatted
     return final_response_highlighted

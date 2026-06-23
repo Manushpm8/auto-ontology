@@ -56,7 +56,9 @@ def safe_invoke_with_structured_output(
                 )
                 continue
             else:
-                logger.error(f"Validation failed after {RETRY_MAX_ATTEMPTS} attempts for {schema_name}")
+                logger.error(
+                    f"Validation failed after {RETRY_MAX_ATTEMPTS} attempts for {schema_name}"
+                )
                 raise
         except Exception as e:
             logger.error(

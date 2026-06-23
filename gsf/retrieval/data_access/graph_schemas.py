@@ -76,21 +76,27 @@ def get_schemas_by_ids(relevant_schemas_ids: list = None):
     schema_dfs = {}
     dbs_nodes = {}
     for database_name in dbs:
-        database_node = Neo4jNode(name=database_name, label=Labels.DB, props={"name": database_name})
+        database_node = Neo4jNode(
+            name=database_name, label=Labels.DB, props={"name": database_name}
+        )
         dbs_nodes[database_name] = database_node
 
-    tables_df = data_df[["database_name", "table_schema", "table_name", "table_id"]].drop_duplicates(
-        subset=["database_name", "table_schema", "table_name"]
-    )
+    tables_df = data_df[
+        ["database_name", "table_schema", "table_name", "table_id"]
+    ].drop_duplicates(subset=["database_name", "table_schema", "table_name"])
     tables_df = tables_df.rename(columns={"table_id": "id"})
 
     unique_schemas = data_df.table_schema.unique()
     for table_schema in unique_schemas:
         schema_tables_df = tables_df.loc[tables_df["table_schema"] == table_schema]
-        schema_dfs[table_schema] = {"tables": schema_tables_df.to_dict(orient="records")}
+        schema_dfs[table_schema] = {
+            "tables": schema_tables_df.to_dict(orient="records")
+        }
 
     for table_schema in unique_schemas:
-        columns_df = data_df.loc[data_df["table_schema"] == table_schema].rename(columns={"column_id": "id"})
+        columns_df = data_df.loc[data_df["table_schema"] == table_schema].rename(
+            columns={"column_id": "id"}
+        )
         schema_dfs[table_schema]["columns"] = columns_df.to_dict(orient="records")
 
     before_modify_all = time.time()
@@ -111,7 +117,9 @@ def get_schemas_by_ids(relevant_schemas_ids: list = None):
             table_schema,
             is_creation_mode=False,
         )
-    logger.info(f"total time it took to create all schemas nodes: {time.time() - before_modify_all}")
+    logger.info(
+        f"total time it took to create all schemas nodes: {time.time() - before_modify_all}"
+    )
     logger.info(f"total time for get_schemas_by_ids(): {time.time() - before_get_all}")
     return all_schemas
 
@@ -120,7 +128,9 @@ def _get_node_properties_by_id(id, label: str | list[str]):
     labels_list = label if isinstance(label, list) else [label]
     for lbl in labels_list:
         if lbl not in _ALLOWED_NODE_LABELS:
-            logger.warning("Rejecting unknown label %r in _get_node_properties_by_id", lbl)
+            logger.warning(
+                "Rejecting unknown label %r in _get_node_properties_by_id", lbl
+            )
             return None
     label_filter = "|".join(labels_list)
     query = f"""
@@ -140,5 +150,7 @@ def get_item_by_id(item_id, label):
     if result:
         return result
     else:
-        logger.error(f"The required item with id : {item_id} is not found in graph. ERROR.")
+        logger.error(
+            f"The required item with id : {item_id} is not found in graph. ERROR."
+        )
         return None

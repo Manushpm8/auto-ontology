@@ -81,7 +81,9 @@ def _format_semantic_context(
 
     if attribute_join_paths:
         lines.append("")
-        lines.append("SUGGESTED JOIN PATHS (derived from semantic model — use only the hops you need):")
+        lines.append(
+            "SUGGESTED JOIN PATHS (derived from semantic model — use only the hops you need):"
+        )
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
             col_name = entry.get("col_name", "")
@@ -153,7 +155,9 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
         if not isinstance(columns, list):
             columns = []
         if columns:
-            table_parts.append("  AVAILABLE COLUMNS (only use these columns for this table):")
+            table_parts.append(
+                "  AVAILABLE COLUMNS (only use these columns for this table):"
+            )
             for col in columns:
                 # Handle both dict and string column formats
                 if isinstance(col, dict):
@@ -260,8 +264,12 @@ class SQLFromCandidatesAgent(BaseAgent):
         )
 
         # Format similar questions for prompt
-        similar_questions_txt = "\n".join(f"question: {x[0]}\nanswer: {x[1]}" for x in similar_questions)
-        self.logger.info(f"Using {len(similar_questions)} similar questions from conversations.")
+        similar_questions_txt = "\n".join(
+            f"question: {x[0]}\nanswer: {x[1]}" for x in similar_questions
+        )
+        self.logger.info(
+            f"Using {len(similar_questions)} similar questions from conversations."
+        )
 
         def build_messages() -> list:
             """
@@ -273,12 +281,16 @@ class SQLFromCandidatesAgent(BaseAgent):
             relevance_reasoning = path_state.get("table_relevance_reasoning", "")
             observation_block = ""
             if relevance_reasoning:
-                observation_block += f"\nTable selection reasoning:\n{relevance_reasoning}\n"
+                observation_block += (
+                    f"\nTable selection reasoning:\n{relevance_reasoning}\n"
+                )
             observation_block += f"\nlist of important semantic entities with sql snippets:\n{custom_analyses_str}\n"
             if term_synonyms:
                 gloss_lines = ["TERM GLOSSARY (alternate names users may use):"]
                 for term_name, syns in term_synonyms.items():
-                    gloss_lines.append(f"  {term_name}: also known as {', '.join(syns)}")
+                    gloss_lines.append(
+                        f"  {term_name}: also known as {', '.join(syns)}"
+                    )
                 observation_block += "\n" + "\n".join(gloss_lines) + "\n"
 
             # Build custom analyses section for user prompt
@@ -303,9 +315,14 @@ class SQLFromCandidatesAgent(BaseAgent):
             # Build tables/schema section — semantic hint and available tables are co-equal.
             parts = []
             if primary_attribute:
-                parts.append(_format_semantic_context(primary_attribute, attribute_join_paths))
+                parts.append(
+                    _format_semantic_context(primary_attribute, attribute_join_paths)
+                )
             if relevant_tables:
-                parts.append("AVAILABLE TABLES (schema context):\n" + format_tables_for_prompt(relevant_tables))
+                parts.append(
+                    "AVAILABLE TABLES (schema context):\n"
+                    + format_tables_for_prompt(relevant_tables)
+                )
             tables_section = "\n\n".join(parts) if parts else "No tables available."
 
             # Build user prompt
@@ -328,9 +345,14 @@ class SQLFromCandidatesAgent(BaseAgent):
             ]
 
             # Add calendar time window reminder if needed
-            if any(phrase in question.lower() for phrase in ["last week", "last month", "last year"]):
+            if any(
+                phrase in question.lower()
+                for phrase in ["last week", "last month", "last year"]
+            ):
                 messages.append(
-                    SystemMessage(content="Apply only calendar time windows. DO NOT apply rolling time windows.")
+                    SystemMessage(
+                        content="Apply only calendar time windows. DO NOT apply rolling time windows."
+                    )
                 )
 
             return messages
@@ -389,7 +411,10 @@ class SQLFromCandidatesAgent(BaseAgent):
 
         if has_sql:
             custom_analyses_used = []
-            if hasattr(response, "custom_analyses_used") and response.custom_analyses_used:
+            if (
+                hasattr(response, "custom_analyses_used")
+                and response.custom_analyses_used
+            ):
                 # Filter custom analyses to keep only those found in candidates
                 candidates_ids = {
                     c.get("id") if isinstance(c, dict) else getattr(c, "id", None)
@@ -398,10 +423,13 @@ class SQLFromCandidatesAgent(BaseAgent):
                 filtered_elements = [
                     elem
                     for elem in response.custom_analyses_used
-                    if (elem.id if hasattr(elem, "id") else elem.get("id")) in candidates_ids
+                    if (elem.id if hasattr(elem, "id") else elem.get("id"))
+                    in candidates_ids
                 ]
                 response.custom_analyses_used = filtered_elements
-                custom_analyses_used = get_custom_analyses_ids(response.custom_analyses_used)
+                custom_analyses_used = get_custom_analyses_ids(
+                    response.custom_analyses_used
+                )
 
             return {
                 "messages": messages,  # Don't add formatted response here - formatting agent will do it
@@ -419,7 +447,9 @@ class SQLFromCandidatesAgent(BaseAgent):
                 response.response += build_custom_analyses_section(
                     response.custom_analyses_used, path_state.get("custom_analyses", [])
                 )
-                custom_analyses_used = get_custom_analyses_ids(response.custom_analyses_used)
+                custom_analyses_used = get_custom_analyses_ids(
+                    response.custom_analyses_used
+                )
 
             return {
                 "messages": messages + [AIMessage(content=response.response)],
@@ -436,7 +466,8 @@ class SQLFromCandidatesAgent(BaseAgent):
             return {
                 "path_state": {
                     **path_state,
-                    "unconstructable_explanation": response.response or "Unable to construct response.",
+                    "unconstructable_explanation": response.response
+                    or "Unable to construct response.",
                 },
                 "decision": "unconstructable",
             }

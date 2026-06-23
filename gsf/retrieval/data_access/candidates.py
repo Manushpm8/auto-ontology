@@ -182,9 +182,17 @@ def _get_candidates_information(
             c.update(extra)
             rel_tabs = c.get("relevant_tables")
             if isinstance(rel_tabs, list):
-                c["relevant_tables"] = [_normalize_table_to_relevant_shape(t) for t in rel_tabs if isinstance(t, dict)]
+                c["relevant_tables"] = [
+                    _normalize_table_to_relevant_shape(t)
+                    for t in rel_tabs
+                    if isinstance(t, dict)
+                ]
 
-    results.sort(key=lambda item: float(item.get("score") if item.get("score") is not None else float("inf")))
+    results.sort(
+        key=lambda item: float(
+            item.get("score") if item.get("score") is not None else float("inf")
+        )
+    )
     return results
 
 
@@ -205,7 +213,11 @@ def _dedupe_best_score_sort_cap(combined: list[dict]) -> list[dict]:
             best_by_key[key] = c
 
     unique = list(best_by_key.values())
-    unique.sort(key=lambda x: float(x.get("score")) if x.get("score") is not None else float("inf"))
+    unique.sort(
+        key=lambda x: (
+            float(x.get("score")) if x.get("score") is not None else float("inf")
+        )
+    )
     return unique[:MAX_CALCULATION_CANDIDATES]
 
 

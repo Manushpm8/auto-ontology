@@ -155,7 +155,9 @@ class IntentValidationAgent(BaseAgent):
 
         # Call LLM for validation
         try:
-            validation_result = invoke_with_structured_output(llm, messages, IntentValidationModel)
+            validation_result = invoke_with_structured_output(
+                llm, messages, IntentValidationModel
+            )
         except Exception as e:
             self.logger.error(f"Intent validation LLM call failed: {str(e)}")
             # On error, pass through (don't block execution)
@@ -171,9 +173,13 @@ class IntentValidationAgent(BaseAgent):
                 "path_state": path_state,
             }
 
-        has_real_issues = validation_result.join_issues or validation_result.aggregation_issues
+        has_real_issues = (
+            validation_result.join_issues or validation_result.aggregation_issues
+        )
         if not has_real_issues:
-            self.logger.info("SQL validation passed (is_valid=False but no real issues listed)")
+            self.logger.info(
+                "SQL validation passed (is_valid=False but no real issues listed)"
+            )
             return {
                 "decision": "intent_valid",
                 "path_state": path_state,
@@ -184,17 +190,22 @@ class IntentValidationAgent(BaseAgent):
 
         if validation_result.join_issues:
             error_parts.append(
-                "\n\nCritical join issues:\n" + "\n".join(f"  - {issue}" for issue in validation_result.join_issues)
+                "\n\nCritical join issues:\n"
+                + "\n".join(f"  - {issue}" for issue in validation_result.join_issues)
             )
 
         if validation_result.aggregation_issues:
             error_parts.append(
                 "\n\nCritical aggregation issues:\n"
-                + "\n".join(f"  - {issue}" for issue in validation_result.aggregation_issues)
+                + "\n".join(
+                    f"  - {issue}" for issue in validation_result.aggregation_issues
+                )
             )
 
         error_msg = "".join(error_parts)
-        self.logger.info(f"SQL validation failed (critical issues): {error_msg[:200]}...")
+        self.logger.info(
+            f"SQL validation failed (critical issues): {error_msg[:200]}..."
+        )
 
         updated_path_state = {
             **path_state,

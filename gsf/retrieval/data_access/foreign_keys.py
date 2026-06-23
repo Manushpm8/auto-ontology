@@ -161,7 +161,9 @@ def _apply_foreign_key_hints(tables: list[dict], relevant_fks: list) -> None:
     for table in tables:
         for fk in relevant_fks:
             if table["name"] == fk["table1"]:
-                table["foreign_key"] = f"'{table['name']}.{fk['column1']}' = '{fk['table2']}.{fk['column2']}'"
+                table["foreign_key"] = (
+                    f"'{table['name']}.{fk['column1']}' = '{fk['table2']}.{fk['column2']}'"
+                )
 
 
 def get_relevant_fks_from_candidates_tables(
@@ -197,7 +199,9 @@ def get_relevant_tables_with_fks(
     database_name: str | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Like :func:`get_relevant_tables` but also returns FK relationships, with FK hints applied in-place."""
-    relevant_tables_list = get_relevant_tables(retriever, initial_question, k=k, database_name=database_name)
+    relevant_tables_list = get_relevant_tables(
+        retriever, initial_question, k=k, database_name=database_name
+    )
 
     relevant_fks: list = []
     if relevant_tables_list:

@@ -59,7 +59,9 @@ class ResponseAgent(BaseAgent):
         response_explanation = getattr(llm_response, "response", "")
         candidates_with_entities = path_state.get("candidates", [])
         candidates = [
-            item["candidate"] if isinstance(item, dict) and "candidate" in item else item
+            item["candidate"]
+            if isinstance(item, dict) and "candidate" in item
+            else item
             for item in candidates_with_entities
         ]
 

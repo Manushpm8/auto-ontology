@@ -130,7 +130,9 @@ class SQLReconstructionAgent(BaseAgent):
         response = invoke_with_structured_output(llm, messages, schema)
 
         if response is None:
-            self.logger.warning("SQL reconstruction returned None — marking unconstructable")
+            self.logger.warning(
+                "SQL reconstruction returned None — marking unconstructable"
+            )
             return {
                 "decision": "unconstructable",
                 "path_state": path_state,
@@ -146,14 +148,18 @@ class SQLReconstructionAgent(BaseAgent):
         # Extract custom analyses
         custom_analyses_used = []
         if hasattr(response, "custom_analyses_used"):
-            custom_analyses_used = get_custom_analyses_ids(response.custom_analyses_used)
+            custom_analyses_used = get_custom_analyses_ids(
+                response.custom_analyses_used
+            )
 
         return {
             "messages": messages,
             "path_state": {
                 **path_state,
                 "sql_generation_result": response,
-                "relevant_tables": all_tables if all_tables is not None else path_state.get("relevant_tables", []),
+                "relevant_tables": all_tables
+                if all_tables is not None
+                else path_state.get("relevant_tables", []),
                 "custom_analyses_used": custom_analyses_used,
             },
         }

@@ -179,7 +179,9 @@ Only fail validation for serious, critical errors that
 would make the query unusable."""
 
 
-def create_intent_validation_prompt(question: str, entities_text: str, sql_code: str) -> str:
+def create_intent_validation_prompt(
+    question: str, entities_text: str, sql_code: str
+) -> str:
     return f"""User's Question: {question}
 
 Generated SQL Query:

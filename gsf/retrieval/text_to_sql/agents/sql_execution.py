@@ -34,7 +34,9 @@ def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
     ``connector.database_name``).
     """
     if connector is None:
-        return QueryResponse(result=None, sliced=False, error="No connector available to execute SQL.")
+        return QueryResponse(
+            result=None, sliced=False, error="No connector available to execute SQL."
+        )
     try:
         df = connector.execute(sql)
     except Exception as e:
@@ -90,5 +92,8 @@ class SQLExecutionAgent(BaseAgent):
 
         return {
             "decision": "valid_sql",
-            "path_state": {**path_state, "sql_response_from_db": response_from_db.result},
+            "path_state": {
+                **path_state,
+                "sql_response_from_db": response_from_db.result,
+            },
         }

@@ -10,8 +10,12 @@ from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
-from gsf.retrieval.text_to_sql.agents.candidates_preparation import CandidatePreparationAgent
-from gsf.retrieval.text_to_sql.agents.candidates_retrieval import CandidateRetrievalAgent
+from gsf.retrieval.text_to_sql.agents.candidates_preparation import (
+    CandidatePreparationAgent,
+)
+from gsf.retrieval.text_to_sql.agents.candidates_retrieval import (
+    CandidateRetrievalAgent,
+)
 from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionAgent
 from gsf.retrieval.text_to_sql.agents.intent_validation import IntentValidationAgent
 from gsf.retrieval.text_to_sql.agents.response import ResponseAgent
@@ -48,7 +52,9 @@ def route_sql_validation(state: AgentState) -> str:
         logger.info(f"Construct sql attempt: {attempts}")
         state["path_state"]["sql_attempts"] = attempts + 1
         if attempts == 4:
-            logger.info("Can not construct sql from snippets, try from relevant tables. Fallback.")
+            logger.info(
+                "Can not construct sql from snippets, try from relevant tables. Fallback."
+            )
             return "fallback"  # try constructing from tables, not only snippets
         elif attempts < 8:
             return "invalid_sql"
@@ -60,7 +66,9 @@ def route_sql_validation(state: AgentState) -> str:
         # SQL is valid - check if we should skip intent validation
         reconstruction_count = state["path_state"].get("reconstruction_count", 0)
         if reconstruction_count > 5:
-            logger.info(f"Skipping intent validation after {reconstruction_count} reconstructions")
+            logger.info(
+                f"Skipping intent validation after {reconstruction_count} reconstructions"
+            )
             return "skip_intent_validation"
         return "valid_sql"
 
@@ -193,9 +201,15 @@ def create_graph():
 
     # Routing nodes (using agent_wrapper)
 
-    entities_extraction_node = _make_node("entities_extraction", agent_wrapper(entities_extraction_agent))
-    retrieve_candidates_node = _make_node("retrieve_candidates", agent_wrapper(retrieval_agent))
-    prepare_candidates_node = _make_node("prepare_candidates", agent_wrapper(candidate_preparation_agent))
+    entities_extraction_node = _make_node(
+        "entities_extraction", agent_wrapper(entities_extraction_agent)
+    )
+    retrieve_candidates_node = _make_node(
+        "retrieve_candidates", agent_wrapper(retrieval_agent)
+    )
+    prepare_candidates_node = _make_node(
+        "prepare_candidates", agent_wrapper(candidate_preparation_agent)
+    )
     construct_sql_not_from_snippets_node = _make_node(
         "construct_sql_not_from_snippets", agent_wrapper(sql_from_tables_agent)
     )
@@ -203,12 +217,22 @@ def create_graph():
         "construct_sql_from_candidates",
         agent_wrapper(sql_from_candidates_agent),
     )
-    reconstruct_sql_node = _make_node("reconstruct_sql", agent_wrapper(sql_reconstruction_agent))
+    reconstruct_sql_node = _make_node(
+        "reconstruct_sql", agent_wrapper(sql_reconstruction_agent)
+    )
 
-    validate_sql_query_node = _make_node("validate_sql_query", agent_wrapper(sql_validation_agent))
-    validate_intent_node = _make_node("validate_intent", agent_wrapper(intent_validation_agent))
-    execute_sql_query_node = _make_node("execute_sql_query", agent_wrapper(sql_execution_agent))
-    format_and_respond_node = _make_node("format_and_respond", agent_wrapper(response_agent))
+    validate_sql_query_node = _make_node(
+        "validate_sql_query", agent_wrapper(sql_validation_agent)
+    )
+    validate_intent_node = _make_node(
+        "validate_intent", agent_wrapper(intent_validation_agent)
+    )
+    execute_sql_query_node = _make_node(
+        "execute_sql_query", agent_wrapper(sql_execution_agent)
+    )
+    format_and_respond_node = _make_node(
+        "format_and_respond", agent_wrapper(response_agent)
+    )
     unconstructable_sql_response_node = _make_node(
         "unconstructable_sql_response", agent_wrapper(sql_unconstructable_agent)
     )
@@ -224,7 +248,9 @@ def create_graph():
     graph.add_node("entities_extraction", entities_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
-    graph.add_node("construct_sql_not_from_snippets", construct_sql_not_from_snippets_node)
+    graph.add_node(
+        "construct_sql_not_from_snippets", construct_sql_not_from_snippets_node
+    )
     graph.add_node("construct_sql_from_candidates", construct_sql_from_candidates_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
     graph.add_node("validate_sql_query", validate_sql_query_node)

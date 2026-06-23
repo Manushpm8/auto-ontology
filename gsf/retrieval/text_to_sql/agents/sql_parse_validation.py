@@ -89,7 +89,9 @@ class SQLValidationAgent(BaseAgent):
         schemas_ids = get_all_schemas_ids()
         schemas = get_schemas_by_ids(schemas_ids)
 
-        validation_result = self._sql_parse_validation(schemas, response.sql_code, dialects)
+        validation_result = self._sql_parse_validation(
+            schemas, response.sql_code, dialects
+        )
 
         if validation_result.get("error"):
             error_msg = validation_result["error"]
@@ -103,7 +105,9 @@ class SQLValidationAgent(BaseAgent):
         sql_columns = validation_result.get("sql_columns") or []
         custom_analyses_used = []
         if hasattr(response, "custom_analyses_used"):
-            custom_analyses_used = get_custom_analyses_ids(response.custom_analyses_used)
+            custom_analyses_used = get_custom_analyses_ids(
+                response.custom_analyses_used
+            )
 
         # Store connection_data in the format expected by execute_sql_query
         # execute_sql_query expects connections as a list

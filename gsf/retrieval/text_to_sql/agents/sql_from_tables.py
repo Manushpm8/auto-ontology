@@ -30,7 +30,10 @@ from gsf.retrieval.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 from gsf.retrieval.text_to_sql.state import AgentState, get_question_for_processing
-from gsf.retrieval.text_to_sql.prompts import create_sql_general_prompt, create_sql_user_prompt
+from gsf.retrieval.text_to_sql.prompts import (
+    create_sql_general_prompt,
+    create_sql_user_prompt,
+)
 from gsf.retrieval.data_access.relevant_tables import get_relevant_tables
 
 logger = logging.getLogger(__name__)
@@ -127,7 +130,9 @@ class SQLFromTablesAgent(BaseAgent):
             return {
                 "path_state": {
                     **path_state,
-                    "unconstructable_explanation": getattr(response, "response", "LLM failed to produce SQL."),
+                    "unconstructable_explanation": getattr(
+                        response, "response", "LLM failed to produce SQL."
+                    ),
                 },
                 "decision": "unconstructable",
             }

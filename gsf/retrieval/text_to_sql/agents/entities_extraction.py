@@ -63,7 +63,9 @@ class EntitiesExtractionAgent(BaseAgent):
         result: Dict[str, Any] = {"path_state": path_state}
 
         try:
-            extraction_messages = [SystemMessage(content=create_entity_extraction_prompt(question))]
+            extraction_messages = [
+                SystemMessage(content=create_entity_extraction_prompt(question))
+            ]
             extraction_result = invoke_with_structured_output(
                 llm,
                 extraction_messages,
@@ -79,7 +81,9 @@ class EntitiesExtractionAgent(BaseAgent):
             entities = extraction_result.required_entity_name or []
 
             if not entities:
-                self.logger.warning("LLM returned empty entities — using question as fallback")
+                self.logger.warning(
+                    "LLM returned empty entities — using question as fallback"
+                )
                 entities = [question]
 
             path_state["entities"] = entities

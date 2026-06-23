@@ -31,7 +31,9 @@ def resolve_connector_from_tables(
         return None
 
     db_to_connector: dict[str, SQLDatabase] = {
-        str(getattr(c, "database_name", "")): c for c in connectors if getattr(c, "database_name", None)
+        str(getattr(c, "database_name", "")): c
+        for c in connectors
+        if getattr(c, "database_name", None)
     }
 
     for table in tables or []:

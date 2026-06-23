@@ -75,7 +75,9 @@ def _extract_json_from_sql_object(text: str) -> dict | None:
                 out[key], _ = lit
         else:
             # Non-string value (e.g. COUNT(...)); take until next 'sql_code', 'answer', 'result' or end
-            next_key = re.search(r"'\s*(?:sql_code|answer|result)\s*'\s*,\s*", inner[pos:], re.IGNORECASE)
+            next_key = re.search(
+                r"'\s*(?:sql_code|answer|result)\s*'\s*,\s*", inner[pos:], re.IGNORECASE
+            )
             end = pos + next_key.start() if next_key else len(inner)
             out[key] = inner[pos:end].strip().rstrip(",").strip()
     if out["sql_code"] or out["answer"] or out["result"] is not None:
@@ -211,7 +213,8 @@ CALC_FINAL_RESPONSE_JSON_SCHEMA = {
         "response": {
             "type": "string",
             "description": (
-                "The final response with your explanations and the final sql query " "that answers the user's question."
+                "The final response with your explanations and the final sql query "
+                "that answers the user's question."
             ),
         },
         "sql_code": {
@@ -302,7 +305,9 @@ def get_sql_tool_response_top_k(
     structured_llm = llm_client.with_structured_output(CALC_FINAL_RESPONSE_JSON_SCHEMA)
     try:
         result = structured_llm.invoke(prompt)
-        if isinstance(result, dict) and (result.get("sql_code") or result.get("response")):
+        if isinstance(result, dict) and (
+            result.get("sql_code") or result.get("response")
+        ):
             result_dict = _dict_to_sql_result(result)
     except Exception as e:
         err_str = str(e)
@@ -310,11 +315,17 @@ def get_sql_tool_response_top_k(
             content = err_str.split("Invalid json output:", 1)[-1].strip()
             if "For troubleshooting" in content:
                 content = content.split("For troubleshooting")[0].strip()
-            result_dict = _parse_sql_response_content(content) or _parse_markdown_explanation_sql_thought(content)
+            result_dict = _parse_sql_response_content(
+                content
+            ) or _parse_markdown_explanation_sql_thought(content)
         if result_dict is None:
             response = llm_client.invoke(prompt)
-            content = response.content if hasattr(response, "content") else str(response)
-            result_dict = _parse_sql_response_content(content) or _parse_markdown_explanation_sql_thought(content)
+            content = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+            result_dict = _parse_sql_response_content(
+                content
+            ) or _parse_markdown_explanation_sql_thought(content)
 
     if result_dict is None:
         result_dict = _dict_to_sql_result(None)

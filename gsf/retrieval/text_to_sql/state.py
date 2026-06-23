@@ -81,4 +81,10 @@ def rules_to_text(rules: list[dict[str, str]]) -> str:
     return "\n\n".join(parts) + "\n\n"
 
 
-__all__ = ["AgentPayload", "TextToSQLPayload", "AgentState", "get_question_for_processing", "rules_to_text"]
+__all__ = [
+    "AgentPayload",
+    "TextToSQLPayload",
+    "AgentState",
+    "get_question_for_processing",
+    "rules_to_text",
+]

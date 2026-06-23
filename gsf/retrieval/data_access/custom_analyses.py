@@ -85,7 +85,9 @@ def build_custom_analyses_section(items, candidates):
 
     # Normalize to attribute access via getattr (fallback to dict.get)
     def _get(obj, key, default=None):
-        return getattr(obj, key, obj.get(key, default) if isinstance(obj, dict) else default)
+        return getattr(
+            obj, key, obj.get(key, default) if isinstance(obj, dict) else default
+        )
 
     # Map candidate id -> candidate object
     by_id = {_get(c, "id"): c for c in candidates if _get(c, "id")}

@@ -8,7 +8,9 @@ import logging
 
 from gsf.utils import get_embed_params
 from nemo_retriever.graph import Graph
-from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import TabularSchemaExtractOp
+from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import (
+    TabularSchemaExtractOp,
+)
 from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
@@ -51,6 +53,6 @@ def run_ingest(connection_string: str) -> None:
         )
     else:
         logger.info("Tabular ingest result: no rows produced")
-    
+
     logger.info("Starting semantic compilation")
     run_semantic_compilation(database_name)

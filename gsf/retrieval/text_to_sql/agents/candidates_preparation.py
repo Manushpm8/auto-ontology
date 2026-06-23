@@ -67,7 +67,11 @@ def _extract_relevant_queries(candidates: list) -> list[dict]:
 
     Returns a list of dicts with keys: id, name, description, sql.
     """
-    analysis_ids = [str(c["id"]) for c in candidates if c.get("label", "") == Labels.CUSTOM_ANALYSIS and c.get("id")]
+    analysis_ids = [
+        str(c["id"])
+        for c in candidates
+        if c.get("label", "") == Labels.CUSTOM_ANALYSIS and c.get("id")
+    ]
     if not analysis_ids:
         return []
 
@@ -162,7 +166,9 @@ class CandidatePreparationAgent(BaseAgent):
         self.logger.info("Retrieved %d custom analyses", len(custom_analyses))
 
         relevant_queries = _extract_relevant_queries(custom_analyses)
-        self.logger.info("Found %d relevant queries from custom analyses", len(relevant_queries))
+        self.logger.info(
+            "Found %d relevant queries from custom analyses", len(relevant_queries)
+        )
 
         custom_analyses_str = self._build_custom_analyses_str(relevant_queries)
 
@@ -173,7 +179,9 @@ class CandidatePreparationAgent(BaseAgent):
         term_synonyms: dict[str, list[str]] = {}
 
         if column_attributes:
-            attr_ids = [str(hit.get("id") or "") for hit in column_attributes if hit.get("id")]
+            attr_ids = [
+                str(hit.get("id") or "") for hit in column_attributes if hit.get("id")
+            ]
             attr_ids = list(dict.fromkeys(attr_ids))  # deduplicate, preserve order
 
             attr_contexts = self._fetch_attr_column_contexts(attr_ids)
@@ -201,7 +209,9 @@ class CandidatePreparationAgent(BaseAgent):
                 for dest_id, dest_ctx in attr_contexts.items():
                     if dest_id == anchor_id:
                         continue
-                    join_path = self._find_join_path(anchor_ctx["col_id"], dest_ctx["col_id"])
+                    join_path = self._find_join_path(
+                        anchor_ctx["col_id"], dest_ctx["col_id"]
+                    )
                     attribute_join_paths.append(
                         {
                             "id": dest_id,
@@ -219,14 +229,22 @@ class CandidatePreparationAgent(BaseAgent):
                         len(join_path),
                     )
             else:
-                self.logger.warning("No valid anchor attribute found — skipping join path computation")
+                self.logger.warning(
+                    "No valid anchor attribute found — skipping join path computation"
+                )
 
         # --- 4. Retrieve relevant tables ---
         relevant_tables = get_relevant_tables_from_candidates(candidates)
 
         # Also fetch tables directly connected to the retrieved ColumnAttributes via Neo4j.
         if attr_contexts:
-            ca_table_ids = list(dict.fromkeys(ctx["table_id"] for ctx in attr_contexts.values() if ctx.get("table_id")))
+            ca_table_ids = list(
+                dict.fromkeys(
+                    ctx["table_id"]
+                    for ctx in attr_contexts.values()
+                    if ctx.get("table_id")
+                )
+            )
             ca_tables = self._fetch_tables_by_ids(ca_table_ids)
             existing_ids = {t.get("id") for t in relevant_tables}
             for tbl in ca_tables:
@@ -234,7 +252,9 @@ class CandidatePreparationAgent(BaseAgent):
                     relevant_tables.append(tbl)
                     existing_ids.add(tbl.get("id"))
 
-        self.logger.info("Tables from candidates: %s", [t["name"] for t in relevant_tables])
+        self.logger.info(
+            "Tables from candidates: %s", [t["name"] for t in relevant_tables]
+        )
 
         additional_tables = []
         search_queries = [question] + path_state.get("entities", [])
@@ -248,7 +268,9 @@ class CandidatePreparationAgent(BaseAgent):
                 )
                 additional_tables.extend(tables)
             except Exception:
-                self.logger.warning("Table retrieval failed for query: %s", query, exc_info=True)
+                self.logger.warning(
+                    "Table retrieval failed for query: %s", query, exc_info=True
+                )
         additional_tables = dedupe_merge_relevant_tables(additional_tables)[:10]
         relevant_tables.extend(additional_tables)
 
@@ -292,7 +314,9 @@ class CandidatePreparationAgent(BaseAgent):
             "path_state": {
                 **path_state,
                 "relevant_tables": relevant_tables,
-                "relevant_queries": [r["sql"] for r in relevant_queries if r.get("sql")],
+                "relevant_queries": [
+                    r["sql"] for r in relevant_queries if r.get("sql")
+                ],
                 "custom_analyses": custom_analyses,
                 "custom_analyses_str": custom_analyses_str,
                 "table_relevance_reasoning": table_relevance_reasoning,
@@ -318,7 +342,9 @@ class CandidatePreparationAgent(BaseAgent):
         try:
             llm = state["llm"]
         except KeyError:
-            self.logger.warning("No LLM in state — skipping custom analysis relevance filter")
+            self.logger.warning(
+                "No LLM in state — skipping custom analysis relevance filter"
+            )
             return analyses
 
         analyses_summary = "\n".join(
@@ -334,12 +360,16 @@ class CandidatePreparationAgent(BaseAgent):
         )
 
         messages = [
-            SystemMessage(content="You are a database domain expert that filters custom analyses."),
+            SystemMessage(
+                content="You are a database domain expert that filters custom analyses."
+            ),
             HumanMessage(content=prompt_text),
         ]
 
         try:
-            result = invoke_with_structured_output(llm, messages, CustomAnalysisRelevanceModel)
+            result = invoke_with_structured_output(
+                llm, messages, CustomAnalysisRelevanceModel
+            )
         except Exception as e:
             self.logger.warning(
                 "Custom analysis relevance LLM call failed: %s — keeping all",
@@ -348,22 +378,37 @@ class CandidatePreparationAgent(BaseAgent):
             return analyses
 
         if result is None:
-            self.logger.warning("Custom analysis relevance filter returned None — keeping all")
+            self.logger.warning(
+                "Custom analysis relevance filter returned None — keeping all"
+            )
             return analyses
 
         names_to_remove = {name.lower() for name in result.analyses_to_remove}
 
-        filtered = [a for a in analyses if (a.get("name") or "").lower() not in names_to_remove]
-        removed = [a.get("name") for a in analyses if (a.get("name") or "").lower() in names_to_remove]
+        filtered = [
+            a for a in analyses if (a.get("name") or "").lower() not in names_to_remove
+        ]
+        removed = [
+            a.get("name")
+            for a in analyses
+            if (a.get("name") or "").lower() in names_to_remove
+        ]
 
         reasoning = (result.reasoning or "").strip()
-        self.logger.info("Custom analysis filter reasoning: %s", reasoning if reasoning else "(empty)")
+        self.logger.info(
+            "Custom analysis filter reasoning: %s",
+            reasoning if reasoning else "(empty)",
+        )
         if removed:
             self.logger.info("Custom analysis filter removed: %s", removed)
-        self.logger.info("Custom analysis filter kept: %s", [a.get("name") for a in filtered])
+        self.logger.info(
+            "Custom analysis filter kept: %s", [a.get("name") for a in filtered]
+        )
 
         if not filtered:
-            self.logger.warning("Custom analysis filter removed ALL analyses — keeping all")
+            self.logger.warning(
+                "Custom analysis filter removed ALL analyses — keeping all"
+            )
             return analyses
 
         return filtered
@@ -393,13 +438,17 @@ class CandidatePreparationAgent(BaseAgent):
             return tables, ""
 
         tables_summary = "\n".join(
-            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}" for t in tables
+            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
+            for t in tables
         )
 
         domain_rules_text = rules_to_text(state.get("domain_rules", []))
         domain_rules_section = ""
         if domain_rules_text:
-            domain_rules_section = "Domain-specific rules (use these to decide relevance):\n" f"{domain_rules_text}\n"
+            domain_rules_section = (
+                "Domain-specific rules (use these to decide relevance):\n"
+                f"{domain_rules_text}\n"
+            )
 
         ca_section = ""
         if custom_analyses:
@@ -427,7 +476,9 @@ class CandidatePreparationAgent(BaseAgent):
         )
 
         messages = [
-            SystemMessage(content="You are a database schema expert that filters candidate tables."),
+            SystemMessage(
+                content="You are a database schema expert that filters candidate tables."
+            ),
             HumanMessage(content=prompt_text),
         ]
 
@@ -457,10 +508,18 @@ class CandidatePreparationAgent(BaseAgent):
         reasoning = (result.reasoning or "").strip()
         names_to_remove = {name.lower() for name in result.tables_to_remove}
 
-        filtered = [t for t in tables if _qualified_name(t).lower() not in names_to_remove]
-        removed = [_qualified_name(t) for t in tables if _qualified_name(t).lower() in names_to_remove]
+        filtered = [
+            t for t in tables if _qualified_name(t).lower() not in names_to_remove
+        ]
+        removed = [
+            _qualified_name(t)
+            for t in tables
+            if _qualified_name(t).lower() in names_to_remove
+        ]
 
-        self.logger.info("Relevance filter reasoning: %s", reasoning if reasoning else "(empty)")
+        self.logger.info(
+            "Relevance filter reasoning: %s", reasoning if reasoning else "(empty)"
+        )
         if removed:
             self.logger.info("Relevance filter removed tables: %s", removed)
 
@@ -489,7 +548,9 @@ class CandidatePreparationAgent(BaseAgent):
         try:
             rows = get_neo4j_conn().query_read(query, {"attr_ids": attr_ids})
         except Exception:
-            self.logger.warning("_fetch_attr_column_contexts: Neo4j query failed", exc_info=True)
+            self.logger.warning(
+                "_fetch_attr_column_contexts: Neo4j query failed", exc_info=True
+            )
             return {}
         result: dict[str, dict] = {}
         for row in rows:
@@ -523,7 +584,9 @@ class CandidatePreparationAgent(BaseAgent):
         try:
             rows = get_neo4j_conn().query_read(query, {"attr_ids": attr_ids})
         except Exception:
-            self.logger.warning("_fetch_term_synonyms: Neo4j query failed", exc_info=True)
+            self.logger.warning(
+                "_fetch_term_synonyms: Neo4j query failed", exc_info=True
+            )
             return {}
         result: dict[str, list[str]] = {}
         for row in rows:
@@ -554,7 +617,9 @@ class CandidatePreparationAgent(BaseAgent):
         try:
             rows = get_neo4j_conn().query_read(query, {"ids": analysis_ids})
         except Exception:
-            self.logger.warning("_fetch_tables_from_custom_analyses: Neo4j query failed", exc_info=True)
+            self.logger.warning(
+                "_fetch_tables_from_custom_analyses: Neo4j query failed", exc_info=True
+            )
             return []
         tables = []
         seen: set[str] = set()
@@ -595,7 +660,9 @@ class CandidatePreparationAgent(BaseAgent):
         try:
             rows = get_neo4j_conn().query_read(query, {"table_ids": table_ids})
         except Exception:
-            self.logger.warning("_fetch_tables_by_ids: Neo4j query failed", exc_info=True)
+            self.logger.warning(
+                "_fetch_tables_by_ids: Neo4j query failed", exc_info=True
+            )
             return []
         tables = []
         for row in rows:
@@ -634,7 +701,9 @@ class CandidatePreparationAgent(BaseAgent):
         try:
             llm = state["llm"]
         except KeyError:
-            self.logger.warning("_identify_anchor: no LLM in state — using first attribute")
+            self.logger.warning(
+                "_identify_anchor: no LLM in state — using first attribute"
+            )
             return ids[0]
 
         attrs_block = "\n".join(
@@ -663,14 +732,21 @@ class CandidatePreparationAgent(BaseAgent):
         try:
             result = invoke_with_structured_output(llm, messages, AnchorColumnModel)
         except Exception:
-            self.logger.warning("_identify_anchor: LLM call failed — using first attribute", exc_info=True)
+            self.logger.warning(
+                "_identify_anchor: LLM call failed — using first attribute",
+                exc_info=True,
+            )
             return ids[0]
 
         if result and result.anchor_id and result.anchor_id in contexts:
-            self.logger.info("Anchor column identified: %s (%s)", result.anchor_id, result.reasoning)
+            self.logger.info(
+                "Anchor column identified: %s (%s)", result.anchor_id, result.reasoning
+            )
             return result.anchor_id
 
-        self.logger.warning("_identify_anchor: LLM returned invalid id — using first attribute")
+        self.logger.warning(
+            "_identify_anchor: LLM returned invalid id — using first attribute"
+        )
         return ids[0]
 
     def _fetch_col_table_contexts(self, col_ids: list[str]) -> dict[str, dict]:
@@ -685,7 +761,9 @@ class CandidatePreparationAgent(BaseAgent):
         try:
             rows = get_neo4j_conn().query_read(query, {"col_ids": col_ids})
         except Exception:
-            self.logger.warning("_fetch_col_table_contexts: Neo4j query failed", exc_info=True)
+            self.logger.warning(
+                "_fetch_col_table_contexts: Neo4j query failed", exc_info=True
+            )
             return {}
         return {
             r["col_id"]: {
@@ -724,15 +802,24 @@ class CandidatePreparationAgent(BaseAgent):
         }] AS path_nodes
         """
         try:
-            rows = get_neo4j_conn().query_read(path_query, {"anchor_col_id": anchor_col_id, "dest_col_id": dest_col_id})
+            rows = get_neo4j_conn().query_read(
+                path_query, {"anchor_col_id": anchor_col_id, "dest_col_id": dest_col_id}
+            )
         except Exception:
             self.logger.warning(
-                "_find_join_path: Neo4j query failed for %s -> %s", anchor_col_id, dest_col_id, exc_info=True
+                "_find_join_path: Neo4j query failed for %s -> %s",
+                anchor_col_id,
+                dest_col_id,
+                exc_info=True,
             )
             return []
 
         if not rows:
-            self.logger.debug("_find_join_path: no path found for %s -> %s", anchor_col_id, dest_col_id)
+            self.logger.debug(
+                "_find_join_path: no path found for %s -> %s",
+                anchor_col_id,
+                dest_col_id,
+            )
             return []
 
         path_nodes: list[dict] = rows[0].get("path_nodes") or []

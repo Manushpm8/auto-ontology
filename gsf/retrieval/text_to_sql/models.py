@@ -10,7 +10,9 @@ from typing import List, Annotated, Literal
 
 NonEmptyStr = Annotated[str, Field(min_length=1, description="Non-empty string")]
 
-NonEmptyStrList = Annotated[list[str], Field(min_length=1, description="Non-empty list of strings")]
+NonEmptyStrList = Annotated[
+    list[str], Field(min_length=1, description="Non-empty list of strings")
+]
 
 
 class StrictModel(BaseModel):
@@ -45,7 +47,9 @@ class ItemScore(BaseModel):
 
 NonEmptyItemScoreList = Annotated[
     List[ItemScore],
-    Field(min_length=1, description="Non-empty list of custom analysis classifications"),
+    Field(
+        min_length=1, description="Non-empty list of custom analysis classifications"
+    ),
 ]
 
 
@@ -143,7 +147,9 @@ class SQLGenerationModel(StrictModel):
     )
     sql_code: NonEmptyStr = Field(
         ...,
-        description=("The complete, executable SQL query. No comments, no delimiters, no explanation."),
+        description=(
+            "The complete, executable SQL query. No comments, no delimiters, no explanation."
+        ),
     )
     response: NonEmptyStr = Field(
         ...,
@@ -163,7 +169,9 @@ class SQLGenerationModel(StrictModel):
     def reject_placeholder_strings(cls, v: str, info) -> str:
         """Block LLM stubs like literal '...' that satisfy min length but are not valid output."""
         t = (v or "").strip()
-        if t in ("...", "…", "..", ".") or (len(t) <= 3 and not t.isalnum() and set(t) <= {".", "…", " "}):
+        if t in ("...", "…", "..", ".") or (
+            len(t) <= 3 and not t.isalnum() and set(t) <= {".", "…", " "}
+        ):
             raise ValueError(
                 f"{info.field_name!r} must be real content, not an ellipsis placeholder. "
                 "sql_code must be the full executable statement; response must be a real explanation."

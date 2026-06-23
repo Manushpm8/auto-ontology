@@ -57,7 +57,9 @@ def _search_column_attributes(ontology_retriever, entity: str, k: int) -> list[d
             )
         )
     except Exception:
-        logger.warning("ColumnAttribute search failed for entity %r", entity, exc_info=True)
+        logger.warning(
+            "ColumnAttribute search failed for entity %r", entity, exc_info=True
+        )
         return []
 
 
@@ -73,7 +75,9 @@ def _search_custom_analyses(retriever, entity: str, k: int) -> list[dict]:
             )
         )
     except Exception:
-        logger.warning("CustomAnalysis search failed for entity %r", entity, exc_info=True)
+        logger.warning(
+            "CustomAnalysis search failed for entity %r", entity, exc_info=True
+        )
         return []
 
 
@@ -106,7 +110,9 @@ def _llm_filter(llm, question: str, entity: str, candidates: list[dict]) -> list
 
     all_ids = [str(c.get("id") or "") for c in candidates if c.get("id")]
 
-    candidates_block = "\n".join(f"- id: {c.get('id')} | {c.get('text', '')}" for c in candidates if c.get("id"))
+    candidates_block = "\n".join(
+        f"- id: {c.get('id')} | {c.get('text', '')}" for c in candidates if c.get("id")
+    )
 
     messages = [
         SystemMessage(
@@ -139,7 +145,9 @@ Return the list of IDs to KEEP. If none are relevant, return an empty list.
 """
 
 
-def _llm_filter_custom_analyses(llm, question: str, candidates: list[dict]) -> list[dict]:
+def _llm_filter_custom_analyses(
+    llm, question: str, candidates: list[dict]
+) -> list[dict]:
     """Use the LLM to keep only custom analysis candidates relevant to *question*.
 
     Returns the filtered list; falls back to the original list on LLM failure.
@@ -147,7 +155,9 @@ def _llm_filter_custom_analyses(llm, question: str, candidates: list[dict]) -> l
     if not candidates:
         return []
 
-    candidates_block = "\n".join(f"- id: {c.get('id')} | {c.get('text', '')}" for c in candidates if c.get("id"))
+    candidates_block = "\n".join(
+        f"- id: {c.get('id')} | {c.get('text', '')}" for c in candidates if c.get("id")
+    )
 
     messages = [
         SystemMessage(
@@ -164,7 +174,12 @@ def _llm_filter_custom_analyses(llm, question: str, candidates: list[dict]) -> l
 
     kept_ids = set(result.kept_ids)
     filtered = [c for c in candidates if str(c.get("id") or "") in kept_ids]
-    logger.debug("Custom analysis filter: %d → %d (kept ids: %s)", len(candidates), len(filtered), kept_ids)
+    logger.debug(
+        "Custom analysis filter: %d → %d (kept ids: %s)",
+        len(candidates),
+        len(filtered),
+        kept_ids,
+    )
     return filtered
 
 
@@ -276,7 +291,9 @@ class CandidateRetrievalAgent(BaseAgent):
                 continue
             key = str(hid)
             prev = best_custom.get(key)
-            if prev is None or float(hit.get("score") or float("inf")) < float(prev.get("score") or float("inf")):
+            if prev is None or float(hit.get("score") or float("inf")) < float(
+                prev.get("score") or float("inf")
+            ):
                 best_custom[key] = hit
         deduped_custom = sorted(
             best_custom.values(),
@@ -287,7 +304,8 @@ class CandidateRetrievalAgent(BaseAgent):
         path_state["retrieved_custom_analyses"] = deduped_custom
 
         self.logger.info(
-            "Retrieved %d ColumnAttributes and %d CustomAnalysis candidates " "(%d entities queried)",
+            "Retrieved %d ColumnAttributes and %d CustomAnalysis candidates "
+            "(%d entities queried)",
             len(deduped_col_attr),
             len(deduped_custom),
             len(entities),
