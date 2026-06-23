@@ -13,8 +13,8 @@ from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
 from nemo_retriever.text_embed.operators import _BatchEmbedActor
-from nemo_retriever.vdb import IngestVdbOperator
-from nemo_retriever.params import TabularExtractParams
+from nemo_retriever.operators.vdb import IngestVdbOperator
+from nemo_retriever.common.params.models import TabularExtractParams
 from gsf.vdb import get_vdb
 from gsf.connectors.registry import create_connector
 
