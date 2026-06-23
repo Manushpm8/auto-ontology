@@ -87,7 +87,7 @@ class PostgresVDB(VDB):
     # straight into ``PGVectorStore.similarity_search_with_score_by_vector``.
     metadata_filter_format = "dict"
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, *, reset: bool = False, **kwargs: Any) -> None:
         connection_string = kwargs.get("connection_string")
         if not connection_string:
             raise ValueError(
@@ -110,7 +110,7 @@ class PostgresVDB(VDB):
         # 1. The ingestion should return which tables/columns were added/updated/deleted
         # 2. The implemtation should support be fault tolerant and support incremental ingestion, which is challenging.
         self.database_name = kwargs.get("database_name")
-        if self.database_name:
+        if self.database_name and reset:
             ids = self.delete_by_database(self.database_name)
             logger.info(
                 "PostgresVDB.delete_by_database: deleted %d rows for database %s",

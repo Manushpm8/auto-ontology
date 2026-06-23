@@ -32,7 +32,7 @@ def get_vdb(*, database_name: str | None = None) -> PostgresVDB:
 
 def get_data_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
     """Backward-compatible alias for :func:`get_vdb` (tabular / data layer)."""
-    return get_vdb(database_name=database_name)
+    return get_vdb(database_name=database_name, reset=reset)
 
 
 def get_semantic_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
@@ -44,4 +44,4 @@ def get_semantic_vdb(*, database_name: str | None = None, reset: bool = False) -
     }
     if database_name:
         kwargs["database_name"] = database_name
-    return PostgresVDB(**kwargs)
+    return PostgresVDB(reset=reset, **kwargs)
