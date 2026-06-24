@@ -36,6 +36,9 @@ lancedb/*
 # WWI CSV data (local only)
 dev_tools/wwi/data/
 
+# IDE config
+.vscode/
+
 # Cursor debug logs
 .cursor/
 
