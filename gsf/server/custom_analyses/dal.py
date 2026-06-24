@@ -34,16 +34,18 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
 )
 from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-from nemo_retriever.tabular_data.retrieval.data_access.graph_schemas import (
+from gsf.retrieval.data_access.graph_schemas import (
     get_all_schemas_ids,
     get_schemas_by_ids,
 )
+from nemo_retriever.operators.vdb import IngestVdbOperator
+from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
 
 from gsf.connectors import get_connectors
 
 if TYPE_CHECKING:
-    from nemo_retriever.params import EmbedParams
-    from nemo_retriever.vdb import VDB
+    from nemo_retriever.common.params.models import EmbedParams
+    from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
 
@@ -514,9 +516,8 @@ def delete_custom_analysis(analysis_id: str) -> dict[str, str] | None:
     Graph delete happens before the VDB delete so a Neo4j failure
     leaves both stores pointing at the same (still-present) record;
     if Neo4j succeeds and the VDB delete throws, the orphan VDB row
-    will be cleaned up on the next ingest of *database_name*
-    (``PostgresVDB.__init__`` calls ``delete_by_database`` at startup,
-    see ``gsf/vdb/postgres.py``).
+    will be cleaned up on the next ingest of *database_name* with ``reset=True``
+    (see :func:`gsf.vdb.get_data_vdb`).
     """
     existing = get_neo4j_conn().query_read(
         f"""
@@ -554,6 +555,7 @@ def _embed_custom_analyses(
     embed_params: "EmbedParams",
     vdb: "VDB",
     analysis_id: str | None = None,
+    database_name: str | None = None,
 ) -> None:
     """Fetch ``CustomAnalysis`` docs from Neo4j, embed them, and append to *vdb*.
 
@@ -581,9 +583,6 @@ def _embed_custom_analyses(
     row first.
     """
     import pandas as pd
-
-    from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
-    from nemo_retriever.vdb import IngestVdbOperator
 
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
@@ -629,6 +628,7 @@ def _embed_custom_analyses(
             "label": item.get("label", ""),
             "name": item.get("name", ""),
             "source_path": path,
+            "database_name": database_name,
         }
         rows.append(
             {

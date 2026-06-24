@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from nemo_retriever.params import EmbedParams
+from nemo_retriever.common.params.models import EmbedParams
 
 # Remote NIM embedding endpoint — no local GPU required.
 # MUST match the model used at ingest time; a mismatch produces garbage results

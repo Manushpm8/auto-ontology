@@ -73,7 +73,7 @@ def _worker_loop(
     )
 
     try:
-        from nemo_retriever.tabular_data.retrieval.text_to_sql.main import (
+        from gsf.retrieval.text_to_sql.main import (
             stream_agent_response,
         )
 
