@@ -8,6 +8,10 @@ Generative Semantic Fabric adds the structured-data ontology layer to any partne
 > [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). **This project
 > is currently not accepting external contributions.**
 
+<p>
+<img src="./docs/assets/arch.png" alt="GSF Architecture" width="800">
+</p>
+
 ## Key Features
 
 - **Natural-language querying** of structured data — questions are translated to
