@@ -10,9 +10,10 @@ import logging
 from typing import Any
 
 import pandas as pd
-from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
+from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
+
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 

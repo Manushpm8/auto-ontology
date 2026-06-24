@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from nemo_retriever.retriever import Retriever
+from nemo_retriever.graph.retriever import Retriever
 
 from gsf.utils.embedding import get_embed_kwargs
 from gsf.vdb import get_vdb
