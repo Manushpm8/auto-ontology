@@ -149,11 +149,12 @@ def list_custom_analyses() -> list[dict[str, Any]]:
 
 
 def _get_dialects() -> list[str]:
-    """Return the SQL dialects from the active connectors (all dialects supported by sqlglot)."""
+    """Return SQL dialects from active connectors (NeMo multi-connector order)."""
     connectors = get_connectors()
-    if not len(connectors):
+    dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
+    if not dialects:
         return ["generic", "ansi", "postgres"]
-    return [connector.dialect for connector in connectors]
+    return dialects
 
 
 def _get_schemas() -> dict:
@@ -393,12 +394,12 @@ def create_custom_analysis(
 
     row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
 
-    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    from gsf.utils import get_embed_params
     from gsf.vdb import get_vdb
 
     vdb = get_vdb()
     _embed_custom_analyses(
-        embed_params=EMBED_PARAMS,
+        embed_params=get_embed_params(),
         vdb=vdb,
         analysis_id=row["id"],
     )
@@ -482,13 +483,13 @@ def update_custom_analysis(
     # `IngestVdbOperator` appends, so re-embedding without first dropping
     # the stale row would leave two VDB entries for this analysis_id and
     # double-weight it at retrieval time.
-    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    from gsf.utils import get_embed_params
     from gsf.vdb import get_vdb
 
     vdb = get_vdb()
     vdb.delete_by_id(analysis_id)
     _embed_custom_analyses(
-        embed_params=EMBED_PARAMS,
+        embed_params=get_embed_params(),
         vdb=vdb,
         analysis_id=analysis_id,
     )

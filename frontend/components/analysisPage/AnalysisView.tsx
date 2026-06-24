@@ -195,9 +195,9 @@ export const AnalysisView = () => {
 				)}
 
 				{!loading && error == null && items.length === 0 && (
-					<div className="flex h-full min-h-[40dvh] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300/80 bg-white/60 p-12 text-center dark:border-zinc-600 dark:bg-zinc-950/40">
+					<div className="flex h-full flex-1 items-center justify-center">
 						<p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-							No custom analyses found
+							No Custom Analyses found
 						</p>
 					</div>
 				)}

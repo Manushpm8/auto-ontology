@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from nemo_retriever.tabular_data.neo4j import neo4j_connection
 import uvicorn
-from gsf.server.env import load_server_env
+from gsf.env import load_env
 
 import logging
 
@@ -21,10 +21,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
-load_server_env()
+load_env()
 
 from gsf.server.chat.router import router as chat_router  # noqa: E402
 from gsf.server.chat.worker import get_pool, shutdown_pool  # noqa: E402
+from gsf.server.connections.router import router as connections_router  # noqa: E402
 from gsf.server.datasources.router import router as datasources_router  # noqa: E402
 from gsf.server.health.router import router as health_router  # noqa: E402
 
@@ -62,6 +63,7 @@ def main() -> None:
     app.include_router(
         datasources_router, prefix="/api", tags=["datasources", "connectors"]
     )
+    app.include_router(connections_router, prefix="/api", tags=["connections"])
     app.include_router(chat_router, prefix="/api", tags=["chat"])
     app.include_router(health_router, prefix="/api", tags=["health"])
 

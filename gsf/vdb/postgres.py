@@ -20,8 +20,9 @@ from psycopg import sql
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
-from nemo_retriever.common.vdb.adt_vdb import VDB
+
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from nemo_retriever.vdb import VDB
 
 logger = logging.getLogger(__name__)
 
@@ -258,8 +259,20 @@ class PostgresVDB(VDB):
         )
         return inserted
 
-    def delete_by_database(self, database_name: str) -> list[str]:
+    def delete_by_database(
+        self,
+        database_name: str,
+        *,
+        preserve_semantic: bool = True,
+    ) -> list[str]:
         """Delete all rows whose ``database_name`` column matches ``database_name``.
+
+        ``CustomAnalysis`` rows are a global, user-authored pool that must
+        survive the nightly pre-ingest reset (see ``PostgresVDB.__init__``),
+        but should be removed when the database connection itself is torn down.
+        ``preserve_semantic`` defaults to ``True`` so the reset path keeps them;
+        pass ``preserve_semantic=False`` on the delete-connection path to remove
+        everything matching ``database_name``.
 
         Returns the list of deleted row IDs (empty if the table doesn't exist
         or no rows match).
@@ -273,10 +286,11 @@ class PostgresVDB(VDB):
             )
             return []
 
-        filter = {
+        filter: dict[str, Any] = {
             _DATABASE_METADATA_COLUMN: database_name,
-            _LABEL_METADATA_COLUMN: {"$ne": Labels.CUSTOM_ANALYSIS},
         }
+        if preserve_semantic:
+            filter[_LABEL_METADATA_COLUMN] = {"$ne": str(Labels.CUSTOM_ANALYSIS)}
 
         existing = store.get(
             where=filter,

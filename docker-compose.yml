@@ -84,6 +84,30 @@ services:
     environment:
       POSTGRES_HOST: postgres
       NEO4J_URI: bolt://neo4j:7687
+      INGESTION_SERVICE_URL: http://ingestion-service:3002
+    depends_on:
+      postgres:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
+      ingestion-service:
+        condition: service_started
+
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gsf:latest
+    container_name: gsf-ingestion-service
+    restart: unless-stopped
+    command: ["ingestion_service"]
+    ports:
+      - "3002:3002"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      NEO4J_URI: bolt://neo4j:7687
     depends_on:
       postgres:
         condition: service_started
