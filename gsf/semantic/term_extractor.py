@@ -65,8 +65,6 @@ through phrases like "also referred to as", "also known as", "abbreviated as", \
 
 Return each alternate name verbatim as a separate entry in synonyms.
 Example: "business unit (BU)" → synonyms: ["BU"]
-Example: "also referred to as DORs which stands for Diag-on-Request" → \
-synonyms: ["DORs", "Diag-on-Request"]
 
 Return an empty list if no alternate names are explicitly stated. \
 Do NOT infer, guess, or add any name that is not directly written in the description."""

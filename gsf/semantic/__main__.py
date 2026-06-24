@@ -1,7 +1,7 @@
 """CLI entry point for semantic layer compilation.
 
 Usage:
-    python -m gsf.semantic --database-name dor_prod
+    python -m gsf.semantic --database-name <database_name>
 """
 
 from __future__ import annotations

@@ -4,8 +4,7 @@
 
 """Stamp table/column metadata onto the Neo4j graph.
 
-This module reads ``<database_name>.json`` (sitting next to it — e.g.
-``dor_prod.json`` for the ``dor_prod`` database) and writes descriptions and
+This module reads ``<database_name>.json`` and writes descriptions and
 sample values onto the ``Table`` and ``Column`` nodes that the tabular ingest
 pipeline created in Neo4j. It is intentionally a small, dev-tools-only helper
 and is meant to be invoked at the end of an ingest run.
