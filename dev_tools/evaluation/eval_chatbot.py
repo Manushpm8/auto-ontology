@@ -22,7 +22,7 @@ result)), this script:
 Usage::
 
     uv run python -m dev_tools.evaluation.eval_chatbot \
-        [--input PATH] [--output PATH]
+        --database-name wideworldimporters [--input PATH] [--output PATH]
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from nemo_retriever.retriever import Retriever
+from nemo_retriever.graph.retriever import Retriever
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 from gsf.retrieval.text_to_sql.main import get_agent_response
@@ -72,10 +72,32 @@ if not _NVIDIA_API_KEY:
 # and pgvector store. Anything else here and scoring stops being apples-to-apples
 # with production.
 
-_DEFAULT_INPUT = Path(__file__).parent / "chatbot_evaluation.json"
+_EVAL_DIR = Path(__file__).parent
+
+_DEFAULT_MODEL_NAME = os.environ.get("MODEL_NAME", "nemotron")
 
 
-_DEFAULT_OUTPUT = Path(__file__).parent / "chatbot_evaluation_scores.csv"
+def _resolve_paths(
+    database_name: str | None,
+    input_override: Path | None,
+    output_override: Path | None,
+) -> tuple[Path, Path]:
+    """Derive input/output paths from *database_name* when not explicitly set."""
+    if input_override and output_override:
+        return input_override, output_override
+
+    if database_name:
+        db_dir = _EVAL_DIR / database_name
+        db_dir.mkdir(parents=True, exist_ok=True)
+        default_input = db_dir / "evaluation.json"
+        model_slug = _DEFAULT_MODEL_NAME.rsplit("/", 1)[-1]
+        default_output = db_dir / f"{model_slug}.csv"
+    else:
+        default_input = _EVAL_DIR / "evaluation.json"
+        model_slug = _DEFAULT_MODEL_NAME.rsplit("/", 1)[-1]
+        default_output = _EVAL_DIR / f"{model_slug}.csv"
+
+    return input_override or default_input, output_override or default_output
 
 
 def _build_connectors() -> list:
@@ -316,8 +338,7 @@ def _load_questions(path: Path) -> List[Dict[str, Any]]:
     if not path.exists():
         raise SystemExit(
             f"Evaluation file not found: {path}\n"
-            f"Pass --input <path> or create the default file at "
-            f"{_DEFAULT_INPUT}."
+            f"Pass --input <path> or --database-name <name>."
         )
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
@@ -499,16 +520,23 @@ def evaluate(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--database-name",
+        type=str,
+        default=None,
+        help="Database name (e.g. wideworldimporters). "
+        "Derives input from <db>/evaluation.json and output from <db>/<model>.csv.",
+    )
+    parser.add_argument(
         "--input",
         type=Path,
-        default=_DEFAULT_INPUT,
-        help=f"Input JSON path (default: {_DEFAULT_INPUT})",
+        default=None,
+        help="Input JSON path (overrides --database-name default).",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=_DEFAULT_OUTPUT,
-        help=f"Output CSV path (default: {_DEFAULT_OUTPUT})",
+        default=None,
+        help="Output CSV path (overrides --database-name default).",
     )
     parser.add_argument(
         "--consistency",
@@ -735,13 +763,18 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = _parse_args()
+    input_path, output_path = _resolve_paths(
+        args.database_name, args.input, args.output
+    )
     if args.single:
         run_single_query(SINGLE_QUERY)
     elif RUN_CONSISTENCY or args.consistency:
         num_runs = args.runs if args.consistency else CONSISTENCY_RUNS
-        consistency_output = Path(__file__).parent / "chatbot_consistency_scores.csv"
+        consistency_output = output_path.with_name(
+            f"{output_path.stem}_consistency.csv"
+        )
         evaluate_consistency(
-            input_path=args.input,
+            input_path=input_path,
             output_path=consistency_output,
             start_index=START_INDEX,
             end_index=END_INDEX,
@@ -749,8 +782,8 @@ if __name__ == "__main__":
         )
     else:
         evaluate(
-            input_path=args.input,
-            output_path=args.output,
+            input_path=input_path,
+            output_path=output_path,
             start_index=START_INDEX,
             end_index=END_INDEX,
         )

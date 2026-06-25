@@ -45,9 +45,8 @@ dev_tools/wwi/data/
 # Cache
 .cache/
 
-# Evaluation data files
-dev_tools/evaluation/*csv
-dev_tools/evaluation/*.json
+# Evaluation data files (per-database subfolders)
+dev_tools/evaluation/*/
 
 # Local OpenMetadata evaluation environment (Docker volume + rendered configs
 # with secrets); local scratch state, never commit.

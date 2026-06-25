@@ -4,7 +4,7 @@
 
 """Stamp table/column metadata onto the Neo4j graph.
 
-This module reads ``<database_name>.json`` and writes descriptions and
+This module reads ``<database_name>/metadata.json`` and writes descriptions and
 sample values onto the ``Table`` and ``Column`` nodes that the tabular ingest
 pipeline created in Neo4j. It is intentionally a small, dev-tools-only helper
 and is meant to be invoked at the end of an ingest run.
@@ -27,7 +27,7 @@ JSON shape (per table)::
         ...
     }
 
-Custom analyses (optional, separate file ``<database_name>_custom_analyses.json``)::
+Custom analyses (optional, ``<database_name>/custom_analyses.json``)::
 
     [
         {
@@ -59,7 +59,7 @@ DEFAULT_DIR = Path(__file__).resolve().parent
 def apply_metadata(database_name: str) -> None:
     """Stamp table/column metadata onto the Neo4j graph.
 
-    Reads ``<this dir>/<database_name>.json`` (keyed by table name) and
+    Reads ``<this dir>/<database_name>/metadata.json`` (keyed by table name) and
     updates the following properties for every table/column belonging to
     *database_name*:
 
@@ -74,7 +74,7 @@ def apply_metadata(database_name: str) -> None:
     """
     from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-    metadata_path = DEFAULT_DIR / f"{database_name}.json"
+    metadata_path = DEFAULT_DIR / database_name / "metadata.json"
 
     if not metadata_path.exists():
         logger.info("No metadata file at %s — skipping enrichment.", metadata_path)
@@ -156,7 +156,7 @@ def add_custom_analyses(
 ) -> None:
     """Ingest custom analyses for *database_name* into the Neo4j graph and the VDB.
 
-    Reads ``<this dir>/<database_name>_custom_analyses.json`` — a list of
+    Reads ``<this dir>/<database_name>/custom_analyses.json`` — a list of
     ``{"name", "description", "sql"}`` entries — and, for each entry:
 
     * parses the SQL against the schemas already in the graph (via
@@ -188,7 +188,7 @@ def add_custom_analyses(
 
     from gsf.server.custom_analyses.dal import _embed_custom_analyses
 
-    analyses_path = DEFAULT_DIR / f"{database_name}_custom_analyses.json"
+    analyses_path = DEFAULT_DIR / database_name / "custom_analyses.json"
 
     if not analyses_path.exists():
         logger.warning("custom analyses file not found at %s; skipping", analyses_path)

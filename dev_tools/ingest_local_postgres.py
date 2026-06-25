@@ -29,15 +29,15 @@ from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import EmbedParams, TabularExtractParams
 from gsf.vdb import get_data_vdb
 from gsf.connectors import get_connectors
-from gsf.server.env import load_server_env
+from gsf.env import load_env
 
 from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
 
-load_server_env()
+load_env()
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 
-_NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+_NVIDIA_API_KEY = os.environ.get("EMBED_API_KEY", "") or os.environ.get("NVIDIA_API_KEY", "")
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
 )
