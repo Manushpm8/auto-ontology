@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
