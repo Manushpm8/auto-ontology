@@ -130,7 +130,6 @@ ingestion:
 # ------------------------------------------------------------------
 frontend:
   image:
-    # Locally-built image (see ./frontend/Dockerfile).
     repository: nvcr.io/nvstaging/gsf/gsf-frontend
     tag: 0.0.1
   service:
