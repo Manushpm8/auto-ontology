@@ -36,8 +36,9 @@ lancedb/*
 # WWI CSV data (local only)
 dev_tools/wwi/data/
 
-# IDE config
-.vscode/
+# IDE config (keep launch.json tracked)
+.vscode/*
+!.vscode/launch.json
 
 # Cursor debug logs
 .cursor/
