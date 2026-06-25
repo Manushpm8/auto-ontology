@@ -99,10 +99,8 @@ neo4j:
 # ------------------------------------------------------------------
 backend:
   image:
-    # Locally-built image (see ./Dockerfile). Loaded into minikube via
-    # `minikube image load`; imagePullPolicy IfNotPresent uses it without pulling.
-    repository: gsf-backend
-    tag: local
+    repository: nvcr.io/nvstaging/gsf/gsf
+    tag: 0.0.1
   service:
     port: 3001
   replicas: 1
@@ -133,8 +131,8 @@ ingestion:
 frontend:
   image:
     # Locally-built image (see ./frontend/Dockerfile).
-    repository: gsf-frontend
-    tag: local
+    repository: nvcr.io/nvstaging/gsf/gsf-frontend
+    tag: 0.0.1
   service:
     port: 3000
     nodePort: 30000
