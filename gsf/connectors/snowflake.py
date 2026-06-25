@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -25,8 +24,8 @@ def _quoted_identifier(name: str) -> str:
 
 def _parse_connection_string(
     connection_string: str,
-) -> tuple[dict[str, Any], str, str, str]:
-    """Parse a Snowflake URL into connector kwargs, warehouse, database, and metadata name.
+) -> tuple[dict[str, Any], str, str]:
+    """Parse a Snowflake URL into connector kwargs, warehouse, and database name.
 
     Required URL parts: ``user``, ``password``, ``account`` (host), ``warehouse``,
     and ``database`` query param.
@@ -34,9 +33,6 @@ def _parse_connection_string(
     Expected format::
 
         snowflake://USER:PASSWORD@ACCOUNT?warehouse=WH&database=SF_DB
-
-    Optional: ``metadata_database`` (Neo4j / pgvector / ``<name>.json`` key;
-    defaults to ``METADATA_DATABASE`` env, then Snowflake ``database``).
     """
     parsed = urlparse(connection_string)
     if parsed.scheme.split("+", 1)[0].lower() != "snowflake":
@@ -78,12 +74,6 @@ def _parse_connection_string(
             "snowflake://user:pass@account?warehouse=COMPUTE_WH&database=MY_DB"
         )
 
-    metadata_database = query.get("metadata_database", [None])[0]
-    if metadata_database:
-        metadata_database = unquote(metadata_database)
-    else:
-        metadata_database = os.environ.get("METADATA_DATABASE", "").strip() or database
-
     connect_kwargs: dict[str, Any] = {
         "user": user,
         "password": password,
@@ -101,7 +91,7 @@ def _parse_connection_string(
     if schema:
         connect_kwargs["schema"] = schema
 
-    return connect_kwargs, warehouse, database, metadata_database
+    return connect_kwargs, warehouse, database
 
 
 class SnowflakeDatabase(SQLDatabase):
@@ -117,7 +107,6 @@ class SnowflakeDatabase(SQLDatabase):
         (
             self._connect_kwargs,
             self._warehouse,
-            self._snowflake_database,
             self._database_name,
         ) = _parse_connection_string(connection_string)
 
@@ -136,7 +125,7 @@ class SnowflakeDatabase(SQLDatabase):
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
         with snowflake.connector.connect(**self._connect_kwargs) as conn:
             with conn.cursor() as cur:
-                cur.execute(f"USE WAREHOUSE {self._warehouse}")
+                cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")
                 if parameters:
                     cur.execute(sql, parameters)
                 else:
@@ -210,7 +199,7 @@ class SnowflakeDatabase(SQLDatabase):
             return pd.DataFrame(columns=["end_time", "query_text"])
 
     def get_views(self) -> pd.DataFrame:
-        db = _quoted_identifier(self._snowflake_database)
+        db = _quoted_identifier(self._database_name)
         df = self.execute(f"SHOW VIEWS IN DATABASE {db}")
         if df.empty:
             return pd.DataFrame(
@@ -227,7 +216,7 @@ class SnowflakeDatabase(SQLDatabase):
         )[["table_schema", "table_name", "view_definition"]]
 
     def get_pks(self) -> pd.DataFrame:
-        db = _quoted_identifier(self._snowflake_database)
+        db = _quoted_identifier(self._database_name)
         df = self.execute(f"SHOW PRIMARY KEYS IN DATABASE {db}")
         if df.empty:
             return pd.DataFrame(
@@ -247,7 +236,7 @@ class SnowflakeDatabase(SQLDatabase):
         )[["table_schema", "table_name", "column_name", "ordinal_position"]]
 
     def get_fks(self) -> pd.DataFrame:
-        db = _quoted_identifier(self._snowflake_database)
+        db = _quoted_identifier(self._database_name)
         df = self.execute(f"SHOW IMPORTED KEYS IN DATABASE {db}")
         if df.empty:
             return pd.DataFrame(
@@ -284,6 +273,13 @@ class SnowflakeDatabase(SQLDatabase):
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    def ping(self) -> None:
+        """Verify credentials, the warehouse, and that schemas are visible."""
+        with snowflake.connector.connect(**self._connect_kwargs) as conn:
+            conn.execute_string(
+                f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}; SHOW SCHEMAS"
+            )
 
     def close(self) -> None:
         """No persistent connection to close (connections are per-query)."""

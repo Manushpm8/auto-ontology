@@ -95,7 +95,7 @@ function ConversationItem({
 			>
 				<span className="line-clamp-1">{conv.title}</span>
 				<span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">
-					{formatDate(conv.createdAt)}
+					{formatDate(conv.createdAt, '(DD.MM.YY)')}
 				</span>
 			</button>
 

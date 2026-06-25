@@ -10,9 +10,10 @@ import logging
 from typing import Any
 
 import pandas as pd
-from nemo_retriever.graph.tabular_fetch_embeddings_operator import (
+from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
+
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
@@ -244,18 +245,12 @@ def get_parent_table_id_for_column(column_id: str) -> str | None:
 
 
 def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
-    """Delete stale VDB rows, re-embed, and append Table/Column rows.
-
-    Embeddings are computed BEFORE any VDB rows are deleted so that a failure
-    in the embedding service leaves the existing rows intact (stale but
-    searchable) rather than removing them with nothing to replace them.
-    """
+    """Delete stale VDB rows, re-embed, and append Table/Column rows."""
     from gsf.utils import get_embed_params
     from gsf.vdb import get_vdb
     from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
     from nemo_retriever.vdb import IngestVdbOperator
 
-    EMBED_PARAMS = get_embed_params()
     unique_ids = set(dict.fromkeys(node_ids))
 
     # ── Step 1: build text representations from Neo4j ───────────────────────
@@ -286,12 +281,14 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
         return
 
     # ── Step 2: compute embeddings (may raise if service is unavailable) ─────
+
+    embed_params = get_embed_params()
     embedded = embed_text_main_text_embed(
         pd.DataFrame(records),
-        model_name=EMBED_PARAMS.model_name,
-        embed_invoke_url=EMBED_PARAMS.embed_invoke_url,
-        api_key=EMBED_PARAMS.api_key,
-        embed_modality=EMBED_PARAMS.embed_modality,
+        model_name=embed_params.model_name,
+        embed_invoke_url=embed_params.embed_invoke_url,
+        api_key=embed_params.api_key,
+        embed_modality=embed_params.embed_modality,
     )
     rows = [
         row
@@ -323,7 +320,8 @@ def _get_tables_and_columns_by_node_ids(
         conn.query_read(
             f"""
             UNWIND $ids AS id
-            MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
             WHERE t.id = id OR c.id = id
             RETURN DISTINCT
                    c.id AS id,
@@ -333,7 +331,7 @@ def _get_tables_and_columns_by_node_ids(
                    c.data_type AS data_type,
                    c.description AS description,
                    c.sample_values AS sample_values,
-                   t.db_name AS db_name
+                   db.name AS database_name
             """,
             {"ids": node_ids},
         ),
@@ -342,13 +340,14 @@ def _get_tables_and_columns_by_node_ids(
         conn.query_read(
             f"""
             UNWIND $ids AS id
-            MATCH (t:{Labels.TABLE} {{id: id}})
+            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{id: id}})
             RETURN t.id AS id,
                    t.name AS table_name,
                    t.schema_name AS table_schema,
                    t.table_type AS table_type,
                    t.description AS description,
-                   t.db_name AS db_name
+                   db.name AS database_name
             """,
             {"ids": node_ids},
         ),
@@ -356,8 +355,8 @@ def _get_tables_and_columns_by_node_ids(
 
     database_name = ""
     if not tables_df.empty:
-        database_name = str(tables_df.iloc[0].get("db_name") or "")
+        database_name = str(tables_df.iloc[0].get("database_name") or "")
     elif not columns_df.empty:
-        database_name = str(columns_df.iloc[0].get("db_name") or "")
+        database_name = str(columns_df.iloc[0].get("database_name") or "")
 
     return tables_df, columns_df, database_name

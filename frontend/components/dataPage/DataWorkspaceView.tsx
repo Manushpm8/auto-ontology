@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { BackPanelLayout } from '@/components/BackPanelLayout';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from './SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
@@ -33,11 +34,8 @@ export function DataWorkspaceView() {
 	const databasesRef = useRef<Database[]>([]);
 	const [treeDatabases, setTreeDatabases] = useState<Database[]>([]);
 	const [treeDataEpoch, setTreeDataEpoch] = useState(0);
-	const [treeCollapsed, setTreeCollapsed] = useState(false);
 	const treeEpochFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const inFlightRef = useRef(false);
-
-	const toggleTreeCollapsed = useCallback(() => setTreeCollapsed((c) => !c), []);
 
 	const workspaceDb = databases[0];
 	const workspaceDataId = workspaceDb?.id ?? '';
@@ -121,7 +119,7 @@ export function DataWorkspaceView() {
 
 		let next = databasesRef.current;
 		const db = next.find((d) => d.id === dbId);
-		if (db && db.schemas.length === 0 && (db.num_of_schemas ?? 0) > 0) {
+		if (db && db.schemas.length === 0) {
 			const r = await datasources.getSchemasForDatabase(dbId);
 			if (r.error === true || !r.data) return;
 			next = mergeSchemasIntoDatabase(next, dbId, r.data);
@@ -229,30 +227,29 @@ export function DataWorkspaceView() {
 
 	if (!workspaceDb) {
 		return (
-			<div className="flex min-h-[min(70dvh,520px)] flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300/80 bg-white/60 p-12 text-center dark:border-zinc-600 dark:bg-zinc-950/40">
+			<div className="flex h-full flex-1 items-center justify-center">
 				<p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-					No databases returned
+					No Databases found
 				</p>
 			</div>
 		);
 	}
 
 	return (
-		<div className="flex h-full w-full bg-white dark:bg-zinc-950">
-			<aside
-				className={`flex h-full shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 ${treeCollapsed ? 'w-8' : 'w-[296px]'}`}
-			>
+		<BackPanelLayout
+			panelAriaLabel="Datasource tree"
+			expandAriaLabel="Expand explorer"
+			collapseAriaLabel="Collapse explorer"
+			panel={
 				<DataTree
 					key="data-catalog-tree"
 					initialDatabases={treeDatabases}
 					selectedId={treeFocusId ?? undefined}
 					pathBase="/data"
-					collapsed={treeCollapsed}
-					onToggleCollapse={toggleTreeCollapsed}
 					onTreeDataUpdated={handleTreeDataUpdated}
 				/>
-			</aside>
-
+			}
+		>
 			<main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
 				<SinglePageView
 					dataId={workspaceDataId}
@@ -264,6 +261,6 @@ export function DataWorkspaceView() {
 					onSave={syncEdits}
 				/>
 			</main>
-		</div>
+		</BackPanelLayout>
 	);
 }

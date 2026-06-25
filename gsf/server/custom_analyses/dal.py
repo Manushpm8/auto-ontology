@@ -34,16 +34,18 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
 )
 from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-from nemo_retriever.tabular_data.retrieval.data_access.graph_schemas import (
+from gsf.retrieval.data_access.graph_schemas import (
     get_all_schemas_ids,
     get_schemas_by_ids,
 )
+from nemo_retriever.operators.vdb import IngestVdbOperator
+from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
 
 from gsf.connectors import get_connectors
 
 if TYPE_CHECKING:
-    from nemo_retriever.params import EmbedParams
-    from nemo_retriever.vdb import VDB
+    from nemo_retriever.common.params.models import EmbedParams
+    from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
 
@@ -147,11 +149,12 @@ def list_custom_analyses() -> list[dict[str, Any]]:
 
 
 def _get_dialects() -> list[str]:
-    """Return the SQL dialects from the active connectors (all dialects supported by sqlglot)."""
+    """Return SQL dialects from active connectors (NeMo multi-connector order)."""
     connectors = get_connectors()
-    if not len(connectors):
+    dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
+    if not dialects:
         return ["generic", "ansi", "postgres"]
-    return [connector.dialect for connector in connectors]
+    return dialects
 
 
 def _get_schemas() -> dict:
@@ -391,12 +394,12 @@ def create_custom_analysis(
 
     row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
 
-    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    from gsf.utils import get_embed_params
     from gsf.vdb import get_vdb
 
     vdb = get_vdb()
     _embed_custom_analyses(
-        embed_params=EMBED_PARAMS,
+        embed_params=get_embed_params(),
         vdb=vdb,
         analysis_id=row["id"],
     )
@@ -480,13 +483,13 @@ def update_custom_analysis(
     # `IngestVdbOperator` appends, so re-embedding without first dropping
     # the stale row would leave two VDB entries for this analysis_id and
     # double-weight it at retrieval time.
-    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    from gsf.utils import get_embed_params
     from gsf.vdb import get_vdb
 
     vdb = get_vdb()
     vdb.delete_by_id(analysis_id)
     _embed_custom_analyses(
-        embed_params=EMBED_PARAMS,
+        embed_params=get_embed_params(),
         vdb=vdb,
         analysis_id=analysis_id,
     )
@@ -513,9 +516,8 @@ def delete_custom_analysis(analysis_id: str) -> dict[str, str] | None:
     Graph delete happens before the VDB delete so a Neo4j failure
     leaves both stores pointing at the same (still-present) record;
     if Neo4j succeeds and the VDB delete throws, the orphan VDB row
-    will be cleaned up on the next ingest of *database_name*
-    (``PostgresVDB.__init__`` calls ``delete_by_database`` at startup,
-    see ``gsf/vdb/postgres.py``).
+    will be cleaned up on the next ingest of *database_name* with ``reset=True``
+    (see :func:`gsf.vdb.get_data_vdb`).
     """
     existing = get_neo4j_conn().query_read(
         f"""
@@ -553,6 +555,7 @@ def _embed_custom_analyses(
     embed_params: "EmbedParams",
     vdb: "VDB",
     analysis_id: str | None = None,
+    database_name: str | None = None,
 ) -> None:
     """Fetch ``CustomAnalysis`` docs from Neo4j, embed them, and append to *vdb*.
 
@@ -580,9 +583,6 @@ def _embed_custom_analyses(
     row first.
     """
     import pandas as pd
-
-    from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
-    from nemo_retriever.vdb import IngestVdbOperator
 
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
@@ -628,6 +628,7 @@ def _embed_custom_analyses(
             "label": item.get("label", ""),
             "name": item.get("name", ""),
             "source_path": path,
+            "database_name": database_name,
         }
         rows.append(
             {

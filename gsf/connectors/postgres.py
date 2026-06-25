@@ -23,8 +23,11 @@ class PostgresDatabase(SQLDatabase):
     Parameters
     ----------
     connection_string:
-        A ``libpq``-style connection URI, e.g.
-        ``postgresql://user:pass@host:5432/dbname``.
+        A ``libpq``-style connection URI.
+
+        Expected format::
+
+            postgresql://USER:PASSWORD@HOST:5432/DBNAME
     """
 
     def __init__(self, connection_string: str) -> None:
@@ -188,6 +191,11 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    def ping(self) -> None:
+        """Verify connectivity and that the catalog is readable."""
+        with psycopg.connect(self._connection_string) as conn:
+            conn.execute("SELECT schema_name FROM information_schema.schemata")
 
     def close(self) -> None:
         if self._pool and not self._pool.closed:

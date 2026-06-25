@@ -5,12 +5,34 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug Current Python File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "Debug Local Ingest",
       "type": "debugpy",
       "request": "launch",
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "module": "dev_tools.local_ingest",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Debug Ingestion Service",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gsf.ingestion_service",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
@@ -61,6 +83,5 @@
       "console": "integratedTerminal",
       "justMyCode": false
     }
-
   ]
 }

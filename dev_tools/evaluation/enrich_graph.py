@@ -4,8 +4,7 @@
 
 """Stamp table/column metadata onto the Neo4j graph.
 
-This module reads ``<database_name>.json`` (sitting next to it — e.g.
-``dor_prod.json`` for the ``dor_prod`` database) and writes descriptions and
+This module reads ``<database_name>.json`` and writes descriptions and
 sample values onto the ``Table`` and ``Column`` nodes that the tabular ingest
 pipeline created in Neo4j. It is intentionally a small, dev-tools-only helper
 and is meant to be invoked at the end of an ingest run.
@@ -49,8 +48,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from nemo_retriever.params import EmbedParams
-    from nemo_retriever.vdb import VDB
+    from nemo_retriever.common.params.models import EmbedParams
+    from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +77,8 @@ def apply_metadata(database_name: str) -> None:
     metadata_path = DEFAULT_DIR / f"{database_name}.json"
 
     if not metadata_path.exists():
-        raise SystemExit(
-            f"Metadata file not found: {metadata_path}\n"
-            f"Expected a JSON file describing tables/columns for database "
-            f"{database_name!r}."
-        )
+        logger.info("No metadata file at %s — skipping enrichment.", metadata_path)
+        return
 
     with metadata_path.open() as f:
         raw = json.load(f)
@@ -270,4 +266,4 @@ def add_custom_analyses(
         )
         return
 
-    _embed_custom_analyses(embed_params, vdb)
+    _embed_custom_analyses(embed_params, vdb, database_name=database_name)

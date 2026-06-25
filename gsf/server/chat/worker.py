@@ -73,7 +73,7 @@ def _worker_loop(
     )
 
     try:
-        from nemo_retriever.tabular_data.retrieval.text_to_sql.main import (
+        from gsf.retrieval.text_to_sql.main import (
             stream_agent_response,
         )
 
@@ -315,3 +315,14 @@ def shutdown_pool() -> None:
         _pool = None
     if pool is not None:
         pool.shutdown()
+
+
+def refresh_chat_workers() -> None:
+    """Replace the warm standby worker so the next request loads fresh connectors."""
+    pool = get_pool()
+    with pool._lock:
+        standby = pool._standby
+        pool._standby = None
+    if standby is not None:
+        standby.kill()
+    pool._spawn_async()

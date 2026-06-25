@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-INFRA_SERVICES="postgres pgadmin neo4j"
+INFRA_SERVICES="postgres pgadmin neo4j ingestion-service"
 GSF_SERVICES="gsf gsf-frontend"
 
 neo4j_running() {
@@ -38,9 +38,11 @@ if [[ " $* " =~ \ --dev\  ]]; then
 	echo "  Postgres:      http://localhost:5432"
 	echo "  pgAdmin:       http://localhost:5050"
 	echo "  Neo4j:         http://localhost:7474"
+	echo "  GSF ingestion: http://localhost:3002"
 
 	echo ""
-	echo "start GSF locally"
+	echo "Start GSF locally:"
+	echo "  uv run python -m gsf.server"
 	exit 0
 fi
 
@@ -61,6 +63,7 @@ if [[ " $* " =~ \ --ds\  ]]; then
 	echo "  pgAdmin:       http://localhost:5050"
 	echo "  Neo4j:         http://localhost:7474"
 	echo "  GSF frontend:  http://localhost:3000"
+	echo "  GSF ingestion: http://localhost:3002"
 
 	echo ""
 	echo "Start the backend locally:"
@@ -82,3 +85,4 @@ echo "  pgAdmin:       http://localhost:5050"
 echo "  Neo4j:         http://localhost:7474"
 echo "  GSF frontend:  http://localhost:3000"
 echo "  GSF backend:   http://localhost:3001"
+echo "  GSF ingestion: http://localhost:3002"

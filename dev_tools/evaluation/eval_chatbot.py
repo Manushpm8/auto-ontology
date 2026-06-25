@@ -41,15 +41,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
-from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
+from nemo_retriever.retriever import Retriever
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
-from gsf.connectors import get_connectors
-from gsf.utils import get_retriever
-from gsf.server.env import load_server_env
+from gsf.retrieval.text_to_sql.main import get_agent_response
+from gsf.retrieval.text_to_sql.state import TextToSQLPayload
 
-load_server_env()
+from gsf.env import load_env
+from gsf.connectors import get_connectors
+from gsf.utils.embedding import get_embed_kwargs
+from gsf.vdb import get_data_vdb, get_semantic_vdb
+
+load_env()
 
 # The text-to-SQL agent stores executed-DB rows under this key on its result dict.
 _DB_RESULT_KEY = "sql_response_from_db"
@@ -73,6 +76,35 @@ _DEFAULT_INPUT = Path(__file__).parent / "chatbot_evaluation.json"
 
 
 _DEFAULT_OUTPUT = Path(__file__).parent / "chatbot_evaluation_scores.csv"
+
+
+def _build_connectors() -> list:
+    """Build source-DB connectors from ``CONNECTION_STRINGS``."""
+    connectors = get_connectors()
+    if not connectors:
+        raise EnvironmentError(
+            "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
+            "    CONNECTION_STRINGS=snowflake://user:pass@account?warehouse=WH&database=DB"
+        )
+    return connectors
+
+
+def _build_retriever() -> Retriever:
+    """Build the retriever against the local pgvector store."""
+    return Retriever(
+        top_k=15,
+        vdb_kwargs={"vdb": get_data_vdb()},
+        embed_kwargs=get_embed_kwargs(),
+    )
+
+
+def _build_ontology_retriever() -> Retriever:
+    """Build a retriever for the semantic-layer ontology collection."""
+    return Retriever(
+        top_k=15,
+        vdb_kwargs={"vdb": get_semantic_vdb()},
+        embed_kwargs=get_embed_kwargs(),
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -226,6 +258,9 @@ def _db_result_to_df(value: str) -> Optional[pd.DataFrame]:
     return None
 
 
+_SCORE_STR_LIMIT = 8000
+
+
 def _score_answer(expected_raw: str, returned_db_str: str) -> Dict[str, Any]:
     """Score the agent's answer against the expected ``answer_raw`` markdown table.
 
@@ -243,9 +278,11 @@ def _score_answer(expected_raw: str, returned_db_str: str) -> Dict[str, Any]:
     if expected_df is not None and actual_df is not None:
         structural_match = 1 if _df_values_equal(expected_df, actual_df) else 0
 
-    haystack = str(returned_db_str or "")
+    # Truncate large strings before expensive text operations
+    haystack = str(returned_db_str or "")[:_SCORE_STR_LIMIT]
+    expected_capped = str(expected_raw or "")[:_SCORE_STR_LIMIT]
 
-    expected_nums = sorted(round(n, 4) for n in _extract_numbers(expected_raw))
+    expected_nums = sorted(round(n, 4) for n in _extract_numbers(expected_capped))
     actual_nums = sorted(round(n, 4) for n in _extract_numbers(haystack))
     if not expected_nums and not actual_nums:
         nums_match = 1
@@ -254,9 +291,9 @@ def _score_answer(expected_raw: str, returned_db_str: str) -> Dict[str, Any]:
 
     sim = (
         difflib.SequenceMatcher(
-            None, _normalize_text(expected_raw), _normalize_text(haystack)
+            None, _normalize_text(expected_capped), _normalize_text(haystack)
         ).ratio()
-        if expected_raw and haystack
+        if expected_capped and haystack
         else 0.0
     )
     if structural_match:
@@ -291,20 +328,23 @@ def _load_questions(path: Path) -> List[Dict[str, Any]]:
     return data
 
 
+_STRINGIFY_ROW_LIMIT = 200
+
+
 def _stringify_db_result(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, pd.DataFrame):
-        return value.to_csv(index=False)
+        return value.head(_STRINGIFY_ROW_LIMIT).to_csv(index=False)
     # Some agent paths return executed rows as a plain ``list[dict]`` — serialise
     # as JSON so the downstream parser hits the JSON branch (rather than
     # ``str(...)`` which uses single quotes and breaks json.loads).
     if isinstance(value, list) and value and isinstance(value[0], dict):
         try:
-            return json.dumps(value, default=str)
+            return json.dumps(value[:_STRINGIFY_ROW_LIMIT], default=str)
         except (TypeError, ValueError):
-            return str(value)
-    return str(value)
+            return str(value[:_STRINGIFY_ROW_LIMIT])
+    return str(value)[:_SCORE_STR_LIMIT]
 
 
 CSV_FIELDS = [
@@ -380,8 +420,9 @@ def evaluate(
         input_path,
     )
 
-    connectors = get_connectors()
-    retriever = get_retriever()
+    connectors = _build_connectors()
+    retriever = _build_retriever()
+    ontology_retriever = _build_ontology_retriever()
 
     resuming = start_index > 0 and output_path.exists()
     mode = "a" if resuming else "w"
@@ -421,9 +462,10 @@ def evaluate(
 
             t0 = time.perf_counter()
             try:
-                payload: AgentPayload = {
+                payload: TextToSQLPayload = {
                     "question": question,
-                    "retriever": retriever,
+                    "data_retriever": retriever,
+                    "taxonomies_retriever": ontology_retriever,
                     "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
@@ -443,7 +485,6 @@ def evaluate(
             except Exception as exc:
                 logger.exception("Question %s failed", qid)
                 row["error"] = f"{type(exc).__name__}: {exc}"
-                # Truncate traceback into the cell to keep the CSV diff-friendly.
                 row["error"] += (
                     " | " + traceback.format_exc().replace("\n", " | ")[:1000]
                 )
@@ -571,8 +612,9 @@ def evaluate_consistency(
         output_path,
     )
 
-    connectors = get_connectors()
-    retriever = get_retriever()
+    connectors = _build_connectors()
+    retriever = _build_retriever()
+    ontology_retriever = _build_ontology_retriever()
 
     results: Dict[int, list] = {i: [] for i in range(len(questions))}
 
@@ -587,9 +629,10 @@ def evaluate_consistency(
             logger.info("[Run %d] q%s: %s", run_num, qid, question)
 
             try:
-                payload: AgentPayload = {
+                payload: TextToSQLPayload = {
                     "question": question,
-                    "retriever": retriever,
+                    "data_retriever": retriever,
+                    "taxonomies_retriever": ontology_retriever,
                     "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
@@ -658,12 +701,14 @@ def evaluate_consistency(
 
 def run_single_query(question: str) -> None:
     """Run a single question through the agent and print the result."""
-    connectors = get_connectors()
-    retriever = get_retriever()
+    connectors = _build_connectors()
+    retriever = _build_retriever()
+    ontology_retriever = _build_ontology_retriever()
 
-    payload: AgentPayload = {
+    payload: TextToSQLPayload = {
         "question": question,
-        "retriever": retriever,
+        "data_retriever": retriever,
+        "taxonomies_retriever": ontology_retriever,
         "connectors": connectors,
         "path_state": {},
         "custom_prompts": "",
@@ -677,7 +722,7 @@ def run_single_query(question: str) -> None:
     print(f"\n  Runtime: {elapsed}s")
 
 
-SINGLE_QUERY = "list all actors"
+SINGLE_QUERY = "What is the most frequently used GPU MODS version?"
 
 START_INDEX = 0
 END_INDEX = None  # None = run to the end
