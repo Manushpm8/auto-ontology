@@ -36,6 +36,12 @@ authSecret: ""
 # `kubectl port-forward svc/frontend 3000:3000`. For NodePort/ingress/https,
 # set this to that exact origin (e.g. https://gsf.example.com).
 appUrl: "http://localhost:3000"
+# Bootstrap admin account. REQUIRED — self-service sign-up is disabled, so this
+# is the only way the initial admin is provisioned. The frontend creates this
+# admin on first start (email-verified), or resets its password to this value
+# on subsequent starts. Leaving either empty fails the install/upgrade.
+adminEmail: ""
+adminPassword: ""
 
 # ------------------------------------------------------------------
 # Postgres (pgvector)

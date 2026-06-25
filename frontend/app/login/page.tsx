@@ -6,7 +6,6 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { Icon, IconName } from '@/components/icons';
 import { signIn } from '@/lib/auth-client';
 
@@ -118,14 +117,6 @@ const LoginForm = () => {
 				</>
 			) : null}
 
-			{providers.length === 0 ? (
-				<p className="text-center text-xs text-zinc-400">
-					No account yet?{' '}
-					<Link href="/signup" className="text-[#76b900] hover:underline">
-						Create one
-					</Link>
-				</p>
-			) : null}
 		</form>
 	);
 };

@@ -6,7 +6,6 @@ import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { admin } from 'better-auth/plugins/admin';
 import { nextCookies } from 'better-auth/next-js';
-import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { sso } from '@better-auth/sso';
 import { getPrisma } from '@/lib/prisma';
 import { ac, roles } from '@/lib/auth-access';
@@ -28,7 +27,11 @@ export const auth = betterAuth({
 	secret: process.env.AUTH_SECRET ?? (isBuildPhase ? 'next-build-time-placeholder' : undefined),
 	baseURL: process.env.APP_URL,
 	database: prismaAdapter(prisma, { provider: 'postgresql' }),
-	emailAndPassword: { enabled: true },
+	// Email/password sign-IN is enabled, but self-service sign-UP is disabled:
+	// the only credential account is the bootstrap admin seeded from
+	// GSF_ADMIN_EMAIL / GSF_ADMIN_PASSWORD (see lib/seed-admin.ts). Further users
+	// are added by an admin or provisioned via SSO.
+	emailAndPassword: { enabled: true, disableSignUp: true },
 	plugins: [
 		// Two roles only: `admin` (user management) and `viewer` (everything else).
 		admin({ ac, roles, adminRoles: [Role.Admin], defaultRole: Role.Viewer }),
@@ -38,30 +41,20 @@ export const auth = betterAuth({
 		// Must be the last plugin so it can set cookies on outgoing responses.
 		nextCookies(),
 	],
-	hooks: {
-		// Once SSO is configured, SSO becomes the only way in: disable local
-		// email/password sign-up. (Local sign-up stays open beforehand so the
-		// first admin can be bootstrapped.) Sign-in and SSO provisioning are
-		// unaffected.
-		before: createAuthMiddleware(async (ctx) => {
-			if (ctx.path === '/sign-up/email' && (await isSsoConfigured())) {
-				throw new APIError('FORBIDDEN', {
-					message:
-						'Sign-up is disabled because SSO is configured. Please sign in with SSO.',
-				});
-			}
-		}),
-	},
 	databaseHooks: {
 		user: {
 			create: {
-				// First account ever created becomes the admin; everyone else is a
-				// viewer. The unique email constraint guards against a duplicate-account
-				// race; the count check assigns the role.
+				// First account ever created becomes the admin and is marked
+				// email-verified (so it can later link an SSO identity to the same
+				// account); everyone else is a viewer. The unique email constraint
+				// guards against a duplicate-account race; the count check assigns
+				// the role.
 				before: async (user) => {
-					const count = await prisma.user.count();
+					const isFirstUser = (await prisma.user.count()) === 0;
 					return {
-						data: { ...user, role: count === 0 ? Role.Admin : Role.Viewer },
+						data: isFirstUser
+							? { ...user, role: Role.Admin, emailVerified: true }
+							: { ...user, role: Role.Viewer },
 					};
 				},
 			},
