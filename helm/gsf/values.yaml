@@ -55,6 +55,9 @@ postgres:
     port: 5432
   persistence:
     size: 5Gi
+    # Set to a specific class on clusters without a default dynamic provisioner
+    # (e.g. Astra pdx02: pdx02-cdot03-ainfs01-nfsv3). Empty = cluster default.
+    storageClassName: ""
   resources:
     requests:
       cpu: 100m
@@ -93,6 +96,9 @@ neo4j:
     logsSize: 1Gi
     pluginsSize: 1Gi
     importSize: 1Gi
+    # Set to a specific class on clusters without a default dynamic provisioner
+    # (e.g. Astra pdx02: pdx02-cdot03-ainfs01-nfsv3). Empty = cluster default.
+    storageClassName: ""
   resources:
     requests:
       cpu: 200m
