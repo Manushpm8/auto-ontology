@@ -22,7 +22,7 @@ result)), this script:
 Usage::
 
     uv run python -m dev_tools.evaluation.eval_chatbot \
-        --database-name wideworldimporters [--input PATH] [--output PATH]
+        --database-name <name> [--input PATH] [--output PATH]
 """
 
 from __future__ import annotations
