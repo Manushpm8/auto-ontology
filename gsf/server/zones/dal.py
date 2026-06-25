@@ -19,8 +19,6 @@ from gsf.server.zones.utils import (
     format_zone,
 )
 
-logger = logging.getLogger(__name__)
-
 _DATA_ITEM_PATTERN = "|".join(ZONE_DATA_LABELS)
 
 
