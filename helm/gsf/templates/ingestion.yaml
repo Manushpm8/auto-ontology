@@ -31,11 +31,12 @@ spec:
       labels:
         {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "ingestion") | nindent 8 }}
     spec:
+      {{- include "gsf.imagePullSecrets" . | nindent 6 }}
       initContainers:
         {{- include "gsf.waitForDeps" . | nindent 8 }}
       containers:
         - name: ingestion
-          image: "{{ .Values.ingestion.image.repository }}:{{ .Values.ingestion.image.tag }}"
+          image: "{{ include "gsf.image" .Values.ingestion.image }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           args: ["ingestion_service"]
           ports:
