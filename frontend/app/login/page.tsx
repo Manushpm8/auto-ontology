@@ -116,7 +116,6 @@ const LoginForm = () => {
 					))}
 				</>
 			) : null}
-
 		</form>
 	);
 };

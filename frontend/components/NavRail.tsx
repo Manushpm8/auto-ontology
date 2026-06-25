@@ -22,7 +22,8 @@ const navItems: NavItem[] = [
 	{ icon: IconName.ChartLine, href: '/analytics', label: 'Analytics' },
 	{ icon: IconName.Settings, href: '/settings', label: 'Settings' },
 	{ icon: IconName.Users, href: '/admin/users', label: 'Users', adminOnly: true },
-	{ icon: IconName.Key, href: '/admin/sso', label: 'Single Sign-On', adminOnly: true },
+	// SSO config is reachable as a tab within the admin (Users) section
+	// (see app/admin/layout.tsx), so it doesn't need its own nav-rail icon.
 ];
 
 export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {
