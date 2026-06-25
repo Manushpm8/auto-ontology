@@ -102,7 +102,7 @@ def create_zone(
     *,
     name: str,
     description: str | None,
-    color: str | None,
+    color: str,
     item_ids: list[str],
 ) -> dict[str, Any]:
     """Create a zone and link it to catalog data nodes (db/schema/table)."""

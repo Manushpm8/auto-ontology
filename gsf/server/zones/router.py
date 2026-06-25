@@ -7,36 +7,18 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from gsf.server.zones import dal
 
 router = APIRouter()
 
 
-class ZoneItem(BaseModel):
-    id: str
-    name: str
-    label: str
-
-
-class ZoneSummary(BaseModel):
-    id: str
-    name: str
-    label: str
-    description: str | None = None
-    color: str | None = None
-
-
-class ZoneDetail(ZoneSummary):
-    items: list[ZoneItem]
-
-
 class ZoneCreate(BaseModel):
     name: str
     description: str | None = None
-    color: str | None = None
-    items: list[str] = Field(default_factory=list)
+    color: str
+    items: list[str]
 
 
 class ZoneUpdate(BaseModel):

@@ -28,8 +28,8 @@ export type ZoneCreated = Zone & {
 export type ZoneCreateInput = {
 	name: string;
 	description?: string;
-	color?: string;
-	items?: string[];
+	color: string;
+	items: string[];
 };
 
 export type ZoneUpdateInput = {
