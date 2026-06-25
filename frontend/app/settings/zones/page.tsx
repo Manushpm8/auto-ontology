@@ -236,7 +236,6 @@ export default function ZonesSettingsPage() {
 		}
 		return zone.name.trim().toLowerCase() === normalizedName.toLowerCase();
 	});
-	const hasSelectedData = selectedItems.size > 0;
 	const normalizedSelectedItems = normalizeZoneItemSelection(selectedItems, treeDatabases);
 	const normalizedInitialEditSelectedItems = normalizeZoneItemSelection(
 		expandInitialZoneItemSelection(initialEditSelectedItems, treeDatabases),
@@ -265,8 +264,22 @@ export default function ZonesSettingsPage() {
 	}, []);
 
 	useEffect(() => {
-		void loadZones();
-	}, [loadZones]);
+		let cancelled = false;
+		zonesApi.getAll().then((response) => {
+			if (cancelled) return;
+			if (response.error) {
+				setError(response.message ?? 'Failed to load zones.');
+				setZones([]);
+			} else {
+				setError(null);
+				setZones(response.data ?? []);
+			}
+			setLoading(false);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	const openCreateModal = () => {
 		setModalMode('create');
@@ -443,9 +456,12 @@ export default function ZonesSettingsPage() {
 
 			const created: ZoneCreated | undefined = response.data;
 			if (created != null) {
-				const { items: _items, ...zoneFields } = created;
+				const { id, name, label, description, color } = created;
 				setZones((prev) => {
-					const next = [...prev.filter((z) => z.id !== created.id), zoneFields];
+					const next = [
+						...prev.filter((z) => z.id !== created.id),
+						{ id, name, label, description, color },
+					];
 					return next.sort((a, b) => a.name.localeCompare(b.name));
 				});
 			} else {
