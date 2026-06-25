@@ -24,13 +24,21 @@ const LoginForm = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
 	const [providers, setProviders] = useState<SsoProvider[]>([]);
+	const [providersLoaded, setProvidersLoaded] = useState(false);
+	// When SSO is configured, SSO is the only option shown by default. This
+	// toggles the email/password fallback ("backdoor") so the local bootstrap
+	// admin can still sign in if the SSO provider is unreachable.
+	const [showPasswordLogin, setShowPasswordLogin] = useState(false);
 
 	useEffect(() => {
 		fetch('/api/sso-providers')
 			.then((res) => res.json())
 			.then((data) => setProviders(data.providers ?? []))
-			.catch(() => setProviders([]));
+			.catch(() => setProviders([]))
+			.finally(() => setProvidersLoaded(true));
 	}, []);
+
+	const ssoEnabled = providers.length > 0;
 
 	const handleSubmit = async (event: React.FormEvent) => {
 		event.preventDefault();
@@ -50,6 +58,41 @@ const LoginForm = () => {
 		signIn.sso({ providerId, callbackURL: next });
 	};
 
+	// Avoid flashing the password form before we know whether SSO is configured.
+	if (!providersLoaded) {
+		return <div className="w-full max-w-sm" />;
+	}
+
+	// SSO configured → show SSO as the only primary option, plus a discreet
+	// password fallback for the local admin if the provider is unavailable.
+	if (ssoEnabled && !showPasswordLogin) {
+		return (
+			<div className="flex w-full max-w-sm flex-col gap-4">
+				{providers.map((provider) => (
+					<button
+						key={provider.providerId}
+						type="button"
+						onClick={() => handleSso(provider.providerId)}
+						className="cursor-pointer rounded-md bg-[#76b900] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#6aa600]"
+					>
+						Sign in with SSO
+					</button>
+				))}
+				<button
+					type="button"
+					onClick={() => {
+						setError(null);
+						setShowPasswordLogin(true);
+					}}
+					className="cursor-pointer text-center text-xs text-zinc-400 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
+				>
+					Sign in with password
+				</button>
+			</div>
+		);
+	}
+
+	// No SSO configured, or the admin chose the password fallback.
 	return (
 		<form onSubmit={handleSubmit} className="flex w-full max-w-sm flex-col gap-4">
 			<div className="flex flex-col gap-1.5">
@@ -97,24 +140,17 @@ const LoginForm = () => {
 				{submitting ? 'Signing in…' : 'Sign in'}
 			</button>
 
-			{providers.length > 0 ? (
-				<>
-					<div className="flex items-center gap-3 text-xs text-zinc-400">
-						<span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
-						or
-						<span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
-					</div>
-					{providers.map((provider) => (
-						<button
-							key={provider.providerId}
-							type="button"
-							onClick={() => handleSso(provider.providerId)}
-							className="cursor-pointer rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
-						>
-							Sign in with SSO
-						</button>
-					))}
-				</>
+			{ssoEnabled ? (
+				<button
+					type="button"
+					onClick={() => {
+						setError(null);
+						setShowPasswordLogin(false);
+					}}
+					className="cursor-pointer text-center text-xs text-zinc-400 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
+				>
+					Back to SSO
+				</button>
 			) : null}
 		</form>
 	);

@@ -4,15 +4,13 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { authClient } from '@/lib/auth-client';
 
 type SsoProvider = { providerId: string; issuer: string; domain: string };
 
 const inputClass =
-	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
-
-const trimTrailingSlash = (value: string): string => value.replace(/\/$/, '');
+	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:disabled:bg-zinc-800/50 dark:disabled:text-zinc-400';
 
 const fetchSsoProviders = async (): Promise<SsoProvider[]> => {
 	const res = await fetch('/api/sso-providers').catch(() => null);
@@ -20,8 +18,10 @@ const fetchSsoProviders = async (): Promise<SsoProvider[]> => {
 	return data?.providers ?? [];
 };
 
-export const SsoConfigForm = () => {
-	const [providers, setProviders] = useState<SsoProvider[]>([]);
+export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvider[] }) => {
+	// Seeded from the server (see page.tsx) so the correct view renders on first
+	// paint; re-fetched after register/delete to stay in sync.
+	const [providers, setProviders] = useState<SsoProvider[]>(initialProviders);
 	const [providerId, setProviderId] = useState('');
 	const [issuer, setIssuer] = useState('');
 	const [domain, setDomain] = useState('');
@@ -32,15 +32,28 @@ export const SsoConfigForm = () => {
 	const [submitting, setSubmitting] = useState(false);
 	const [deletingId, setDeletingId] = useState<string | null>(null);
 
-	useEffect(() => {
-		fetchSsoProviders().then(setProviders);
-	}, []);
-
 	const handleSubmit = async (event: React.FormEvent) => {
 		event.preventDefault();
 		setSubmitting(true);
 		setError(null);
 		setMessage(null);
+
+		// Resolve the provider's endpoints server-side, then register with
+		// skipDiscovery. This avoids Better Auth's auto-discovery, which would
+		// require the IdP origin in trustedOrigins; the skipDiscovery path
+		// accepts any public IdP without per-provider config.
+		const discoveryRes = await fetch(
+			`/api/sso-discovery?issuer=${encodeURIComponent(issuer)}`,
+		).catch(() => null);
+		const discovery = discoveryRes ? await discoveryRes.json().catch(() => null) : null;
+
+		if (!discoveryRes || !discoveryRes.ok || !discovery) {
+			setError(
+				discovery?.error ?? 'Could not fetch the provider configuration from the issuer.',
+			);
+			setSubmitting(false);
+			return;
+		}
 
 		const result = await authClient.sso.register({
 			providerId,
@@ -49,7 +62,12 @@ export const SsoConfigForm = () => {
 			oidcConfig: {
 				clientId,
 				clientSecret,
-				discoveryEndpoint: `${trimTrailingSlash(issuer)}/.well-known/openid-configuration`,
+				skipDiscovery: true,
+				authorizationEndpoint: discovery.authorizationEndpoint,
+				tokenEndpoint: discovery.tokenEndpoint,
+				userInfoEndpoint: discovery.userInfoEndpoint ?? undefined,
+				jwksEndpoint: discovery.jwksEndpoint ?? undefined,
+				discoveryEndpoint: discovery.discoveryEndpoint,
 				scopes: ['openid', 'profile', 'email'],
 				pkce: true,
 			},
@@ -93,6 +111,9 @@ export const SsoConfigForm = () => {
 		setProviders(await fetchSsoProviders());
 	};
 
+	const provider = providers[0];
+	const isConfigured = Boolean(provider);
+
 	return (
 		<div className="h-full overflow-auto p-6">
 			<div className="mx-auto max-w-xl">
@@ -100,42 +121,12 @@ export const SsoConfigForm = () => {
 					Single Sign-On (OIDC)
 				</h1>
 				<p className="mb-4 text-xs text-zinc-500">
-					Register an OpenID Connect provider. Endpoints are auto-discovered from the
+					Configure a single OpenID Connect provider. Endpoints are discovered from the
 					issuer. The client secret is stored securely and never shown again.
 				</p>
 
-				{providers.length > 0 ? (
-					<div className="mb-6 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-						<h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-							Configured providers
-						</h2>
-						<ul className="space-y-1 text-sm text-zinc-700 dark:text-zinc-300">
-							{providers.map((provider) => (
-								<li
-									key={provider.providerId}
-									className="flex items-center justify-between gap-4"
-								>
-									<div className="flex min-w-0 flex-col">
-										<span className="font-medium">{provider.providerId}</span>
-										<span className="truncate text-xs text-zinc-400">
-											{provider.issuer}
-										</span>
-									</div>
-									<button
-										type="button"
-										onClick={() => handleDelete(provider.providerId)}
-										disabled={deletingId === provider.providerId}
-										className="shrink-0 cursor-pointer rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-									>
-										{deletingId === provider.providerId
-											? 'Deleting…'
-											: 'Delete'}
-									</button>
-								</li>
-							))}
-						</ul>
-					</div>
-				) : null}
+				{error ? <p className="mb-3 text-xs text-red-500">{error}</p> : null}
+				{message ? <p className="mb-3 text-xs text-[#76b900]">{message}</p> : null}
 
 				<form onSubmit={handleSubmit} className="flex flex-col gap-4">
 					<div className="flex flex-col gap-1.5">
@@ -150,7 +141,8 @@ export const SsoConfigForm = () => {
 							type="text"
 							required
 							placeholder="okta"
-							value={providerId}
+							disabled={isConfigured}
+							value={provider ? provider.providerId : providerId}
 							onChange={(event) => setProviderId(event.target.value)}
 							className={inputClass}
 						/>
@@ -167,7 +159,8 @@ export const SsoConfigForm = () => {
 							type="url"
 							required
 							placeholder="https://example.okta.com"
-							value={issuer}
+							disabled={isConfigured}
+							value={provider ? provider.issuer : issuer}
 							onChange={(event) => setIssuer(event.target.value)}
 							className={inputClass}
 						/>
@@ -184,7 +177,8 @@ export const SsoConfigForm = () => {
 							type="text"
 							required
 							placeholder="nvidia.com"
-							value={domain}
+							disabled={isConfigured}
+							value={provider ? provider.domain : domain}
 							onChange={(event) => setDomain(event.target.value)}
 							className={inputClass}
 						/>
@@ -200,7 +194,8 @@ export const SsoConfigForm = () => {
 							id="clientId"
 							type="text"
 							required
-							value={clientId}
+							disabled={isConfigured}
+							value={isConfigured ? '' : clientId}
 							onChange={(event) => setClientId(event.target.value)}
 							className={inputClass}
 						/>
@@ -217,22 +212,32 @@ export const SsoConfigForm = () => {
 							type="password"
 							required
 							autoComplete="off"
-							value={clientSecret}
+							disabled={isConfigured}
+							placeholder={isConfigured ? '••••••••' : undefined}
+							value={isConfigured ? '' : clientSecret}
 							onChange={(event) => setClientSecret(event.target.value)}
 							className={inputClass}
 						/>
 					</div>
 
-					{error ? <p className="text-xs text-red-500">{error}</p> : null}
-					{message ? <p className="text-xs text-[#76b900]">{message}</p> : null}
-
-					<button
-						type="submit"
-						disabled={submitting}
-						className="cursor-pointer self-start rounded-md bg-[#76b900] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#6aa600] disabled:opacity-50"
-					>
-						{submitting ? 'Saving…' : 'Save provider'}
-					</button>
+					{provider ? (
+						<button
+							type="button"
+							onClick={() => handleDelete(provider.providerId)}
+							disabled={deletingId === provider.providerId}
+							className="cursor-pointer self-start rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+						>
+							{deletingId === provider.providerId ? 'Deleting…' : 'Delete provider'}
+						</button>
+					) : (
+						<button
+							type="submit"
+							disabled={submitting}
+							className="cursor-pointer self-start rounded-md bg-[#76b900] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#6aa600] disabled:opacity-50"
+						>
+							{submitting ? 'Saving…' : 'Save provider'}
+						</button>
+					)}
 				</form>
 			</div>
 		</div>
