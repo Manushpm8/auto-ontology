@@ -22,7 +22,9 @@ on:
 
 env:
   CHART_DIR: helm/gsf
-  OCI_REPO: oci://nvcr.io/nvstaging/gsf/charts
+  # nvcr.io allows only org/team/image (3 segments), so the chart is published to
+  # nvcr.io/nvstaging/gsf/gsf (same repo as the app image, distinct -stg.* tags).
+  OCI_REPO: oci://nvcr.io/nvstaging/gsf
 
 jobs:
   publish-chart:

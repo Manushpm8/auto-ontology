@@ -64,6 +64,9 @@ postgres:
 # pgAdmin
 # ------------------------------------------------------------------
 pgadmin:
+  # Optional DB admin UI. Handy for local/minikube; disabled on Astra via the
+  # deploy overlay (gsf.pgadmin.enabled=false).
+  enabled: true
   image:
     repository: dpage/pgadmin4
     tag: latest
