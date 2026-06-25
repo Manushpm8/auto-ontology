@@ -78,14 +78,17 @@ def _worker_loop(
         )
 
         from gsf.connectors import get_connectors
-        from gsf.utils import get_retriever
+        from gsf.utils import get_retriever, get_taxonomies_retriever
         from gsf.server.chat.settings_dal import (
             fetch_acronyms,
             fetch_custom_prompts,
         )
 
         # Eagerly build the heavyweights so they're hot before the first ask.
-        retriever = get_retriever()
+        # The text-to-SQL flow needs two retrievers (data + taxonomies) over
+        # their respective VDB collections.
+        data_retriever = get_retriever()
+        taxonomies_retriever = get_taxonomies_retriever()
         connectors = get_connectors()
     except BaseException as exc:  # noqa: BLE001 — surface init failure to parent
         logger.exception("Worker init failed")
@@ -115,7 +118,8 @@ def _worker_loop(
         try:
             agent_payload = {
                 "question": payload,
-                "retriever": retriever,
+                "data_retriever": data_retriever,
+                "taxonomies_retriever": taxonomies_retriever,
                 "connectors": connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": fetch_custom_prompts(),
