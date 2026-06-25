@@ -16,6 +16,11 @@ imagePullSecrets: []
 bundledSecret:
   enabled: true
 
+# Extra annotations merged into the backend / ingestion / frontend pod templates.
+# A GitOps overlay can bump a value here (e.g. rolledAt) to force a fresh rollout
+# even when image references are unchanged.
+podAnnotations: {}
+
 # ------------------------------------------------------------------
 # Shared credentials — populate a single k8s Secret (<release>-secrets)
 # consumed by all GSF workloads.
