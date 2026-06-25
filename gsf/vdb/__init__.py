@@ -15,7 +15,7 @@ VDB_SCHEMA: str = "vdb"
 DATA_VDB_COLLECTION = VDB_COLLECTION
 
 
-def get_vdb(*, database_name: str | None = None) -> PostgresVDB:
+def get_vdb(*, database_name: str | None = None, reset: bool = False) -> PostgresVDB:
     """Build a PostgresVDB pointed at the local pgvector-enabled Postgres.
 
     When database_name is provided, the VDB will use it to reset old embeddings for the given database.
@@ -27,7 +27,7 @@ def get_vdb(*, database_name: str | None = None) -> PostgresVDB:
     }
     if database_name:
         kwargs["database_name"] = database_name
-    return PostgresVDB(**kwargs)
+    return PostgresVDB(reset=reset, **kwargs)
 
 
 def get_data_vdb(
