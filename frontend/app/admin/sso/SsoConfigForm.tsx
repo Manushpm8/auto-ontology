@@ -24,7 +24,6 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 	const [providers, setProviders] = useState<SsoProvider[]>(initialProviders);
 	const [providerId, setProviderId] = useState('');
 	const [issuer, setIssuer] = useState('');
-	const [domain, setDomain] = useState('');
 	const [clientId, setClientId] = useState('');
 	const [clientSecret, setClientSecret] = useState('');
 	const [error, setError] = useState<string | null>(null);
@@ -58,7 +57,9 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 		const result = await authClient.sso.register({
 			providerId,
 			issuer,
-			domain,
+			// Domain-based provider routing isn't used (login is by providerId), but
+			// Better Auth requires a string here, so send empty.
+			domain: '',
 			oidcConfig: {
 				clientId,
 				clientSecret,
@@ -162,24 +163,6 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 							disabled={isConfigured}
 							value={provider ? provider.issuer : issuer}
 							onChange={(event) => setIssuer(event.target.value)}
-							className={inputClass}
-						/>
-					</div>
-					<div className="flex flex-col gap-1.5">
-						<label
-							htmlFor="domain"
-							className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
-						>
-							Email domain
-						</label>
-						<input
-							id="domain"
-							type="text"
-							required
-							placeholder="nvidia.com"
-							disabled={isConfigured}
-							value={provider ? provider.domain : domain}
-							onChange={(event) => setDomain(event.target.value)}
 							className={inputClass}
 						/>
 					</div>
