@@ -30,6 +30,7 @@ export const SsoConfigForm = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
+	const [deletingId, setDeletingId] = useState<string | null>(null);
 
 	useEffect(() => {
 		fetchSsoProviders().then(setProviders);
@@ -66,6 +67,32 @@ export const SsoConfigForm = () => {
 		setProviders(await fetchSsoProviders());
 	};
 
+	const handleDelete = async (id: string) => {
+		if (
+			!window.confirm(
+				`Delete SSO provider "${id}"? Users will no longer be able to sign in with it.`,
+			)
+		) {
+			return;
+		}
+
+		setError(null);
+		setMessage(null);
+		setDeletingId(id);
+
+		const result = await authClient.sso.deleteProvider({ providerId: id });
+
+		if (result.error) {
+			setError(result.error.message ?? 'Failed to delete the SSO provider.');
+			setDeletingId(null);
+			return;
+		}
+
+		setMessage(`SSO provider "${id}" deleted.`);
+		setDeletingId(null);
+		setProviders(await fetchSsoProviders());
+	};
+
 	return (
 		<div className="h-full overflow-auto p-6">
 			<div className="mx-auto max-w-xl">
@@ -86,12 +113,24 @@ export const SsoConfigForm = () => {
 							{providers.map((provider) => (
 								<li
 									key={provider.providerId}
-									className="flex justify-between gap-4"
+									className="flex items-center justify-between gap-4"
 								>
-									<span className="font-medium">{provider.providerId}</span>
-									<span className="truncate text-xs text-zinc-400">
-										{provider.issuer}
-									</span>
+									<div className="flex min-w-0 flex-col">
+										<span className="font-medium">{provider.providerId}</span>
+										<span className="truncate text-xs text-zinc-400">
+											{provider.issuer}
+										</span>
+									</div>
+									<button
+										type="button"
+										onClick={() => handleDelete(provider.providerId)}
+										disabled={deletingId === provider.providerId}
+										className="shrink-0 cursor-pointer rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+									>
+										{deletingId === provider.providerId
+											? 'Deleting…'
+											: 'Delete'}
+									</button>
 								</li>
 							))}
 						</ul>

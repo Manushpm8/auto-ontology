@@ -21,11 +21,25 @@ const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build';
 /** True once at least one SSO provider has been registered. */
 export const isSsoConfigured = async (): Promise<boolean> => (await prisma.ssoProvider.count()) > 0;
 
+// Origins of external IdPs the SSO plugin is allowed to fetch OIDC discovery
+// documents from. Better Auth always trusts the app's own baseURL; these are
+// additional trusted origins. NVIDIA login is included by default; add more
+// (comma-separated origins) via SSO_TRUSTED_ORIGINS.
+const ssoTrustedOrigins = [
+	'https://login.nvidia.com',
+	...(process.env.SSO_TRUSTED_ORIGINS?.split(',')
+		.map((origin) => origin.trim())
+		.filter(Boolean) ?? []),
+];
+
 export const auth = betterAuth({
 	// Project-scoped env var names, wired explicitly so they aren't tied to
 	// Better Auth's BETTER_AUTH_* defaults.
 	secret: process.env.AUTH_SECRET ?? (isBuildPhase ? 'next-build-time-placeholder' : undefined),
 	baseURL: process.env.APP_URL,
+	// Trust external IdP origins (e.g. NVIDIA login) so the SSO plugin may fetch
+	// their OIDC discovery endpoints. The app's own baseURL is always trusted.
+	trustedOrigins: ssoTrustedOrigins,
 	database: prismaAdapter(prisma, { provider: 'postgresql' }),
 	// Email/password sign-IN is enabled, but self-service sign-UP is disabled:
 	// the only credential account is the bootstrap admin seeded from
