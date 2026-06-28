@@ -13,7 +13,6 @@ type ManagedUser = {
 	name: string;
 	email: string;
 	role: string | null | undefined;
-	banned: boolean | null | undefined;
 };
 
 type ListResult = { users: ManagedUser[]; error: string | null };
@@ -32,7 +31,7 @@ export const UsersManager = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [busyId, setBusyId] = useState<string | null>(null);
 
-	const adminCount = users.filter((user) => user.role === Role.Admin && !user.banned).length;
+	const adminCount = users.filter((user) => user.role === Role.Admin).length;
 
 	useEffect(() => {
 		fetchUsers().then((result) => {
@@ -68,12 +67,16 @@ export const UsersManager = () => {
 		);
 	};
 
-	const toggleBan = (user: ManagedUser) =>
-		runAction(user.id, () =>
-			user.banned
-				? authClient.admin.unbanUser({ userId: user.id })
-				: authClient.admin.banUser({ userId: user.id }),
-		);
+	const deleteUser = (user: ManagedUser) => {
+		if (
+			!window.confirm(
+				`Delete user "${user.name || user.email}"? This permanently removes the account and its data.`,
+			)
+		) {
+			return;
+		}
+		return runAction(user.id, () => authClient.admin.removeUser({ userId: user.id }));
+	};
 
 	return (
 		<div className="h-full overflow-auto p-6">
@@ -97,15 +100,14 @@ export const UsersManager = () => {
 								<tr>
 									<th className="px-4 py-2 font-medium">User</th>
 									<th className="px-4 py-2 font-medium">Role</th>
-									<th className="px-4 py-2 font-medium">Status</th>
 									<th className="px-4 py-2 text-right font-medium">Actions</th>
 								</tr>
 							</thead>
 							<tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
 								{users.map((user) => {
 									const isAdmin = user.role === Role.Admin;
-									// Never let the last active admin be demoted or banned.
-									const isLastAdmin = isAdmin && !user.banned && adminCount <= 1;
+									// Never let the last admin be demoted or deleted.
+									const isLastAdmin = isAdmin && adminCount <= 1;
 									const busy = busyId === user.id;
 									return (
 										<tr
@@ -124,13 +126,6 @@ export const UsersManager = () => {
 												{isAdmin ? 'Admin' : 'Viewer'}
 											</td>
 											<td className="px-4 py-2">
-												{user.banned ? (
-													<span className="text-red-500">Disabled</span>
-												) : (
-													<span className="text-[#76b900]">Active</span>
-												)}
-											</td>
-											<td className="px-4 py-2">
 												<div className="flex justify-end gap-2">
 													<button
 														type="button"
@@ -143,10 +138,10 @@ export const UsersManager = () => {
 													<button
 														type="button"
 														disabled={busy || isLastAdmin}
-														onClick={() => toggleBan(user)}
-														className="cursor-pointer rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+														onClick={() => deleteUser(user)}
+														className="cursor-pointer rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
 													>
-														{user.banned ? 'Enable' : 'Disable'}
+														Delete
 													</button>
 												</div>
 											</td>
