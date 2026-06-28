@@ -9,12 +9,17 @@
 // dev-server rewrites buffer streaming responses — the browser would receive
 // nothing until the upstream connection closed, defeating SSE.
 
+import { requireApiAuth } from '@/auth/api-auth';
+
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(req: Request): Promise<Response> {
+	const denied = await requireApiAuth();
+	if (denied) return denied;
+
 	const body = await req.text();
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {

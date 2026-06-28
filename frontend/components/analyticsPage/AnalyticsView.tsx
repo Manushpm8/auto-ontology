@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 
 import { Icon, IconName } from '@/components/icons';
 import { Table } from '@/components/Table';
+import { Toast } from '@/components/Toast';
 import { analyticsApi } from '@/api/analytics';
 import { formatDate } from '@/common/date';
 import type { ConversationAnalytics } from '@/types/analytics';
@@ -15,7 +16,7 @@ import type { TableColumn } from '@/types/table';
 
 const PAGE_SIZE = 10;
 
-const CSV_HEADERS = ['Timestamp', 'Question', 'Reasoning', 'SQL'];
+const CSV_HEADERS = ['Timestamp', 'User', 'Question', 'Reasoning', 'SQL'];
 const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 const COLUMNS: TableColumn<ConversationAnalytics>[] = [
@@ -26,6 +27,16 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 		nowrap: true,
 		className: 'text-zinc-600 dark:text-zinc-300',
 		cell: (row) => formatDate(row.questionTimestamp),
+	},
+	{
+		key: 'userName',
+		header: 'User',
+		width: 'w-40',
+		nowrap: true,
+		truncate: true,
+		className: 'text-zinc-700 dark:text-zinc-300',
+		cell: (row) => row.userName ?? '—',
+		title: (row) => row.userName ?? '',
 	},
 	{
 		key: 'question',
@@ -90,6 +101,7 @@ export const AnalyticsView = () => {
 			...rows.map((row) =>
 				[
 					formatDate(row.questionTimestamp),
+					row.userName ?? '',
 					row.question ?? '',
 					row.response ?? '',
 					row.sql ?? '',
@@ -140,17 +152,6 @@ export const AnalyticsView = () => {
 					</div>
 				)}
 
-				{!loading && error != null && (
-					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
-						<h2 className="text-lg font-semibold tracking-tight text-red-800 dark:text-red-300">
-							Couldn&apos;t load analytics
-						</h2>
-						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-red-900/80 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
-							{error}
-						</pre>
-					</div>
-				)}
-
 				{!loading && error == null && rows.length === 0 && (
 					<div className="flex h-full min-h-[40dvh] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300/80 bg-white/60 p-12 text-center dark:border-zinc-600 dark:bg-zinc-950/40">
 						<Icon
@@ -181,6 +182,14 @@ export const AnalyticsView = () => {
 					/>
 				)}
 			</div>
+
+			<Toast
+				open={error !== null}
+				message={error ?? ''}
+				title="Couldn't load analytics"
+				variant="error"
+				onClose={() => setError(null)}
+			/>
 		</div>
 	);
 };
