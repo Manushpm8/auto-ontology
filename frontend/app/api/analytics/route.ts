@@ -4,8 +4,8 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAdmin } from '@/lib/api-auth';
-import { getCurrentSession } from '@/lib/auth-guards';
+import { requireApiAdmin } from '@/auth/api-auth';
+import { getCurrentSession } from '@/auth/auth-guards';
 
 // Analytics always cover a fixed trailing window; not configurable per-request.
 const ANALYTICS_DAYS = 30;

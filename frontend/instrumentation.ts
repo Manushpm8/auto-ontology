@@ -12,7 +12,7 @@ export async function register() {
 	if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
 	try {
-		const { seedAdmin } = await import('@/lib/seed-admin');
+		const { seedAdmin } = await import('@/auth/seed-admin');
 		await seedAdmin();
 	} catch (error) {
 		// Don't crash the server if seeding fails (e.g. DB not yet reachable);

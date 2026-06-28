@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAuth } from '@/lib/api-auth';
+import { requireApiAuth } from '@/auth/api-auth';
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const denied = await requireApiAuth();

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NextResponse } from 'next/server';
-import { getCurrentSession } from '@/lib/auth-guards';
+import { getCurrentSession } from '@/auth/auth-guards';
 import { Role } from '@/enums/auth';
 
 /**

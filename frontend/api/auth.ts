@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { authClient } from '@/lib/auth-client';
+import { authClient } from '@/auth/auth-client';
 
 export type SsoProvider = { providerId: string; issuer: string; domain: string };
 
@@ -25,7 +25,7 @@ type RegisterInput = {
 	discovery: SsoDiscovery;
 };
 
-export const ssoApi = {
+export const authApi = {
 	/** Public list of configured providers (no secrets). */
 	listProviders: async (): Promise<SsoProvider[]> => {
 		const res = await fetch('/api/sso-providers').catch(() => null);
@@ -73,4 +73,12 @@ export const ssoApi = {
 		}),
 
 	deleteProvider: (providerId: string) => authClient.sso.deleteProvider({ providerId }),
+
+	/** Email/password sign-in (the local bootstrap-admin fallback). */
+	signInWithPassword: (email: string, password: string) =>
+		authClient.signIn.email({ email, password }),
+
+	/** Start the OIDC sign-in redirect for a registered provider. */
+	signInWithProvider: (providerId: string, callbackURL: string) =>
+		authClient.signIn.sso({ providerId, callbackURL }),
 };

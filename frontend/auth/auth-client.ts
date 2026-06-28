@@ -5,7 +5,7 @@
 import { createAuthClient } from 'better-auth/react';
 import { adminClient } from 'better-auth/client/plugins';
 import { ssoClient } from '@better-auth/sso/client';
-import { ac, roles } from '@/lib/auth-access';
+import { ac, roles } from '@/auth/auth-access';
 
 export const authClient = createAuthClient({
 	plugins: [adminClient({ ac, roles }), ssoClient()],

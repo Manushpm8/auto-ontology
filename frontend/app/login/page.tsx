@@ -7,9 +7,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Icon, IconName } from '@/components/icons';
-import { signIn } from '@/lib/auth-client';
-
-type SsoProvider = { providerId: string; issuer: string; domain: string };
+import { authApi, type SsoProvider } from '@/api/auth';
 
 const inputClass =
 	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
@@ -31,10 +29,9 @@ const LoginForm = () => {
 	const [showPasswordLogin, setShowPasswordLogin] = useState(false);
 
 	useEffect(() => {
-		fetch('/api/sso-providers')
-			.then((res) => res.json())
-			.then((data) => setProviders(data.providers ?? []))
-			.catch(() => setProviders([]))
+		authApi
+			.listProviders()
+			.then(setProviders)
 			.finally(() => setProvidersLoaded(true));
 	}, []);
 
@@ -44,7 +41,7 @@ const LoginForm = () => {
 		event.preventDefault();
 		setSubmitting(true);
 		setError(null);
-		const result = await signIn.email({ email, password });
+		const result = await authApi.signInWithPassword(email, password);
 		if (result.error) {
 			setError(result.error.message ?? 'Invalid email or password.');
 			setSubmitting(false);
@@ -55,7 +52,7 @@ const LoginForm = () => {
 	};
 
 	const handleSso = (providerId: string) => {
-		signIn.sso({ providerId, callbackURL: next });
+		authApi.signInWithProvider(providerId, next);
 	};
 
 	// Avoid flashing the password form before we know whether SSO is configured.

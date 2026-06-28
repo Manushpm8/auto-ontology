@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { getApiUser } from '@/lib/api-auth';
+import { getApiUser } from '@/auth/api-auth';
 
 const notFound = () => NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
 

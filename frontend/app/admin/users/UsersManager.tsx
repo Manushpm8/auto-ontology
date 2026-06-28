@@ -5,9 +5,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Spinner } from '@nvidia/foundations-react-core';
 import { Role } from '@/enums/auth';
 import { usersApi, type ManagedUser } from '@/api/users';
 import { Table } from '@/components/Table';
+import { Toast } from '@/components/Toast';
 import type { TableColumn } from '@/types/table';
 
 const actionButtonClass =
@@ -131,10 +133,8 @@ export const UsersManager = () => {
 					pages.
 				</p>
 
-				{error ? <p className="mb-3 text-xs text-red-500">{error}</p> : null}
-
 				{loading ? (
-					<p className="text-sm text-zinc-500">Loading…</p>
+					<Spinner aria-label="Loading users" />
 				) : (
 					<Table
 						columns={columns}
@@ -144,6 +144,13 @@ export const UsersManager = () => {
 					/>
 				)}
 			</div>
+
+			<Toast
+				open={error !== null}
+				message={error ?? ''}
+				variant="error"
+				onClose={() => setError(null)}
+			/>
 		</div>
 	);
 };

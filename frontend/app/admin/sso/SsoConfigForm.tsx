@@ -5,7 +5,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ssoApi, type SsoProvider } from '@/api/sso';
+import { authApi, type SsoProvider } from '@/api/auth';
+import { Toast } from '@/components/Toast';
 
 const inputClass =
 	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:disabled:bg-zinc-800/50 dark:disabled:text-zinc-400';
@@ -30,15 +31,15 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 		setMessage(null);
 
 		// Resolve the provider's endpoints server-side, then register with
-		// skipDiscovery (see api/sso.ts).
-		const discovered = await ssoApi.discover(issuer);
+		// skipDiscovery (see api/auth.ts).
+		const discovered = await authApi.discover(issuer);
 		if (discovered.error !== null) {
 			setError(discovered.error);
 			setSubmitting(false);
 			return;
 		}
 
-		const result = await ssoApi.register({
+		const result = await authApi.register({
 			providerId,
 			issuer,
 			clientId,
@@ -55,7 +56,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 		setMessage('SSO provider saved.');
 		setClientSecret('');
 		setSubmitting(false);
-		setProviders(await ssoApi.listProviders());
+		setProviders(await authApi.listProviders());
 	};
 
 	const handleDelete = async (id: string) => {
@@ -71,7 +72,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 		setMessage(null);
 		setDeletingId(id);
 
-		const result = await ssoApi.deleteProvider(id);
+		const result = await authApi.deleteProvider(id);
 
 		if (result.error) {
 			setError(result.error.message ?? 'Failed to delete the SSO provider.');
@@ -81,7 +82,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 
 		setMessage(`SSO provider "${id}" deleted.`);
 		setDeletingId(null);
-		setProviders(await ssoApi.listProviders());
+		setProviders(await authApi.listProviders());
 	};
 
 	const provider = providers[0];
@@ -97,9 +98,6 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 					Configure a single OpenID Connect provider. Endpoints are discovered from the
 					issuer. The client secret is stored securely and never shown again.
 				</p>
-
-				{error ? <p className="mb-3 text-xs text-red-500">{error}</p> : null}
-				{message ? <p className="mb-3 text-xs text-[#76b900]">{message}</p> : null}
 
 				<form onSubmit={handleSubmit} className="flex flex-col gap-4">
 					<div className="flex flex-col gap-1.5">
@@ -195,6 +193,19 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 					)}
 				</form>
 			</div>
+
+			<Toast
+				open={error !== null}
+				message={error ?? ''}
+				variant="error"
+				onClose={() => setError(null)}
+			/>
+			<Toast
+				open={message !== null}
+				message={message ?? ''}
+				variant="success"
+				onClose={() => setMessage(null)}
+			/>
 		</div>
 	);
 };

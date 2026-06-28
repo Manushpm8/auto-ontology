@@ -5,8 +5,7 @@
 'use client';
 
 import { useState } from 'react';
-import { signOut, useSession } from '@/lib/auth-client';
-import { Role } from '@/enums/auth';
+import { signOut, useSession } from '@/auth/auth-client';
 
 export const UserMenu = () => {
 	const { data } = useSession();
@@ -15,7 +14,6 @@ export const UserMenu = () => {
 	if (!data) return null;
 
 	const { user } = data;
-	const isAdmin = user.role === Role.Admin;
 	const initial = (user.name || user.email || '?').charAt(0).toUpperCase();
 
 	const handleSignOut = async () => {
@@ -37,7 +35,7 @@ export const UserMenu = () => {
 						{user.name || user.email}
 					</span>
 					<span className="text-[10px] uppercase tracking-wide text-zinc-400">
-						{isAdmin ? 'Admin' : 'Viewer'}
+						{user.role}
 					</span>
 				</div>
 			</div>

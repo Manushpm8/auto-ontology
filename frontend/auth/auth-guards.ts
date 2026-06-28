@@ -4,7 +4,7 @@
 
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { auth } from '@/lib/auth';
+import { auth } from '@/auth/auth';
 import { Role } from '@/enums/auth';
 
 /** Authoritative session lookup for server components and route handlers. */

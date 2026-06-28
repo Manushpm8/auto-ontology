@@ -8,7 +8,7 @@ import { admin } from 'better-auth/plugins/admin';
 import { nextCookies } from 'better-auth/next-js';
 import { sso } from '@better-auth/sso';
 import { getPrisma } from '@/lib/prisma';
-import { ac, roles } from '@/lib/auth-access';
+import { ac, roles } from '@/auth/auth-access';
 import { Role } from '@/enums/auth';
 
 const prisma = getPrisma();

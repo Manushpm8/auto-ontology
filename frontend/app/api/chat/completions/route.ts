@@ -9,7 +9,7 @@
 // dev-server rewrites buffer streaming responses — the browser would receive
 // nothing until the upstream connection closed, defeating SSE.
 
-import { requireApiAuth } from '@/lib/api-auth';
+import { requireApiAuth } from '@/auth/api-auth';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 

@@ -7,7 +7,7 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import { NavRail } from '@/components/NavRail';
 import { AppTopBar } from '@/components/AppTopBar';
 import { BreadcrumbProvider } from '@/contexts/BreadcrumbContext';
-import { getCurrentSession } from '@/lib/auth-guards';
+import { getCurrentSession } from '@/auth/auth-guards';
 import { Role } from '@/enums/auth';
 import './globals.css';
 

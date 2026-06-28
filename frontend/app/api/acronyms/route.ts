@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAuth } from '@/lib/api-auth';
+import { requireApiAuth } from '@/auth/api-auth';
 
 export async function GET(req: Request) {
 	const denied = await requireApiAuth();

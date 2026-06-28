@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { requireAdmin } from '@/lib/auth-guards';
+import { requireAdmin } from '@/auth/auth-guards';
 import { UsersManager } from './UsersManager';
 
 const AdminUsersPage = async () => {

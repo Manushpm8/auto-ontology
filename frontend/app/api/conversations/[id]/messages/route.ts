@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { getApiUser } from '@/lib/api-auth';
+import { getApiUser } from '@/auth/api-auth';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { userId, deny } = await getApiUser();

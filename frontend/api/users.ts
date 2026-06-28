@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { authClient } from '@/lib/auth-client';
+import { authClient } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
 
 export type ManagedUser = {
