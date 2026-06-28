@@ -55,14 +55,35 @@ const LoginForm = () => {
 		authApi.signInWithProvider(providerId, next);
 	};
 
-	// Avoid flashing the password form before we know whether SSO is configured.
-	if (!providersLoaded) {
-		return <div className="w-full max-w-sm" />;
+	// The password "backdoor" — reachable via /login?password (or the link
+	// below) so the local admin can still sign in if SSO is down.
+	const passwordMode = showPasswordLogin || params.has('password');
+	// A failed SSO callback bounces back to /login carrying an error; don't
+	// auto-redirect in that case or we'd loop forever back to the IdP.
+	const hasError = params.has('error') || next.includes('error=');
+	// When SSO is configured, send the user straight to the provider on load
+	// (no button click) — unless they want the password form or just errored out.
+	const autoRedirect = ssoEnabled && !passwordMode && !hasError;
+
+	useEffect(() => {
+		if (providersLoaded && autoRedirect && providers[0]) {
+			authApi.signInWithProvider(providers[0].providerId, next);
+		}
+	}, [providersLoaded, autoRedirect, providers, next]);
+
+	// Avoid flashing the form before providers load, and while the auto-redirect
+	// to the IdP is kicking off.
+	if (!providersLoaded || autoRedirect) {
+		return (
+			<p className="w-full max-w-sm text-center text-sm text-zinc-500">
+				{autoRedirect ? 'Redirecting to SSO…' : null}
+			</p>
+		);
 	}
 
-	// SSO configured → show SSO as the only primary option, plus a discreet
-	// password fallback for the local admin if the provider is unavailable.
-	if (ssoEnabled && !showPasswordLogin) {
+	// SSO configured but auto-redirect was suppressed (an error bounced the user
+	// back): offer the SSO button to retry, plus the password backdoor.
+	if (ssoEnabled && !passwordMode) {
 		return (
 			<div className="flex w-full max-w-sm flex-col gap-4">
 				{providers.map((provider) => (

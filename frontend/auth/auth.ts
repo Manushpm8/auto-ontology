@@ -38,7 +38,7 @@ export const auth = betterAuth({
 		// GSF Allows only one SSO provider, so this makes the redirect URI static.
 		// This resolves to /api/auth/sso/callback
 		// the `ssoProvider` table — there are no SSO env vars.
-		sso({ redirectURI: "/sso/callback" }),
+		sso({ redirectURI: '/sso/callback' }),
 		// Must be the last plugin so it can set cookies on outgoing responses.
 		nextCookies(),
 	],
