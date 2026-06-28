@@ -5,25 +5,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { authClient } from '@/lib/auth-client';
 import { Role } from '@/enums/auth';
+import { usersApi, type ManagedUser } from '@/api/users';
+import { Table } from '@/components/Table';
+import type { TableColumn } from '@/types/table';
 
-type ManagedUser = {
-	id: string;
-	name: string;
-	email: string;
-	role: string | null | undefined;
-};
+const actionButtonClass =
+	'cursor-pointer rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800';
 
-type ListResult = { users: ManagedUser[]; error: string | null };
-
-const fetchUsers = async (): Promise<ListResult> => {
-	const result = await authClient.admin.listUsers({ query: { limit: 200 } });
-	if (result.error) {
-		return { users: [], error: result.error.message ?? 'Failed to load users.' };
-	}
-	return { users: (result.data?.users ?? []) as ManagedUser[], error: null };
-};
+const deleteButtonClass =
+	'cursor-pointer rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950';
 
 export const UsersManager = () => {
 	const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -34,7 +25,7 @@ export const UsersManager = () => {
 	const adminCount = users.filter((user) => user.role === Role.Admin).length;
 
 	useEffect(() => {
-		fetchUsers().then((result) => {
+		usersApi.list().then((result) => {
 			setUsers(result.users);
 			setError(result.error);
 			setLoading(false);
@@ -54,7 +45,7 @@ export const UsersManager = () => {
 					: 'Action failed.';
 			setError(message);
 		}
-		const listed = await fetchUsers();
+		const listed = await usersApi.list();
 		setUsers(listed.users);
 		if (listed.error) setError(listed.error);
 		setBusyId(null);
@@ -62,9 +53,7 @@ export const UsersManager = () => {
 
 	const toggleRole = (user: ManagedUser) => {
 		const nextRole = user.role === Role.Admin ? Role.Viewer : Role.Admin;
-		return runAction(user.id, () =>
-			authClient.admin.setRole({ userId: user.id, role: nextRole }),
-		);
+		return runAction(user.id, () => usersApi.setRole(user.id, nextRole));
 	};
 
 	const deleteUser = (user: ManagedUser) => {
@@ -75,8 +64,61 @@ export const UsersManager = () => {
 		) {
 			return;
 		}
-		return runAction(user.id, () => authClient.admin.removeUser({ userId: user.id }));
+		return runAction(user.id, () => usersApi.remove(user.id));
 	};
+
+	const columns: TableColumn<ManagedUser>[] = [
+		{
+			key: 'user',
+			header: 'User',
+			cell: (user) => (
+				<div>
+					<div className="font-medium">{user.name || '—'}</div>
+					<div className="text-xs text-zinc-400">{user.email}</div>
+				</div>
+			),
+		},
+		{
+			key: 'role',
+			header: 'Role',
+			width: 'w-32',
+			nowrap: true,
+			cell: (user) => (user.role === Role.Admin ? 'Admin' : 'Viewer'),
+		},
+		{
+			key: 'actions',
+			header: 'Actions',
+			width: 'w-56',
+			nowrap: true,
+			headerClassName: 'text-right',
+			cell: (user) => {
+				const isAdmin = user.role === Role.Admin;
+				// Never let the last admin be demoted or deleted.
+				const isLastAdmin = isAdmin && adminCount <= 1;
+				const busy = busyId === user.id;
+				return (
+					<div className="flex justify-end gap-2">
+						<button
+							type="button"
+							disabled={busy || isLastAdmin}
+							onClick={() => toggleRole(user)}
+							className={actionButtonClass}
+						>
+							{isAdmin ? 'Make viewer' : 'Make admin'}
+						</button>
+						<button
+							type="button"
+							disabled={busy || isLastAdmin}
+							onClick={() => deleteUser(user)}
+							className={deleteButtonClass}
+						>
+							Delete
+						</button>
+					</div>
+				);
+			},
+		},
+	];
 
 	return (
 		<div className="h-full overflow-auto p-6">
@@ -94,63 +136,12 @@ export const UsersManager = () => {
 				{loading ? (
 					<p className="text-sm text-zinc-500">Loading…</p>
 				) : (
-					<div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-						<table className="w-full text-left text-sm">
-							<thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-900">
-								<tr>
-									<th className="px-4 py-2 font-medium">User</th>
-									<th className="px-4 py-2 font-medium">Role</th>
-									<th className="px-4 py-2 text-right font-medium">Actions</th>
-								</tr>
-							</thead>
-							<tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-								{users.map((user) => {
-									const isAdmin = user.role === Role.Admin;
-									// Never let the last admin be demoted or deleted.
-									const isLastAdmin = isAdmin && adminCount <= 1;
-									const busy = busyId === user.id;
-									return (
-										<tr
-											key={user.id}
-											className="text-zinc-700 dark:text-zinc-300"
-										>
-											<td className="px-4 py-2">
-												<div className="font-medium">
-													{user.name || '—'}
-												</div>
-												<div className="text-xs text-zinc-400">
-													{user.email}
-												</div>
-											</td>
-											<td className="px-4 py-2">
-												{isAdmin ? 'Admin' : 'Viewer'}
-											</td>
-											<td className="px-4 py-2">
-												<div className="flex justify-end gap-2">
-													<button
-														type="button"
-														disabled={busy || isLastAdmin}
-														onClick={() => toggleRole(user)}
-														className="cursor-pointer rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
-													>
-														{isAdmin ? 'Make viewer' : 'Make admin'}
-													</button>
-													<button
-														type="button"
-														disabled={busy || isLastAdmin}
-														onClick={() => deleteUser(user)}
-														className="cursor-pointer rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-													>
-														Delete
-													</button>
-												</div>
-											</td>
-										</tr>
-									);
-								})}
-							</tbody>
-						</table>
-					</div>
+					<Table
+						columns={columns}
+						rows={users}
+						rowKey={(user) => user.id}
+						layout="auto"
+					/>
 				)}
 			</div>
 		</div>
