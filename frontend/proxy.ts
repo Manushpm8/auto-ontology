@@ -12,6 +12,15 @@ const PUBLIC_PATHS = ['/login'];
 const isPublicPath = (pathname: string): boolean =>
 	PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
+// API paths reachable without a session: Better Auth's own endpoints (sign-in,
+// SSO callback, session), the health check, and the public SSO-provider list
+// the login page reads before authenticating. Everything else under /api/*
+// requires a session.
+const PUBLIC_API_PREFIXES = ['/api/auth', '/api/health', '/api/sso-providers'];
+
+const isPublicApi = (pathname: string): boolean =>
+	PUBLIC_API_PREFIXES.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+
 /**
  * For /api/* requests, moves the first `*_id` query parameter into the URL path
  * so the backend receives it as a path param.
@@ -57,9 +66,16 @@ function guardPage(request: NextRequest): NextResponse {
 }
 
 export function proxy(request: NextRequest) {
-	// API requests (including Better Auth's own /api/auth/*) are not page-gated;
-	// auth is enforced on pages and in route handlers. Keep the `*_id` rewrite.
-	if (request.nextUrl.pathname.startsWith('/api/')) {
+	const { pathname } = request.nextUrl;
+
+	if (pathname.startsWith('/api/')) {
+		// Gate API routes: handlers aren't covered by the page gate. This is an
+		// optimistic cookie-presence check (the route handlers do the real
+		// session validation via requireApiAuth) — reject outright when no
+		// session cookie is present, except for the public API allowlist.
+		if (!isPublicApi(pathname) && getSessionCookie(request) == null) {
+			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		}
 		return rewriteApiIdParam(request);
 	}
 

@@ -11,11 +11,14 @@ generator client {
 
 model Conversation {
   id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String    @default("")
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
   messages  Message[]
 
+  @@index([userId])
   @@map("conversations")
   @@schema("public")
 }
@@ -84,6 +87,7 @@ model User {
   sessions      Session[]
   accounts      Account[]
   ssoproviders  SsoProvider[]
+  conversations Conversation[]
 
   @@unique([email])
   @@map("user")

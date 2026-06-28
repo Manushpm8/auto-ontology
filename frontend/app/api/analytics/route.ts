@@ -4,6 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
+import { requireApiAuth } from '@/lib/api-auth';
 
 // Analytics always cover a fixed trailing window; not configurable per-request.
 const ANALYTICS_DAYS = 30;
@@ -15,6 +16,9 @@ const parseIntParam = (value: string | null, fallback: number): number => {
 };
 
 export async function GET(request: Request) {
+	const denied = await requireApiAuth();
+	if (denied) return denied;
+
 	const prisma = getPrisma();
 	const { searchParams } = new URL(request.url);
 
@@ -37,6 +41,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(req: Request) {
+	const denied = await requireApiAuth();
+	if (denied) return denied;
+
 	const prisma = getPrisma();
 	const body = await req.json();
 	const row = await prisma.conversationAnalytics.create({
