@@ -60,6 +60,7 @@ model Acronym {
 model ConversationAnalytics {
   id                String    @id @default(uuid()) @db.Uuid
   questionMessageId String    @unique @map("question_message_id") @db.Uuid
+  userName          String?   @map("user_name")
   question          String    @default("")
   questionTimestamp DateTime  @default(now()) @map("question_timestamp") @db.Timestamptz
   response          String?

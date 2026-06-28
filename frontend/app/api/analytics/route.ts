@@ -4,7 +4,8 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAuth, requireApiAdmin } from '@/lib/api-auth';
+import { requireApiAdmin } from '@/lib/api-auth';
+import { getCurrentSession } from '@/lib/auth-guards';
 
 // Analytics always cover a fixed trailing window; not configurable per-request.
 const ANALYTICS_DAYS = 30;
@@ -31,42 +32,25 @@ export async function GET(request: Request) {
 	const where = { questionTimestamp: { gte: cutoff } };
 
 	const total = await prisma.conversationAnalytics.count({ where });
-	const rows = await prisma.conversationAnalytics.findMany({
+	// userName is denormalized onto the row at capture time (see POST), so the
+	// report reads it directly — no join back to message/conversation/user.
+	const data = await prisma.conversationAnalytics.findMany({
 		where,
 		orderBy: { questionTimestamp: 'desc' },
 		skip,
 		...(limit != null ? { take: limit } : {}),
 	});
 
-	// Resolve who ran each question: questionMessageId -> message -> conversation
-	// -> user. ConversationAnalytics has no Prisma relation to Message, so look
-	// the owners up in one query and attach a display name to each row.
-	const messageIds = rows.map((row) => row.questionMessageId);
-	const messages = await prisma.message.findMany({
-		where: { id: { in: messageIds } },
-		select: {
-			id: true,
-			conversation: { select: { user: { select: { name: true, email: true } } } },
-		},
-	});
-	const userByMessageId = new Map(
-		messages.map((message) => {
-			const user = message.conversation.user;
-			return [message.id, user.name || user.email || null];
-		}),
-	);
-
-	const data = rows.map((row) => ({
-		...row,
-		userName: userByMessageId.get(row.questionMessageId) ?? null,
-	}));
-
 	return NextResponse.json({ data, total });
 }
 
 export async function POST(req: Request) {
-	const denied = await requireApiAuth();
-	if (denied) return denied;
+	// Capture runs for the signed-in user; their display name is recorded on the
+	// analytics row so the report is self-contained.
+	const session = await getCurrentSession();
+	if (!session) {
+		return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+	}
 
 	const prisma = getPrisma();
 	const body = await req.json();
@@ -74,6 +58,7 @@ export async function POST(req: Request) {
 		data: {
 			questionMessageId: body.questionMessageId,
 			question: body.question ?? '',
+			userName: session.user.name || session.user.email || null,
 		},
 	});
 	return NextResponse.json(row, { status: 201 });
