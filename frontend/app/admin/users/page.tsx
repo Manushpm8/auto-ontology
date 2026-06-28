@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { requireAdmin } from '@/auth/auth-guards';
-import { AnalyticsView } from '@/components/analyticsPage';
+import { UsersManager } from './UsersManager';
 
-// Analytics is admin-only; non-admins are redirected to /chat.
-export default async function AnalyticsPage() {
+const AdminUsersPage = async () => {
 	await requireAdmin();
-	return <AnalyticsView />;
-}
+	return <UsersManager />;
+};
+
+export default AdminUsersPage;

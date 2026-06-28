@@ -4,6 +4,8 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
+import { requireApiAdmin } from '@/auth/api-auth';
+import { getCurrentSession } from '@/auth/auth-guards';
 
 // Analytics always cover a fixed trailing window; not configurable per-request.
 const ANALYTICS_DAYS = 30;
@@ -15,6 +17,10 @@ const parseIntParam = (value: string | null, fallback: number): number => {
 };
 
 export async function GET(request: Request) {
+	// Viewing analytics (the report) is admin-only.
+	const denied = await requireApiAdmin();
+	if (denied) return denied;
+
 	const prisma = getPrisma();
 	const { searchParams } = new URL(request.url);
 
@@ -26,6 +32,8 @@ export async function GET(request: Request) {
 	const where = { questionTimestamp: { gte: cutoff } };
 
 	const total = await prisma.conversationAnalytics.count({ where });
+	// userName is denormalized onto the row at capture time (see POST), so the
+	// report reads it directly — no join back to message/conversation/user.
 	const data = await prisma.conversationAnalytics.findMany({
 		where,
 		orderBy: { questionTimestamp: 'desc' },
@@ -37,12 +45,20 @@ export async function GET(request: Request) {
 }
 
 export async function POST(req: Request) {
+	// Capture runs for the signed-in user; their display name is recorded on the
+	// analytics row so the report is self-contained.
+	const session = await getCurrentSession();
+	if (!session) {
+		return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+	}
+
 	const prisma = getPrisma();
 	const body = await req.json();
 	const row = await prisma.conversationAnalytics.create({
 		data: {
 			questionMessageId: body.questionMessageId,
 			question: body.question ?? '',
+			userName: session.user.name || session.user.email || null,
 		},
 	});
 	return NextResponse.json(row, { status: 201 });
