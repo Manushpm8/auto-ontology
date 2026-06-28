@@ -15,7 +15,7 @@ import type { TableColumn } from '@/types/table';
 
 const PAGE_SIZE = 10;
 
-const CSV_HEADERS = ['Timestamp', 'Question', 'Reasoning', 'SQL'];
+const CSV_HEADERS = ['Timestamp', 'User', 'Question', 'Reasoning', 'SQL'];
 const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 const COLUMNS: TableColumn<ConversationAnalytics>[] = [
@@ -26,6 +26,16 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 		nowrap: true,
 		className: 'text-zinc-600 dark:text-zinc-300',
 		cell: (row) => formatDate(row.questionTimestamp),
+	},
+	{
+		key: 'userName',
+		header: 'User',
+		width: 'w-40',
+		nowrap: true,
+		truncate: true,
+		className: 'text-zinc-700 dark:text-zinc-300',
+		cell: (row) => row.userName ?? '—',
+		title: (row) => row.userName ?? '',
 	},
 	{
 		key: 'question',
@@ -90,6 +100,7 @@ export const AnalyticsView = () => {
 			...rows.map((row) =>
 				[
 					formatDate(row.questionTimestamp),
+					row.userName ?? '',
 					row.question ?? '',
 					row.response ?? '',
 					row.sql ?? '',

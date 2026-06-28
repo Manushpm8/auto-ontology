@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAuth } from '@/lib/api-auth';
+import { requireApiAuth, requireApiAdmin } from '@/lib/api-auth';
 
 // Analytics always cover a fixed trailing window; not configurable per-request.
 const ANALYTICS_DAYS = 30;
@@ -16,7 +16,8 @@ const parseIntParam = (value: string | null, fallback: number): number => {
 };
 
 export async function GET(request: Request) {
-	const denied = await requireApiAuth();
+	// Viewing analytics (the report) is admin-only.
+	const denied = await requireApiAdmin();
 	if (denied) return denied;
 
 	const prisma = getPrisma();
@@ -30,12 +31,35 @@ export async function GET(request: Request) {
 	const where = { questionTimestamp: { gte: cutoff } };
 
 	const total = await prisma.conversationAnalytics.count({ where });
-	const data = await prisma.conversationAnalytics.findMany({
+	const rows = await prisma.conversationAnalytics.findMany({
 		where,
 		orderBy: { questionTimestamp: 'desc' },
 		skip,
 		...(limit != null ? { take: limit } : {}),
 	});
+
+	// Resolve who ran each question: questionMessageId -> message -> conversation
+	// -> user. ConversationAnalytics has no Prisma relation to Message, so look
+	// the owners up in one query and attach a display name to each row.
+	const messageIds = rows.map((row) => row.questionMessageId);
+	const messages = await prisma.message.findMany({
+		where: { id: { in: messageIds } },
+		select: {
+			id: true,
+			conversation: { select: { user: { select: { name: true, email: true } } } },
+		},
+	});
+	const userByMessageId = new Map(
+		messages.map((message) => {
+			const user = message.conversation.user;
+			return [message.id, user.name || user.email || null];
+		}),
+	);
+
+	const data = rows.map((row) => ({
+		...row,
+		userName: userByMessageId.get(row.questionMessageId) ?? null,
+	}));
 
 	return NextResponse.json({ data, total });
 }

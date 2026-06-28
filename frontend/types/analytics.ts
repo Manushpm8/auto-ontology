@@ -11,4 +11,7 @@ export type ConversationAnalytics = {
 	responseMessageId: string | null;
 	responseTimestamp: string | null;
 	sql: string | null;
+	// Display name (or email) of the user who ran the question; resolved
+	// server-side via questionMessageId -> message -> conversation -> user.
+	userName?: string | null;
 };

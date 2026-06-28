@@ -4,6 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/auth-guards';
+import { Role } from '@/enums/auth';
 
 /**
  * Auth guard for API route handlers.
@@ -49,4 +50,19 @@ export async function getApiUser(): Promise<
 		};
 	}
 	return { userId: session.user.id, deny: null };
+}
+
+/**
+ * Admin-only guard for API route handlers. Returns 401 when unauthenticated,
+ * 403 when authenticated but not an admin, or null when the caller is an admin.
+ */
+export async function requireApiAdmin(): Promise<NextResponse | null> {
+	const session = await getCurrentSession();
+	if (!session) {
+		return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+	}
+	if (session.user.role !== Role.Admin) {
+		return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+	}
+	return null;
 }
