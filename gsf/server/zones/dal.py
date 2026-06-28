@@ -12,13 +12,40 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.server.zones.utils import (
     LABEL_ZONE,
+    REL_CONTAINS,
     REL_ZONE_OF,
     ZONE_DATA_LABELS,
-    format_data_item,
+    _resolve_api_name,
     format_zone,
 )
 
 _DATA_ITEM_PATTERN = "|".join(ZONE_DATA_LABELS)
+
+
+def _resolve_db_ids(conn, item_ids: list[str]) -> list[str]:
+    """Return the IDs of root Database nodes that own the given items.
+
+    If the item is already a Database node its ID is used directly.
+    For Schema and Table nodes the function walks up the CONTAINS
+    hierarchy (1–2 hops) to find the ancestor Database.
+    """
+    if not item_ids:
+        return []
+    rows = conn.query_read(
+        f"""
+        UNWIND $item_ids AS item_id
+        MATCH (item:{_DATA_ITEM_PATTERN} {{id: item_id}})
+        WITH item,
+             CASE WHEN item:{ZONE_DATA_LABELS[0]} THEN item.id ELSE null END AS direct_db_id
+        OPTIONAL MATCH (db:{ZONE_DATA_LABELS[0]})-[:{REL_CONTAINS}*1..2]->(item)
+        WHERE direct_db_id IS NULL
+        WITH coalesce(direct_db_id, db.id) AS resolved_db_id
+        WHERE resolved_db_id IS NOT NULL
+        RETURN DISTINCT resolved_db_id AS db_id
+        """,
+        {"item_ids": item_ids},
+    )
+    return [row["db_id"] for row in rows]
 
 
 def list_zones() -> list[dict[str, Any]]:
@@ -64,30 +91,51 @@ def get_zone_by_id(zone_id: str) -> dict[str, Any] | None:
 
     row = dict(rows[0])
     items = [
-        format_data_item(
-            item_id=item["id"],
-            name=item["name"],
-            gsf_label=item["gsf_label"],
-        )
+        {
+            "id": item["id"],
+            "name": item["name"],
+            "label": _resolve_api_name(item["gsf_label"]),
+        }
         for item in row.pop("items", [])
     ]
     return format_zone(row, items=items)
 
 
-def zone_name_exists(name: str, *, exclude_id: str | None = None) -> bool:
+def _zone_name_exists(
+    conn,
+    name: str,
+    *,
+    exclude_id: str | None = None,
+    item_ids: list[str] | None = None,
+) -> bool:
     """Return whether a zone with the same name already exists (case-insensitive).
 
     Pass ``exclude_id`` to ignore a specific zone (useful during updates).
+    Pass ``item_ids`` to scope the check to zones that share the same databases
+    as those items; DB IDs are resolved internally via ``_resolve_db_ids``.
     """
     exclude_clause = "AND z.id <> $exclude_id" if exclude_id is not None else ""
-    params: dict[str, str] = {"name": name}
+    db_ids = _resolve_db_ids(conn, item_ids) if item_ids else None
+    db_clause = (
+        f"""
+          AND EXISTS {{
+            MATCH (z)-[:{REL_ZONE_OF}]->(item)
+            MATCH (db:{ZONE_DATA_LABELS[0]})-[:{REL_CONTAINS}*0..2]->(item)
+            WHERE db.id IN $db_ids
+          }}"""
+        if db_ids
+        else ""
+    )
+    params: dict[str, Any] = {"name": name}
     if exclude_id is not None:
         params["exclude_id"] = exclude_id
-    rows = get_neo4j_conn().query_read(
+    if db_ids:
+        params["db_ids"] = db_ids
+    rows = conn.query_read(
         f"""
         MATCH (z:{LABEL_ZONE})
         WHERE toLower(trim(z.name)) = toLower(trim($name))
-          {exclude_clause}
+          {exclude_clause}{db_clause}
         RETURN count(z) > 0 AS exists
         """,
         params,
@@ -102,8 +150,14 @@ def create_zone(
     color: str,
     item_ids: list[str],
 ) -> dict[str, Any]:
-    """Create a zone and link it to catalog data nodes (db/schema/table)."""
+    """Create a zone and link it to catalog data nodes (db/schema/table).
+
+    Raises ``ValueError`` if a zone with the same name already exists in the
+    same databases as the given items.
+    """
     conn = get_neo4j_conn()
+    if _zone_name_exists(conn, name, item_ids=item_ids):
+        raise ValueError(f"Zone with name {name!r} already exists")
     zone_rows = conn.query_write(
         f"""
         CREATE (z:{LABEL_ZONE})
@@ -155,7 +209,13 @@ def update_zone(
     updates: dict[str, Any],
     item_ids: list[str] | None,
 ) -> dict[str, Any] | None:
-    """Update zone properties and optional full items list, then return zone detail."""
+    """Update zone properties and optional full items list, then return zone detail.
+
+    When *item_ids* is provided, the DB IDs are derived from the items themselves.
+    Only existing links that belong to those databases are removed, leaving items
+    from other databases untouched.
+    Name uniqueness is scoped to the databases associated with the zone's items.
+    """
     conn = get_neo4j_conn()
     existing_rows = conn.query_read(
         f"""
@@ -168,6 +228,21 @@ def update_zone(
     if not existing_rows:
         return None
 
+    if "name" in updates:
+        if item_ids is not None:
+            name_check_item_ids = item_ids
+        else:
+            current_items = conn.query_read(
+                f"""
+                MATCH (z:{LABEL_ZONE} {{id: $zone_id}})-[:{REL_ZONE_OF}]->(item)
+                RETURN item.id AS id
+                """,
+                {"zone_id": zone_id},
+            )
+            name_check_item_ids = [r["id"] for r in current_items]
+        if _zone_name_exists(conn, updates["name"], exclude_id=zone_id, item_ids=name_check_item_ids):
+            raise ValueError(f"Zone with name {updates['name']!r} already exists")
+
     if updates:
         set_clauses = ", ".join(f"z.{field} = ${field}" for field in updates)
         conn.query_write(
@@ -179,15 +254,20 @@ def update_zone(
         )
 
     if item_ids is not None:
-        conn.query_write(
-            f"""
-            MATCH (z:{LABEL_ZONE} {{id: $zone_id}})-[r:{REL_ZONE_OF}]->()
-            DELETE r
-            """,
-            {"zone_id": zone_id},
-        )
-
         if item_ids:
+            db_ids = _resolve_db_ids(conn, item_ids)
+            if db_ids:
+                conn.query_write(
+                    f"""
+                    MATCH (z:{LABEL_ZONE} {{id: $zone_id}})-[r:{REL_ZONE_OF}]->(item)
+                    WHERE EXISTS {{
+                        MATCH (db:{ZONE_DATA_LABELS[0]})-[:{REL_CONTAINS}*0..2]->(item)
+                        WHERE db.id IN $db_ids
+                    }}
+                    DELETE r
+                    """,
+                    {"zone_id": zone_id, "db_ids": db_ids},
+                )
             conn.query_write(
                 f"""
                 UNWIND $item_ids AS item_id
@@ -197,6 +277,14 @@ def update_zone(
                 MERGE (z)-[:{REL_ZONE_OF}]->(item)
                 """,
                 {"zone_id": zone_id, "item_ids": item_ids},
+            )
+        else:
+            conn.query_write(
+                f"""
+                MATCH (z:{LABEL_ZONE} {{id: $zone_id}})-[r:{REL_ZONE_OF}]->()
+                DELETE r
+                """,
+                {"zone_id": zone_id},
             )
 
     return get_zone_by_id(zone_id)

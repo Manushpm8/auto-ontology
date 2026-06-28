@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 
 LABEL_ZONE = "zone"
 REL_ZONE_OF = "zone_of"
+REL_CONTAINS = Edges.CONTAINS
 
 ZONE_DATA_LABELS = (
     Labels.DB,
@@ -23,8 +24,6 @@ _GSF_LABEL_TO_API_NAME: dict[str, str] = {
     Labels.TABLE: "table",
     LABEL_ZONE: "zone",
 }
-
-_ZONE_API_LABEL: str = _GSF_LABEL_TO_API_NAME[LABEL_ZONE]
 
 
 def _resolve_api_name(gsf_label: str) -> str:
@@ -43,22 +42,8 @@ def format_zone(
         "name": row["name"],
         "description": row.get("description"),
         "color": row.get("color"),
-        "label": _ZONE_API_LABEL,
+        "label": LABEL_ZONE,
     }
     if items is not None:
         result["items"] = items
     return result
-
-
-def format_data_item(
-    *,
-    item_id: str,
-    name: str,
-    gsf_label: str,
-) -> dict:
-    """Shape a catalog data node for zone item lists."""
-    return {
-        "id": item_id,
-        "name": name,
-        "label": _resolve_api_name(gsf_label),
-    }
