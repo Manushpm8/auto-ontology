@@ -15,6 +15,10 @@ export const UserMenu = () => {
 
 	const { user } = data;
 	const initial = (user.name || user.email || '?').charAt(0).toUpperCase();
+	// Title-case the role, e.g. "admin" → "Admin".
+	const roleLabel = user.role
+		? user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase()
+		: null;
 
 	const handleSignOut = async () => {
 		setSigningOut(true);
@@ -34,9 +38,7 @@ export const UserMenu = () => {
 					<span className="text-xs font-medium text-zinc-700 dark:text-zinc-200">
 						{user.name || user.email}
 					</span>
-					<span className="text-[10px] uppercase tracking-wide text-zinc-400">
-						{user.role}
-					</span>
+					<span className="text-[10px] tracking-wide text-zinc-400">{roleLabel}</span>
 				</div>
 			</div>
 			<button
