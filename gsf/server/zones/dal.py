@@ -240,7 +240,9 @@ def update_zone(
                 {"zone_id": zone_id},
             )
             name_check_item_ids = [r["id"] for r in current_items]
-        if _zone_name_exists(conn, updates["name"], exclude_id=zone_id, item_ids=name_check_item_ids):
+        if _zone_name_exists(
+            conn, updates["name"], exclude_id=zone_id, item_ids=name_check_item_ids
+        ):
             raise ValueError(f"Zone with name {updates['name']!r} already exists")
 
     if updates:
