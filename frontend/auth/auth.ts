@@ -20,6 +20,7 @@ const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build';
 
 /** True once at least one SSO provider has been registered. */
 export const isSsoConfigured = async (): Promise<boolean> => (await prisma.ssoProvider.count()) > 0;
+
 export const auth = betterAuth({
 	// Project-scoped env var names, wired explicitly so they aren't tied to
 	// Better Auth's BETTER_AUTH_* defaults.
@@ -34,9 +35,10 @@ export const auth = betterAuth({
 	plugins: [
 		// Two roles only: `admin` (user management) and `viewer` (everything else).
 		admin({ ac, roles, adminRoles: [Role.Admin], defaultRole: Role.Viewer }),
-		// OIDC providers are registered at runtime via the admin UI and stored in
+		// GSF Allows only one SSO provider, so this makes the redirect URI static.
+		// This resolves to /api/auth/sso/callback
 		// the `ssoProvider` table — there are no SSO env vars.
-		sso(),
+		sso({ redirectURI: "/sso/callback" }),
 		// Must be the last plugin so it can set cookies on outgoing responses.
 		nextCookies(),
 	],

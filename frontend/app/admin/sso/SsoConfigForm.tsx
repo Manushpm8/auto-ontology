@@ -8,6 +8,10 @@ import { useState } from 'react';
 import { authApi, type SsoProvider } from '@/api/auth';
 import { Toast } from '@/components/Toast';
 
+// Only one provider is supported; its id is a fixed constant. It's the DB key
+// and the providerId segment of the native callback (/api/auth/sso/callback/sso).
+const SSO_PROVIDER_ID = 'sso';
+
 const inputClass =
 	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:disabled:bg-zinc-800/50 dark:disabled:text-zinc-400';
 
@@ -15,7 +19,6 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 	// Seeded from the server (see page.tsx) so the correct view renders on first
 	// paint; re-fetched after register/delete to stay in sync.
 	const [providers, setProviders] = useState<SsoProvider[]>(initialProviders);
-	const [providerId, setProviderId] = useState('');
 	const [issuer, setIssuer] = useState('');
 	const [clientId, setClientId] = useState('');
 	const [clientSecret, setClientSecret] = useState('');
@@ -40,7 +43,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 		}
 
 		const result = await authApi.register({
-			providerId,
+			providerId: SSO_PROVIDER_ID,
 			issuer,
 			clientId,
 			clientSecret,
@@ -100,24 +103,6 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 				</p>
 
 				<form onSubmit={handleSubmit} className="flex flex-col gap-4">
-					<div className="flex flex-col gap-1.5">
-						<label
-							htmlFor="providerId"
-							className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
-						>
-							Provider ID
-						</label>
-						<input
-							id="providerId"
-							type="text"
-							required
-							placeholder="okta"
-							disabled={isConfigured}
-							value={provider ? provider.providerId : providerId}
-							onChange={(event) => setProviderId(event.target.value)}
-							className={inputClass}
-						/>
-					</div>
 					<div className="flex flex-col gap-1.5">
 						<label
 							htmlFor="issuer"
