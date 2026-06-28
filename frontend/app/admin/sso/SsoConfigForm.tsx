@@ -5,18 +5,10 @@
 'use client';
 
 import { useState } from 'react';
-import { authClient } from '@/lib/auth-client';
-
-type SsoProvider = { providerId: string; issuer: string; domain: string };
+import { ssoApi, type SsoProvider } from '@/api/sso';
 
 const inputClass =
 	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:disabled:bg-zinc-800/50 dark:disabled:text-zinc-400';
-
-const fetchSsoProviders = async (): Promise<SsoProvider[]> => {
-	const res = await fetch('/api/sso-providers').catch(() => null);
-	const data = res ? await res.json().catch(() => null) : null;
-	return data?.providers ?? [];
-};
 
 export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvider[] }) => {
 	// Seeded from the server (see page.tsx) so the correct view renders on first
@@ -38,40 +30,20 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 		setMessage(null);
 
 		// Resolve the provider's endpoints server-side, then register with
-		// skipDiscovery. This avoids Better Auth's auto-discovery, which would
-		// require the IdP origin in trustedOrigins; the skipDiscovery path
-		// accepts any public IdP without per-provider config.
-		const discoveryRes = await fetch(
-			`/api/sso-discovery?issuer=${encodeURIComponent(issuer)}`,
-		).catch(() => null);
-		const discovery = discoveryRes ? await discoveryRes.json().catch(() => null) : null;
-
-		if (!discoveryRes || !discoveryRes.ok || !discovery) {
-			setError(
-				discovery?.error ?? 'Could not fetch the provider configuration from the issuer.',
-			);
+		// skipDiscovery (see api/sso.ts).
+		const discovered = await ssoApi.discover(issuer);
+		if (discovered.error !== null) {
+			setError(discovered.error);
 			setSubmitting(false);
 			return;
 		}
 
-		const result = await authClient.sso.register({
+		const result = await ssoApi.register({
 			providerId,
 			issuer,
-			// Domain-based provider routing isn't used (login is by providerId), but
-			// Better Auth requires a string here, so send empty.
-			domain: '',
-			oidcConfig: {
-				clientId,
-				clientSecret,
-				skipDiscovery: true,
-				authorizationEndpoint: discovery.authorizationEndpoint,
-				tokenEndpoint: discovery.tokenEndpoint,
-				userInfoEndpoint: discovery.userInfoEndpoint ?? undefined,
-				jwksEndpoint: discovery.jwksEndpoint ?? undefined,
-				discoveryEndpoint: discovery.discoveryEndpoint,
-				scopes: ['openid', 'profile', 'email'],
-				pkce: true,
-			},
+			clientId,
+			clientSecret,
+			discovery: discovered.discovery,
 		});
 
 		if (result.error) {
@@ -83,7 +55,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 		setMessage('SSO provider saved.');
 		setClientSecret('');
 		setSubmitting(false);
-		setProviders(await fetchSsoProviders());
+		setProviders(await ssoApi.listProviders());
 	};
 
 	const handleDelete = async (id: string) => {
@@ -99,7 +71,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 		setMessage(null);
 		setDeletingId(id);
 
-		const result = await authClient.sso.deleteProvider({ providerId: id });
+		const result = await ssoApi.deleteProvider(id);
 
 		if (result.error) {
 			setError(result.error.message ?? 'Failed to delete the SSO provider.');
@@ -109,7 +81,7 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 
 		setMessage(`SSO provider "${id}" deleted.`);
 		setDeletingId(null);
-		setProviders(await fetchSsoProviders());
+		setProviders(await ssoApi.listProviders());
 	};
 
 	const provider = providers[0];
