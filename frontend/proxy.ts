@@ -21,6 +21,15 @@ const PUBLIC_API_PREFIXES = ['/api/auth', '/api/health', '/api/sso-providers'];
 const isPublicApi = (pathname: string): boolean =>
 	PUBLIC_API_PREFIXES.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
+// API endpoints that accept a service-to-service SSO bearer token instead of a
+// session cookie (see auth/bearer.ts). Cookieless requests to these are let
+// through the gate when they carry a Bearer header; the route handler performs
+// the real token verification.
+const BEARER_API_PATHS = ['/api/chat/completions'];
+
+const allowsBearer = (pathname: string): boolean =>
+	BEARER_API_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+
 /**
  * For /api/* requests, moves the first `*_id` query parameter into the URL path
  * so the backend receives it as a path param.
@@ -73,7 +82,10 @@ export function proxy(request: NextRequest) {
 		// optimistic cookie-presence check (the route handlers do the real
 		// session validation via requireApiAuth) — reject outright when no
 		// session cookie is present, except for the public API allowlist.
-		if (!isPublicApi(pathname) && getSessionCookie(request) == null) {
+		const hasBearer =
+			allowsBearer(pathname) &&
+			request.headers.get('authorization')?.toLowerCase().startsWith('bearer ') === true;
+		if (!isPublicApi(pathname) && !hasBearer && getSessionCookie(request) == null) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 		return rewriteApiIdParam(request);

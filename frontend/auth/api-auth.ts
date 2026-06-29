@@ -2,8 +2,10 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/auth/auth-guards';
+import { verifyBearer } from '@/auth/bearer';
 import { Role } from '@/enums/auth';
 
 /**
@@ -28,6 +30,23 @@ export async function requireApiAuth(): Promise<NextResponse | null> {
 		return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 	}
 	return null;
+}
+
+/**
+ * Like {@link requireApiAuth}, but also accepts a service-to-service caller that
+ * presents a valid SSO bearer token (see {@link verifyBearer}). Used by the chat
+ * API so AI-Q can call it on behalf of a user authenticated through the same
+ * NVIDIA SSO provider, while interactive browser sessions keep working via the
+ * session cookie.
+ */
+export async function requireApiAuthOrBearer(): Promise<NextResponse | null> {
+	const session = await getCurrentSession();
+	if (session) return null;
+
+	const principal = await verifyBearer(await headers());
+	if (principal) return null;
+
+	return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 }
 
 /**
