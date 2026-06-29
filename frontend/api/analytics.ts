@@ -22,7 +22,11 @@ export const analyticsApi = {
 		requests.get<ListResult>('analytics', params),
 
 	create: (questionMessageId: string, question: string): Promise<RowResponse> =>
-		requests.post<ConversationAnalytics>('analytics', { questionMessageId, question }),
+		requests.post<ConversationAnalytics>('analytics', {
+			questionMessageId,
+			question,
+			source: 'app',
+		}),
 
 	update: (analyticsId: string, payload: UpdatePayload): Promise<RowResponse> =>
 		requests.patch<ConversationAnalytics>(

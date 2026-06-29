@@ -58,6 +58,7 @@ export async function POST(req: Request) {
 		data: {
 			questionMessageId: body.questionMessageId,
 			question: body.question ?? '',
+			source: body.source ?? 'app',
 			userName: session.user.name || session.user.email || null,
 		},
 	});

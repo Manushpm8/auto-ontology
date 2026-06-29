@@ -4,7 +4,8 @@
 
 export type ConversationAnalytics = {
 	id: string;
-	questionMessageId: string;
+	questionMessageId: string | null;
+	source: string;
 	question: string;
 	questionTimestamp: string;
 	response: string | null;

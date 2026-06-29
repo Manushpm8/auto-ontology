@@ -9,12 +9,74 @@
 // dev-server rewrites buffer streaming responses — the browser would receive
 // nothing until the upstream connection closed, defeating SSE.
 
+import { after } from 'next/server';
 import { requireApiAuth } from '@/auth/api-auth';
+import { getCurrentSession } from '@/auth/auth-guards';
+import { getPrisma } from '@/lib/prisma';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+const SOURCE_HEADER = 'x-gsf-source';
+const APP_SOURCE = 'app';
+
+const extractQuestion = (rawBody: string): string => {
+	try {
+		const parsed = JSON.parse(rawBody) as { question?: unknown };
+		return typeof parsed.question === 'string' ? parsed.question : '';
+	} catch {
+		return '';
+	}
+};
+
+// Consume a teed copy of the SSE stream, returning the final answer's response
+// text and SQL. Mirrors the parsing the browser does in `frontend/api/chat.ts`
+// (data: lines, `[DONE]` sentinel, JSON `result`/`error` events).
+const readFinalAnswer = async (
+	stream: ReadableStream<Uint8Array>,
+): Promise<{ response: string | null; sql: string | null }> => {
+	const reader = stream.getReader();
+	const decoder = new TextDecoder();
+	let buffer = '';
+	let response: string | null = null;
+	let sql: string | null = null;
+
+	const handleData = (data: string): void => {
+		if (!data || data === '[DONE]') return;
+		try {
+			const event = JSON.parse(data) as {
+				type?: string;
+				answer?: { response?: string; sql_code?: string };
+			};
+			if (event.type === 'result') {
+				response = event.answer?.response ?? null;
+				sql = event.answer?.sql_code ?? null;
+			}
+		} catch {
+			// Skip heartbeats / malformed lines.
+		}
+	};
+
+	try {
+		for (;;) {
+			// eslint-disable-next-line no-await-in-loop
+			const { done, value } = await reader.read();
+			if (done) break;
+			buffer += decoder.decode(value, { stream: true });
+			const lines = buffer.split('\n');
+			buffer = lines.pop() ?? '';
+			for (const line of lines) {
+				const trimmed = line.trim();
+				if (trimmed.startsWith('data:')) handleData(trimmed.slice(5).trim());
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
+
+	return { response, sql };
+};
 
 export async function POST(req: Request): Promise<Response> {
 	const denied = await requireApiAuth();
@@ -53,13 +115,47 @@ export async function POST(req: Request): Promise<Response> {
 		});
 	}
 
-	return new Response(upstream.body, {
-		status: 200,
-		headers: {
-			'Content-Type': 'text/event-stream; charset=utf-8',
-			'Cache-Control': 'no-cache, no-transform',
-			Connection: 'keep-alive',
-			'X-Accel-Buffering': 'no',
-		},
+	const source = req.headers.get(SOURCE_HEADER) ?? 'api';
+
+	const responseHeaders = {
+		'Content-Type': 'text/event-stream; charset=utf-8',
+		'Cache-Control': 'no-cache, no-transform',
+		Connection: 'keep-alive',
+		'X-Accel-Buffering': 'no',
+	};
+
+	// Browser traffic already records analytics via the `useChat` hook; skip to
+	// avoid double-writes and preserve that path's message-id linkage.
+	if (source === APP_SOURCE) {
+		return new Response(upstream.body, { status: 200, headers: responseHeaders });
+	}
+
+	// Non-browser caller: capture analytics server-side. Create the row up
+	// front, then tee the stream — one branch flows to the client untouched,
+	// the other is parsed after the response to backfill the final answer.
+	const question = extractQuestion(body);
+	const session = await getCurrentSession();
+	const userName = session?.user.name || session?.user.email || null;
+
+	const prisma = getPrisma();
+	const row = await prisma.conversationAnalytics.create({
+		data: { question, source, userName },
 	});
+
+	const [toClient, toCapture] = upstream.body.tee();
+
+	after(async () => {
+		try {
+			const { response, sql } = await readFinalAnswer(toCapture);
+			await prisma.conversationAnalytics.update({
+				where: { id: row.id },
+				data: { response, sql, responseTimestamp: new Date() },
+			});
+		} catch {
+			// Best-effort analytics — never let capture failures affect the
+			// already-delivered chat response.
+		}
+	});
+
+	return new Response(toClient, { status: 200, headers: responseHeaders });
 }
