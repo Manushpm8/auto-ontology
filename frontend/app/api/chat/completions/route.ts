@@ -19,7 +19,6 @@ const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 const SOURCE_HEADER = 'x-gsf-source';
-const APP_SOURCE = 'app';
 
 const extractQuestion = (rawBody: string): string => {
 	try {
@@ -115,6 +114,8 @@ export async function POST(req: Request): Promise<Response> {
 		});
 	}
 
+	// Source label for the analytics row: the web app tags itself `app`; any
+	// other caller (the NAT plugin / direct API) defaults to `api`.
 	const source = req.headers.get(SOURCE_HEADER) ?? 'api';
 
 	const responseHeaders = {
@@ -124,22 +125,19 @@ export async function POST(req: Request): Promise<Response> {
 		'X-Accel-Buffering': 'no',
 	};
 
-	// Browser traffic already records analytics via the `useChat` hook; skip to
-	// avoid double-writes and preserve that path's message-id linkage.
-	if (source === APP_SOURCE) {
-		return new Response(upstream.body, { status: 200, headers: responseHeaders });
-	}
-
-	// Non-browser caller: capture analytics server-side. Create the row up
-	// front, then tee the stream — one branch flows to the client untouched,
-	// the other is parsed after the response to backfill the final answer.
+	// Single writer for analytics, for every caller. Create the row up front,
+	// then tee the stream — one branch flows to the client untouched, the other
+	// is parsed after the response to backfill the final answer.
 	const question = extractQuestion(body);
+	// requireApiAuth above guarantees an authenticated caller, so the session
+	// (and its user id) is always present here.
 	const session = await getCurrentSession();
-	const userName = session?.user.name || session?.user.email || null;
+	const userId = session?.user.id;
+	if (!userId) return new Response('Unauthorized', { status: 401 });
 
 	const prisma = getPrisma();
 	const row = await prisma.conversationAnalytics.create({
-		data: { question, source, userName },
+		data: { question, source, userId },
 	});
 
 	const [toClient, toCapture] = upstream.body.tee();

@@ -29,14 +29,14 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 		cell: (row) => formatDate(row.questionTimestamp),
 	},
 	{
-		key: 'userName',
+		key: 'user',
 		header: 'User',
 		width: 'w-40',
 		nowrap: true,
 		truncate: true,
 		className: 'text-zinc-700 dark:text-zinc-300',
-		cell: (row) => row.userName ?? '—',
-		title: (row) => row.userName ?? '',
+		cell: (row) => row.user.name || row.user.email,
+		title: (row) => row.user.name || row.user.email,
 	},
 	{
 		key: 'source',
@@ -110,7 +110,7 @@ export const AnalyticsView = () => {
 			...rows.map((row) =>
 				[
 					formatDate(row.questionTimestamp),
-					row.userName ?? '',
+					row.user.name || row.user.email,
 					row.source ?? '',
 					row.question ?? '',
 					row.response ?? '',

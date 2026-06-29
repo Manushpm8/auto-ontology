@@ -197,7 +197,6 @@ def _verify_analytics(client: httpx.Client, base_url: str, question: str) -> Non
     print(f"  question:  {match.get('question')!r}")
     print(f"  response:  {(match.get('response') or '(pending)')!r}")
     print(f"  sql:       {match.get('sql')!r}")
-    print(f"  qMsgId:    {match.get('questionMessageId')!r}")
 
 
 def main() -> None:
