@@ -1,29 +1,27 @@
 #!/usr/bin/env bash
-# Nightly staging roll for the GSF Astra deployment — Fusion-API write path.
+# Nightly staging roll for the GSF Astra deployment — direct git-push write path.
 #
 # Each run:
 #   1. Finds the newest app image on nvcr.io (built from this repo by
 #      .github/workflows/staging-publish-image.yml) and resolves its digest.
 #   2. Refreshes the WWI seed image digest.
 #   3. Bumps gsf.podAnnotations.rolledAt to now.
-#   4. Commits the updated deployment/stg/values.yaml to the Astra deploy repo
-#      via the Fusion API (values-update.py). ArgoCD auto-syncs (~3 min): the
-#      app redeploys on the newest image and the WWI reset -> seed -> ingest
-#      hooks re-run, so staging tracks the latest stg build and resets to clean
-#      demo data.
+#   4. Commits the updated deployment/stg/values.yaml and pushes it to the Astra
+#      deploy repo (main). pdx04's ArgoCD auto-syncs (~3 min): the app redeploys on
+#      the newest image and the WWI reset -> seed -> ingest hooks re-run, so staging
+#      tracks the latest stg build and resets to clean demo data.
 #
-# Write path: the deploy repo lives under a shared DL where your account is
-# read-only, so a plain `git push` is rejected. Fusion commits server-side with
-# your Astra login instead — no GitLab write token needed. This never builds
-# images (that is staging-publish-image.yml on GitHub); it only re-pins what already
-# exists on nvcr.io.
+# Write path: the deploy repo now lives in the gsf group where you have push
+# rights, so this commits the edited values.yaml and pushes to main directly
+# (the Fusion values-update API can't resolve a DL for the gsf-group repo). This
+# never builds images (that is staging-publish-image.yml on GitHub); it only
+# re-pins what already exists on nvcr.io.
 #
-# Requires: bash, curl, jq, yq (v4 / mikefarah), git; a valid Astra login
-# (run the fusion-auth check_auth.py, or `fusion auth`, first); the fusion-skills
-# venv; and env NGC_API_KEY (nvcr.io read access).
+# Requires: bash, curl, jq, yq (v4 / mikefarah), git; SSH push access to the
+# deploy repo (gsf group); and env NGC_API_KEY (nvcr.io read access).
 #
 # Usage:
-#   NGC_API_KEY=... deploy/roll-stg.sh             # resolve, edit, commit via Fusion
+#   NGC_API_KEY=... deploy/roll-stg.sh             # resolve, edit, commit + push
 #   NGC_API_KEY=... deploy/roll-stg.sh --dry-run   # resolve + show values diff, no commit
 set -euo pipefail
 
@@ -39,10 +37,6 @@ ENVIRONMENT="${ENVIRONMENT:-stg}"
 # ── nvcr.io repos (paths under the registry host) ────────────────────────
 APP_REPO="nvstaging/gsf/gsf"            # app image (shares this repo with the OCI chart)
 SEED_REPO="nvstaging/gsf/gsf-wwi-seed"  # WWI demo-data seed image
-
-# ── fusion tooling (override via env if installed elsewhere) ─────────────
-FUSION_PY="${FUSION_PY:-$HOME/.claude/skills/fusion-skills/.venv/bin/python}"
-VALUES_UPDATE="${VALUES_UPDATE:-$HOME/.claude/skills/fusion-skills/fusion-deployment/scripts/values-update.py}"
 
 : "${NGC_API_KEY:?set NGC_API_KEY (nvcr.io read access)}"
 log() { printf '  %s\n' "$*" >&2; }
@@ -84,8 +78,7 @@ digest_of() {
 command -v yq >/dev/null || die "yq (v4) not found"
 command -v jq >/dev/null || die "jq not found"
 command -v curl >/dev/null || die "curl not found"
-[ "$DRY_RUN" = 1 ] || [ -x "$FUSION_PY" ] || die "fusion venv python not found: $FUSION_PY"
-[ "$DRY_RUN" = 1 ] || [ -f "$VALUES_UPDATE" ] || die "values-update.py not found: $VALUES_UPDATE"
+command -v git >/dev/null || die "git not found"
 
 # ── pull the current values.yaml from the deploy repo (read-only clone) ──
 work="$(mktemp -d)"
@@ -135,15 +128,11 @@ if [ "$DRY_RUN" = 1 ]; then
 	exit 0
 fi
 
-# ── commit via the Fusion API (server-side; ArgoCD auto-syncs ~3 min) ────
+# ── commit + push directly to the deploy repo (gsf group: we have push) ──
 # rolledAt always advances, so there is always something to commit -> the WWI
-# data is reset every run even when the image digest is unchanged.
-log "committing via Fusion (values-update.py)…"
-"$FUSION_PY" "$VALUES_UPDATE" update \
-	--repo-url "$DEPLOY_REPO_URL" \
-	--env "$ENVIRONMENT" \
-	--values-yaml-path "$VALUES_PATH_IN_REPO" \
-	--values-file "$VALUES" \
-	--commit-message "roll stg: $app_tag + data reset $now" \
-	--yes
-log "rolled: $app_tag @ $now — ArgoCD will auto-sync within ~3 min"
+# data is reset every run even when the image digest is unchanged. (The Fusion
+# values-update API can't resolve a DL for the gsf-group repo, so we push.)
+log "committing + pushing to the deploy repo…"
+git -C "$work/repo" commit -aqm "roll stg: $app_tag + data reset $now"
+git -C "$work/repo" push -q origin HEAD:main
+log "rolled: $app_tag @ $now — pdx04 ArgoCD auto-syncs within ~3 min"
