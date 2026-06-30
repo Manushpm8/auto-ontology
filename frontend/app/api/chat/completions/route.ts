@@ -11,7 +11,7 @@
 
 import { after } from 'next/server';
 import { requireApiAuth } from '@/auth/api-auth';
-import { getCurrentSession } from '@/auth/auth-guards';
+import { resolveUserId } from '@/auth/resolve-user';
 import { getPrisma } from '@/lib/prisma';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
@@ -129,10 +129,10 @@ export async function POST(req: Request): Promise<Response> {
 	// then tee the stream — one branch flows to the client untouched, the other
 	// is parsed after the response to backfill the final answer.
 	const question = extractQuestion(body);
-	// requireApiAuth above guarantees an authenticated caller, so the session
-	// (and its user id) is always present here.
-	const session = await getCurrentSession();
-	const userId = session?.user.id;
+
+	// The query must belong to a known GSF user (session or SSO bearer). A bearer
+	// caller whose SSO identity has no matching GSF account is rejected.
+	const userId = await resolveUserId();
 	if (!userId) return new Response('Unauthorized', { status: 401 });
 
 	const prisma = getPrisma();
