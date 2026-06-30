@@ -22,6 +22,16 @@ const statement = {
 	sso: ['read', 'manage'],
 	conversation: ['read', 'write', 'delete'],
 	chat: ['use'],
+	// Custom analyses: everyone may view; only admins may add/edit/delete.
+	analysis: ['read', 'manage'],
+	// Data catalog (databases/schemas/tables/columns/nodes): browsing and
+	// editing node metadata. Editing is allowed for viewers too.
+	catalog: ['read', 'edit'],
+	// Database connections (settings): everyone may view; only admins may
+	// add/test/delete (they carry credentials).
+	connection: ['read', 'manage'],
+	// Zones (settings): everyone may view; only admins may add/edit/delete.
+	zone: ['read', 'manage'],
 } as const;
 
 export const ac = createAccessControl(statement);
@@ -36,14 +46,22 @@ export const roles = {
 		sso: ['read', 'manage'],
 		conversation: ['read', 'write', 'delete'],
 		chat: ['use'],
+		analysis: ['read', 'manage'],
+		catalog: ['read', 'edit'],
+		connection: ['read', 'manage'],
+		zone: ['read', 'manage'],
 	}),
 	// Viewer: read-only on glossary/prompts, full control of their own
-	// conversations, and may run chat. No analytics, SSO, or user management.
+	// conversations, may run chat, may view custom analyses (not add/edit them),
+	// and may browse + edit the data catalog. No analytics, SSO, user mgmt, and
+	// no access at all to connections or zones (admin-only).
 	[Role.Viewer]: ac.newRole({
 		acronym: ['read'],
 		prompt: ['read'],
 		conversation: ['read', 'write', 'delete'],
 		chat: ['use'],
+		analysis: ['read'],
+		catalog: ['read', 'edit'],
 	}),
 };
 

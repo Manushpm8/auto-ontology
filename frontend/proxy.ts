@@ -35,8 +35,8 @@ function rewriteApiIdParam(request: NextRequest): NextResponse {
 /**
  * Optimistic, cookie-only auth gate (no DB call). Redirects unauthenticated
  * users to /login and authenticated users away from the auth pages. Role-based
- * gating of /admin/* happens in the pages themselves, since the role is not
- * present in the session cookie.
+ * gating of admin areas (e.g. /settings/*) happens in those layouts/pages via
+ * requireAdmin(), since the role is not present in the session cookie.
  */
 function guardPage(request: NextRequest): NextResponse {
 	const { pathname, search } = request.nextUrl;
