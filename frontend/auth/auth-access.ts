@@ -56,11 +56,14 @@ export const roles = {
 	// and may browse + edit the data catalog. No analytics, SSO, user mgmt, and
 	// no access at all to connections or zones (admin-only).
 	[Role.Viewer]: ac.newRole({
-		acronym: ['read'],
-		prompt: ['read'],
+		// For now viewers may fully manage the glossary, custom prompts, and
+		// custom analyses (create/edit/delete), so the create + edit controls on
+		// those pages work without 403s.
+		acronym: ['read', 'create', 'update', 'delete'],
+		prompt: ['read', 'create', 'update', 'delete'],
+		analysis: ['read', 'manage'],
 		conversation: ['read', 'write', 'delete'],
 		chat: ['use'],
-		analysis: ['read'],
 		catalog: ['read', 'edit'],
 	}),
 };
