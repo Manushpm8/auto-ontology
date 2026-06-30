@@ -27,6 +27,10 @@ from gsf.server.sql_utils import SqlParseError
 
 logger = logging.getLogger(__name__)
 
+# Source values stored on SqlAttribute nodes.
+SQL_ATTR_SOURCE_MANUAL = "manual"
+SQL_ATTR_SOURCE_SQL = "sql"
+
 
 # ---------------------------------------------------------------------------
 # Domain errors
@@ -198,12 +202,12 @@ def merge_suggested_sql_attribute(
     """Create a semantic SqlAttribute if one with *name* does not already exist.
 
     Returns the node id on creation, or ``None`` when already present (skip).
-    Idempotent: merges by ``(name, source='semantic')``.
+    Idempotent: merges by ``(name, source=SQL_ATTR_SOURCE_SQL)``.
     """
     rows = get_neo4j_conn().query_write(
         f"""
         OPTIONAL MATCH (existing:{LABEL_SQL_ATTRIBUTE}
-                        {{name: $name, source: 'semantic'}})
+                        {{name: $name, source: $source}})
         WITH existing WHERE existing IS NULL
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         CREATE (attr:{LABEL_SQL_ATTRIBUTE} {{
@@ -211,7 +215,7 @@ def merge_suggested_sql_attribute(
             name:        $name,
             description: $description,
             expression:  $expression,
-            source:      'semantic'
+            source:      $source
         }})
         MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
         RETURN attr.id AS id
@@ -221,6 +225,7 @@ def merge_suggested_sql_attribute(
             "description": description,
             "expression": expression,
             "term_id": term_id,
+            "source": SQL_ATTR_SOURCE_SQL,
         },
     )
     return rows[0]["id"] if rows else None
