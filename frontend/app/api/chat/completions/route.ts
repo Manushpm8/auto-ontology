@@ -129,13 +129,13 @@ export async function POST(req: Request): Promise<Response> {
 	// then tee the stream — one branch flows to the client untouched, the other
 	// is parsed after the response to backfill the final answer.
 	const question = extractQuestion(body);
-	const prisma = getPrisma();
 
 	// The query must belong to a known GSF user (session or SSO bearer). A bearer
 	// caller whose SSO identity has no matching GSF account is rejected.
 	const userId = await resolveUserId();
 	if (!userId) return new Response('Unauthorized', { status: 401 });
 
+	const prisma = getPrisma();
 	const row = await prisma.conversationAnalytics.create({
 		data: { question, source, userId },
 	});
