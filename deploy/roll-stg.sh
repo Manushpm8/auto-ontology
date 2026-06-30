@@ -63,7 +63,7 @@ _ngc_token() {
 }
 
 # Newest tag in $1 starting with prefix $2. Lexical sort is chronological
-# because publish-*.yml tags end in -stg.<UTC yyyymmddHHMMSS>.
+# because the staging tags end in <UTC yyyymmddHHMMSS>.
 newest_tag() {
 	local repo="$1" pfx="$2" tok
 	tok="$(_ngc_token "$repo")" || return 1
@@ -95,14 +95,13 @@ git clone --depth 1 "$DEPLOY_REPO_SSH" "$work/repo" >/dev/null 2>&1 || die "clon
 VALUES="$work/repo/$VALUES_PATH_IN_REPO"
 [ -f "$VALUES" ] || die "values not found in repo: $VALUES_PATH_IN_REPO"
 
-# ── resolve the newest app image on the current release line ─────────────
-# Prefix comes from the currently-pinned tag (e.g. 0.1.1-stg.<ts> -> 0.1.1-stg.)
-# so the roll stays on the same release line and never picks up the chart tags
-# (0.0.1-stg.*) that share this repo.
-cur_app_tag="$(yq '.gsf.backend.image.tag' "$VALUES")"
-app_prefix="${cur_app_tag%-stg.*}-stg."
+# ── resolve the newest app image ─────────────────────────────────────────
+# App images are tagged stg.<UTC yyyymmddHHMMSS> (see staging-publish-image.yml).
+# The constant "stg." prefix selects them by recency and excludes the OCI chart
+# tags (<chartver>-stg.*) that share this nvcr.io repo.
+app_prefix="stg."
 app_tag="$(newest_tag "$APP_REPO" "$app_prefix")" || die "tag listing failed for $APP_REPO"
-[ -n "$app_tag" ] || die "no $APP_REPO tags match ${app_prefix}*"
+[ -n "$app_tag" ] || die "no $APP_REPO tags match ${app_prefix}* (build one via staging-publish-image first)"
 app_digest="$(digest_of "$APP_REPO" "$app_tag")" || die "digest lookup failed for $APP_REPO:$app_tag"
 [ -n "$app_digest" ] || die "empty digest for $APP_REPO:$app_tag"
 log "app image -> $app_tag ($app_digest)"

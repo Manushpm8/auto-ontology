@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Override image tag (default: <pyproject version>-stg.<timestamp>)'
+        description: 'Override image tag (default: stg.<timestamp>)'
         required: false
   push:
     branches: [main, feat/astra-nightly-deploy]
@@ -53,11 +53,12 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
+          # Staging app images: tag is stg.<UTC ts> only (no version prefix).
+          # The constant "stg." prefix lets roll-stg.sh pick app images and skip
+          # the OCI chart tags (<chartver>-stg.*) sharing this nvcr.io repo.
           t='${{ github.event.inputs.tag }}'
           if [ -z "$t" ]; then
-            base=$(awk -F'"' '/^version *=/{print $2; exit}' pyproject.toml)
-            base=${base:-0.0.1}
-            t="${base}-stg.$(date -u +%Y%m%d%H%M%S)"
+            t="stg.$(date -u +%Y%m%d%H%M%S)"
           fi
           echo "tag=$t" >>"$GITHUB_OUTPUT"
           echo "Image tag: $t"
