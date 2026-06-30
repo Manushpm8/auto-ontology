@@ -32,10 +32,7 @@ type AuthedHandler<C extends RouteContext> = (
 	ctx: C & { user: ResolvedUser },
 ) => Response | Promise<Response>;
 
-type PublicHandler<C extends RouteContext> = (
-	req: Request,
-	ctx: C,
-) => Response | Promise<Response>;
+type PublicHandler<C extends RouteContext> = (req: Request, ctx: C) => Response | Promise<Response>;
 
 const unauthorized = () => NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 const forbidden = () => NextResponse.json({ error: 'Forbidden' }, { status: 403 });
