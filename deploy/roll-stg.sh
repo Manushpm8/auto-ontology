@@ -31,8 +31,8 @@ DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
 # ── deployment coordinates ───────────────────────────────────────────────
-DEPLOY_REPO_SSH="${DEPLOY_REPO_SSH:-ssh://git@gitlab-master.nvidia.com:12051/ape-repo/astra-projects/nvaif-console-users/gsf-demo-deploy.git}"
-DEPLOY_REPO_URL="${DEPLOY_REPO_URL:-https://gitlab-master.nvidia.com/ape-repo/astra-projects/nvaif-console-users/gsf-demo-deploy}"
+DEPLOY_REPO_SSH="${DEPLOY_REPO_SSH:-ssh://git@gitlab-master.nvidia.com:12051/gsf/gsf-demo-deploy.git}"
+DEPLOY_REPO_URL="${DEPLOY_REPO_URL:-https://gitlab-master.nvidia.com/gsf/gsf-demo-deploy}"
 VALUES_PATH_IN_REPO="${VALUES_PATH_IN_REPO:-deployment/stg/values.yaml}"
 ENVIRONMENT="${ENVIRONMENT:-stg}"
 
