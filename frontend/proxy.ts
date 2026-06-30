@@ -80,7 +80,11 @@ export function proxy(request: NextRequest) {
 		// via requireApiAuth / resolveUser) — reject outright when there's
 		// neither a session cookie nor a bearer token, except for the public
 		// API allowlist.
-		if (!isPublicApi(pathname) && !hasBearerHeader(request) && getSessionCookie(request) == null) {
+		if (
+			!isPublicApi(pathname) &&
+			!hasBearerHeader(request) &&
+			getSessionCookie(request) == null
+		) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 		return rewriteApiIdParam(request);

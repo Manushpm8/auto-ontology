@@ -69,8 +69,7 @@ const resolveProviderJwks = async (): Promise<ProviderJwks | null> => {
 		(config.jwksEndpoint as string | undefined) ??
 		(config.jwksUrl as string | undefined) ??
 		(config.jwks_uri as string | undefined);
-	const issuer =
-		provider.issuer ?? (config.issuer as string | undefined) ?? undefined;
+	const issuer = provider.issuer ?? (config.issuer as string | undefined) ?? undefined;
 
 	if (!jwksUrl || !issuer) {
 		console.warn(
