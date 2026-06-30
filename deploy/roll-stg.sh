@@ -3,7 +3,7 @@
 #
 # Each run:
 #   1. Finds the newest app image on nvcr.io (built from this repo by
-#      .github/workflows/publish-image.yml) and resolves its digest.
+#      .github/workflows/staging-publish-image.yml) and resolves its digest.
 #   2. Refreshes the WWI seed image digest.
 #   3. Bumps gsf.podAnnotations.rolledAt to now.
 #   4. Commits the updated deployment/stg/values.yaml to the Astra deploy repo
@@ -15,7 +15,7 @@
 # Write path: the deploy repo lives under a shared DL where your account is
 # read-only, so a plain `git push` is rejected. Fusion commits server-side with
 # your Astra login instead — no GitLab write token needed. This never builds
-# images (that is publish-image.yml on GitHub); it only re-pins what already
+# images (that is staging-publish-image.yml on GitHub); it only re-pins what already
 # exists on nvcr.io.
 #
 # Requires: bash, curl, jq, yq (v4 / mikefarah), git; a valid Astra login

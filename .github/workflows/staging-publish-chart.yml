@@ -7,7 +7,7 @@
 # GitLab stay decoupled, linked only through nvcr.io. Requires repo secret:
 #   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
 
-name: Publish Helm chart to nvcr.io
+name: 'Staging: Publish Helm chart to nvcr.io'
 
 on:
   workflow_dispatch:

@@ -4,14 +4,14 @@
 
 # Builds the GSF FastAPI/ingestion app image and pushes it to nvcr.io. The Astra
 # deploy repo consumes it by digest; GitHub and GitLab stay decoupled, linked
-# only through nvcr.io (mirrors publish-chart.yml). Requires repo secret:
+# only through nvcr.io (mirrors staging-publish-chart.yml). Requires repo secret:
 #   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
 #
 # The image serves both the API server (`server`) and the ingestion service
 # (`ingestion_service`); the ingestion entrypoint exposes /health on 3002, which
 # the chart's readiness probe requires. Rebuild here whenever app code changes.
 
-name: Publish app image to nvcr.io
+name: 'Staging: Publish app image to nvcr.io'
 
 on:
   workflow_dispatch:
@@ -26,7 +26,7 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - 'Dockerfile'
-      - '.github/workflows/publish-image.yml'
+      - '.github/workflows/staging-publish-image.yml'
 
 env:
   # nvcr.io allows only org/team/image (3 segments); the app image shares the
