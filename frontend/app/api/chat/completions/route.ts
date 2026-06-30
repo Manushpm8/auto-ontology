@@ -9,11 +9,9 @@
 // dev-server rewrites buffer streaming responses — the browser would receive
 // nothing until the upstream connection closed, defeating SSE.
 
-import { headers } from 'next/headers';
 import { after } from 'next/server';
-import { requireApiAuthOrBearer } from '@/auth/api-auth';
-import { verifyBearer } from '@/auth/bearer';
-import { getCurrentSession } from '@/auth/auth-guards';
+import { requireApiAuth } from '@/auth/api-auth';
+import { resolveUserId } from '@/auth/resolve-user';
 import { getPrisma } from '@/lib/prisma';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
@@ -80,7 +78,7 @@ const readFinalAnswer = async (
 };
 
 export async function POST(req: Request): Promise<Response> {
-	const denied = await requireApiAuthOrBearer();
+	const denied = await requireApiAuth();
 	if (denied) return denied;
 
 	const body = await req.text();
@@ -133,33 +131,9 @@ export async function POST(req: Request): Promise<Response> {
 	const question = extractQuestion(body);
 	const prisma = getPrisma();
 
-	// Resolve the GSF user this query belongs to. Browser callers have a
-	// session. Bearer callers (e.g. AI-Q) authenticate with the same NVIDIA SSO
-	// identity but have no GSF session, so map them to the GSF user that shares
-	// the token's email (the account they sign into GSF with), falling back to
-	// the SSO account link by subject.
-	const session = await getCurrentSession();
-	let userId = session?.user.id ?? null;
-	if (!userId) {
-		const principal = await verifyBearer(await headers());
-		if (principal?.email) {
-			const user = await prisma.user.findFirst({
-				where: { email: principal.email },
-				select: { id: true },
-			});
-			userId = user?.id ?? null;
-		}
-		if (!userId && principal?.subject) {
-			const account = await prisma.account.findFirst({
-				where: { accountId: principal.subject },
-				select: { userId: true },
-			});
-			userId = account?.userId ?? null;
-		}
-	}
-
-	// The query must belong to a known GSF user. A bearer caller whose SSO
-	// identity has no matching GSF account is rejected.
+	// The query must belong to a known GSF user (session or SSO bearer). A bearer
+	// caller whose SSO identity has no matching GSF account is rejected.
+	const userId = await resolveUserId();
 	if (!userId) return new Response('Unauthorized', { status: 401 });
 
 	const row = await prisma.conversationAnalytics.create({
