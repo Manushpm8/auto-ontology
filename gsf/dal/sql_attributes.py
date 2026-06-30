@@ -188,6 +188,88 @@ def delete_sql_attribute_node(attr_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def merge_suggested_sql_attribute(
+    *,
+    name: str,
+    description: str,
+    expression: str,
+    term_id: str,
+) -> str | None:
+    """Create a semantic SqlAttribute if one with *name* does not already exist.
+
+    Returns the node id on creation, or ``None`` when already present (skip).
+    Idempotent: merges by ``(name, source='semantic')``.
+    """
+    rows = get_neo4j_conn().query_write(
+        f"""
+        OPTIONAL MATCH (existing:{LABEL_SQL_ATTRIBUTE}
+                        {{name: $name, source: 'semantic'}})
+        WITH existing WHERE existing IS NULL
+        MATCH (term:{LABEL_TERM} {{id: $term_id}})
+        CREATE (attr:{LABEL_SQL_ATTRIBUTE} {{
+            id:          randomUUID(),
+            name:        $name,
+            description: $description,
+            expression:  $expression,
+            source:      'semantic'
+        }})
+        MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
+        RETURN attr.id AS id
+        """,
+        {
+            "name": name,
+            "description": description,
+            "expression": expression,
+            "term_id": term_id,
+        },
+    )
+    return rows[0]["id"] if rows else None
+
+
+def fetch_suggested_sql_attribute_docs(
+    attr_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Return embedding-ready docs for semantic SqlAttributes (no HAS_SQL edge).
+
+    These nodes carry their business logic in ``expression`` rather than a
+    linked Sql node, so the embedding text uses ``expression`` directly.
+    """
+    if not attr_ids:
+        return []
+    result = get_neo4j_conn().query_read(
+        f"""
+        UNWIND $attr_ids AS aid
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: aid}})
+        OPTIONAL MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        RETURN attr.id          AS id,
+               attr.name        AS name,
+               attr.description AS description,
+               attr.expression  AS expression,
+               term.name        AS term_name,
+               labels(attr)[0]  AS label
+        """,
+        {"attr_ids": attr_ids},
+    )
+    docs = []
+    for row in result:
+        parts = [f"sql_attribute: {row['name']}"]
+        if row.get("description"):
+            parts.append(f"description: {row['description']}")
+        if row.get("term_name"):
+            parts.append(f"term: {row['term_name']}")
+        if row.get("expression"):
+            parts.append(f"expression: {row['expression']}")
+        docs.append(
+            {
+                "text": ", ".join(parts),
+                "name": row["name"],
+                "label": row["label"],
+                "id": row["id"],
+            }
+        )
+    return docs
+
+
 def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
     """Fetch one SqlAttribute from Neo4j as embedding-ready docs.
 

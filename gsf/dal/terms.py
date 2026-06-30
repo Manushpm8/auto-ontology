@@ -153,6 +153,33 @@ def fetch_all_terms_and_attributes() -> tuple[
     return terms, attrs
 
 
+def fetch_terms_with_sqls(source: str) -> list[dict[str, Any]]:
+    """Return every Term with the SQL queries from its connected tables.
+
+    Each row contains:
+      term_id, term_name, term_description,
+      sqls — list of {sql_text, props} where *props* holds all Sql node
+              properties (including count_monthly_YYYY_MM counters).
+
+    Only terms that have at least one associated Sql query are returned.
+    """
+    return get_neo4j_conn().query_read(
+        f"""
+        MATCH (term:{LABEL_TERM} {{source: $source}})
+        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
+        MATCH (sql:{Labels.SQL})-[:{Edges.SQL}]->(t)
+        WITH term,
+             collect({{sql_text: sql.sql_full_query,
+                       props:    properties(sql)}}) AS sqls
+        RETURN term.id          AS term_id,
+               term.name        AS term_name,
+               term.description AS term_description,
+               sqls
+        """,
+        {"source": source},
+    )
+
+
 def fetch_terms_and_attributes_for_table(
     table_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

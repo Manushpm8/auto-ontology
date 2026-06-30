@@ -49,4 +49,12 @@ def run_semantic_compilation(
     fk_count = resolve_semantic_fks(database_name)
     logger.info("Semantic FK edges created: %d", fk_count)
 
+    from gsf.semantic.sql_attribute_suggester import suggest_sql_attributes
+
+    logger.info("=" * 60)
+    logger.info("Suggesting SqlAttributes from query history…")
+    logger.info("=" * 60)
+    attr_count = suggest_sql_attributes(database_name)
+    logger.info("New SqlAttribute nodes written: %d", attr_count)
+
     return count
