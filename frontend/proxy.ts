@@ -86,6 +86,9 @@ export function proxy(request: NextRequest) {
 			allowsBearer(pathname) &&
 			request.headers.get('authorization')?.toLowerCase().startsWith('bearer ') === true;
 		if (!isPublicApi(pathname) && !hasBearer && getSessionCookie(request) == null) {
+			console.warn(
+				`[proxy] 401 gate: path=${pathname} allowsBearer=${allowsBearer(pathname)} authHeader=${request.headers.get('authorization') ? 'present' : 'absent'} cookie=${getSessionCookie(request) ? 'present' : 'absent'}`,
+			);
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 		return rewriteApiIdParam(request);

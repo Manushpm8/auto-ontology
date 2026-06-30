@@ -9,8 +9,10 @@
 // dev-server rewrites buffer streaming responses — the browser would receive
 // nothing until the upstream connection closed, defeating SSE.
 
+import { headers } from 'next/headers';
 import { after } from 'next/server';
 import { requireApiAuthOrBearer } from '@/auth/api-auth';
+import { verifyBearer } from '@/auth/bearer';
 import { getCurrentSession } from '@/auth/auth-guards';
 import { getPrisma } from '@/lib/prisma';
 
@@ -129,13 +131,37 @@ export async function POST(req: Request): Promise<Response> {
 	// then tee the stream — one branch flows to the client untouched, the other
 	// is parsed after the response to backfill the final answer.
 	const question = extractQuestion(body);
-	// requireApiAuth above guarantees an authenticated caller, so the session
-	// (and its user id) is always present here.
+	const prisma = getPrisma();
+
+	// Resolve the GSF user this query belongs to. Browser callers have a
+	// session. Bearer callers (e.g. AI-Q) authenticate with the same NVIDIA SSO
+	// identity but have no GSF session, so map them to the GSF user that shares
+	// the token's email (the account they sign into GSF with), falling back to
+	// the SSO account link by subject.
 	const session = await getCurrentSession();
-	const userId = session?.user.id;
+	let userId = session?.user.id ?? null;
+	if (!userId) {
+		const principal = await verifyBearer(await headers());
+		if (principal?.email) {
+			const user = await prisma.user.findFirst({
+				where: { email: principal.email },
+				select: { id: true },
+			});
+			userId = user?.id ?? null;
+		}
+		if (!userId && principal?.subject) {
+			const account = await prisma.account.findFirst({
+				where: { accountId: principal.subject },
+				select: { userId: true },
+			});
+			userId = account?.userId ?? null;
+		}
+	}
+
+	// The query must belong to a known GSF user. A bearer caller whose SSO
+	// identity has no matching GSF account is rejected.
 	if (!userId) return new Response('Unauthorized', { status: 401 });
 
-	const prisma = getPrisma();
 	const row = await prisma.conversationAnalytics.create({
 		data: { question, source, userId },
 	});

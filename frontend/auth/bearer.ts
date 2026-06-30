@@ -16,7 +16,7 @@
 // token was minted for AI-Q's OAuth client, so its `aud` is AI-Q's client id,
 // not ours. Trusting "any token our SSO provider signed" is the intended model.
 
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import { createRemoteJWKSet, decodeJwt, jwtVerify, type JWTPayload } from 'jose';
 import { getPrisma } from '@/lib/prisma';
 
 export type BearerPrincipal = {
@@ -50,12 +50,16 @@ const extractBearer = (headers: Headers): string | null => {
  */
 const resolveProviderJwks = async (): Promise<ProviderJwks | null> => {
 	const provider = await getPrisma().ssoProvider.findFirst();
-	if (!provider?.oidcConfig) return null;
+	if (!provider?.oidcConfig) {
+		console.warn('[bearer] no SSO provider / oidcConfig configured');
+		return null;
+	}
 
 	let config: Record<string, unknown>;
 	try {
 		config = JSON.parse(provider.oidcConfig) as Record<string, unknown>;
 	} catch {
+		console.warn('[bearer] oidcConfig is not valid JSON');
 		return null;
 	}
 
@@ -68,7 +72,12 @@ const resolveProviderJwks = async (): Promise<ProviderJwks | null> => {
 	const issuer =
 		provider.issuer ?? (config.issuer as string | undefined) ?? undefined;
 
-	if (!jwksUrl || !issuer) return null;
+	if (!jwksUrl || !issuer) {
+		console.warn(
+			`[bearer] provider missing jwksUrl or issuer (jwksUrl=${jwksUrl ?? 'none'}, issuer=${issuer ?? 'none'}, oidcConfig keys=${Object.keys(config).join(',')})`,
+		);
+		return null;
+	}
 
 	const cached = jwksCache.get(jwksUrl);
 	if (cached && cached.issuer === issuer) return cached;
@@ -93,11 +102,25 @@ export async function verifyBearer(headers: Headers): Promise<BearerPrincipal | 
 	let payload: JWTPayload;
 	try {
 		({ payload } = await jwtVerify(token, provider.jwks, { issuer: provider.issuer }));
-	} catch {
+	} catch (err) {
+		// Decode (without verifying) to surface why the token was rejected —
+		// issuer mismatch and expiry are the usual culprits for a cross-service
+		// SSO token.
+		let claims = '';
+		try {
+			const c = decodeJwt(token);
+			claims = ` token.iss=${c.iss} token.aud=${JSON.stringify(c.aud)} token.exp=${c.exp} expected.iss=${provider.issuer}`;
+		} catch {
+			claims = ' (token is not a decodable JWT)';
+		}
+		console.warn(
+			`[bearer] jwtVerify failed: ${err instanceof Error ? err.message : String(err)}.${claims}`,
+		);
 		return null;
 	}
 
 	if (!payload.sub) return null;
+	console.warn(`[bearer] verified OK sub=${payload.sub} iss=${payload.iss}`);
 	return {
 		subject: payload.sub,
 		email: typeof payload.email === 'string' ? payload.email : undefined,
