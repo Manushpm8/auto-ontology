@@ -127,7 +127,6 @@ def _extract_expressions(sql_text: str) -> list[str]:
                     exp.Between,
                     exp.Like,
                     exp.Is,
-                    exp.IsNot,
                 ),
             ):
                 _add(node)
