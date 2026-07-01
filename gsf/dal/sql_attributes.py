@@ -257,7 +257,7 @@ def fetch_suggested_sql_attribute_docs(
     )
     docs = []
     for row in result:
-        parts = [f"sql_attribute: {row['name']}"]
+        parts = [f"{LABEL_SQL_ATTRIBUTE}: {row['name']}"]
         if row.get("description"):
             parts.append(f"description: {row['description']}")
         if row.get("term_name"):

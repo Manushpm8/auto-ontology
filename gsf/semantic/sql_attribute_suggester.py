@@ -26,6 +26,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
+_EMBED_RETRIES = 3
+_EMBED_RETRY_DELAY = 5.0  # seconds between retries
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
@@ -86,9 +89,26 @@ def _latest_3month_score(props: dict[str, Any]) -> float:
 # Expression extraction via sqlglot
 # ---------------------------------------------------------------------------
 
+_BARE_KEYWORDS = frozenset(
+    {"select", "where", "from", "join", "on", "union", "intersect", "except", "having"}
+)
+
 
 def _extract_expressions(sql_text: str) -> list[str]:
-    """Parse *sql_text* and return deduplicated SQL sub-expressions."""
+    """Parse *sql_text* and return deduplicated SQL sub-expressions.
+
+    Extracted categories:
+    - WHERE / JOIN ON predicates (comparisons with at least one non-column operand)
+    - Aggregations, anonymous functions, CASE expressions
+    - HAVING predicates
+    - Full JOIN ON predicate (when it contains non-FK conditions)
+    - Whole UNION / INTERSECT / EXCEPT expression and each individual branch
+
+    Excluded:
+    - Bare column references, star, plain literals
+    - Pure FK equalities (col_a = col_b, both sides are columns with no literal)
+    - Degenerate sqlglot emissions that are just a SQL keyword token
+    """
     try:
         import sqlglot
         import sqlglot.expressions as exp
@@ -102,36 +122,38 @@ def _extract_expressions(sql_text: str) -> list[str]:
     seen: set[str] = set()
     results: list[str] = []
 
+    cmp_types = (
+        exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE,
+        exp.In, exp.Between, exp.Like, exp.Is,
+    )
+
+    def _is_pure_fk_eq(node: exp.Expression) -> bool:
+        """Return True for bare col = col equalities (no literals on either side)."""
+        return (
+            isinstance(node, exp.EQ)
+            and isinstance(node.left, exp.Column)
+            and isinstance(node.right, exp.Column)
+        )
+
     def _add(node: exp.Expression) -> None:
         text = node.sql().strip()
         key = text.lower()
         if len(text) < 5 or key in seen:
             return
-        # Skip bare column references, star, and plain literals
         if isinstance(node, (exp.Column, exp.Star, exp.Literal)):
+            return
+        if key in _BARE_KEYWORDS:
+            return
+        if _is_pure_fk_eq(node):
             return
         seen.add(key)
         results.append(text)
 
-    # WHERE predicates — each individual condition
+    # WHERE predicates — each individual comparison condition
     where = ast.find(exp.Where)
     if where:
         for node in where.walk():
-            if isinstance(
-                node,
-                (
-                    exp.EQ,
-                    exp.NEQ,
-                    exp.GT,
-                    exp.GTE,
-                    exp.LT,
-                    exp.LTE,
-                    exp.In,
-                    exp.Between,
-                    exp.Like,
-                    exp.Is,
-                ),
-            ):
+            if isinstance(node, cmp_types):
                 _add(node)
 
     # Aggregations, anonymous functions, CASE anywhere in the query
@@ -144,37 +166,17 @@ def _extract_expressions(sql_text: str) -> list[str]:
     if having and having.this:
         _add(having.this)
 
-    # JOIN ON conditions — capture the full ON predicate of each explicit join.
-    # These often encode business rules about how entities relate (e.g. joining
-    # on a status flag or a date range) beyond simple FK equality.
+    # JOIN ON conditions — capture the full ON predicate and each sub-predicate.
+    # These encode business rules beyond simple FK equality.
     for join in ast.find_all(exp.Join):
         on = join.args.get("on")
         if on:
-            # Add the whole ON predicate as one expression (the join relationship)
             _add(on)
-            # Also add each sub-predicate so they can be scored individually
             for node in on.walk():
-                if isinstance(
-                    node,
-                    (
-                        exp.EQ,
-                        exp.NEQ,
-                        exp.GT,
-                        exp.GTE,
-                        exp.LT,
-                        exp.LTE,
-                        exp.In,
-                        exp.Between,
-                        exp.Like,
-                        exp.Is,
-                    ),
-                ):
+                if isinstance(node, cmp_types):
                     _add(node)
 
-    # UNION / INTERSECT / EXCEPT — capture both the whole set-operation and each
-    # individual branch. The whole expression is needed for rule 3c (multi-path
-    # UNION defining a named aggregate concept); individual branches are needed
-    # so high-frequency arms can be surfaced on their own.
+    # UNION / INTERSECT / EXCEPT — capture the whole set-operation and each branch.
     for set_op in ast.find_all(exp.Union, exp.Intersect, exp.Except):
         _add(set_op)
         for branch in (set_op.left, set_op.right):
@@ -257,6 +259,13 @@ def _judge_with_llm(
                 "columns from the same table with no literal value, constant, or "
                 "cross-table condition (e.g. start_date < end_date). Such expressions "
                 "describe structural integrity, not reusable business logic.\n"
+                "  4. NEVER mark an IS NULL / IS NOT NULL check on a surrogate or "
+                "primary-key column (any column named 'id' or ending in '_id') as a "
+                "SqlAttribute. These are LEFT JOIN absence checks — structural plumbing "
+                "that detects whether a join matched, not a business concept "
+                "(e.g. request_task_collaborators.id IS NULL). "
+                "Exception: IS NULL on non-key columns that carry business meaning IS "
+                "valid (e.g. deleted_at IS NULL, approved_by IS NULL).\n"
                 "  3. ALWAYS mark a JOIN ON condition or a UNION/INTERSECT/EXCEPT branch "
                 "as a SqlAttribute when it appears frequently AND any of the following "
                 "is true:\n"
@@ -342,22 +351,52 @@ def _embed_new_attrs(
         )
 
     before = time.time()
-    embedded = embed_text_main_text_embed(
-        pd.DataFrame(rows),
-        model_name=embed_params.model_name,
-        embed_invoke_url=embed_params.embed_invoke_url,
-        api_key=embed_params.api_key,
-        embed_modality=embed_params.embed_modality,
-    )
+    embedded = None
+    for attempt in range(1, _EMBED_RETRIES + 1):
+        try:
+            embedded = embed_text_main_text_embed(
+                pd.DataFrame(rows),
+                model_name=embed_params.model_name,
+                embed_invoke_url=embed_params.embed_invoke_url,
+                api_key=embed_params.api_key,
+                embed_modality=embed_params.embed_modality,
+            )
+            break
+        except Exception as exc:
+            if attempt < _EMBED_RETRIES:
+                logger.warning(
+                    "Embedding attempt %d/%d failed (%s) — retrying in %.0fs.",
+                    attempt,
+                    _EMBED_RETRIES,
+                    exc,
+                    _EMBED_RETRY_DELAY,
+                )
+                time.sleep(_EMBED_RETRY_DELAY)
+            else:
+                logger.warning(
+                    "Embedding failed after %d attempts (%s). "
+                    "SqlAttributes were written to Neo4j but not embedded — "
+                    "re-run compilation to embed them.",
+                    _EMBED_RETRIES,
+                    exc,
+                )
+                return
+
+    if embedded is None:
+        return
+
     with_embeddings = [
         r
         for r in embedded.to_dict(orient="records")
         if (r.get("metadata") or {}).get("embedding")
     ]
     if not with_embeddings:
-        raise RuntimeError(
-            f"Embedding step produced 0/{len(embedded)} SqlAttribute rows with embeddings."
+        logger.warning(
+            "Embedding step produced 0/%d SqlAttribute rows with embeddings — "
+            "no rows were ingested into the VDB.",
+            len(embedded),
         )
+        return
     IngestVdbOperator(vdb=vdb)(with_embeddings)
     logger.info(
         "Embedded %d/%d new SqlAttribute(s) in %.2fs.",
