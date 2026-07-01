@@ -141,6 +141,41 @@ def _extract_expressions(sql_text: str) -> list[str]:
     if having and having.this:
         _add(having.this)
 
+    # JOIN ON conditions — capture the full ON predicate of each explicit join.
+    # These often encode business rules about how entities relate (e.g. joining
+    # on a status flag or a date range) beyond simple FK equality.
+    for join in ast.find_all(exp.Join):
+        on = join.args.get("on")
+        if on:
+            # Add the whole ON predicate as one expression (the join relationship)
+            _add(on)
+            # Also add each sub-predicate so they can be scored individually
+            for node in on.walk():
+                if isinstance(
+                    node,
+                    (
+                        exp.EQ,
+                        exp.NEQ,
+                        exp.GT,
+                        exp.GTE,
+                        exp.LT,
+                        exp.LTE,
+                        exp.In,
+                        exp.Between,
+                        exp.Like,
+                        exp.Is,
+                    ),
+                ):
+                    _add(node)
+
+    # UNION / INTERSECT / EXCEPT — each branch represents a named sub-population.
+    # Capture the full SELECT of each branch so that high-frequency union arms
+    # can be surfaced as reusable SqlAttributes.
+    for set_op in ast.find_all((exp.Union, exp.Intersect, exp.Except)):
+        for branch in (set_op.left, set_op.right):
+            if branch is not None:
+                _add(branch)
+
     return results
 
 
@@ -209,7 +244,13 @@ def _judge_with_llm(
                 "  2. NEVER mark an expression as a SqlAttribute if it only references "
                 "columns from the same table with no literal value, constant, or "
                 "cross-table condition (e.g. start_date < end_date). Such expressions "
-                "describe structural integrity, not reusable business logic.\n\n"
+                "describe structural integrity, not reusable business logic.\n"
+                "  3. ALWAYS mark a JOIN ON condition or a UNION/INTERSECT/EXCEPT branch "
+                "as a SqlAttribute when it appears frequently AND encodes obvious business "
+                "logic — for example a join that filters to active records, a union arm "
+                "that defines a named sub-population, or a cross-table condition that "
+                "captures a business relationship beyond a simple FK equality. "
+                "Ignore pure FK joins (table_a.id = table_b.fk_id with no extra conditions).\n\n"
                 "For each chosen expression provide:\n"
                 "  • name — user-friendly Title Case label with spaces between words, "
                 "matching the ColumnAttribute naming style "
