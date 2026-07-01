@@ -35,6 +35,7 @@ from gsf.dal.sql_attributes import (
 )
 from gsf.dal.terms import fetch_terms_with_sqls
 from gsf.semantic.constants import SEMANTIC_SOURCE
+from gsf.utils.embedding import embed_docs_into_vdb
 from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
 
 if TYPE_CHECKING:
@@ -324,51 +325,14 @@ def _embed_new_attrs(
     vdb: "VDB",
     database_name: str,
 ) -> None:
-    import pandas as pd
-
-    from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
-    from nemo_retriever.operators.vdb import IngestVdbOperator
-
     docs = fetch_suggested_sql_attribute_docs(attr_ids)
     if not docs:
         return
 
-    rows = []
-    for item in docs:
-        node_id = item.get("id")
-        path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
-        tabular_fields = {
-            "id": node_id,
-            "label": item.get("label", ""),
-            "name": item.get("name", ""),
-            "source_path": path,
-            "database_name": database_name,
-        }
-        rows.append(
-            {
-                "text": (item.get("text") or "").strip(),
-                "_embed_modality": "text",
-                "path": path,
-                "page_number": -1,
-                "metadata": {
-                    **tabular_fields,
-                    "content_metadata": dict(tabular_fields),
-                },
-            }
-        )
-
-    before = time.time()
-    embedded = None
     for attempt in range(1, _EMBED_RETRIES + 1):
         try:
-            embedded = embed_text_main_text_embed(
-                pd.DataFrame(rows),
-                model_name=embed_params.model_name,
-                embed_invoke_url=embed_params.embed_invoke_url,
-                api_key=embed_params.api_key,
-                embed_modality=embed_params.embed_modality,
-            )
-            break
+            embed_docs_into_vdb(docs, embed_params, vdb, database_name)
+            return
         except Exception as exc:
             if attempt < _EMBED_RETRIES:
                 logger.warning(
@@ -387,30 +351,6 @@ def _embed_new_attrs(
                     _EMBED_RETRIES,
                     exc,
                 )
-                return
-
-    if embedded is None:
-        return
-
-    with_embeddings = [
-        r
-        for r in embedded.to_dict(orient="records")
-        if (r.get("metadata") or {}).get("embedding")
-    ]
-    if not with_embeddings:
-        logger.warning(
-            "Embedding step produced 0/%d SqlAttribute rows with embeddings — "
-            "no rows were ingested into the VDB.",
-            len(embedded),
-        )
-        return
-    IngestVdbOperator(vdb=vdb)(with_embeddings)
-    logger.info(
-        "Embedded %d/%d new SqlAttribute(s) in %.2fs.",
-        len(with_embeddings),
-        len(embedded),
-        time.time() - before,
-    )
 
 
 # ---------------------------------------------------------------------------
