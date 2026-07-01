@@ -13,11 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import timedelta
 
-from gsf.connectors.connection_string_factory import build_connection_string
-from gsf.dal.connections import list_connections
+from gsf.ingestion_service.connections import resolve_connection_strings
 from gsf.ingestion_service.ingest import run_ingest
 from gsf.ingestion_service.scheduler import IntervalScheduler
 
@@ -26,21 +24,6 @@ logger = logging.getLogger(__name__)
 # Cadence measured from the end of the previous run rather than a fixed
 # wall-clock time.
 INGEST_INTERVAL = timedelta(hours=24)
-
-
-def _connection_strings() -> list[str]:
-    """Resolve the connection strings to ingest for the current pass."""
-    raw = os.environ.get("CONNECTION_STRINGS", "")
-    connections = [cs.strip() for cs in raw.split(",") if cs.strip()]
-    if connections:
-        logger.info("ingest: using connections from CONNECTION_STRINGS")
-        return connections
-
-    try:
-        return [build_connection_string(conn) for conn in list_connections()]
-    except Exception:
-        logger.exception("ingest: failed to load connections from Neo4j")
-        return []
 
 
 class DataScheduler(IntervalScheduler):
@@ -52,7 +35,7 @@ class DataScheduler(IntervalScheduler):
         super().__init__(interval)
 
     async def _run_once(self) -> None:
-        connections = _connection_strings()
+        connections = resolve_connection_strings()
         if not connections:
             logger.info(
                 "ingest: no connections configured. "

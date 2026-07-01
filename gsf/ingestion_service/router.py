@@ -49,6 +49,9 @@ async def trigger_semantic_compile(request: Request) -> dict[str, str]:
     the next automatic run is rescheduled for 24h later.
     """
     scheduler = request.app.state.semantic_scheduler
-    scheduler.start()
-    scheduler.trigger()
+    # start() performs an immediate startup run on its own. Only ask for an
+    # extra run when the scheduler was already running; otherwise the startup
+    # run and the trigger would compile twice.
+    if not scheduler.start():
+        scheduler.trigger()
     return {"status": "accepted"}

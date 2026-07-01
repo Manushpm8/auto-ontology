@@ -37,10 +37,19 @@ class IntervalScheduler:
         self._trigger = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
 
-    def start(self) -> None:
-        """Launch the background loop; runs one pass immediately."""
-        if self._task is None:
-            self._task = asyncio.create_task(self._run_forever())
+    def start(self) -> bool:
+        """Launch the background loop; runs one pass immediately.
+
+        Returns ``True`` if this call started the loop (so a startup run is now
+        underway), or ``False`` if it was already running. Callers that also
+        want an on-demand run should only ``trigger()`` when this returns
+        ``False`` — otherwise the fresh startup run and the trigger would
+        compile twice.
+        """
+        if self._task is not None:
+            return False
+        self._task = asyncio.create_task(self._run_forever())
+        return True
 
     async def stop(self) -> None:
         """Signal the loop to exit and wait for the in-flight wait to unwind."""

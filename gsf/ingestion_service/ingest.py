@@ -57,8 +57,6 @@ def run_ingest(connection_string: str) -> None:
                 f"Tabular ingest result: {len(result_df)} rows written to pgvector",
             )
 
-        logger.info("Starting semantic compilation for database %s", database_name)
-
     finally:
         TABULAR_PARAMS.connector.close()
 
