@@ -171,7 +171,7 @@ def _extract_expressions(sql_text: str) -> list[str]:
     # UNION / INTERSECT / EXCEPT — each branch represents a named sub-population.
     # Capture the full SELECT of each branch so that high-frequency union arms
     # can be surfaced as reusable SqlAttributes.
-    for set_op in ast.find_all((exp.Union, exp.Intersect, exp.Except)):
+    for set_op in ast.find_all(exp.Union, exp.Intersect, exp.Except):
         for branch in (set_op.left, set_op.right):
             if branch is not None:
                 _add(branch)
@@ -255,7 +255,7 @@ def _judge_with_llm(
                 "  3. ALWAYS mark a JOIN ON condition or a UNION/INTERSECT/EXCEPT branch "
                 "as a SqlAttribute when it appears frequently AND any of the following "
                 "is true:\n"
-                "     a. It encodes obvious business logic beyond a simple FK equality — "
+                "     a. It encodes obvious business logic — "
                 "e.g. a join that filters to active records, a union arm that defines a "
                 "named sub-population, or a cross-table condition capturing a business "
                 "relationship.\n"
@@ -264,9 +264,17 @@ def _judge_with_llm(
                 "business name (e.g. 'AS active_assignees', 'AS overdue_tasks'). "
                 "The alias itself signals that the expression represents a named concept "
                 "worth capturing.\n"
-                "     Ignore pure FK joins (table_a.id = table_b.fk_id with no extra "
-                "conditions) and union branches whose aliases are generic or technical "
-                "(e.g. 'col1', 'tmp', 'x').\n\n"
+                "     c. A UNION combines two or more SELECT branches that each use a "
+                "different join path to reach the same entity type (e.g. one branch joins "
+                "via a direct ownership FK, another via a membership/collaborator table). "
+                "This pattern structurally defines a named aggregate concept — all members "
+                "of a group regardless of their role. Promote the whole UNION as a "
+                "SqlAttribute representing that concept (e.g. 'Task Participants', "
+                "'Order Stakeholders'). When naming and describing it, ignore any "
+                "instance-specific WHERE predicates (like record-ID literals) and focus "
+                "on the reusable structural pattern.\n"
+                "     Ignore pure FK-only joins and UNION branches that select from a "
+                "single table with no join or filter.\n\n"
                 "For each chosen expression provide:\n"
                 "  • name — user-friendly Title Case label with spaces between words, "
                 "matching the ColumnAttribute naming style "
