@@ -197,14 +197,28 @@ def _judge_with_llm(
                 f"Business term: {term_name}\n"
                 f"Description: {term_description or '(none)'}\n\n"
                 f"Top SQL expressions extracted from queries on tables for this term "
-                f"(ranked by 3-month usage):\n\n"
+                f"(ranked by 3-month execution count):\n\n"
                 f"{expr_block}\n\n"
                 f"Which expressions should become a named SqlAttribute for the term "
-                f"'{term_name}'? For each one provide:\n"
-                "  • name — concise snake_case identifier (e.g. active_orders_filter)\n"
-                "  • description — plain-English explanation of what it captures\n"
-                "  • expression — the exact SQL expression\n\n"
-                "Return an empty list if none have clear business value."
+                f"'{term_name}'?\n\n"
+                "Rules you MUST follow:\n"
+                "  1. ALWAYS mark an expression as a SqlAttribute if it compares a column "
+                "against a literal value (e.g. status = 'active', amount > 1000, "
+                "type IN ('A','B')). Literal values encode business thresholds and "
+                "categories that are exactly what SqlAttributes are designed to capture.\n"
+                "  2. NEVER mark an expression as a SqlAttribute if it only references "
+                "columns from the same table with no literal value, constant, or "
+                "cross-table condition (e.g. start_date < end_date). Such expressions "
+                "describe structural integrity, not reusable business logic.\n\n"
+                "For each chosen expression provide:\n"
+                "  • name — user-friendly Title Case label with spaces between words, "
+                "matching the ColumnAttribute naming style "
+                "(e.g. 'Active Customer Filter', 'Revenue Above Threshold', "
+                "'Last 90 Days Activity')\n"
+                "  • description — what business logic it captures, why it matters for "
+                "this term, and when a data consumer would apply it\n"
+                "  • expression — the exact SQL expression copied verbatim\n\n"
+                "Return an empty list if none qualify."
             )
         ),
     ]
@@ -317,6 +331,10 @@ def suggest_sql_attributes(database_name: str) -> int:
     embed_params = get_embed_params()
     vdb = get_semantic_vdb()
     new_attr_ids: list[str] = []
+    # Tracks expressions already handled in this run to avoid creating duplicate
+    # SqlAttribute nodes when the same expression appears across multiple terms
+    # that share the same underlying table.
+    seen_expressions: set[str] = set()
 
     for row in term_rows:
         term_id: str = row["term_id"]
@@ -347,6 +365,16 @@ def suggest_sql_attributes(database_name: str) -> int:
             "Term %r: LLM suggested %d SqlAttribute(s).", term_name, len(suggestions)
         )
         for s in suggestions:
+            expr_key = s.expression.strip().lower()
+            if expr_key in seen_expressions:
+                logger.debug(
+                    "SqlAttribute expression already handled this run — skipping duplicate for term %r: %r",
+                    term_name,
+                    s.expression,
+                )
+                continue
+            seen_expressions.add(expr_key)
+
             attr_id = merge_suggested_sql_attribute(
                 name=s.name,
                 description=s.description,
