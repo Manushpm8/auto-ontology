@@ -26,9 +26,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
-_EMBED_RETRIES = 3
-_EMBED_RETRY_DELAY = 5.0  # seconds between retries
-
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
@@ -46,6 +43,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_EMBED_RETRIES = 3
+_EMBED_RETRY_DELAY = 5.0  # seconds between retries
 _TOP_N = 10
 _TERM_WORKERS = 4
 _COUNTER_RE = re.compile(r"^count_monthly_(\d{4})_(\d{2})$")
@@ -123,8 +122,16 @@ def _extract_expressions(sql_text: str) -> list[str]:
     results: list[str] = []
 
     cmp_types = (
-        exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE,
-        exp.In, exp.Between, exp.Like, exp.Is,
+        exp.EQ,
+        exp.NEQ,
+        exp.GT,
+        exp.GTE,
+        exp.LT,
+        exp.LTE,
+        exp.In,
+        exp.Between,
+        exp.Like,
+        exp.Is,
     )
 
     def _is_pure_fk_eq(node: exp.Expression) -> bool:
