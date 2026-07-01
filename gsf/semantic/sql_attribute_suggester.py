@@ -168,10 +168,12 @@ def _extract_expressions(sql_text: str) -> list[str]:
                 ):
                     _add(node)
 
-    # UNION / INTERSECT / EXCEPT — each branch represents a named sub-population.
-    # Capture the full SELECT of each branch so that high-frequency union arms
-    # can be surfaced as reusable SqlAttributes.
+    # UNION / INTERSECT / EXCEPT — capture both the whole set-operation and each
+    # individual branch. The whole expression is needed for rule 3c (multi-path
+    # UNION defining a named aggregate concept); individual branches are needed
+    # so high-frequency arms can be surfaced on their own.
     for set_op in ast.find_all(exp.Union, exp.Intersect, exp.Except):
+        _add(set_op)
         for branch in (set_op.left, set_op.right):
             if branch is not None:
                 _add(branch)
