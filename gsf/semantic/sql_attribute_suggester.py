@@ -22,6 +22,8 @@ import logging
 import re
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _TOP_N = 10
+_TERM_WORKERS = 4
 _COUNTER_RE = re.compile(r"^count_monthly_(\d{4})_(\d{2})$")
 
 
@@ -398,12 +401,12 @@ def suggest_sql_attributes(database_name: str) -> int:
     embed_params = get_embed_params()
     vdb = get_semantic_vdb()
     new_attr_ids: list[str] = []
-    # Tracks expressions already handled in this run to avoid creating duplicate
-    # SqlAttribute nodes when the same expression appears across multiple terms
-    # that share the same underlying table.
+    # Shared across workers — guards seen_expressions to prevent duplicate
+    # SqlAttribute nodes when terms share the same underlying table.
     seen_expressions: set[str] = set()
+    seen_lock = Lock()
 
-    for row in term_rows:
+    def _process_term(row: dict[str, Any]) -> list[str]:
         term_id: str = row["term_id"]
         term_name: str = row["term_name"]
         term_description: str = row.get("term_description") or ""
@@ -413,7 +416,7 @@ def suggest_sql_attributes(database_name: str) -> int:
         top = ranked[:_TOP_N]
         if not top:
             logger.debug("Term %r: no scoreable expressions — skipping.", term_name)
-            continue
+            return []
 
         logger.info(
             "Term %r: %d SQL(s), %d unique expression(s) — sending top %d to LLM.",
@@ -426,21 +429,24 @@ def suggest_sql_attributes(database_name: str) -> int:
 
         if not suggestions:
             logger.info("Term %r: LLM suggested 0 SqlAttributes.", term_name)
-            continue
+            return []
 
         logger.info(
             "Term %r: LLM suggested %d SqlAttribute(s).", term_name, len(suggestions)
         )
+        created: list[str] = []
         for s in suggestions:
             expr_key = s.expression.strip().lower()
-            if expr_key in seen_expressions:
-                logger.debug(
-                    "SqlAttribute expression already handled this run — skipping duplicate for term %r: %r",
-                    term_name,
-                    s.expression,
-                )
-                continue
-            seen_expressions.add(expr_key)
+            with seen_lock:
+                if expr_key in seen_expressions:
+                    logger.debug(
+                        "SqlAttribute expression already handled this run — "
+                        "skipping duplicate for term %r: %r",
+                        term_name,
+                        s.expression,
+                    )
+                    continue
+                seen_expressions.add(expr_key)
 
             attr_id = merge_suggested_sql_attribute(
                 name=s.name,
@@ -452,7 +458,17 @@ def suggest_sql_attributes(database_name: str) -> int:
                 logger.debug("SqlAttribute %r already exists — skipping.", s.name)
             else:
                 logger.info("Created SqlAttribute %r (id=%s).", s.name, attr_id)
-                new_attr_ids.append(attr_id)
+                created.append(attr_id)
+        return created
+
+    with ThreadPoolExecutor(max_workers=_TERM_WORKERS) as pool:
+        futures = {pool.submit(_process_term, row): row for row in term_rows}
+        for future in as_completed(futures):
+            try:
+                new_attr_ids.extend(future.result())
+            except Exception:
+                row = futures[future]
+                logger.exception("Error processing term %r", row.get("term_name"))
 
     total = len(new_attr_ids)
     if new_attr_ids:
