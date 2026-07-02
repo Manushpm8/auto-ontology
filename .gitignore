@@ -49,3 +49,12 @@ dev_tools/evaluation/
 # Local OpenMetadata evaluation environment (Docker volume + rendered configs
 # with secrets); local scratch state, never commit.
 openmetadata-eval/
+
+# Agentic PLC — runtime, scan artifacts/evidence, telemetry, and local agent config.
+# Mirrors NVIDIA-AI-Blueprints/aiq: skills + CLAUDE.md/AGENTS.md are committed, but the
+# PLC runtime + scan evidence stay out of git (regenerated locally; surfaced in PRs/CI).
+.plc/
+plc-evidence.jsonl
+.plc-scan/
+.codex/
+.claude/settings.json

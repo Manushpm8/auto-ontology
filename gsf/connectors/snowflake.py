@@ -125,7 +125,12 @@ class SnowflakeDatabase(SQLDatabase):
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
         with snowflake.connector.connect(**self._connect_kwargs) as conn:
             with conn.cursor() as cur:
-                cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")
+                # SQLi triage: the warehouse name is operator config from the
+                # connection string, escaped via _quoted_identifier; the
+                # Snowflake connector cannot bind identifiers. Not user input.
+                cur.execute(  # nosemgrep
+                    f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}"
+                )
                 if parameters:
                     cur.execute(sql, parameters)
                 else:
@@ -174,13 +179,16 @@ class SnowflakeDatabase(SQLDatabase):
     def get_queries(self, hours: int = 24) -> pd.DataFrame:
         """Return recent queries from ``INFORMATION_SCHEMA.QUERY_HISTORY``."""
         try:
-            df = self.execute(f"""
+            # SQLi triage: the only interpolation below is an int (hours),
+            # coerced with int() so no string input can reach the SQL text.
+            df = self.execute(  # nosemgrep
+                f"""
                 SELECT
                     END_TIME   AS end_time,
                     QUERY_TEXT AS query_text
                 FROM TABLE(
                     INFORMATION_SCHEMA.QUERY_HISTORY(
-                        DATEADD(hour, -{hours}, CURRENT_TIMESTAMP()),
+                        DATEADD(hour, -{int(hours)}, CURRENT_TIMESTAMP()),
                         CURRENT_TIMESTAMP(),
                         RESULT_LIMIT => 10000
                     )
@@ -192,7 +200,8 @@ class SnowflakeDatabase(SQLDatabase):
                   AND EXECUTION_STATUS = 'SUCCESS'
                   AND LOWER(QUERY_TEXT) NOT LIKE '%information_schema%'
                 ORDER BY END_TIME DESC
-            """)
+            """
+            )
             return df[["end_time", "query_text"]]
         except snowflake.connector.errors.Error:
             logger.exception("Failed to fetch Snowflake query history")
@@ -200,7 +209,9 @@ class SnowflakeDatabase(SQLDatabase):
 
     def get_views(self) -> pd.DataFrame:
         db = _quoted_identifier(self._database_name)
-        df = self.execute(f"SHOW VIEWS IN DATABASE {db}")
+        # SQLi triage: db is operator config, escaped via _quoted_identifier;
+        # SHOW ... IN DATABASE cannot bind identifiers. Not user input.
+        df = self.execute(f"SHOW VIEWS IN DATABASE {db}")  # nosemgrep
         if df.empty:
             return pd.DataFrame(
                 columns=["table_schema", "table_name", "view_definition"]
@@ -217,7 +228,9 @@ class SnowflakeDatabase(SQLDatabase):
 
     def get_pks(self) -> pd.DataFrame:
         db = _quoted_identifier(self._database_name)
-        df = self.execute(f"SHOW PRIMARY KEYS IN DATABASE {db}")
+        # SQLi triage: db is operator config, escaped via _quoted_identifier;
+        # SHOW ... IN DATABASE cannot bind identifiers. Not user input.
+        df = self.execute(f"SHOW PRIMARY KEYS IN DATABASE {db}")  # nosemgrep
         if df.empty:
             return pd.DataFrame(
                 columns=[
@@ -237,7 +250,9 @@ class SnowflakeDatabase(SQLDatabase):
 
     def get_fks(self) -> pd.DataFrame:
         db = _quoted_identifier(self._database_name)
-        df = self.execute(f"SHOW IMPORTED KEYS IN DATABASE {db}")
+        # SQLi triage: db is operator config, escaped via _quoted_identifier;
+        # SHOW ... IN DATABASE cannot bind identifiers. Not user input.
+        df = self.execute(f"SHOW IMPORTED KEYS IN DATABASE {db}")  # nosemgrep
         if df.empty:
             return pd.DataFrame(
                 columns=[

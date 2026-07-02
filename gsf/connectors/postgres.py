@@ -80,7 +80,10 @@ class PostgresDatabase(SQLDatabase):
         view_type = TableTypes.VIEW
         materialized_view_type = TableTypes.MATERIALIZED_VIEW
         base_table_type = TableTypes.BASE_TABLE
-        return self.execute(f"""
+        # SQLi triage: the CASE values below interpolate only internal
+        # TableTypes enum constants (fixed reserved words), never user input.
+        return self.execute(  # nosemgrep
+            f"""
             SELECT
                 t.table_schema AS table_schema,
                 t.table_name   AS table_name,
@@ -96,7 +99,8 @@ class PostgresDatabase(SQLDatabase):
               AND c.relispartition = false
               AND c.relkind IN ('r', 'v', 'm', 'f')
             ORDER BY t.table_schema, t.table_name
-        """)
+        """
+        )
 
     def get_columns(self) -> pd.DataFrame:
         return self.execute("""

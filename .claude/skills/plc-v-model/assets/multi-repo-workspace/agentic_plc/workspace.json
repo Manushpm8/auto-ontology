@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "workspace_id": "sample-rate-limit-workspace",
+  "work_products_root": "agentic_plc/work_products",
+  "repos": [
+    {
+      "repo_id": "control-plane",
+      "path": "repos/control-plane",
+      "url": "https://gitlab.example.com/team/control-plane.git"
+    },
+    {
+      "repo_id": "runtime",
+      "path": "repos/runtime",
+      "url": "https://gitlab.example.com/team/runtime.git"
+    }
+  ]
+}

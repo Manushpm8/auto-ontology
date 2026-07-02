@@ -155,7 +155,7 @@ class PostgresVDB(VDB):
                 # `schema_name` is internal config (defaults to 'public');
                 # psycopg can't parameterise identifiers, so it's interpolated
                 # via the identifier-safe quote. Not user input.
-                cur.execute(
+                cur.execute(  # nosemgrep
                     sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
                         sql.Identifier(self.schema_name)
                     )
@@ -314,7 +314,7 @@ class PostgresVDB(VDB):
                 # `schema_name`/`collection_name` are internal config; psycopg
                 # can't parameterise identifiers, so they're composed via the
                 # identifier-safe API. Not user input.
-                cur.execute(
+                cur.execute(  # nosemgrep
                     sql.SQL(
                         """
                         DELETE FROM {table}
