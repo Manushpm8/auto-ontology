@@ -28,10 +28,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from gsf.dal.sql_attributes import (
-    SQL_ATTR_SOURCE_SQL,
-    link_attr_to_source_sqls,
-)
+from gsf.dal.sql_attributes import SQL_ATTR_SOURCE_SQL
 from gsf.dal.terms import fetch_table_schema_map, fetch_terms_with_sqls
 from gsf.semantic.constants import SEMANTIC_SOURCE
 from gsf.server.sql_attributes.service import (
@@ -267,8 +264,26 @@ def _try_wrap_in_select(
         if from_clause is None:
             return None
         joins = best_select.args.get("joins") or []
+
+        # Only keep JOINs whose table name/alias is actually referenced by
+        # columns in the expression.  When the expression has no explicit table
+        # qualifiers (expr_table_aliases is empty) we omit all JOINs and just
+        # use the primary FROM table.
+        if expr_table_aliases:
+            filtered_joins = [
+                j
+                for j in joins
+                if any(
+                    (tbl.alias.lower() if tbl.alias else tbl.name.lower())
+                    in expr_table_aliases
+                    for tbl in j.find_all(exp.Table)  # type: ignore[attr-defined]
+                )
+            ]
+        else:
+            filtered_joins = []
+
         from_str = from_clause.sql()
-        joins_str = " ".join(j.sql() for j in joins)
+        joins_str = " ".join(j.sql() for j in filtered_joins)
     except Exception:
         return None
 
@@ -679,18 +694,6 @@ def suggest_sql_attributes(database_name: str) -> int:
                 continue
 
             logger.info("Created SqlAttribute %r (id=%s).", s.name, attr_id)
-
-            # Link to the original source Sql nodes as well (in addition to
-            # the generated-SELECT Sql node created by the service).
-            if source_sql_ids:
-                try:
-                    link_attr_to_source_sqls(attr_id, source_sql_ids)
-                except Exception as exc:
-                    logger.warning(
-                        "Could not link SqlAttribute %r to source SQLs: %s",
-                        attr_id,
-                        exc,
-                    )
 
             created.append(attr_id)
         return created
