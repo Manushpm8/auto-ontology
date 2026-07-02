@@ -15,7 +15,7 @@ import logging
 
 import psycopg
 
-from gsf.vdb.config import get_postgres_connection_string
+from gsf.infra.postgres import get_postgres_connection_string
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,11 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Env-derived configuration helpers shared across server and dev_tools."""
+"""Env-derived Postgres connection config, shared across the codebase.
+
+Not VDB-specific: the server, ingestion service, and dev tools all build the
+local Postgres URL from the same ``POSTGRES_*`` env vars via this helper.
+"""
 
 from __future__ import annotations
 
