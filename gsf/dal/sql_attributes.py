@@ -187,6 +187,26 @@ def delete_sql_attribute_node(attr_id: str) -> None:
     )
 
 
+def link_attr_to_source_sqls(attr_id: str, sql_ids: list[str]) -> None:
+    """MERGE HAS_SQL edges from a SqlAttribute to already-existing Sql nodes.
+
+    Used by the suggester to record which original SQL queries an auto-generated
+    SqlAttribute was extracted from, in addition to the generated-SELECT Sql node
+    already created by ``create_sql_attribute``.
+    """
+    if not sql_ids:
+        return
+    get_neo4j_conn().query_write(
+        f"""
+        UNWIND $sql_ids AS sid
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
+        MATCH (sql:{Labels.SQL} {{id: sid}})
+        MERGE (attr)-[:{Edges.HAS_SQL}]->(sql)
+        """,
+        {"attr_id": attr_id, "sql_ids": sql_ids},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Embedding data fetch
 # ---------------------------------------------------------------------------

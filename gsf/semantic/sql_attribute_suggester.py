@@ -20,32 +20,29 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from gsf.dal.sql_attributes import (
-    fetch_suggested_sql_attribute_docs,
-    merge_suggested_sql_attribute,
+    SQL_ATTR_SOURCE_SQL,
+    link_attr_to_source_sqls,
 )
 from gsf.dal.terms import fetch_terms_with_sqls
 from gsf.semantic.constants import SEMANTIC_SOURCE
-from gsf.utils.embedding import embed_docs_into_vdb
+from gsf.server.sql_attributes.service import (
+    SqlAttributeNameConflict,
+    SqlAttributeSqlError,
+    create_sql_attribute,
+)
 from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
-
-if TYPE_CHECKING:
-    from nemo_retriever.common.params.models import EmbedParams
-    from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
 
-_EMBED_RETRIES = 3
-_EMBED_RETRY_DELAY = 5.0  # seconds between retries
 _TOP_N = 10
 _TERM_WORKERS = 4
 _COUNTER_RE = re.compile(r"^count_monthly_(\d{4})_(\d{2})$")
@@ -195,21 +192,185 @@ def _extract_expressions(sql_text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Expression → valid SELECT transformation
+# ---------------------------------------------------------------------------
+
+
+def _try_wrap_in_select(
+    expression: str,
+    source_sql: str,
+    expr_ast: object,
+    is_agg: bool,
+) -> str | None:
+    """Build ``SELECT … FROM … [JOINs] [WHERE expression]`` from *source_sql*.
+
+    Finds the innermost SELECT node whose table aliases cover every alias
+    referenced in *expression*, extracts its FROM + JOIN clauses, and wraps
+    the expression as a WHERE predicate (conditions/filters) or a SELECT-list
+    item (aggregations).
+
+    Returns ``None`` when parsing fails or no suitable SELECT is found.
+    """
+    try:
+        import sqlglot
+        import sqlglot.expressions as exp
+
+        src_ast = sqlglot.parse_one(source_sql, error_level=sqlglot.ErrorLevel.IGNORE)
+    except Exception:
+        return None
+    if src_ast is None:
+        return None
+
+    # Aliases referenced by columns inside the expression.
+    expr_table_aliases: set[str] = set()
+    if expr_ast is not None:
+        try:
+            import sqlglot.expressions as exp  # noqa: F811 (re-import inside try block)
+
+            for col in expr_ast.find_all(exp.Column):  # type: ignore[attr-defined]
+                if col.table:
+                    expr_table_aliases.add(col.table.lower())
+        except Exception:
+            pass
+
+    best_select = None
+    try:
+        import sqlglot.expressions as exp  # noqa: F811
+
+        for sel in src_ast.find_all(exp.Select):  # type: ignore[attr-defined]
+            from_part = sel.args.get("from_")
+            if from_part is None:
+                continue
+            sel_aliases: set[str] = set()
+            for tbl in sel.find_all(exp.Table):
+                if tbl.alias:
+                    sel_aliases.add(tbl.alias.lower())
+                sel_aliases.add(tbl.name.lower())
+            if expr_table_aliases.issubset(sel_aliases) or not expr_table_aliases:
+                best_select = sel
+                break  # take the first (outermost) matching one
+
+        if best_select is None:
+            # Fallback: first SELECT that has a FROM clause
+            for sel in src_ast.find_all(exp.Select):
+                if sel.args.get("from_"):
+                    best_select = sel
+                    break
+    except Exception:
+        return None
+
+    if best_select is None:
+        return None
+
+    try:
+        from_clause = best_select.args.get("from_")
+        if from_clause is None:
+            return None
+        joins = best_select.args.get("joins") or []
+        from_str = from_clause.sql()
+        joins_str = " ".join(j.sql() for j in joins)
+    except Exception:
+        return None
+
+    parts = ["SELECT", expression if is_agg else "*", from_str]
+    if joins_str:
+        parts.append(joins_str)
+    if not is_agg:
+        parts.append(f"WHERE {expression}")
+    return " ".join(parts)
+
+
+def _build_valid_sql(expression: str, source_sql_texts: list[str]) -> str:
+    """Return a syntactically valid SELECT statement wrapping *expression*.
+
+    Cases:
+    * Expression is already a full SELECT / UNION / INTERSECT / EXCEPT:
+      returned as-is.
+    * Filter or JOIN condition: ``SELECT * FROM <from+joins> WHERE <expression>``
+      where the FROM clause is extracted from the first source SQL that contains
+      the expression.
+    * Aggregation / function: ``SELECT <expression> FROM <from+joins>``.
+
+    If no source SQL can provide the context, raises ``ValueError`` so the
+    caller can decide how to proceed.
+    """
+    try:
+        import sqlglot
+        import sqlglot.expressions as exp
+
+        ast = sqlglot.parse_one(expression, error_level=sqlglot.ErrorLevel.IGNORE)
+        if isinstance(ast, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
+            return expression
+    except Exception:
+        ast = None
+
+    # Determine whether the expression is an aggregation/function.
+    is_agg = False
+    try:
+        import sqlglot.expressions as exp  # noqa: F811
+
+        if ast is not None:
+            is_agg = isinstance(ast, (exp.AggFunc, exp.Anonymous))
+    except Exception:
+        pass
+
+    # Try to wrap using context from each source SQL.
+    expr_lower = expression.lower()
+    for sql_text in source_sql_texts:
+        if not sql_text:
+            continue
+        # Quick pre-filter: skip source SQLs that don't share any token with the
+        # expression (avoids pointless parse overhead).
+        if not any(
+            tok in sql_text.lower() for tok in expr_lower.split() if len(tok) > 3
+        ):
+            continue
+        wrapped = _try_wrap_in_select(expression, sql_text, ast, is_agg)
+        if wrapped:
+            return wrapped
+
+    # No source SQL could provide context — try every source SQL without filtering.
+    for sql_text in source_sql_texts:
+        if not sql_text:
+            continue
+        wrapped = _try_wrap_in_select(expression, sql_text, ast, is_agg)
+        if wrapped:
+            return wrapped
+
+    raise ValueError(
+        f"Cannot build a valid SELECT for expression {expression!r}: "
+        "no source SQL context available."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Score and rank across all SQLs for a term
 # ---------------------------------------------------------------------------
 
 
-def _rank_expressions(sqls: list[dict[str, Any]]) -> list[tuple[str, float]]:
-    """Return (expression, score) pairs sorted by score descending."""
+def _rank_expressions(sqls: list[dict[str, Any]]) -> list[tuple[str, float, list[str]]]:
+    """Return ``(expression, score, sql_ids)`` triples sorted by score descending.
+
+    *sql_ids* lists the Neo4j Sql node ids of every query the expression
+    appeared in — used later to link the created SqlAttribute back to its
+    source queries.
+    """
     scores: dict[str, float] = defaultdict(float)
+    expr_sql_ids: dict[str, list[str]] = defaultdict(list)
     for item in sqls:
         sql_text = item.get("sql_text") or ""
+        sql_id = item.get("sql_id") or ""
         sql_score = _latest_3month_score(item.get("props") or {})
         if not sql_text:
             continue
         for expr in _extract_expressions(sql_text):
             scores[expr] += sql_score
-    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            if sql_id and sql_id not in expr_sql_ids[expr]:
+                expr_sql_ids[expr].append(sql_id)
+    return [
+        (expr, score, expr_sql_ids[expr])
+        for expr, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -315,45 +476,6 @@ def _judge_with_llm(
 
 
 # ---------------------------------------------------------------------------
-# Embedding
-# ---------------------------------------------------------------------------
-
-
-def _embed_new_attrs(
-    attr_ids: list[str],
-    embed_params: "EmbedParams",
-    vdb: "VDB",
-    database_name: str,
-) -> None:
-    docs = fetch_suggested_sql_attribute_docs(attr_ids)
-    if not docs:
-        return
-
-    for attempt in range(1, _EMBED_RETRIES + 1):
-        try:
-            embed_docs_into_vdb(docs, embed_params, vdb, database_name)
-            return
-        except Exception as exc:
-            if attempt < _EMBED_RETRIES:
-                logger.warning(
-                    "Embedding attempt %d/%d failed (%s) — retrying in %.0fs.",
-                    attempt,
-                    _EMBED_RETRIES,
-                    exc,
-                    _EMBED_RETRY_DELAY,
-                )
-                time.sleep(_EMBED_RETRY_DELAY)
-            else:
-                logger.warning(
-                    "Embedding failed after %d attempts (%s). "
-                    "SqlAttributes were written to Neo4j but not embedded — "
-                    "re-run compilation to embed them.",
-                    _EMBED_RETRIES,
-                    exc,
-                )
-
-
-# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -365,14 +487,13 @@ def suggest_sql_attributes(database_name: str) -> int:
       1. Collects SQL queries from connected tables.
       2. Extracts and scores expressions by 3-month usage.
       3. Sends the top 10 to the LLM for SqlAttribute judgment.
-      4. Writes newly approved suggestions to Neo4j (existing ones are skipped).
-      5. Embeds only the newly created nodes into the semantic VDB.
+      4. Transforms each approved expression into a valid SELECT statement.
+      5. Persists new SqlAttributes via the service (validates SQL, creates Sql
+         node, embeds).  Existing ones (same name) are skipped automatically.
+      6. Links each new SqlAttribute to the original source Sql nodes.
 
     Returns the total number of new SqlAttribute nodes written.
     """
-    from gsf.utils import get_embed_params
-    from gsf.vdb import get_semantic_vdb
-
     logger.info("Collecting SQL expressions per term…")
     term_rows = fetch_terms_with_sqls(SEMANTIC_SOURCE)
 
@@ -384,8 +505,6 @@ def suggest_sql_attributes(database_name: str) -> int:
 
     logger.info("Found %d term(s) with SQL queries.", len(term_rows))
 
-    embed_params = get_embed_params()
-    vdb = get_semantic_vdb()
     new_attr_ids: list[str] = []
     # Shared across workers — guards seen_expressions to prevent duplicate
     # SqlAttribute nodes when terms share the same underlying table.
@@ -411,7 +530,13 @@ def suggest_sql_attributes(database_name: str) -> int:
             len(ranked),
             len(top),
         )
-        suggestions = _judge_with_llm(term_name, term_description, top)
+
+        # _judge_with_llm only needs (expr, score) pairs.
+        suggestions = _judge_with_llm(
+            term_name,
+            term_description,
+            [(expr, score) for expr, score, _ in top],
+        )
 
         if not suggestions:
             logger.info("Term %r: LLM suggested 0 SqlAttributes.", term_name)
@@ -420,6 +545,17 @@ def suggest_sql_attributes(database_name: str) -> int:
         logger.info(
             "Term %r: LLM suggested %d SqlAttribute(s).", term_name, len(suggestions)
         )
+
+        # Build lookup structures from the ranked results.
+        sql_text_by_id = {
+            item["sql_id"]: item["sql_text"]
+            for item in sqls
+            if item.get("sql_id") and item.get("sql_text")
+        }
+        expr_to_sql_ids: dict[str, list[str]] = {
+            expr: sql_ids for expr, _, sql_ids in ranked
+        }
+
         created: list[str] = []
         for s in suggestions:
             expr_key = s.expression.strip().lower()
@@ -434,17 +570,70 @@ def suggest_sql_attributes(database_name: str) -> int:
                     continue
                 seen_expressions.add(expr_key)
 
-            attr_id = merge_suggested_sql_attribute(
-                name=s.name,
-                description=s.description,
-                expression=s.expression,
-                term_id=term_id,
-            )
-            if attr_id is None:
+            source_sql_ids = expr_to_sql_ids.get(s.expression, [])
+            source_sql_texts = [
+                sql_text_by_id[sid] for sid in source_sql_ids if sid in sql_text_by_id
+            ]
+
+            # Transform the expression into a valid SELECT statement.
+            try:
+                valid_sql = _build_valid_sql(s.expression, source_sql_texts)
+            except ValueError as exc:
+                logger.warning(
+                    "Term %r: cannot build valid SQL for %r — skipping: %s",
+                    term_name,
+                    s.name,
+                    exc,
+                )
+                continue
+
+            # Persist via the service (validates SQL, creates Sql node, embeds).
+            try:
+                row_result = create_sql_attribute(
+                    name=s.name,
+                    description=s.description,
+                    expression=valid_sql,
+                    term_id=term_id,
+                    connector=database_name,
+                    source=SQL_ATTR_SOURCE_SQL,
+                )
+                attr_id: str = row_result["id"]
+            except SqlAttributeNameConflict:
                 logger.debug("SqlAttribute %r already exists — skipping.", s.name)
-            else:
-                logger.info("Created SqlAttribute %r (id=%s).", s.name, attr_id)
-                created.append(attr_id)
+                continue
+            except SqlAttributeSqlError as exc:
+                logger.warning(
+                    "Term %r: generated SQL for %r failed schema validation — "
+                    "skipping: %s",
+                    term_name,
+                    s.name,
+                    exc,
+                )
+                continue
+            except Exception as exc:
+                logger.warning(
+                    "Term %r: unexpected error creating SqlAttribute %r — skipping: %s",
+                    term_name,
+                    s.name,
+                    exc,
+                )
+                continue
+
+            logger.info("Created SqlAttribute %r (id=%s).", s.name, attr_id)
+
+            # Link to the original source Sql nodes as well (in addition to
+            # the generated-SELECT Sql node created by the service).
+            if source_sql_ids:
+                try:
+                    link_attr_to_source_sqls(attr_id, source_sql_ids)
+                except Exception as exc:
+                    logger.warning(
+                        "Could not link SqlAttribute %r to source SQLs: %s",
+                        attr_id,
+                        exc,
+                    )
+
+            created.append(attr_id)
         return created
 
     with ThreadPoolExecutor(max_workers=_TERM_WORKERS) as pool:
@@ -457,10 +646,6 @@ def suggest_sql_attributes(database_name: str) -> int:
                 logger.exception("Error processing term %r", row.get("term_name"))
 
     total = len(new_attr_ids)
-    if new_attr_ids:
-        logger.info("Embedding %d new SqlAttribute(s)…", total)
-        _embed_new_attrs(new_attr_ids, embed_params, vdb, database_name)
-
     logger.info(
         "SqlAttribute suggestion pass complete — %d new node(s) written.", total
     )

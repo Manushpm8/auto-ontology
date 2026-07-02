@@ -170,6 +170,7 @@ def fetch_terms_with_sqls(source: str) -> list[dict[str, Any]]:
         MATCH (sql:{Labels.SQL})-[:{Edges.SQL}]->(t)
         WITH term,
              collect({{sql_text: sql.sql_full_query,
+                       sql_id:   sql.id,
                        props:    properties(sql)}}) AS sqls
         RETURN term.id          AS term_id,
                term.name        AS term_name,
