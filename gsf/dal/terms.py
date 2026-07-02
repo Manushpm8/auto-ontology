@@ -153,6 +153,27 @@ def fetch_all_terms_and_attributes() -> tuple[
     return terms, attrs
 
 
+def fetch_table_schema_map(database_name: str) -> dict[str, str]:
+    """Return ``{table_name_lower: schema_name}`` for every table in *database_name*.
+
+    Used by the SqlAttribute suggester to qualify bare table names in
+    generated SELECT statements with their canonical schema prefix.
+    """
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (db:{Labels.DB} {{name: $db_name}})-[:{Edges.CONTAINS}]->
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
+        RETURN t.name AS table_name, sch.name AS schema_name
+        """,
+        {"db_name": database_name},
+    )
+    return {
+        row["table_name"].lower(): row["schema_name"]
+        for row in rows
+        if row.get("table_name") and row.get("schema_name")
+    }
+
+
 def fetch_terms_with_sqls(source: str) -> list[dict[str, Any]]:
     """Return every Term with the SQL queries from its connected tables.
 

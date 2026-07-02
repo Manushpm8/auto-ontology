@@ -32,7 +32,7 @@ from gsf.dal.sql_attributes import (
     SQL_ATTR_SOURCE_SQL,
     link_attr_to_source_sqls,
 )
-from gsf.dal.terms import fetch_terms_with_sqls
+from gsf.dal.terms import fetch_table_schema_map, fetch_terms_with_sqls
 from gsf.semantic.constants import SEMANTIC_SOURCE
 from gsf.server.sql_attributes.service import (
     SqlAttributeNameConflict,
@@ -280,27 +280,74 @@ def _try_wrap_in_select(
     return " ".join(parts)
 
 
-def _build_valid_sql(expression: str, source_sql_texts: list[str]) -> str:
+def _qualify_table_names(sql: str, schema_map: dict[str, str]) -> str:
+    """Add ``schema.`` prefix to bare table references in *sql*.
+
+    Only tables whose names appear in *schema_map* (table_name_lower →
+    schema_name) and that do not already carry a schema qualifier are updated.
+    Returns *sql* unchanged when *schema_map* is empty or parsing fails.
+    """
+    if not schema_map:
+        return sql
+    try:
+        import sqlglot
+        import sqlglot.expressions as exp
+
+        ast = sqlglot.parse_one(sql, error_level=sqlglot.ErrorLevel.IGNORE)
+        if ast is None:
+            return sql
+
+        def _add_schema(node: object) -> object:
+            if (
+                isinstance(node, exp.Table)
+                and not node.args.get("db")
+                and not node.args.get("catalog")
+            ):
+                schema = schema_map.get(node.name.lower())
+                if schema:
+                    n = node.copy()
+                    n.set("db", exp.to_identifier(schema))
+                    return n
+            return node  # type: ignore[return-value]
+
+        return ast.transform(_add_schema).sql()
+    except Exception:
+        return sql
+
+
+def _build_valid_sql(
+    expression: str,
+    source_sql_texts: list[str],
+    schema_map: dict[str, str] | None = None,
+) -> str:
     """Return a syntactically valid SELECT statement wrapping *expression*.
 
     Cases:
     * Expression is already a full SELECT / UNION / INTERSECT / EXCEPT:
-      returned as-is.
+      returned as-is (with table names qualified if *schema_map* provided).
     * Filter or JOIN condition: ``SELECT * FROM <from+joins> WHERE <expression>``
       where the FROM clause is extracted from the first source SQL that contains
       the expression.
     * Aggregation / function: ``SELECT <expression> FROM <from+joins>``.
 
+    Table names in the result are schema-qualified using *schema_map* when
+    provided.
+
     If no source SQL can provide the context, raises ``ValueError`` so the
     caller can decide how to proceed.
     """
+    _schema_map = schema_map or {}
+
+    def _qualify(sql: str) -> str:
+        return _qualify_table_names(sql, _schema_map)
+
     try:
         import sqlglot
         import sqlglot.expressions as exp
 
         ast = sqlglot.parse_one(expression, error_level=sqlglot.ErrorLevel.IGNORE)
         if isinstance(ast, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
-            return expression
+            return _qualify(expression)
     except Exception:
         ast = None
 
@@ -327,7 +374,7 @@ def _build_valid_sql(expression: str, source_sql_texts: list[str]) -> str:
             continue
         wrapped = _try_wrap_in_select(expression, sql_text, ast, is_agg)
         if wrapped:
-            return wrapped
+            return _qualify(wrapped)
 
     # No source SQL could provide context — try every source SQL without filtering.
     for sql_text in source_sql_texts:
@@ -335,7 +382,7 @@ def _build_valid_sql(expression: str, source_sql_texts: list[str]) -> str:
             continue
         wrapped = _try_wrap_in_select(expression, sql_text, ast, is_agg)
         if wrapped:
-            return wrapped
+            return _qualify(wrapped)
 
     raise ValueError(
         f"Cannot build a valid SELECT for expression {expression!r}: "
@@ -505,6 +552,18 @@ def suggest_sql_attributes(database_name: str) -> int:
 
     logger.info("Found %d term(s) with SQL queries.", len(term_rows))
 
+    schema_map: dict[str, str] = {}
+    try:
+        schema_map = fetch_table_schema_map(database_name)
+        logger.info(
+            "Loaded schema map: %d table(s) with schema qualifiers.", len(schema_map)
+        )
+    except Exception:
+        logger.warning(
+            "Could not fetch table→schema map; table names will not be schema-qualified.",
+            exc_info=True,
+        )
+
     new_attr_ids: list[str] = []
     # Shared across workers — guards seen_expressions to prevent duplicate
     # SqlAttribute nodes when terms share the same underlying table.
@@ -577,7 +636,7 @@ def suggest_sql_attributes(database_name: str) -> int:
 
             # Transform the expression into a valid SELECT statement.
             try:
-                valid_sql = _build_valid_sql(s.expression, source_sql_texts)
+                valid_sql = _build_valid_sql(s.expression, source_sql_texts, schema_map)
             except ValueError as exc:
                 logger.warning(
                     "Term %r: cannot build valid SQL for %r — skipping: %s",
