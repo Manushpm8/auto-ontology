@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from gsf.dal.datasources import fetch_table_context, fetch_all_tables_without_term
+from gsf.dal.datasources import fetch_all_tables_without_term, fetch_table_context
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import SemanticEmbedder
+from gsf.semantic.models import ProcessTableResult
 from gsf.semantic.visit_enter import process_table
 
 logger = logging.getLogger(__name__)
@@ -31,23 +32,29 @@ def compile_semantic_layer(
     summary = domain_summary or load_domain_summary(database_name)
     tables = fetch_all_tables_without_term()
 
-    def _process(table: dict, index: int) -> bool:
+    def _process(table: dict, index: int) -> ProcessTableResult | None:
         table_name = table["name"]
         ctx = fetch_table_context(table["id"])
 
         if not ctx.get("columns"):
             logger.warning("Table %s has no columns — skipping", table_name)
-            return False
+            return None
 
         logger.info("[%d/%d] Processing table: %s", index, len(tables), table_name)
         try:
-            process_table(table, ctx, domain_summary=summary, embedder=embedder)
-            return True
+            return process_table(
+                table,
+                ctx,
+                domain_summary=summary,
+                embedder=embedder,
+                database_name=database_name,
+            )
         except Exception:
             logger.exception("Unexpected error processing table %s", table_name)
-            return False
+            return None
 
     count = 0
+
     if embedder is not None:
         embedder.vdb.create_index()
 
@@ -56,8 +63,15 @@ def compile_semantic_layer(
             pool.submit(_process, table, i + 1): table for i, table in enumerate(tables)
         }
         for future in as_completed(futures):
-            if future.result():
+            result = future.result()
+            if result is not None:
                 count += 1
+                logger.debug(
+                    "  terms=%s attrs=%s sql_attrs=%s",
+                    result.term_names,
+                    result.attr_names,
+                    result.sql_attr_names,
+                )
 
     logger.info("Compilation complete — %d table(s) processed", count)
     return count
