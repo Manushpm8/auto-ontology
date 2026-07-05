@@ -46,6 +46,23 @@ from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 logger = logging.getLogger(__name__)
 
 
+def _pg_quote(name: str) -> str:
+    """Wrap a Postgres identifier in double-quotes if it needs quoting.
+
+    Identifiers that contain uppercase letters were created with quoted DDL
+    (e.g. ``CREATE TABLE "Sales"."Orders"``).  Without quotes at query time
+    Postgres folds them to lowercase and fails to find the table/column.
+    """
+    if not name:
+        return name
+    return f'"{name}"' if name != name.lower() else name
+
+
+def _pg_qualified(*parts: str) -> str:
+    """Build a dot-separated qualified identifier, quoting each part as needed."""
+    return ".".join(_pg_quote(p) for p in parts if p)
+
+
 def _format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
@@ -71,12 +88,16 @@ def _format_semantic_context(
     anchor_table = primary_attribute.get("table_name", "")
     anchor_col = primary_attribute.get("col_name", "")
     anchor_name = primary_attribute.get("attr_name", "")
-    anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
+    anchor_full = (
+        _pg_qualified(anchor_schema, anchor_table)
+        if anchor_schema
+        else _pg_quote(anchor_table)
+    )
 
     lines: list[str] = [
         "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
         f"  Table: {anchor_full}",
-        f"  Column: {anchor_col}  ({anchor_name})",
+        f"  Column: {_pg_quote(anchor_col)}  ({anchor_name})",
     ]
 
     if attribute_join_paths:
@@ -89,8 +110,8 @@ def _format_semantic_context(
             col_name = entry.get("col_name", "")
             schema = entry.get("schema_name", "")
             table = entry.get("table_name", "")
-            full_table = f"{schema}.{table}" if schema else table
-            lines.append(f"  {attr_name}: {full_table}.{col_name}")
+            full_table = _pg_qualified(schema, table) if schema else _pg_quote(table)
+            lines.append(f"  {attr_name}: {full_table}.{_pg_quote(col_name)}")
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
@@ -101,8 +122,16 @@ def _format_semantic_context(
                     tgt_s = hop.get("target_schema", "")
                     tgt_t = hop.get("target_table", "")
                     tgt_c = hop.get("target_column", "")
-                    src = f"{src_s}.{src_t}.{src_c}" if src_s else f"{src_t}.{src_c}"
-                    tgt = f"{tgt_s}.{tgt_t}.{tgt_c}" if tgt_s else f"{tgt_t}.{tgt_c}"
+                    src = (
+                        _pg_qualified(src_s, src_t, src_c)
+                        if src_s
+                        else _pg_qualified(src_t, src_c)
+                    )
+                    tgt = (
+                        _pg_qualified(tgt_s, tgt_t, tgt_c)
+                        if tgt_s
+                        else _pg_qualified(tgt_t, tgt_c)
+                    )
                     lines.append(f"      {src} = {tgt}")
 
     return "\n".join(lines)
@@ -137,9 +166,11 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
 
         # Build table header
         if database_name and schema_name:
-            full_name = f"{database_name}.{schema_name}.{table_name}"
+            full_name = _pg_qualified(database_name, schema_name, table_name)
+        elif schema_name:
+            full_name = _pg_qualified(schema_name, table_name)
         else:
-            full_name = table_name
+            full_name = _pg_quote(table_name)
 
         table_parts.append(f"TABLE: {full_name}")
         if table_label and table_label != table_name:
@@ -166,7 +197,7 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
                     col_desc = col.get("description", "")
                     sample_values = col.get("sample_values")
 
-                    col_line = f"    - {col_name} ({col_type})"
+                    col_line = f"    - {_pg_quote(col_name)} ({col_type})"
                     if col_desc:
                         col_line += f" - {col_desc}"
                     if sample_values:

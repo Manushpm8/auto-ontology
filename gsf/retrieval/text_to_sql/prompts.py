@@ -74,6 +74,9 @@ def create_sql_from_candidates_prompt() -> str:
 Key rules:
 - Use fully qualified table names exactly as provided (e.g., schema.table_name).
   Never drop the schema/database prefix.
+- If a schema, table, or column name contains uppercase letters, always wrap it
+  in double-quotes (e.g. "Sales"."Orders"."OrderID"). Names that are already all
+  lowercase do not need quotes.
 - When SQL snippets are provided as reference, do NOT copy their aliases.
   Define your own aliases in FROM/JOIN and use only those.
 - File contents (if present) are inputs only — use them as literals, filters,
