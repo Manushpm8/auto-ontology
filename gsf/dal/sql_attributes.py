@@ -27,6 +27,10 @@ from gsf.server.sql_utils import SqlParseError
 
 logger = logging.getLogger(__name__)
 
+# Source values stored on SqlAttribute nodes.
+SQL_ATTR_SOURCE_MANUAL = "manual"
+SQL_ATTR_SOURCE_SQL = "sql"
+
 
 # ---------------------------------------------------------------------------
 # Domain errors
