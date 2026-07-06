@@ -13,8 +13,10 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from pathlib import Path
 
 from gsf.utils import get_embed_params
 from nemo_retriever.graph import Graph
@@ -27,12 +29,69 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import TabularExtractParams
-from gsf.vdb import get_data_vdb, get_semantic_vdb
+from gsf.vdb import get_data_vdb
 from gsf.connectors.registry import create_connector
+from gsf.server.custom_analyses.service import (
+    CustomAnalysisNameConflict,
+    CustomAnalysisSqlConflict,
+    CustomAnalysisSqlError,
+    create_custom_analysis,
+)
 
-from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
+from dev_tools.evaluation.enrich_graph import apply_metadata
 
 logger = logging.getLogger("dev_tools.local_ingest")
+
+
+def _ingest_custom_analyses(database_name: str) -> None:
+    """Create each entry in ``<database_name>/custom_analyses.json``.
+
+    Routes every analysis through the server-side
+    :func:`create_custom_analysis`, so the dev ingest exercises the same
+    SQL validation, Neo4j persistence, and semantic-VDB embedding path the
+    API uses. Name/SQL conflicts (e.g. on re-runs) are logged and skipped so
+    the ingest stays idempotent.
+    """
+    analyses_path = (
+        Path(__file__).resolve().parent
+        / "evaluation"
+        / database_name
+        / "custom_analyses.json"
+    )
+
+    if not analyses_path.exists():
+        logger.warning("custom analyses file not found at %s; skipping", analyses_path)
+        return
+
+    with analyses_path.open() as f:
+        analyses = json.load(f)
+
+    if not isinstance(analyses, list) or not analyses:
+        logger.info("No custom analyses to ingest from %s.", analyses_path)
+        return
+
+    created = 0
+    for entry in analyses:
+        name = entry.get("name", "")
+        description = entry.get("description", "")
+        sql = (entry.get("sql") or "").strip()
+        if not sql:
+            logger.warning("Skipping custom analysis %r — no SQL provided.", name)
+            continue
+        try:
+            create_custom_analysis(name=name, description=description, sql=sql)
+            created += 1
+        except (CustomAnalysisNameConflict, CustomAnalysisSqlConflict) as exc:
+            logger.info("Skipping custom analysis %r — %s", name, exc)
+        except CustomAnalysisSqlError as exc:
+            logger.warning("Skipping custom analysis %r — SQL error: %s", name, exc)
+
+    logger.info(
+        "Created %d/%d custom analyses for %s.",
+        created,
+        len(analyses),
+        database_name,
+    )
 
 
 def run_ingest(connection_string: str) -> None:
@@ -64,9 +123,8 @@ def run_ingest(connection_string: str) -> None:
     results = embed_graph.execute(schema_data)
     result_df = results[0] if results else None
 
-    # Build the pgvector VDB once. PostgresVDB.__init__ wipes existing rows
-    # for `database_name`, so reuse the same instance for the custom-analysis
-    # append below — calling get_data_vdb(database_name=...) again would re-delete
+    # PostgresVDB.__init__ wipes existing rows for `database_name`, so build it
+    # once here: calling get_data_vdb(database_name=...) again would re-delete
     # everything we just wrote.
     vdb = get_data_vdb(database_name=database_name)
 
@@ -81,14 +139,7 @@ def run_ingest(connection_string: str) -> None:
     else:
         print("Tabular ingest result: no rows produced")
 
-    # Custom analyses live in the semantic-layer collection, so embed them
-    # through a dedicated semantic VDB rather than the tabular `vdb` above.
-    add_custom_analyses(
-        connector.database_name,
-        connector.dialect,
-        embed_params=embed_params,
-        vdb=get_semantic_vdb(database_name=connector.database_name),
-    )
+    _ingest_custom_analyses(connector.database_name)
 
 
 if __name__ == "__main__":
