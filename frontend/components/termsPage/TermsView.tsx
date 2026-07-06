@@ -10,20 +10,23 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Placeholders } from '@/assets/images/placeholders';
 import { Icon, IconName } from '@/components/icons';
 import { termsApi } from '@/api/terms';
+import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { zonesApi } from '@/api/zones';
 import { useSession } from '@/auth/auth-client';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
-import type { ColumnAttribute, Term } from '@/types/terms';
+import { CreateSqlAttributeModal } from '@/components/termsPage/CreateSqlAttributeModal';
+import type { ColumnAttribute, SqlAttribute, Term } from '@/types/terms';
 
 type TermCardProps = {
 	term: Term;
 	attributes: ColumnAttribute[];
+	sqlAttributes: SqlAttribute[];
 	relatedCount: number;
 	onClick: (term: Term) => void;
 };
 
-const TermCard = ({ term, attributes, relatedCount, onClick }: TermCardProps) => (
+const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: TermCardProps) => (
 	<li
 		role="button"
 		tabIndex={0}
@@ -53,8 +56,8 @@ const TermCard = ({ term, attributes, relatedCount, onClick }: TermCardProps) =>
 			</p>
 		)}
 
-		{/* Two-column section */}
-		<div className="mt-4 grid grid-cols-2 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
+		{/* Three-column section */}
+		<div className="mt-4 grid grid-cols-3 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
 			{/* Column Attributes */}
 			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
@@ -67,6 +70,23 @@ const TermCard = ({ term, attributes, relatedCount, onClick }: TermCardProps) =>
 						<span>Column Attributes</span>
 						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
 							{attributes.length}
+						</span>
+					</span>
+				</div>
+			</div>
+
+			{/* SQL Attributes */}
+			<div className="border-r border-zinc-200 dark:border-zinc-700">
+				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
+					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+						SQL Attributes
+					</span>
+				</div>
+				<div className="flex items-center">
+					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+						<span>SQL Attributes</span>
+						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
+							{sqlAttributes.length}
 						</span>
 					</span>
 				</div>
@@ -94,6 +114,7 @@ export const TermsView = () => {
 	const router = useRouter();
 	const searchParams = useSearchParams();
 	const focusId = searchParams.get('focus');
+	const sqlAttrId = searchParams.get('sqlAttr');
 
 	const { data: session } = useSession();
 	const sessionUserId = session?.user?.id ?? null;
@@ -101,18 +122,21 @@ export const TermsView = () => {
 
 	const [terms, setTerms] = useState<Term[]>([]);
 	const [attrs, setAttrs] = useState<ColumnAttribute[]>([]);
+	const [sqlAttrs, setSqlAttrs] = useState<SqlAttribute[]>([]);
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
 
 		(async () => {
 			setLoading(true);
-			const [termsRes, attrsRes, countsRes] = await Promise.all([
+			const [termsRes, attrsRes, sqlAttrsRes, countsRes] = await Promise.all([
 				termsApi.list(),
 				termsApi.listColumnAttributes(),
+				termsApi.listSqlAttributes(),
 				termsApi.listRelatedCounts(),
 			]);
 			if (cancelled) return;
@@ -127,6 +151,10 @@ export const TermsView = () => {
 
 			if (!attrsRes.error) {
 				setAttrs(attrsRes.data ?? []);
+			}
+
+			if (!sqlAttrsRes.error) {
+				setSqlAttrs(sqlAttrsRes.data ?? []);
 			}
 
 			if (!countsRes.error) {
@@ -155,6 +183,17 @@ export const TermsView = () => {
 		return map;
 	}, [attrs]);
 
+	const sqlAttrsByTerm = useMemo(() => {
+		const map = new Map<string, SqlAttribute[]>();
+		for (const attr of sqlAttrs) {
+			if (attr.term_name == null) continue;
+			const list = map.get(attr.term_name) ?? [];
+			list.push(attr);
+			map.set(attr.term_name, list);
+		}
+		return map;
+	}, [sqlAttrs]);
+
 	const handleCardClick = useCallback(
 		(term: Term) => {
 			router.push(`/terms?focus=${encodeURIComponent(term.id)}`);
@@ -166,12 +205,84 @@ export const TermsView = () => {
 		router.push('/terms');
 	}, [router]);
 
+	const handleBackToTerm = useCallback(() => {
+		if (focusId == null) {
+			handleBack();
+			return;
+		}
+		router.push(`/terms?focus=${encodeURIComponent(focusId)}`);
+	}, [focusId, handleBack, router]);
+
+	const handleSqlAttrClick = useCallback(
+		(sectionId: string, rowId: string) => {
+			if (sectionId !== 'sql_attributes' || focusId == null) return;
+			router.push(
+				`/terms?focus=${encodeURIComponent(focusId)}&sqlAttr=${encodeURIComponent(rowId)}`,
+			);
+		},
+		[focusId, router],
+	);
+
+	const getSqlAttributeSinglePage = useCallback(
+		async (attrId: string): Promise<SinglePageFormat> => {
+			const isViewer = sessionRole !== null && sessionRole !== 'admin';
+			const [res, userZonesRes] = await Promise.all([
+				sqlAttributesApi.get(attrId),
+				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
+			]);
+			if (res.error || !res.data) {
+				return {
+					sections: [],
+					header: { header: { title: 'SQL Attribute not found', withBorder: true } },
+				};
+			}
+			const attr = res.data;
+
+			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
+			const userZoneIds: string[] | null =
+				userZonesRes !== null && !userZonesRes.error
+					? (userZonesRes.data ?? []).map((z) => z.id)
+					: null;
+
+			return {
+				header: { header: { title: attr.name, withBorder: true } },
+				sections: [
+					{
+						type: ComposerSectionKind.TEXT_CARD,
+						id: 'description',
+						title: 'Description',
+						body: attr.description ?? '',
+					},
+					{
+						type: ComposerSectionKind.SQL_BLOCK,
+						id: 'sql',
+						title: 'SQL',
+						sql: attr.expression ?? '',
+					},
+					{
+						type: ComposerSectionKind.ZONES_CHIPS,
+						id: 'zones',
+						title: 'Zones',
+						zones: (attr.zones ?? []).map((z) => ({
+							id: z.id,
+							name: z.name,
+							color: z.color,
+						})),
+						userZoneIds,
+					},
+				],
+			};
+		},
+		[sessionUserId, sessionRole],
+	);
+
 	const getSinglePage = useCallback(
 		async (termId: string): Promise<SinglePageFormat> => {
 			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, attrsRes, relatedRes, userZonesRes] = await Promise.all([
+			const [res, attrsRes, sqlAttrsRes, relatedRes, userZonesRes] = await Promise.all([
 				termsApi.get(termId),
 				termsApi.getColumnAttributes(termId),
+				termsApi.getSqlAttributes(termId),
 				termsApi.getRelatedTerms(termId),
 				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
 			]);
@@ -183,6 +294,7 @@ export const TermsView = () => {
 			}
 			const term = res.data;
 			const termAttrs = attrsRes?.data ?? [];
+			const termSqlAttrs = sqlAttrsRes?.data ?? [];
 			const relatedTerms = relatedRes?.data ?? [];
 
 			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
@@ -241,6 +353,17 @@ export const TermsView = () => {
 							name: attr.name,
 						})),
 					},
+					{
+						type: ComposerSectionKind.DATA_TABLE,
+						id: 'sql_attributes',
+						title: 'SQL Attributes',
+						rowIdKey: 'id',
+						columns: [{ key: 'name', label: 'Attribute Name' }],
+						rows: termSqlAttrs.map((attr) => ({
+							id: attr.id,
+							name: attr.name,
+						})),
+					},
 				],
 			};
 		},
@@ -248,6 +371,54 @@ export const TermsView = () => {
 	);
 
 	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
+	const focusedSqlAttr =
+		sqlAttrId != null
+			? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ??
+				(focusedTerm != null
+					? (sqlAttrsByTerm
+							.get(focusedTerm.name)
+							?.find((attr) => attr.id === sqlAttrId) ?? null)
+					: null))
+			: null;
+
+	if (focusId != null && sqlAttrId != null) {
+		const termTitle = focusedTerm?.name ?? focusId;
+		const sqlAttrTitle = focusedSqlAttr?.name ?? sqlAttrId;
+		return (
+			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
+				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+					<button
+						type="button"
+						onClick={handleBack}
+						className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+						aria-label="Back to terms list"
+					>
+						<Icon name={IconName.Terms} className="h-4 w-4" />
+						Terms
+					</button>
+					<span className="text-zinc-300 dark:text-zinc-600">/</span>
+					<button
+						type="button"
+						onClick={handleBackToTerm}
+						className="cursor-pointer rounded-lg px-1.5 py-1 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+					>
+						{termTitle}
+					</button>
+					<span className="text-zinc-300 dark:text-zinc-600">/</span>
+					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+						{sqlAttrTitle}
+					</span>
+				</header>
+				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+					<SinglePageView
+						dataId={sqlAttrId}
+						title={sqlAttrTitle}
+						getSinglePage={getSqlAttributeSinglePage}
+					/>
+				</main>
+			</div>
+		);
+	}
 
 	if (focusId != null) {
 		const termTitle = focusedTerm?.name ?? focusId;
@@ -267,14 +438,27 @@ export const TermsView = () => {
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{termTitle}
 					</span>
+					<button
+						type="button"
+						onClick={() => setCreateSqlAttrModalOpen(true)}
+						className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
+					>
+						Create new sql attribute
+					</button>
 				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
 						dataId={focusId}
 						title={termTitle}
 						getSinglePage={getSinglePage}
+						onDataTableRowClick={handleSqlAttrClick}
 					/>
 				</main>
+				<CreateSqlAttributeModal
+					open={createSqlAttrModalOpen}
+					onClose={() => setCreateSqlAttrModalOpen(false)}
+					termId={focusId}
+				/>
 			</div>
 		);
 	}
@@ -326,6 +510,7 @@ export const TermsView = () => {
 								key={term.id}
 								term={term}
 								attributes={attrsByTerm.get(term.name) ?? []}
+								sqlAttributes={sqlAttrsByTerm.get(term.name) ?? []}
 								relatedCount={relatedCountsMap.get(term.id) ?? 0}
 								onClick={handleCardClick}
 							/>

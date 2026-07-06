@@ -59,7 +59,12 @@ export const Table = <T,>({
 	rowClassName,
 	scrollClassName,
 	className,
+	onRowClick,
 }: TableProps<T>) => {
+	const interactiveRowClassName = onRowClick
+		? cx(rowClassName ?? DEFAULT_ROW, 'cursor-pointer')
+		: (rowClassName ?? DEFAULT_ROW);
+
 	const tableElement = (
 		<table
 			className={cx(
@@ -83,7 +88,23 @@ export const Table = <T,>({
 			</thead>
 			<tbody className={bodyClassName ?? DEFAULT_TBODY}>
 				{rows.map((row, index) => (
-					<tr key={rowKey(row, index)} className={rowClassName ?? DEFAULT_ROW}>
+					<tr
+						key={rowKey(row, index)}
+						className={interactiveRowClassName}
+						onClick={onRowClick ? () => onRowClick(row, index) : undefined}
+						onKeyDown={
+							onRowClick
+								? (e) => {
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											onRowClick(row, index);
+										}
+									}
+								: undefined
+						}
+						role={onRowClick ? 'button' : undefined}
+						tabIndex={onRowClick ? 0 : undefined}
+					>
 						{columns.map((column) => (
 							<td key={column.key} className={bodyCellClasses(column, cellClassName)}>
 								{column.truncate ? (

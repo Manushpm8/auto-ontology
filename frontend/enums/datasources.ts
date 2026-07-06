@@ -33,6 +33,7 @@ export enum ComposerSectionKind {
 	LOADING_PANEL = 'loadingPanel',
 	ZONES_CHIPS = 'zonesChips',
 	RELATED_TERMS_CHIPS = 'relatedTermsChips',
+	SQL_BLOCK = 'sqlBlock',
 }
 
 export enum Usage {

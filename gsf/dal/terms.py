@@ -25,6 +25,7 @@ from gsf.semantic.constants import (
     REL_HAS_ATTRIBUTE,
     REL_PROPERTY_OF,
     REL_REPRESENTS,
+    REL_SEMANTIC_FK,
     SEMANTIC_SOURCE,
 )
 from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
@@ -423,11 +424,19 @@ def fetch_related_terms(
     """Return Term nodes related to *term_id* by co-location in the same table.
 
     Two terms are considered related when they are both connected to the same
-    Table node — either directly via a REPRESENTS edge, or indirectly through
-    the Column → ColumnAttribute → PROPERTY_OF path.
+    Table node.  A term is connected to a table through any of three paths:
 
-    Step 1 — collect every table connected to *term_id* (both paths).
-    Step 2 — collect every other term connected to those same tables (both paths).
+    * REPRESENTS — the table directly represents the term;
+    * PROPERTY_OF — the table owns a column whose ColumnAttribute is
+      PROPERTY_OF the term (``Table → Column → ColumnAttribute → Term``);
+    * SEMANTIC_FK — the table owns a foreign-key column that points, via a
+      SEMANTIC_FK edge, to a ColumnAttribute of the term
+      (``Table → Column → [SEMANTIC_FK] → ColumnAttribute → Term``).  This is
+      what links, e.g. ``Request`` (represented by ``requests``) to ``User``
+      when ``requests.creator_id`` references ``users.id``.
+
+    Step 1 — collect every table connected to *term_id* (all three paths).
+    Step 2 — collect every other term connected to those same tables (all three).
 
     *zone_ids* is a hard authorization boundary, not a relevance filter.
     When supplied: Step 1 only considers tables reachable through those
@@ -459,6 +468,12 @@ def fetch_related_terms(
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
               -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
+        WHERE true {step1_filter}
+        RETURN ta.id AS table_id
+        UNION
+        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
         WHERE true {step1_filter}
         RETURN ta.id AS table_id
@@ -505,6 +520,14 @@ def fetch_related_terms(
               {term_b_filter}
         RETURN DISTINCT term_b.id AS id, term_b.name AS name,
                         term_b.description AS description
+        UNION
+        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              -[:{REL_PROPERTY_OF}]->(term_b:{LABEL_TERM})
+        WHERE ta.id IN $shared_table_ids AND term_b.id <> $term_id
+              {term_b_filter}
+        RETURN DISTINCT term_b.id AS id, term_b.name AS name,
+                        term_b.description AS description
         """,
         step2_params,
     )
@@ -518,7 +541,10 @@ def fetch_related_terms_counts(
 
     Builds a ``term_id → set(table_id)`` map and a ``table_id → set(term_id)``
     reverse map from Neo4j, then computes for each term the number of distinct
-    other terms that share at least one table with it.
+    other terms that share at least one table with it.  A term is connected to
+    a table via REPRESENTS, PROPERTY_OF (its own ColumnAttribute) **or**
+    SEMANTIC_FK (a foreign-key column that references one of its
+    ColumnAttributes) — the same three paths used by ``fetch_related_terms``.
 
     *zone_ids* is a hard authorization boundary, not a relevance filter. A
     Term can be represented by more than one Table (see ``merge_term``), so
@@ -559,6 +585,12 @@ def fetch_related_terms_counts(
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
               -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        {filter_clause}
+        RETURN term.id AS term_id, ta.id AS table_id
+        UNION
+        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         {filter_clause}
         RETURN term.id AS term_id, ta.id AS table_id

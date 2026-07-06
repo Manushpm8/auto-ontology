@@ -7,6 +7,7 @@ import type {
 	ColumnAttribute,
 	RelatedTerm,
 	RelatedTermCount,
+	SqlAttribute,
 	Term,
 	TermDetail,
 } from '@/types/terms';
@@ -17,6 +18,9 @@ type ListResponse = ResponseWithError<ListResult>;
 
 type AttributeListResult = { data: ColumnAttribute[]; count: number };
 type AttributeListResponse = ResponseWithError<AttributeListResult>;
+
+type SqlAttributeListResult = { data: SqlAttribute[]; count: number };
+type SqlAttributeListResponse = ResponseWithError<SqlAttributeListResult>;
 
 type SingleResult = { data: TermDetail };
 type SingleResponse = ResponseWithError<SingleResult>;
@@ -31,11 +35,15 @@ export const termsApi = {
 	list: (): Promise<ListResponse> => requests.get<ListResult>('terms'),
 	listColumnAttributes: (): Promise<AttributeListResponse> =>
 		requests.get<AttributeListResult>('terms/column-attributes'),
+	listSqlAttributes: (): Promise<SqlAttributeListResponse> =>
+		requests.get<SqlAttributeListResult>('terms/sql-attributes'),
 	listRelatedCounts: (): Promise<RelatedCountsResponse> =>
 		requests.get<RelatedCountsResult>('terms/related-counts'),
 	get: (id: string): Promise<SingleResponse> => requests.get<SingleResult>(`terms/${id}`),
 	getColumnAttributes: (id: string): Promise<AttributeListResponse> =>
 		requests.get<AttributeListResult>(`terms/${id}/column-attributes`),
+	getSqlAttributes: (id: string): Promise<SqlAttributeListResponse> =>
+		requests.get<SqlAttributeListResult>(`terms/${id}/sql-attributes`),
 	getRelatedTerms: (id: string): Promise<RelatedTermsResponse> =>
 		requests.get<RelatedTermsResult>(`terms/${id}/related-terms`),
 };

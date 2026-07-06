@@ -25,6 +25,7 @@ import {
 import { Icon, IconName } from '@/components/icons';
 import { TagInput } from '@/components/TagInput';
 import { Table } from '@/components/Table';
+import { SqlBlock } from '@/components/SqlBlock';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import { Toast } from '@/components/Toast';
@@ -60,6 +61,7 @@ export type SinglePageComposerProps = {
 	isEditing?: boolean;
 	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
+	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
 };
 
 function composerSectionHeading(section: ComposerSection): string {
@@ -214,6 +216,7 @@ const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
 function renderComposerSection(
 	section: ComposerSection,
 	onTermClick?: (termId: string) => void,
+	onDataTableRowClick?: (sectionId: string, rowId: string) => void,
 ): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
@@ -261,7 +264,9 @@ function renderComposerSection(
 					</dl>
 				</div>
 			);
-		case ComposerSectionKind.DATA_TABLE:
+		case ComposerSectionKind.DATA_TABLE: {
+			const isClickable =
+				section.rowIdKey != null && onDataTableRowClick != null && section.rowIdKey !== '';
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
 					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -279,13 +284,38 @@ function renderComposerSection(
 						columns={section.columns.map((col) => ({
 							key: col.key,
 							header: col.label,
-							cell: (row: Record<string, string>) => row[col.key] || '—',
+							cell: (row: Record<string, string>) => {
+								const value = row[col.key] || '—';
+								if (isClickable && col.key === 'name') {
+									return (
+										<span className="font-medium text-[#76b900] dark:text-[#a3d63a]">
+											{value}
+										</span>
+									);
+								}
+								return value;
+							},
 						}))}
 						rows={section.rows}
-						rowKey={(_, index) => String(index)}
+						rowKey={(row, index) =>
+							isClickable && section.rowIdKey
+								? (row[section.rowIdKey] ?? String(index))
+								: String(index)
+						}
+						onRowClick={
+							isClickable && section.rowIdKey
+								? (row) => {
+										const rowId = row[section.rowIdKey as string];
+										if (rowId) {
+											onDataTableRowClick(section.id, rowId);
+										}
+									}
+								: undefined
+						}
 					/>
 				</div>
 			);
+		}
 		case ComposerSectionKind.LOADING_PANEL:
 			return (
 				<div
@@ -335,6 +365,19 @@ function renderComposerSection(
 					)}
 				</div>
 			);
+		case ComposerSectionKind.SQL_BLOCK:
+			return (
+				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{section.title}
+					</h2>
+					{section.sql.trim() !== '' ? (
+						<SqlBlock sql={section.sql} className="mt-4" />
+					) : (
+						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+					)}
+				</div>
+			);
 		default:
 			return null;
 	}
@@ -361,6 +404,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			isEditing,
 			onSave,
 			onCancel,
+			onDataTableRowClick,
 		} = props;
 		const router = useRouter();
 
@@ -635,7 +679,11 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													}}
 												/>
 											) : (
-												renderComposerSection(section, handleTermClick)
+												renderComposerSection(
+													section,
+													handleTermClick,
+													onDataTableRowClick,
+												)
 											)}
 										</div>
 									);

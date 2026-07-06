@@ -30,6 +30,18 @@ export type ColumnAttribute = {
 	table_id: string;
 };
 
+export type SqlAttribute = {
+	id: string;
+	name: string;
+	description: string | null;
+	expression: string | null;
+	source: string | null;
+	sql: string | null;
+	term_id?: string | null;
+	term_name?: string | null;
+	zones?: TermZone[];
+};
+
 export type RelatedTerm = {
 	id: string;
 	name: string;
