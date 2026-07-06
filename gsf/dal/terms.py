@@ -417,6 +417,36 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
     return rows[0]["id"] if rows else None
 
 
+def _term_table_paths(
+    term_pattern: str,
+    term_pattern_via_attr: str | None = None,
+    attr_pattern: str = f":{LABEL_COLUMN_ATTRIBUTE}",
+) -> list[str]:
+    """Return the three MATCH-clause fragments connecting ``ta:Table`` to a Term.
+
+    A table is connected to a term through any of three paths (see
+    ``fetch_related_terms`` for the full rationale):
+
+    * REPRESENTS — the table directly represents the term;
+    * PROPERTY_OF — via the table's own ColumnAttribute;
+    * SEMANTIC_FK — via a foreign-key column's ColumnAttribute.
+
+    *term_pattern_via_attr* lets the REPRESENTS path use a different term
+    filter than the two attribute-based paths (e.g. filtering the term's
+    ``source`` directly there vs. via the attribute's ``source`` here);
+    it defaults to *term_pattern* when both should match.
+    """
+    term_via_attr = term_pattern_via_attr or term_pattern
+    paths = [f"MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->{term_pattern}"]
+    for column_to_attr_rel in (REL_HAS_ATTRIBUTE, REL_SEMANTIC_FK):
+        paths.append(
+            f"""MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{column_to_attr_rel}]->({attr_pattern})
+              -[:{REL_PROPERTY_OF}]->{term_via_attr}"""
+        )
+    return paths
+
+
 def fetch_related_terms(
     term_id: str,
     zone_ids: list[str] | None = None,
@@ -460,26 +490,11 @@ def fetch_related_terms(
         step1_filter = "AND ta.id IN $zone_table_ids"
 
     # Step 1: tables for this term
-    table_rows = conn.query_read(
-        f"""
-        MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{id: $term_id}})
-        WHERE true {step1_filter}
-        RETURN ta.id AS table_id
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
-              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
-        WHERE true {step1_filter}
-        RETURN ta.id AS table_id
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
-              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
-        WHERE true {step1_filter}
-        RETURN ta.id AS table_id
-        """,
-        params,
+    step1_query = "\nUNION\n".join(
+        f"{path}\nWHERE true {step1_filter}\nRETURN ta.id AS table_id"
+        for path in _term_table_paths(f"(term:{LABEL_TERM} {{id: $term_id}})")
     )
+    table_rows = conn.query_read(step1_query, params)
     if not table_rows:
         return []
 
@@ -505,32 +520,15 @@ def fetch_related_terms(
         step2_params["zone_table_ids"] = params["zone_table_ids"]
 
     # Step 2: other terms in those tables
-    term_rows = conn.query_read(
-        f"""
-        MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term_b:{LABEL_TERM})
+    step2_query = "\nUNION\n".join(
+        f"""{path}
         WHERE ta.id IN $shared_table_ids AND term_b.id <> $term_id
               {term_b_filter}
         RETURN DISTINCT term_b.id AS id, term_b.name AS name,
-                        term_b.description AS description
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
-              -[:{REL_PROPERTY_OF}]->(term_b:{LABEL_TERM})
-        WHERE ta.id IN $shared_table_ids AND term_b.id <> $term_id
-              {term_b_filter}
-        RETURN DISTINCT term_b.id AS id, term_b.name AS name,
-                        term_b.description AS description
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
-              -[:{REL_PROPERTY_OF}]->(term_b:{LABEL_TERM})
-        WHERE ta.id IN $shared_table_ids AND term_b.id <> $term_id
-              {term_b_filter}
-        RETURN DISTINCT term_b.id AS id, term_b.name AS name,
-                        term_b.description AS description
-        """,
-        step2_params,
+                        term_b.description AS description"""
+        for path in _term_table_paths(f"(term_b:{LABEL_TERM})")
     )
+    term_rows = conn.query_read(step2_query, step2_params)
     return [dict(r) for r in term_rows]
 
 
@@ -577,26 +575,17 @@ def fetch_related_terms_counts(
         )
         params = {"source": SEMANTIC_SOURCE, "table_ids": table_ids}
 
-    pairs = conn.query_read(
-        f"""
-        MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{source: $source}})
+    pairs_query = "\nUNION\n".join(
+        f"""{path}
         {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id
-        """,
-        params,
+        RETURN term.id AS term_id, ta.id AS table_id"""
+        for path in _term_table_paths(
+            f"(term:{LABEL_TERM} {{source: $source}})",
+            term_pattern_via_attr=f"(term:{LABEL_TERM})",
+            attr_pattern=f":{LABEL_COLUMN_ATTRIBUTE} {{source: $source}}",
+        )
     )
+    pairs = conn.query_read(pairs_query, params)
 
     term_tables: dict[str, set[str]] = {}
     table_terms: dict[str, set[str]] = {}
