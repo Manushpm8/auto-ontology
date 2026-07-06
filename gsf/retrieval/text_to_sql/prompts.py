@@ -102,6 +102,8 @@ Key rules:
 - Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
   RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
   NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
+- If the question filters by a single constant value on a column,
+  do NOT include that column in SELECT — it adds no information since every row has the same value.
 
 Output (fill fields in this exact order):
 - thought: 1-2 sentence internal reasoning — your approach and key decisions.
