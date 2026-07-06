@@ -138,6 +138,8 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
         # Build table header
         if database_name and schema_name:
             full_name = f"{database_name}.{schema_name}.{table_name}"
+        elif schema_name:
+            full_name = f"{schema_name}.{table_name}"
         else:
             full_name = table_name
 
