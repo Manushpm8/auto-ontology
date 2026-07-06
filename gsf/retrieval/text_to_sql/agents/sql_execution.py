@@ -42,7 +42,7 @@ def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
         return QueryResponse(result=None, sliced=False, error=str(e))
-    payload = df.to_json(orient="records", default_handler=str) if len(df) else "[]"
+    payload = df.to_json(orient="records", date_format="iso", default_handler=str) if len(df) else "[]"
     return QueryResponse(result=[payload], sliced=False, error=None)
 
 
