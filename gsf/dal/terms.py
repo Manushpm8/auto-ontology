@@ -467,13 +467,7 @@ def fetch_related_terms(
         RETURN ta.id AS table_id
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
-              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
-        WHERE true {step1_filter}
-        RETURN ta.id AS table_id
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
         WHERE true {step1_filter}
         RETURN ta.id AS table_id
@@ -514,15 +508,7 @@ def fetch_related_terms(
                         term_b.description AS description
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
-              -[:{REL_PROPERTY_OF}]->(term_b:{LABEL_TERM})
-        WHERE ta.id IN $shared_table_ids AND term_b.id <> $term_id
-              {term_b_filter}
-        RETURN DISTINCT term_b.id AS id, term_b.name AS name,
-                        term_b.description AS description
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
               -[:{REL_PROPERTY_OF}]->(term_b:{LABEL_TERM})
         WHERE ta.id IN $shared_table_ids AND term_b.id <> $term_id
               {term_b_filter}
@@ -584,13 +570,7 @@ def fetch_related_terms_counts(
         RETURN term.id AS term_id, ta.id AS table_id
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         {filter_clause}
         RETURN term.id AS term_id, ta.id AS table_id
