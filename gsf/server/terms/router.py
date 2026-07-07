@@ -15,14 +15,22 @@ router = APIRouter()
 
 
 @router.get("/terms")
-def list_terms(zone_ids: list[str] | None = Query(default=None)) -> dict:
+def list_terms(
+    zone_ids: list[str] | None = Query(default=None),
+    q: str | None = Query(default=None),
+) -> dict:
     """Return Term nodes zone-scoped to the provided zones.
 
     ``None`` (param absent) → no filter, return all (admin callers).
     ``[]`` (empty list) → viewer with no zone access, returns empty.
     ``[id, ...]`` → filter to terms reachable through those zones.
+
+    *q*, when given, additionally filters to terms whose name contains it
+    (case-insensitive).
     """
-    terms, _attrs = neo4j_dal.fetch_all_terms_and_attributes(zone_ids=zone_ids)
+    terms, _attrs = neo4j_dal.fetch_all_terms_and_attributes(
+        zone_ids=zone_ids, search=q
+    )
     return {"data": terms, "count": len(terms)}
 
 

@@ -31,8 +31,14 @@ type RelatedTermsResponse = ResponseWithError<RelatedTermsResult>;
 type RelatedCountsResult = { data: RelatedTermCount[]; count: number };
 type RelatedCountsResponse = ResponseWithError<RelatedCountsResult>;
 
+export type TermsListParams = {
+	/** Case-insensitive substring filter on the term name. */
+	q?: string;
+};
+
 export const termsApi = {
-	list: (): Promise<ListResponse> => requests.get<ListResult>('terms'),
+	list: (params?: TermsListParams): Promise<ListResponse> =>
+		requests.get<ListResult>('terms', params?.q ? { q: params.q } : {}),
 	listColumnAttributes: (): Promise<AttributeListResponse> =>
 		requests.get<AttributeListResult>('terms/column-attributes'),
 	listSqlAttributes: (): Promise<SqlAttributeListResponse> =>

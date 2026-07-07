@@ -4,16 +4,18 @@
 
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Icon, IconName } from '@/components/icons';
 import { ConfirmModal } from '@/components/ConfirmModal';
+import { SearchInput } from '@/components/SearchInput';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { zonesApi } from '@/api/zones';
 import { useSession } from '@/auth/auth-client';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
@@ -139,6 +141,9 @@ export const TermsView = () => {
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [searchQuery, setSearchQuery] = useState('');
+	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
+	const loadedAuxRef = useRef(false);
 	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
 	const [sqlAttrsEpoch, setSqlAttrsEpoch] = useState(0);
 	const [sqlAttrName, setSqlAttrName] = useState('');
@@ -168,11 +173,15 @@ export const TermsView = () => {
 
 		(async () => {
 			setLoading(true);
+			// Attributes/SQL attributes/related counts don't depend on the term
+			// search — only fetch them once, up front, and just re-fetch `terms`
+			// as the (debounced) search query changes.
+			const loadAux = !loadedAuxRef.current;
 			const [termsRes, attrsRes, sqlAttrsRes, countsRes] = await Promise.all([
-				termsApi.list(),
-				termsApi.listColumnAttributes(),
-				termsApi.listSqlAttributes(),
-				termsApi.listRelatedCounts(),
+				termsApi.list(debouncedSearchQuery ? { q: debouncedSearchQuery } : undefined),
+				loadAux ? termsApi.listColumnAttributes() : Promise.resolve(null),
+				loadAux ? termsApi.listSqlAttributes() : Promise.resolve(null),
+				loadAux ? termsApi.listRelatedCounts() : Promise.resolve(null),
 			]);
 			if (cancelled) return;
 
@@ -184,15 +193,15 @@ export const TermsView = () => {
 				setTerms(termsRes.data ?? []);
 			}
 
-			if (!attrsRes.error) {
+			if (attrsRes != null && !attrsRes.error) {
 				setAttrs(attrsRes.data ?? []);
 			}
 
-			if (!sqlAttrsRes.error) {
+			if (sqlAttrsRes != null && !sqlAttrsRes.error) {
 				setSqlAttrs(sqlAttrsRes.data ?? []);
 			}
 
-			if (!countsRes.error) {
+			if (countsRes != null && !countsRes.error) {
 				const map = new Map<string, number>();
 				for (const { term_id, count } of countsRes.data ?? []) {
 					map.set(term_id, count);
@@ -200,13 +209,14 @@ export const TermsView = () => {
 				setRelatedCountsMap(map);
 			}
 
+			loadedAuxRef.current = true;
 			setLoading(false);
 		})();
 
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+	}, [debouncedSearchQuery]);
 
 	const attrsByTerm = useMemo(() => {
 		const map = new Map<string, ColumnAttribute[]>();
@@ -896,6 +906,14 @@ export const TermsView = () => {
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
+				<SearchInput
+					value={searchQuery}
+					onChange={setSearchQuery}
+					placeholder="Search terms…"
+					aria-label="Search terms"
+					className="mb-6 w-full"
+				/>
+
 				{loading && (
 					<div className="flex h-full items-center justify-center">
 						<div
@@ -921,7 +939,9 @@ export const TermsView = () => {
 					<div className="flex h-full min-h-[40dvh] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300/80 bg-white/60 p-12 text-center dark:border-zinc-600 dark:bg-zinc-950/40">
 						<Placeholders.NoTerms />
 						<p className="mt-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-							No Terms Created Yet
+							{debouncedSearchQuery
+								? 'No Terms Match Your Search'
+								: 'No Terms Created Yet'}
 						</p>
 					</div>
 				)}
