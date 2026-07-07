@@ -353,6 +353,106 @@ def delete_sql_attribute_node(attr_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Retrieval-time helpers
+# ---------------------------------------------------------------------------
+
+
+def fetch_sql_attributes_with_sql(attr_ids: list[str]) -> list[dict[str, str]]:
+    """Fetch id, name, description, expression, and SQL for each SqlAttribute.
+
+    Returns a list of dicts with keys: id, name, description, expression, sql.
+    """
+    if not attr_ids:
+        return []
+
+    query = f"""
+    UNWIND $ids AS attr_id
+    MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: attr_id}})
+    MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+    MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+    RETURN attr.id AS attr_id, attr.name AS name,
+           attr.description AS description,
+           attr.expression AS expression,
+           sql.sql_full_query AS sql_text,
+           term.name AS term_name
+    """
+    try:
+        rows = get_neo4j_conn().query_read(query, {"ids": attr_ids})
+    except Exception:
+        logger.warning(
+            "fetch_sql_attributes_with_sql: Neo4j query failed",
+            exc_info=True,
+        )
+        return []
+
+    seen_ids: set[str] = set()
+    result: list[dict[str, str]] = []
+    for row in rows:
+        aid = row.get("attr_id") or ""
+        if aid in seen_ids:
+            continue
+        seen_ids.add(aid)
+        result.append(
+            {
+                "id": aid,
+                "name": row.get("name") or "",
+                "description": row.get("description") or "",
+                "expression": row.get("expression") or "",
+                "sql": row.get("sql_text") or "",
+                "term_name": row.get("term_name") or "",
+            }
+        )
+    return result
+
+
+def fetch_tables_from_sql_attributes(
+    attr_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Fetch Tables referenced by SqlAttribute nodes via HAS_SQL -> Sql -> SQL -> Table."""
+    if not attr_ids:
+        return []
+    query = f"""
+    UNWIND $ids AS attr_id
+    MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: attr_id}})
+          -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+          -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
+    OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
+    OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
+    WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
+                             description: col.description}}) AS cols
+    RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
+           sch.name AS schema_name, cols
+    """
+    try:
+        rows = get_neo4j_conn().query_read(query, {"ids": attr_ids})
+    except Exception:
+        logger.warning(
+            "fetch_tables_from_sql_attributes: Neo4j query failed",
+            exc_info=True,
+        )
+        return []
+    tables: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        tid = row.get("id") or ""
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        cols = [c for c in (row.get("cols") or []) if c.get("name")]
+        tables.append(
+            {
+                "id": tid,
+                "name": row.get("name") or "",
+                "description": row.get("description") or "",
+                "schema_name": row.get("schema_name") or "",
+                "label": Labels.TABLE,
+                "columns": cols,
+            }
+        )
+    return tables
+
+
+# ---------------------------------------------------------------------------
 # Embedding data fetch
 # ---------------------------------------------------------------------------
 
@@ -367,7 +467,7 @@ def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
               -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        OPTIONAL MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         RETURN collect({{
             text: 'sql_attribute: ' + attr.name +
                   CASE WHEN attr.description IS NOT NULL
