@@ -31,6 +31,7 @@ from gsf.dal.sql_attributes import (
     get_full_sql_attribute_by_id,
     get_sql_attribute_by_id,
     link_to_term,
+    list_sql_attributes,
     update_sql_attribute_props,
 )
 from gsf.dal.terms import get_slim_term_by_id
@@ -50,6 +51,7 @@ __all__ = [
     "SqlAttributeNameConflict",
     "SqlAttributeExpressionConflict",
     "SqlAttributeSqlError",
+    "list_sql_attributes",
     "get_full_sql_attribute_by_id",
     "validate_sql_attribute",
     "create_sql_attribute",

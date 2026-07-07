@@ -86,6 +86,21 @@ def _term_zone_filter(
 # ---------------------------------------------------------------------------
 
 
+def list_sql_attributes() -> list[dict[str, Any]]:
+    """Return every SqlAttribute with its connected Term and SQL text."""
+    return get_neo4j_conn().query_read(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE})
+        OPTIONAL MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        OPTIONAL MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        RETURN {_SQL_ATTRIBUTE_FIELDS},
+               term.id          AS term_id,
+               term.name        AS term_name
+        ORDER BY attr.name
+        """
+    )
+
+
 def get_sql_attribute(attr_id: str) -> dict[str, Any] | None:
     """Return a single SqlAttribute by id, or None."""
     rows = get_neo4j_conn().query_read(
