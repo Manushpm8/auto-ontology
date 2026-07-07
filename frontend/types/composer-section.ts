@@ -37,6 +37,8 @@ export type ComposerDataTableSection = {
 	rows: Record<string, string>[];
 	/** When set with `onDataTableRowClick`, rows become clickable using this field as id. */
 	rowIdKey?: string;
+	/** Shown instead of the table (columns included) when `rows` is empty. */
+	emptyMessage?: string;
 };
 
 export type ComposerLoadingPanelSection = {

@@ -621,6 +621,7 @@ export const TermsView = () => {
 							id: attr.id,
 							name: attr.name,
 						})),
+						emptyMessage: 'SQL attribute does not exist',
 					},
 				],
 			};

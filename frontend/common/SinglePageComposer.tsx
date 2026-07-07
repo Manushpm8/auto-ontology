@@ -312,17 +312,7 @@ function renderComposerSection(
 						columns={section.columns.map((col) => ({
 							key: col.key,
 							header: col.label,
-							cell: (row: Record<string, string>) => {
-								const value = row[col.key] || '—';
-								if (isClickable && col.key === 'name') {
-									return (
-										<span className="font-medium text-[#76b900] dark:text-[#a3d63a]">
-											{value}
-										</span>
-									);
-								}
-								return value;
-							},
+							cell: (row: Record<string, string>) => row[col.key] || '—',
 						}))}
 						rows={section.rows}
 						rowKey={(row, index) =>
@@ -340,6 +330,7 @@ function renderComposerSection(
 									}
 								: undefined
 						}
+						emptyMessage={section.emptyMessage}
 					/>
 				</div>
 			);
