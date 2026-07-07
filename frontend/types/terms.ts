@@ -37,8 +37,8 @@ export type SqlAttribute = {
 	expression: string | null;
 	source: string | null;
 	sql: string | null;
-	term_id?: string | null;
-	term_name?: string | null;
+	term_id: string;
+	term_name: string;
 	zones?: TermZone[];
 };
 

@@ -231,7 +231,6 @@ export const TermsView = () => {
 	const sqlAttrsByTerm = useMemo(() => {
 		const map = new Map<string, SqlAttribute[]>();
 		for (const attr of sqlAttrs) {
-			if (attr.term_name == null) continue;
 			const list = map.get(attr.term_name) ?? [];
 			list.push(attr);
 			map.set(attr.term_name, list);
@@ -399,7 +398,7 @@ export const TermsView = () => {
 			name: focusedSqlAttr.name,
 			description,
 			expression,
-			termId: focusedSqlAttr.term_id ?? focusId,
+			termId: focusedSqlAttr.term_id,
 		});
 		if (res.error) {
 			setSqlAttrEditError(res.message ?? 'Failed to update SQL attribute');
@@ -468,7 +467,7 @@ export const TermsView = () => {
 			name: focusedSqlAttr.name,
 			description: focusedSqlAttr.description ?? '',
 			expression: trimmedSqlEditValue,
-			termId: focusedSqlAttr.term_id ?? focusId,
+			termId: focusedSqlAttr.term_id,
 		});
 		setSqlEditSubmitting(false);
 		if (res.error) {

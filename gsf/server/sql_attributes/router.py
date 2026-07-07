@@ -36,13 +36,6 @@ class SqlAttributeUpdate(BaseModel):
     source: str = "manual"
 
 
-@router.get("/sql-attributes")
-def list_sql_attributes() -> dict:
-    """All SqlAttribute nodes with their linked Term."""
-    rows = dal.list_sql_attributes()
-    return {"data": rows, "count": len(rows)}
-
-
 @router.get("/sql-attributes/{attr_id}")
 def get_sql_attribute(
     attr_id: str,
