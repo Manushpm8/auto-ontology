@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Icon, IconName } from '@/components/icons';
+import { ConfirmModal } from '@/components/ConfirmModal';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { zonesApi } from '@/api/zones';
@@ -25,6 +26,11 @@ type TermCardProps = {
 	sqlAttributes: SqlAttribute[];
 	relatedCount: number;
 	onClick: (term: Term) => void;
+};
+
+type SqlAttributeDeleteTarget = {
+	id: string;
+	name: string;
 };
 
 const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: TermCardProps) => (
@@ -142,6 +148,9 @@ export const TermsView = () => {
 	const [sqlAttrSqlValidated, setSqlAttrSqlValidated] = useState(false);
 	const [sqlAttrSubmitting, setSqlAttrSubmitting] = useState(false);
 	const [sqlAttrSubmitError, setSqlAttrSubmitError] = useState<string | null>(null);
+	const [deletingSqlAttr, setDeletingSqlAttr] = useState<SqlAttributeDeleteTarget | null>(null);
+	const [deletingSqlAttrBusy, setDeletingSqlAttrBusy] = useState(false);
+	const [deleteSqlAttrError, setDeleteSqlAttrError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -298,6 +307,30 @@ export const TermsView = () => {
 		handleSqlAttrCreated(res.data);
 		resetCreateSqlAttrForm();
 		setCreateSqlAttrModalOpen(false);
+	};
+
+	const handleDeleteSqlAttrClose = () => {
+		if (deletingSqlAttrBusy) return;
+		setDeletingSqlAttr(null);
+		setDeleteSqlAttrError(null);
+	};
+
+	const handleDeleteSqlAttrConfirm = async () => {
+		if (deletingSqlAttr == null) return;
+		setDeletingSqlAttrBusy(true);
+		setDeleteSqlAttrError(null);
+		const res = await sqlAttributesApi.delete(deletingSqlAttr.id);
+		setDeletingSqlAttrBusy(false);
+		if (res.error) {
+			setDeleteSqlAttrError(res.message ?? 'Failed to delete SQL attribute');
+			return;
+		}
+		setSqlAttrs((prev) => prev.filter((attr) => attr.id !== deletingSqlAttr.id));
+		setSqlAttrsEpoch((prev) => prev + 1);
+		setDeletingSqlAttr(null);
+		if (focusId != null) {
+			router.push(`/terms?focus=${encodeURIComponent(focusId)}`);
+		}
 	};
 
 	const handleSqlAttrClick = useCallback(
@@ -495,6 +528,29 @@ export const TermsView = () => {
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{sqlAttrTitle}
 					</span>
+					<div className="ml-auto flex shrink-0 items-center gap-1">
+						<button
+							type="button"
+							onClick={() => console.log('edit sql attribute', sqlAttrId)}
+							aria-label={`Edit ${sqlAttrTitle}`}
+							title="Edit"
+							className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+						>
+							<Icon name={IconName.Pencil} className="h-4 w-4" />
+						</button>
+						<button
+							type="button"
+							onClick={() => {
+								setDeletingSqlAttr({ id: sqlAttrId, name: sqlAttrTitle });
+								setDeleteSqlAttrError(null);
+							}}
+							aria-label={`Delete ${sqlAttrTitle}`}
+							title="Delete"
+							className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+						>
+							<Icon name={IconName.Trash} className="h-4 w-4" />
+						</button>
+					</div>
 				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
@@ -503,6 +559,19 @@ export const TermsView = () => {
 						getSinglePage={getSqlAttributeSinglePage}
 					/>
 				</main>
+				<ConfirmModal
+					open={deletingSqlAttr !== null}
+					onCancel={handleDeleteSqlAttrClose}
+					onConfirm={handleDeleteSqlAttrConfirm}
+					title="Delete SQL attribute"
+					message={[
+						'Are you sure you want to delete ',
+						<strong key="name">{deletingSqlAttr?.name}</strong>,
+						'? This action cannot be undone.',
+					]}
+					confirming={deletingSqlAttrBusy}
+					error={deleteSqlAttrError}
+				/>
 			</div>
 		);
 	}

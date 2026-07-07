@@ -21,3 +21,7 @@ export const GET = withPermission({ catalog: ['read'] })(async (req, { user }) =
 	}
 	return proxyToBackend(req, { zoneIds: zoneIds ?? undefined });
 });
+
+// Deleting a SqlAttribute mutates catalog data and the backend handles graph
+// cleanup plus VDB embedding deletion.
+export const DELETE = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
