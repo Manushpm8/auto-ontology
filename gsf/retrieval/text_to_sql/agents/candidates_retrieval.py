@@ -21,6 +21,9 @@ from typing import Any, Dict
 from langchain_core.messages import SystemMessage
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+
+from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
+
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -36,49 +39,42 @@ from gsf.retrieval.text_to_sql.state import (
 
 logger = logging.getLogger(__name__)
 
-# Label used in the semantic VDB for column-attribute nodes.
-_COLUMN_ATTRIBUTE_LABEL = "ColumnAttribute"
-
 
 # ---------------------------------------------------------------------------
-# Search helpers
+# Search / dedup helpers
 # ---------------------------------------------------------------------------
 
 
-def _search_column_attributes(ontology_retriever, entity: str, k: int) -> list[dict]:
-    """Return up to *k* ColumnAttribute hits from the semantic VDB for *entity*."""
+def _search_by_label(retriever: object, entity: str, label: str, k: int) -> list[dict]:
+    """Return up to *k* VDB hits for *label*."""
     try:
         return list(
             search_semantic_index(
-                ontology_retriever,
-                entity,
-                label_filter=[_COLUMN_ATTRIBUTE_LABEL],
-                per_label_k=k,
+                retriever, entity, label_filter=[label], per_label_k=k
             )
         )
     except Exception:
-        logger.warning(
-            "ColumnAttribute search failed for entity %r", entity, exc_info=True
-        )
+        logger.warning("%s search failed for entity %r", label, entity, exc_info=True)
         return []
 
 
-def _search_custom_analyses(retriever, entity: str, k: int) -> list[dict]:
-    """Return up to *k* CustomAnalysis hits from the semantic VDB for *entity*."""
-    try:
-        return list(
-            search_semantic_index(
-                retriever,
-                entity,
-                label_filter=[Labels.CUSTOM_ANALYSIS],
-                per_label_k=k,
-            )
-        )
-    except Exception:
-        logger.warning(
-            "CustomAnalysis search failed for entity %r", entity, exc_info=True
-        )
-        return []
+def _dedupe_best_score(hits: list[dict]) -> list[dict]:
+    """Deduplicate by id, keeping the hit with the lowest score."""
+    best: dict[str, dict] = {}
+    for hit in hits:
+        hid = hit.get("id")
+        if hid is None:
+            continue
+        key = str(hid)
+        prev = best.get(key)
+        if prev is None or float(hit.get("score") or float("inf")) < float(
+            prev.get("score") or float("inf")
+        ):
+            best[key] = hit
+    return sorted(
+        best.values(),
+        key=lambda h: float(h.get("score") or float("inf")),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +127,9 @@ def _llm_filter(llm, question: str, entity: str, candidates: list[dict]) -> list
     return [result.best_id]
 
 
-_CUSTOM_ANALYSIS_FILTER_PROMPT = """\
-You are filtering candidate custom analyses for relevance to a user question.
-Keep only analyses that could meaningfully contribute to answering the question.
+_CANDIDATE_FILTER_PROMPT = """\
+You are filtering candidate {candidate_type} for relevance to a user question.
+Keep only candidates that could meaningfully contribute to answering the question.
 Remove any that share no common domain, idea, or intent with the question.
 
 User question: {question}
@@ -145,12 +141,12 @@ Return the list of IDs to KEEP. If none are relevant, return an empty list.
 """
 
 
-def _llm_filter_custom_analyses(
-    llm, question: str, candidates: list[dict]
+def _llm_filter_candidates(
+    llm, question: str, candidates: list[dict], candidate_type: str
 ) -> list[dict]:
-    """Use the LLM to keep only custom analysis candidates relevant to *question*.
+    """Keep only candidates relevant to *question* via LLM.
 
-    Returns the filtered list; falls back to the original list on LLM failure.
+    Falls back to the original list on LLM failure.
     """
     if not candidates:
         return []
@@ -161,7 +157,8 @@ def _llm_filter_custom_analyses(
 
     messages = [
         SystemMessage(
-            content=_CUSTOM_ANALYSIS_FILTER_PROMPT.format(
+            content=_CANDIDATE_FILTER_PROMPT.format(
+                candidate_type=candidate_type,
                 question=question,
                 candidates_block=candidates_block,
             )
@@ -175,7 +172,8 @@ def _llm_filter_custom_analyses(
     kept_ids = set(result.kept_ids)
     filtered = [c for c in candidates if str(c.get("id") or "") in kept_ids]
     logger.debug(
-        "Custom analysis filter: %d → %d (kept ids: %s)",
+        "%s filter: %d → %d (kept ids: %s)",
+        candidate_type,
         len(candidates),
         len(filtered),
         kept_ids,
@@ -228,15 +226,16 @@ def _build_column_attribute_spec(hit: dict) -> ColumnAttributeSpec | None:
 
 
 class CandidateRetrievalAgent(BaseAgent):
-    """Retrieve ColumnAttribute and CustomAnalysis candidates.
+    """Retrieve ColumnAttribute, CustomAnalysis, and SqlAttribute candidates.
 
-    - ColumnAttributes: searched per entity from the semantic VDB, then
-      LLM-filtered by the full question intent.
-    - CustomAnalysis: searched once with the full question from the data VDB.
+    - ColumnAttributes: searched per entity from the semantic VDB.
+    - CustomAnalysis: searched once with the full question from the semantic VDB.
+    - SqlAttribute: searched once with the full question from the semantic VDB.
 
     Deduplicate across entities and store:
-    - ``path_state["retrieved_column_attributes"]``: ``list[ColumnAttributeSpec]``
-    - ``path_state["retrieved_custom_analyses"]``:   ``list[dict]`` (same shape as before)
+    - ``path_state["retrieved_column_attributes"]``: ``list[dict]``
+    - ``path_state["retrieved_custom_analyses"]``:   ``list[dict]``
+    - ``path_state["retrieved_sql_attributes"]``:    ``list[dict]``
     """
 
     def __init__(self):
@@ -257,62 +256,50 @@ class CandidateRetrievalAgent(BaseAgent):
         semantic_retriever = state.get("semantic_retriever")
 
         all_col_attr_hits: list[dict] = []
+        all_custom_hits: list[dict] = []
+        all_sql_attr_hits: list[dict] = []
 
-        # CustomAnalysis: search once with the full question, not per entity.
-        # CustomAnalysis rows live in the semantic-layer collection, so query
-        # the semantic retriever rather than the data retriever.
-        all_custom_hits = (
-            _search_custom_analyses(semantic_retriever, question, 3)
-            if semantic_retriever is not None
-            else []
+        if semantic_retriever is not None:
+            # CustomAnalysis: search once with the full question.
+            all_custom_hits = _search_by_label(
+                semantic_retriever, question, Labels.CUSTOM_ANALYSIS, 3
+            )
+            # SqlAttribute: search once with the full question.
+            all_sql_attr_hits = _search_by_label(
+                semantic_retriever, question, LABEL_SQL_ATTRIBUTE, 3
+            )
+            # ColumnAttribute: search per entity.
+            for entity in entities:
+                entity = (entity or "").strip()
+                if not entity:
+                    continue
+                all_col_attr_hits.extend(
+                    _search_by_label(
+                        semantic_retriever, entity, LABEL_COLUMN_ATTRIBUTE, 2
+                    )
+                )
+
+        all_custom_hits = _llm_filter_candidates(
+            llm, question, all_custom_hits, "custom analyses"
         )
-        all_custom_hits = _llm_filter_custom_analyses(llm, question, all_custom_hits)
-
-        for entity in entities:
-            entity = (entity or "").strip()
-            if not entity:
-                continue
-
-            # 1. Search semantic VDB for ColumnAttributes per entity
-            col_attr_raw = _search_column_attributes(semantic_retriever, entity, 2)
-
-            # 2. Collect all ColumnAttribute hits without LLM filtering
-            all_col_attr_hits.extend(col_attr_raw)
-
-        # Deduplicate ColumnAttribute hits by id (keep first occurrence, i.e. lowest score).
-        seen_col_ids: set[str] = set()
-        deduped_col_attr: list[dict] = []
-        for hit in all_col_attr_hits:
-            key = str(hit.get("id") or "")
-            if key and key not in seen_col_ids:
-                seen_col_ids.add(key)
-                deduped_col_attr.append(hit)
-
-        # Deduplicate CustomAnalysis hits by id (keep lowest score).
-        best_custom: dict[str, dict] = {}
-        for hit in all_custom_hits:
-            hid = hit.get("id")
-            if hid is None:
-                continue
-            key = str(hid)
-            prev = best_custom.get(key)
-            if prev is None or float(hit.get("score") or float("inf")) < float(
-                prev.get("score") or float("inf")
-            ):
-                best_custom[key] = hit
-        deduped_custom = sorted(
-            best_custom.values(),
-            key=lambda h: float(h.get("score") or float("inf")),
+        all_sql_attr_hits = _llm_filter_candidates(
+            llm, question, all_sql_attr_hits, "SQL attributes"
         )
+
+        deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
+        deduped_custom = _dedupe_best_score(all_custom_hits)
+        deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom
+        path_state["retrieved_sql_attributes"] = deduped_sql_attr
 
         self.logger.info(
-            "Retrieved %d ColumnAttributes and %d CustomAnalysis candidates "
-            "(%d entities queried)",
+            "Retrieved %d ColumnAttributes, %d CustomAnalysis, "
+            "and %d SqlAttribute candidates (%d entities queried)",
             len(deduped_col_attr),
             len(deduped_custom),
+            len(deduped_sql_attr),
             len(entities),
         )
 

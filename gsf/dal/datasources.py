@@ -27,6 +27,8 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.dal.users import get_accessible_catalog_ids_for_zones, resolve_table_filter
 
+from gsf.semantic.constants import REL_REPRESENTS
+
 logger = logging.getLogger(__name__)
 
 _ALLOWED_NODE_LABELS = frozenset(Labels.LIST_OF_ALL)
@@ -350,7 +352,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
 
 def fetch_all_tables_without_term() -> list[dict[str, Any]]:
     """Return Table nodes that have not yet been assigned a Term."""
-    from gsf.semantic.constants import REL_REPRESENTS
+    from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges
 
     return get_neo4j_conn().query_read(
         f"""
