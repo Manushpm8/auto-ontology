@@ -476,14 +476,27 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const isEditingActive = isEditing || localIsEditing;
 
 		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
-		const wasEditingRef = useRef(false);
 
-		useEffect(() => {
-			if (isEditingActive && !wasEditingRef.current) {
-				pendingEditsRef.current = {};
+		// Reset the save error when an *externally* controlled `isEditing` prop
+		// flips to true (e.g. a parent toggling edit mode) — mirrors what the
+		// internal "Edit" button already does for `localIsEditing`. Adjusted
+		// during render (not in an effect) per
+		// https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes.
+		const [prevIsEditingActive, setPrevIsEditingActive] = useState(isEditingActive);
+		if (isEditingActive !== prevIsEditingActive) {
+			setPrevIsEditingActive(isEditingActive);
+			if (isEditingActive) {
 				setSaveError(null);
 			}
-			wasEditingRef.current = isEditingActive;
+		}
+
+		// Refs can't be mutated during render, so the pending-edits reset for
+		// that same transition lives in its own effect (no setState here, so
+		// it doesn't trip the "no setState in effects" rule above).
+		useEffect(() => {
+			if (isEditingActive) {
+				pendingEditsRef.current = {};
+			}
 		}, [isEditingActive]);
 
 		const handleSave = async () => {
