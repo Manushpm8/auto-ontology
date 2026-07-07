@@ -86,35 +86,64 @@ def _term_zone_filter(
 # ---------------------------------------------------------------------------
 
 
-def list_sql_attributes() -> list[dict[str, Any]]:
-    """Return every SqlAttribute with its connected Term and SQL text."""
+def _query_sql_attributes(
+    *,
+    attr_id: str | None = None,
+    term_id: str | None = None,
+    zone_ids: list[str] | None = None,
+    order_by: str | None = None,
+) -> list[dict[str, Any]]:
+    """Run the shared SqlAttribute ↔ Term ↔ Sql traversal behind every read below.
+
+    Every SqlAttribute read joins the same three things: the SqlAttribute
+    itself, its Term (via PROPERTY_OF), and its SQL text (via HAS_SQL) —
+    this factors that join, the zone scoping (``_term_zone_filter``), and
+    the shared RETURN projection into one place. Anchor on *attr_id* or
+    *term_id* (mutually exclusive) to scope to one attribute/term, or leave
+    both ``None`` for every SqlAttribute. Pass *order_by* as a raw ``ORDER
+    BY`` expression (e.g. ``"attr.name"``); omitted when ``None``.
+    """
+    extra_params: dict[str, Any] = {}
+    if attr_id is not None:
+        extra_params["id"] = attr_id
+    if term_id is not None:
+        extra_params["term_id"] = term_id
+    term_filter, params = _term_zone_filter(zone_ids, extra_params=extra_params)
+
+    if term_id is not None:
+        anchor = f"""
+        MATCH (term:{LABEL_TERM} {{id: $term_id}})
+        {term_filter}
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term)
+        """
+    elif attr_id is not None:
+        anchor = f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        {term_filter}
+        """
+    else:
+        anchor = f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        {term_filter}
+        """
+
     return get_neo4j_conn().query_read(
         f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE})
-        MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        {anchor}
         MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
         RETURN {_SQL_ATTRIBUTE_FIELDS},
-               term.id          AS term_id,
-               term.name        AS term_name
-        ORDER BY attr.name
-        """
-    )
-
-
-def get_sql_attribute(attr_id: str) -> dict[str, Any] | None:
-    """Return a single SqlAttribute by id, or None."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
-        OPTIONAL MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        OPTIONAL MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        RETURN {_SQL_ATTRIBUTE_FIELDS},
-               term.id          AS term_id,
-               term.name        AS term_name
+               term.id   AS term_id,
+               term.name AS term_name
+        {f"ORDER BY {order_by}" if order_by else ""}
         """,
-        {"id": attr_id},
+        params,
     )
-    return rows[0] if rows else None
+
+
+def list_sql_attributes() -> list[dict[str, Any]]:
+    """Return every SqlAttribute with its connected Term and SQL text."""
+    return _query_sql_attributes(order_by="attr.name")
 
 
 def get_full_sql_attribute_by_id(
@@ -131,19 +160,7 @@ def get_full_sql_attribute_by_id(
     so viewers cannot read attributes of out-of-zone terms.
     """
     conn = get_neo4j_conn()
-    term_filter, params = _term_zone_filter(zone_ids, extra_params={"id": attr_id})
-    rows = conn.query_read(
-        f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
-        MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        {term_filter}
-        OPTIONAL MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        RETURN {_SQL_ATTRIBUTE_FIELDS},
-               term.id          AS term_id,
-               term.name        AS term_name
-        """,
-        params,
-    )
+    rows = _query_sql_attributes(attr_id=attr_id, zone_ids=zone_ids)
     if not rows:
         return None
     result = dict(rows[0])
@@ -183,19 +200,7 @@ def fetch_sql_attributes(
     zone_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return SqlAttribute nodes, optionally restricted to zone-visible terms."""
-    term_filter, params = _term_zone_filter(zone_ids)
-    return get_neo4j_conn().query_read(
-        f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        {term_filter}
-        OPTIONAL MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        RETURN {_SQL_ATTRIBUTE_FIELDS},
-               term.id          AS term_id,
-               term.name        AS term_name
-        ORDER BY term.name, attr.name
-        """,
-        params,
-    )
+    return _query_sql_attributes(zone_ids=zone_ids, order_by="term.name, attr.name")
 
 
 def fetch_sql_attributes_by_term_id(
@@ -208,20 +213,8 @@ def fetch_sql_attributes_by_term_id(
     zone check used by ``get_full_term_by_id``; otherwise an empty list is
     returned so viewers cannot read SQL attributes for out-of-zone terms.
     """
-    term_filter, params = _term_zone_filter(zone_ids, extra_params={"term_id": term_id})
-
-    return get_neo4j_conn().query_read(
-        f"""
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        {term_filter}
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term)
-        OPTIONAL MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        RETURN {_SQL_ATTRIBUTE_FIELDS},
-               term.id   AS term_id,
-               term.name AS term_name
-        ORDER BY attr.name
-        """,
-        params,
+    return _query_sql_attributes(
+        term_id=term_id, zone_ids=zone_ids, order_by="attr.name"
     )
 
 
