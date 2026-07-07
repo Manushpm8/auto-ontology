@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from gsf.server.custom_analyses import service as custom_analyses_dal
 from gsf.server.datasources import service as dal
@@ -18,10 +18,14 @@ class NodeUpdate(BaseModel):
     sample_values: list[str] | None = None
 
 
+class CustomAnalysisValidate(BaseModel):
+    sql: str = Field(..., min_length=1)
+
+
 class CustomAnalysisCreate(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1)
     description: str
-    sql: str
+    sql: str = Field(..., min_length=1)
 
 
 router = APIRouter()
@@ -95,6 +99,20 @@ def list_custom_analyses(zone_ids: list[str] | None = Query(default=None)) -> di
     """CustomAnalysis nodes joined with their HAS_SQL neighbour, zone-scoped when zone_ids are provided."""
     rows = custom_analyses_dal.list_custom_analyses(zone_ids=zone_ids)
     return _count_payload(rows)
+
+
+@router.post("/custom-analyses/validate")
+def validate_custom_analysis_sql(body: CustomAnalysisValidate) -> dict:
+    """Validate a SQL expression against the full catalog.
+
+    Does not create a CustomAnalysis. Returns 422 when the SQL can't be
+    parsed or doesn't resolve to a known table.
+    """
+    try:
+        result = custom_analyses_dal.validate_custom_analysis_sql(body.sql)
+    except custom_analyses_dal.CustomAnalysisSqlError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": result}
 
 
 @router.post("/custom-analyses", status_code=201)

@@ -45,10 +45,28 @@ __all__ = [
     "CustomAnalysisSqlConflict",
     "CustomAnalysisSqlError",
     "list_custom_analyses",
+    "validate_custom_analysis_sql",
     "create_custom_analysis",
     "update_custom_analysis",
     "delete_custom_analysis",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Validation API
+# ---------------------------------------------------------------------------
+
+
+def validate_custom_analysis_sql(sql: str) -> dict[str, Any]:
+    """Validate a SQL expression against the full catalog.
+
+    Does not persist anything — used by the "Validate SQL" step before a
+    CustomAnalysis is created or updated.
+
+    Raises :class:`CustomAnalysisSqlError` when the SQL can't be resolved.
+    """
+    validate_sql(sql, get_dialects(), get_schemas())
+    return {"valid": True, "sql": sql}
 
 
 # ---------------------------------------------------------------------------

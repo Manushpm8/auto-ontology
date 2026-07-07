@@ -17,10 +17,15 @@ export type CustomAnalysisCreatePayload = {
 type CreateResponse = ResponseWithError<{ data: CustomAnalysis }>;
 type UpdateResponse = ResponseWithError<{ data: CustomAnalysis }>;
 type DeleteResponse = ResponseWithError<{ data: { id: string } }>;
+type ValidateResponse = ResponseWithError<{ data: { valid: boolean; sql: string } }>;
 
 export const analyses = {
 	list: (): Promise<ListResponse> =>
 		requests.get<ResponseWithCount<CustomAnalysis[]>>('custom-analyses'),
+	validate: (sql: string): Promise<ValidateResponse> =>
+		requests.post<{ data: { valid: boolean; sql: string } }>('custom-analyses/validate', {
+			sql,
+		}),
 	create: (payload: CustomAnalysisCreatePayload): Promise<CreateResponse> =>
 		requests.post<{ data: CustomAnalysis }>('custom-analyses', payload),
 	update: (id: string, payload: CustomAnalysisCreatePayload): Promise<UpdateResponse> =>

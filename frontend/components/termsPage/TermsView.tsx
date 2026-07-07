@@ -14,8 +14,9 @@ import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { zonesApi } from '@/api/zones';
 import { useSession } from '@/auth/auth-client';
 import { ComposerSectionKind } from '@/enums/datasources';
+import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
-import { CreateSqlAttributeModal } from '@/components/termsPage/CreateSqlAttributeModal';
+import { SqlEditor } from '@/components/SqlBlock';
 import type { ColumnAttribute, SqlAttribute, Term } from '@/types/terms';
 
 type TermCardProps = {
@@ -110,6 +111,11 @@ const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: Te
 	</li>
 );
 
+const FIELD_INPUT_CLASSNAME =
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+
+const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
+
 export const TermsView = () => {
 	const router = useRouter();
 	const searchParams = useSearchParams();
@@ -127,6 +133,15 @@ export const TermsView = () => {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
+	const [sqlAttrsEpoch, setSqlAttrsEpoch] = useState(0);
+	const [sqlAttrName, setSqlAttrName] = useState('');
+	const [sqlAttrDescription, setSqlAttrDescription] = useState('');
+	const [sqlAttrSql, setSqlAttrSql] = useState('');
+	const [sqlAttrValidating, setSqlAttrValidating] = useState(false);
+	const [sqlAttrValidationMessage, setSqlAttrValidationMessage] = useState<string | null>(null);
+	const [sqlAttrSqlValidated, setSqlAttrSqlValidated] = useState(false);
+	const [sqlAttrSubmitting, setSqlAttrSubmitting] = useState(false);
+	const [sqlAttrSubmitError, setSqlAttrSubmitError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -212,6 +227,78 @@ export const TermsView = () => {
 		}
 		router.push(`/terms?focus=${encodeURIComponent(focusId)}`);
 	}, [focusId, handleBack, router]);
+
+	const handleSqlAttrCreated = useCallback((attribute: SqlAttribute) => {
+		setSqlAttrs((prev) => [...prev, attribute]);
+		// Re-fetch the term's single page so the new attribute shows up in the
+		// "SQL Attributes" table without changing which term is focused.
+		setSqlAttrsEpoch((prev) => prev + 1);
+	}, []);
+
+	const trimmedSqlAttrName = sqlAttrName.trim();
+	const trimmedSqlAttrSql = sqlAttrSql.trim();
+	const canCreateSqlAttr =
+		trimmedSqlAttrName.length > 0 && trimmedSqlAttrSql.length > 0 && sqlAttrSqlValidated;
+
+	const resetCreateSqlAttrForm = () => {
+		setSqlAttrName('');
+		setSqlAttrDescription('');
+		setSqlAttrSql('');
+		setSqlAttrValidating(false);
+		setSqlAttrValidationMessage(null);
+		setSqlAttrSqlValidated(false);
+		setSqlAttrSubmitting(false);
+		setSqlAttrSubmitError(null);
+	};
+
+	const handleCreateSqlAttrClose = () => {
+		if (sqlAttrValidating || sqlAttrSubmitting) return;
+		resetCreateSqlAttrForm();
+		setCreateSqlAttrModalOpen(false);
+	};
+
+	const handleSqlAttrSqlChange = (value: string) => {
+		setSqlAttrSql(value);
+		setSqlAttrSqlValidated(false);
+		setSqlAttrValidationMessage(null);
+	};
+
+	const handleValidateSqlAttrSql = async () => {
+		if (trimmedSqlAttrSql.length === 0) return;
+		setSqlAttrValidating(true);
+		setSqlAttrValidationMessage(null);
+		setSqlAttrSqlValidated(false);
+		const res = await sqlAttributesApi.validate({ expression: trimmedSqlAttrSql });
+		setSqlAttrValidating(false);
+		if (res.error) {
+			setSqlAttrValidationMessage(res.message ?? 'SQL validation failed');
+			return;
+		}
+		const isValid = res.data.valid === true;
+		setSqlAttrSqlValidated(isValid);
+		setSqlAttrValidationMessage(isValid ? 'SQL is valid.' : 'SQL validation failed');
+	};
+
+	const handleCreateSqlAttr = async () => {
+		if (!canCreateSqlAttr || focusId == null) return;
+		setSqlAttrSubmitting(true);
+		setSqlAttrSubmitError(null);
+		const res = await sqlAttributesApi.create({
+			name: trimmedSqlAttrName,
+			description: sqlAttrDescription.trim(),
+			expression: trimmedSqlAttrSql,
+			term_id: focusId,
+			source: 'manual',
+		});
+		setSqlAttrSubmitting(false);
+		if (res.error) {
+			setSqlAttrSubmitError(res.message ?? 'Failed to create SQL attribute');
+			return;
+		}
+		handleSqlAttrCreated(res.data);
+		resetCreateSqlAttrForm();
+		setCreateSqlAttrModalOpen(false);
+	};
 
 	const handleSqlAttrClick = useCallback(
 		(sectionId: string, rowId: string) => {
@@ -443,6 +530,14 @@ export const TermsView = () => {
 						onClick={() => setCreateSqlAttrModalOpen(true)}
 						className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
 					>
+						<svg
+							className="h-4 w-4"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							aria-hidden
+						>
+							<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
+						</svg>
 						Create new sql attribute
 					</button>
 				</header>
@@ -451,14 +546,61 @@ export const TermsView = () => {
 						dataId={focusId}
 						title={termTitle}
 						getSinglePage={getSinglePage}
+						treeDataEpoch={sqlAttrsEpoch}
 						onDataTableRowClick={handleSqlAttrClick}
 					/>
 				</main>
-				<CreateSqlAttributeModal
+				<ModalCreateNewItem
 					open={createSqlAttrModalOpen}
-					onClose={() => setCreateSqlAttrModalOpen(false)}
-					termId={focusId}
-				/>
+					onClose={handleCreateSqlAttrClose}
+					title="Create New SQL Attribute"
+					submitLabel={sqlAttrSubmitting ? 'Creating…' : 'Create'}
+					onSubmit={handleCreateSqlAttr}
+					canSubmit={canCreateSqlAttr}
+					secondaryAction={{
+						label: sqlAttrValidating ? 'Validating…' : 'Validate SQL',
+						onClick: handleValidateSqlAttrSql,
+						disabled: trimmedSqlAttrSql.length === 0 || sqlAttrValidating,
+					}}
+				>
+					<div>
+						<label className={FIELD_LABEL_CLASSNAME}>Attribute Name</label>
+						<input
+							type="text"
+							value={sqlAttrName}
+							onChange={(e) => setSqlAttrName(e.target.value)}
+							placeholder="Attribute Name"
+							className={FIELD_INPUT_CLASSNAME}
+						/>
+					</div>
+
+					<div>
+						<label className={FIELD_LABEL_CLASSNAME}>Description (Optional)</label>
+						<textarea
+							value={sqlAttrDescription}
+							onChange={(e) => setSqlAttrDescription(e.target.value)}
+							placeholder="Add Description"
+							rows={3}
+							className={`resize-y ${FIELD_INPUT_CLASSNAME}`}
+						/>
+					</div>
+
+					<div>
+						<SqlEditor value={sqlAttrSql} onChange={handleSqlAttrSqlChange} rows={10} />
+					</div>
+
+					{sqlAttrValidationMessage != null && (
+						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+							{sqlAttrValidationMessage}
+						</p>
+					)}
+
+					{sqlAttrSubmitError != null && (
+						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+							{sqlAttrSubmitError}
+						</p>
+					)}
+				</ModalCreateNewItem>
 			</div>
 		);
 	}
