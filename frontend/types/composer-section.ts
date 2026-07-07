@@ -84,6 +84,7 @@ export type ComposerSqlBlockSection = {
 	id: string;
 	title: string;
 	sql: string;
+	editable?: boolean;
 };
 
 export type ComposerSection =

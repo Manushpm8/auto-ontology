@@ -14,6 +14,7 @@ import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { zonesApi } from '@/api/zones';
 import { useSession } from '@/auth/auth-client';
+import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
@@ -151,6 +152,16 @@ export const TermsView = () => {
 	const [deletingSqlAttr, setDeletingSqlAttr] = useState<SqlAttributeDeleteTarget | null>(null);
 	const [deletingSqlAttrBusy, setDeletingSqlAttrBusy] = useState(false);
 	const [deleteSqlAttrError, setDeleteSqlAttrError] = useState<string | null>(null);
+	const [sqlAttrEditing, setSqlAttrEditing] = useState(false);
+	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
+	const [sqlEditModalOpen, setSqlEditModalOpen] = useState(false);
+	const [sqlEditValue, setSqlEditValue] = useState('');
+	const [sqlEditOriginalValue, setSqlEditOriginalValue] = useState('');
+	const [sqlEditValidating, setSqlEditValidating] = useState(false);
+	const [sqlEditValidationMessage, setSqlEditValidationMessage] = useState<string | null>(null);
+	const [sqlEditValidated, setSqlEditValidated] = useState(false);
+	const [sqlEditSubmitting, setSqlEditSubmitting] = useState(false);
+	const [sqlEditError, setSqlEditError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -277,7 +288,10 @@ export const TermsView = () => {
 		setSqlAttrValidating(true);
 		setSqlAttrValidationMessage(null);
 		setSqlAttrSqlValidated(false);
-		const res = await sqlAttributesApi.validate({ expression: trimmedSqlAttrSql });
+		const res = await sqlAttributesApi.validate({
+			expression: trimmedSqlAttrSql,
+			term_id: focusId ?? undefined,
+		});
 		setSqlAttrValidating(false);
 		if (res.error) {
 			setSqlAttrValidationMessage(res.message ?? 'SQL validation failed');
@@ -333,6 +347,128 @@ export const TermsView = () => {
 		}
 	};
 
+	const updateSqlAttr = async (payload: {
+		id: string;
+		name: string;
+		description: string;
+		expression: string;
+		termId: string;
+	}) => {
+		const res = await sqlAttributesApi.update(payload.id, {
+			name: payload.name,
+			description: payload.description,
+			expression: payload.expression,
+			term_id: payload.termId,
+			source: 'manual',
+		});
+		if (res.error) {
+			return res;
+		}
+		setSqlAttrs((prev) => {
+			const exists = prev.some((attr) => attr.id === res.data.id);
+			if (!exists) return [...prev, res.data];
+			return prev.map((attr) => (attr.id === res.data.id ? res.data : attr));
+		});
+		setSqlAttrsEpoch((prev) => prev + 1);
+		return res;
+	};
+
+	const handleSqlAttrEditSave = async (edits: Record<string, ComposerEditValue>) => {
+		if (focusedSqlAttr == null || focusId == null) return;
+		setSqlAttrEditError(null);
+		const description =
+			typeof edits.description === 'string'
+				? edits.description
+				: (focusedSqlAttr.description ?? '');
+		const expression =
+			typeof edits.sql === 'string'
+				? edits.sql
+				: (focusedSqlAttr.expression ?? focusedSqlAttr.sql ?? '');
+		const res = await updateSqlAttr({
+			id: focusedSqlAttr.id,
+			name: focusedSqlAttr.name,
+			description,
+			expression,
+			termId: focusedSqlAttr.term_id ?? focusId,
+		});
+		if (res.error) {
+			setSqlAttrEditError(res.message ?? 'Failed to update SQL attribute');
+			return;
+		}
+		setSqlAttrEditing(false);
+	};
+
+	const trimmedSqlEditValue = sqlEditValue.trim();
+	const sqlEditUnchanged = trimmedSqlEditValue === sqlEditOriginalValue.trim();
+	const canSaveSqlEdit =
+		trimmedSqlEditValue.length > 0 &&
+		!sqlEditUnchanged &&
+		sqlEditValidated &&
+		!sqlEditValidating &&
+		!sqlEditSubmitting;
+
+	const resetSqlEditModal = () => {
+		setSqlEditValue('');
+		setSqlEditOriginalValue('');
+		setSqlEditValidating(false);
+		setSqlEditValidationMessage(null);
+		setSqlEditValidated(false);
+		setSqlEditSubmitting(false);
+		setSqlEditError(null);
+	};
+
+	const handleSqlEditClose = () => {
+		if (sqlEditValidating || sqlEditSubmitting) return;
+		resetSqlEditModal();
+		setSqlEditModalOpen(false);
+	};
+
+	const handleSqlEditChange = (value: string) => {
+		setSqlEditValue(value);
+		setSqlEditValidated(false);
+		setSqlEditValidationMessage(null);
+	};
+
+	const handleValidateSqlEdit = async () => {
+		if (trimmedSqlEditValue.length === 0) return;
+		setSqlEditValidating(true);
+		setSqlEditValidationMessage(null);
+		setSqlEditValidated(false);
+		const res = await sqlAttributesApi.validate({
+			expression: trimmedSqlEditValue,
+			term_id: focusId ?? undefined,
+			attribute_id: focusedSqlAttr?.id,
+		});
+		setSqlEditValidating(false);
+		if (res.error) {
+			setSqlEditValidationMessage(res.message ?? 'SQL validation failed');
+			return;
+		}
+		const isValid = res.data.valid === true;
+		setSqlEditValidated(isValid);
+		setSqlEditValidationMessage(isValid ? 'SQL is valid.' : 'SQL validation failed');
+	};
+
+	const handleSaveSqlEdit = async () => {
+		if (!canSaveSqlEdit || focusedSqlAttr == null || focusId == null) return;
+		setSqlEditSubmitting(true);
+		setSqlEditError(null);
+		const res = await updateSqlAttr({
+			id: focusedSqlAttr.id,
+			name: focusedSqlAttr.name,
+			description: focusedSqlAttr.description ?? '',
+			expression: trimmedSqlEditValue,
+			termId: focusedSqlAttr.term_id ?? focusId,
+		});
+		setSqlEditSubmitting(false);
+		if (res.error) {
+			setSqlEditError(res.message ?? 'Failed to save SQL');
+			return;
+		}
+		resetSqlEditModal();
+		setSqlEditModalOpen(false);
+	};
+
 	const handleSqlAttrClick = useCallback(
 		(sectionId: string, rowId: string) => {
 			if (sectionId !== 'sql_attributes' || focusId == null) return;
@@ -372,12 +508,14 @@ export const TermsView = () => {
 						id: 'description',
 						title: 'Description',
 						body: attr.description ?? '',
+						editable: true,
 					},
 					{
 						type: ComposerSectionKind.SQL_BLOCK,
 						id: 'sql',
 						title: 'SQL',
 						sql: attr.expression ?? '',
+						editable: true,
 					},
 					{
 						type: ComposerSectionKind.ZONES_CHIPS,
@@ -529,27 +667,45 @@ export const TermsView = () => {
 						{sqlAttrTitle}
 					</span>
 					<div className="ml-auto flex shrink-0 items-center gap-1">
-						<button
-							type="button"
-							onClick={() => console.log('edit sql attribute', sqlAttrId)}
-							aria-label={`Edit ${sqlAttrTitle}`}
-							title="Edit"
-							className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
-						>
-							<Icon name={IconName.Pencil} className="h-4 w-4" />
-						</button>
-						<button
-							type="button"
-							onClick={() => {
-								setDeletingSqlAttr({ id: sqlAttrId, name: sqlAttrTitle });
-								setDeleteSqlAttrError(null);
-							}}
-							aria-label={`Delete ${sqlAttrTitle}`}
-							title="Delete"
-							className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
-						>
-							<Icon name={IconName.Trash} className="h-4 w-4" />
-						</button>
+						{sqlAttrEditing ? (
+							<button
+								type="button"
+								onClick={() => {
+									setSqlAttrEditing(false);
+									setSqlAttrEditError(null);
+								}}
+								className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+							>
+								Read mode
+							</button>
+						) : (
+							<>
+								<button
+									type="button"
+									onClick={() => {
+										setSqlAttrEditError(null);
+										setSqlAttrEditing(true);
+									}}
+									aria-label={`Edit ${sqlAttrTitle}`}
+									title="Edit"
+									className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+								>
+									<Icon name={IconName.Pencil} className="h-4 w-4" />
+								</button>
+								<button
+									type="button"
+									onClick={() => {
+										setDeletingSqlAttr({ id: sqlAttrId, name: sqlAttrTitle });
+										setDeleteSqlAttrError(null);
+									}}
+									aria-label={`Delete ${sqlAttrTitle}`}
+									title="Delete"
+									className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+								>
+									<Icon name={IconName.Trash} className="h-4 w-4" />
+								</button>
+							</>
+						)}
 					</div>
 				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -557,8 +713,28 @@ export const TermsView = () => {
 						dataId={sqlAttrId}
 						title={sqlAttrTitle}
 						getSinglePage={getSqlAttributeSinglePage}
+						treeDataEpoch={sqlAttrsEpoch}
+						isEditing={sqlAttrEditing}
+						onSave={handleSqlAttrEditSave}
+						onCancel={() => {
+							setSqlAttrEditing(false);
+							setSqlAttrEditError(null);
+						}}
+						inlineSaveSectionId="description"
+						hideEditToolbar
+						onEditSql={(_sectionId, sql) => {
+							resetSqlEditModal();
+							setSqlEditValue(sql);
+							setSqlEditOriginalValue(sql);
+							setSqlEditModalOpen(true);
+						}}
 					/>
 				</main>
+				{sqlAttrEditError != null && (
+					<div className="border-t border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+						{sqlAttrEditError}
+					</div>
+				)}
 				<ConfirmModal
 					open={deletingSqlAttr !== null}
 					onCancel={handleDeleteSqlAttrClose}
@@ -572,6 +748,41 @@ export const TermsView = () => {
 					confirming={deletingSqlAttrBusy}
 					error={deleteSqlAttrError}
 				/>
+				<ModalCreateNewItem
+					open={sqlEditModalOpen}
+					onClose={handleSqlEditClose}
+					title="SQL Code"
+					submitLabel={sqlEditSubmitting ? 'Saving…' : 'Save'}
+					onSubmit={handleSaveSqlEdit}
+					canSubmit={canSaveSqlEdit}
+					secondaryAction={{
+						label: sqlEditValidating ? 'Validating…' : 'Validate SQL',
+						onClick: handleValidateSqlEdit,
+						disabled:
+							trimmedSqlEditValue.length === 0 ||
+							sqlEditValidating ||
+							sqlEditUnchanged,
+					}}
+				>
+					<SqlEditor
+						value={sqlEditValue}
+						onChange={handleSqlEditChange}
+						label="SQL Code"
+						rows={10}
+					/>
+
+					{sqlEditValidationMessage != null && (
+						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+							{sqlEditValidationMessage}
+						</p>
+					)}
+
+					{sqlEditError != null && (
+						<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+							{sqlEditError}
+						</p>
+					)}
+				</ModalCreateNewItem>
 			</div>
 		);
 	}

@@ -46,6 +46,10 @@ class SqlAttributeNameConflict(Exception):
     """Raised when a write would collide with another SqlAttribute name."""
 
 
+class SqlAttributeExpressionConflict(Exception):
+    """Raised when a Term already has another SqlAttribute with this SQL."""
+
+
 SqlAttributeSqlError = SqlParseError
 
 
@@ -231,6 +235,37 @@ def find_attr_by_name(name: str, exclude_id: str | None) -> dict[str, str] | Non
         {"name": name, "exclude_id": exclude_id},
     )
     return {"id": rows[0]["id"], "name": rows[0]["name"]} if rows else None
+
+
+def find_attr_by_expression(
+    *,
+    term_id: str,
+    expression: str,
+    exclude_id: str | None,
+) -> dict[str, str] | None:
+    """Return a same-term SqlAttribute with equivalent SQL, or None.
+
+    Mirrors the legacy snippet validation behavior by ignoring case and
+    collapsing whitespace before comparison.
+    """
+    normalized_expression = " ".join(expression.split()).lower()
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(:{LABEL_TERM} {{id: $term_id}})
+        WHERE $exclude_id IS NULL OR attr.id <> $exclude_id
+        RETURN attr.id AS id,
+               attr.name AS name,
+               attr.expression AS expression
+        """,
+        {"term_id": term_id, "exclude_id": exclude_id},
+    )
+    for row in rows:
+        row_expression = row.get("expression")
+        if not isinstance(row_expression, str):
+            continue
+        if " ".join(row_expression.split()).lower() == normalized_expression:
+            return {"id": row["id"], "name": row["name"]}
+    return None
 
 
 def get_sql_attribute_by_id(attr_id: str) -> str | None:

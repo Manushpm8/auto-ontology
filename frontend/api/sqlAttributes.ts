@@ -19,11 +19,14 @@ export type SqlAttributeCreatePayload = {
 
 export type SqlAttributeValidatePayload = {
 	expression: string;
+	term_id?: string;
+	attribute_id?: string;
 };
 
 type ValidateResult = { data: { valid: boolean; expression: string } };
 type ValidateResponse = ResponseWithError<ValidateResult>;
 type CreateResponse = ResponseWithError<SingleResult>;
+type UpdateResponse = ResponseWithError<SingleResult>;
 type DeleteResponse = ResponseWithError<{ data: { id: string } }>;
 
 export const sqlAttributesApi = {
@@ -33,6 +36,8 @@ export const sqlAttributesApi = {
 		requests.post<ValidateResult>('sql-attributes/validate', payload),
 	create: (payload: SqlAttributeCreatePayload): Promise<CreateResponse> =>
 		requests.post<SingleResult>('sql-attributes', payload),
+	update: (id: string, payload: SqlAttributeCreatePayload): Promise<UpdateResponse> =>
+		requests.put<SingleResult>(`sql-attributes/${encodeURIComponent(id)}`, payload),
 	delete: (id: string): Promise<DeleteResponse> =>
 		requests.delete<{ data: { id: string } }>(`sql-attributes/${encodeURIComponent(id)}`),
 };

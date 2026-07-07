@@ -62,6 +62,9 @@ export type SinglePageComposerProps = {
 	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
+	onEditSql?: (sectionId: string, sql: string) => void;
+	inlineSaveSectionId?: string;
+	hideEditToolbar?: boolean;
 };
 
 function composerSectionHeading(section: ComposerSection): string {
@@ -80,10 +83,14 @@ function composerSectionHeading(section: ComposerSection): string {
 const EditableTextCard = ({
 	section,
 	onChange,
+	onSave,
+	saving = false,
 	autoFocus = false,
 }: {
 	section: { id: string; title: string; body: string };
 	onChange: (sectionId: string, value: string) => void;
+	onSave?: () => void;
+	saving?: boolean;
 	autoFocus?: boolean;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -110,6 +117,25 @@ const EditableTextCard = ({
 				rows={4}
 				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
 			/>
+			{onSave != null && (
+				<div className="mt-3 flex justify-end">
+					<button
+						type="button"
+						disabled={saving}
+						onClick={onSave}
+						className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
+					>
+						{saving ? (
+							<>
+								<Spinner aria-label="Saving" className="h-3.5 w-3.5" />
+								Saving…
+							</>
+						) : (
+							'Save'
+						)}
+					</button>
+				</div>
+			)}
 		</div>
 	);
 };
@@ -217,6 +243,8 @@ function renderComposerSection(
 	section: ComposerSection,
 	onTermClick?: (termId: string) => void,
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void,
+	isEditingActive = false,
+	onEditSql?: (sectionId: string, sql: string) => void,
 ): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
@@ -368,11 +396,29 @@ function renderComposerSection(
 		case ComposerSectionKind.SQL_BLOCK:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
-					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-						{section.title}
-					</h2>
+					{isEditingActive && section.editable === true && (
+						<div className="mb-3 flex justify-end">
+							<div className="flex shrink-0 items-center gap-1">
+								<button
+									type="button"
+									onClick={() => {
+										if (onEditSql) {
+											onEditSql(section.id, section.sql);
+											return;
+										}
+										console.log('edit sql section', section.id);
+									}}
+									aria-label={`Edit ${section.title}`}
+									title="Edit"
+									className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+								>
+									<Icon name={IconName.Pencil} className="h-4 w-4" />
+								</button>
+							</div>
+						</div>
+					)}
 					{section.sql.trim() !== '' ? (
-						<SqlBlock sql={section.sql} className="mt-4" />
+						<SqlBlock sql={section.sql} />
 					) : (
 						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
 					)}
@@ -405,6 +451,9 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			onSave,
 			onCancel,
 			onDataTableRowClick,
+			onEditSql,
+			inlineSaveSectionId,
+			hideEditToolbar = false,
 		} = props;
 		const router = useRouter();
 
@@ -436,6 +485,15 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const isEditingActive = isEditing || localIsEditing;
 
 		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
+		const wasEditingRef = useRef(false);
+
+		useEffect(() => {
+			if (isEditingActive && !wasEditingRef.current) {
+				pendingEditsRef.current = {};
+				setSaveError(null);
+			}
+			wasEditingRef.current = isEditingActive;
+		}, [isEditingActive]);
 
 		const handleSave = async () => {
 			const edits = pendingEditsRef.current;
@@ -533,7 +591,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</div>
 				) : null}
 
-				{(hasEditableSections && entityId && !isEditingActive) || isEditingActive ? (
+				{!hideEditToolbar &&
+				((hasEditableSections && entityId && !isEditingActive) || isEditingActive) ? (
 					<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
 						{hasEditableSections && entityId && !isEditingActive && (
 							<button
@@ -564,23 +623,28 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								>
 									Cancel
 								</button>
-								<button
-									type="button"
-									disabled={saving}
-									onClick={() => {
-										void handleSave();
-									}}
-									className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
-								>
-									{saving ? (
-										<>
-											<Spinner aria-label="Saving" className="h-3.5 w-3.5" />
-											Saving…
-										</>
-									) : (
-										'Save'
-									)}
-								</button>
+								{inlineSaveSectionId == null && (
+									<button
+										type="button"
+										disabled={saving}
+										onClick={() => {
+											void handleSave();
+										}}
+										className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
+									>
+										{saving ? (
+											<>
+												<Spinner
+													aria-label="Saving"
+													className="h-3.5 w-3.5"
+												/>
+												Saving…
+											</>
+										) : (
+											'Save'
+										)}
+									</button>
+								)}
 							</div>
 						)}
 					</div>
@@ -659,7 +723,6 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										isEditingActive &&
 										section.type === ComposerSectionKind.TAG_LIST &&
 										section.editable === true;
-
 									return (
 										<div key={section.id}>
 											{isEditableTextCard ? (
@@ -669,6 +732,14 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													onChange={(id, val) => {
 														pendingEditsRef.current[id] = val;
 													}}
+													onSave={
+														section.id === inlineSaveSectionId
+															? () => {
+																	void handleSave();
+																}
+															: undefined
+													}
+													saving={saving}
 												/>
 											) : isEditableTagList ? (
 												<EditableTagListCard
@@ -683,6 +754,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													section,
 													handleTermClick,
 													onDataTableRowClick,
+													isEditingActive,
+													onEditSql,
 												)
 											)}
 										</div>

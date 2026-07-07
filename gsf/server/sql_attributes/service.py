@@ -20,14 +20,15 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Props
 
 from gsf.connectors import get_connectors
 from gsf.dal.sql_attributes import (
+    SqlAttributeExpressionConflict,
     SqlAttributeNameConflict,
     SqlAttributeSqlError,
     delete_sql_attribute_node,
     detach_existing_sql_edges,
     fetch_sql_attribute_docs,
+    find_attr_by_expression,
     find_attr_by_name,
     get_full_sql_attribute_by_id,
-    get_sql_attribute,
     get_sql_attribute_by_id,
     link_to_term,
     list_sql_attributes,
@@ -48,9 +49,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "SqlAttributeNameConflict",
+    "SqlAttributeExpressionConflict",
     "SqlAttributeSqlError",
     "list_sql_attributes",
-    "get_sql_attribute",
     "get_full_sql_attribute_by_id",
     "validate_sql_attribute",
     "create_sql_attribute",
@@ -115,6 +116,7 @@ def _persist_attr_with_sql(
         "description": props.get("description", ""),
         "expression": props.get("expression", ""),
         "source": props.get("source", ""),
+        "sql_id": query_obj.sql_node.get_id(),
         "sql": sql,
     }
 
@@ -142,7 +144,11 @@ def _embed_sql_attribute(
 
 
 def validate_sql_attribute(
-    *, expression: str, connector: str | None = None
+    *,
+    expression: str,
+    term_id: str | None = None,
+    attribute_id: str | None = None,
+    connector: str | None = None,
 ) -> dict[str, Any]:
     """Validate a SQL expression against the catalog.
 
@@ -151,8 +157,23 @@ def validate_sql_attribute(
     server-side (see :func:`_resolve_database_name`) — callers never need
     to pass one.
 
-    Raises :class:`SqlAttributeSqlError` when the SQL can't be resolved.
+    When *term_id* is given, also checks that no other SqlAttribute of the
+    same term already uses an equivalent expression (*attribute_id*, when
+    editing an existing attribute, excludes it from that check).
+
+    Raises :class:`SqlAttributeExpressionConflict` on a duplicate SQL
+    snippet. Raises :class:`SqlAttributeSqlError` when the SQL can't be
+    resolved.
     """
+    if term_id is not None:
+        conflict = find_attr_by_expression(
+            term_id=term_id,
+            expression=expression,
+            exclude_id=attribute_id,
+        )
+        if conflict is not None:
+            raise SqlAttributeExpressionConflict("SQL snippet already exists")
+
     database_name = _resolve_database_name(connector)
     validate_sql(
         expression,
@@ -196,6 +217,14 @@ def create_sql_attribute(
     term = get_slim_term_by_id(term_id)
     if not term:
         raise ValueError(f"Term with id {term_id!r} not found")
+
+    expression_conflict = find_attr_by_expression(
+        term_id=term_id,
+        expression=expression,
+        exclude_id=None,
+    )
+    if expression_conflict is not None:
+        raise SqlAttributeExpressionConflict("SQL snippet already exists")
 
     query_obj = validate_sql(
         expression,

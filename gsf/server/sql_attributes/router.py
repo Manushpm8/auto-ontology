@@ -16,6 +16,8 @@ router = APIRouter()
 
 class SqlAttributeValidate(BaseModel):
     expression: str = Field(..., min_length=1)
+    term_id: str | None = None
+    attribute_id: str | None = None
 
 
 class SqlAttributeCreate(BaseModel):
@@ -71,8 +73,12 @@ def validate_sql_attribute(body: SqlAttributeValidate) -> dict:
     known table.
     """
     try:
-        result = dal.validate_sql_attribute(expression=body.expression)
-    except dal.SqlAttributeSqlError as exc:
+        result = dal.validate_sql_attribute(
+            expression=body.expression,
+            term_id=body.term_id,
+            attribute_id=body.attribute_id,
+        )
+    except (dal.SqlAttributeExpressionConflict, dal.SqlAttributeSqlError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": result}
 
@@ -96,6 +102,8 @@ def create_sql_attribute(body: SqlAttributeCreate) -> dict:
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except dal.SqlAttributeExpressionConflict as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (ValueError, dal.SqlAttributeSqlError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": row}
@@ -121,6 +129,8 @@ def update_sql_attribute(attr_id: str, body: SqlAttributeUpdate) -> dict:
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except dal.SqlAttributeExpressionConflict as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (ValueError, dal.SqlAttributeSqlError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if row is None:
