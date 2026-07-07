@@ -91,8 +91,8 @@ def list_sql_attributes() -> list[dict[str, Any]]:
     return get_neo4j_conn().query_read(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})
-        OPTIONAL MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        OPTIONAL MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
         RETURN {_SQL_ATTRIBUTE_FIELDS},
                term.id          AS term_id,
                term.name        AS term_name
