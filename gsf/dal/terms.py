@@ -22,6 +22,7 @@ from gsf.semantic.constants import (
     REL_HAS_ATTRIBUTE,
     REL_PROPERTY_OF,
     REL_REPRESENTS,
+    REL_SEMANTIC_FK,
     SEMANTIC_SOURCE,
 )
 from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
@@ -132,6 +133,7 @@ def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
 
 def fetch_all_terms_and_attributes(
     zone_ids: list[str] | None = None,
+    search: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Scan semantic Term and ColumnAttribute nodes in Neo4j.
 
@@ -146,24 +148,36 @@ def fetch_all_terms_and_attributes(
     rows are naturally owned by exactly one table (via CONTAINS), so a plain
     accessible-table filter is correct for them without this check.  Pass
     ``None`` (or omit) to return all data (admin / internal callers).
+
+    *search* is a case-insensitive substring filter applied to the term's
+    name only. It only narrows the ``terms`` result — ``attrs`` (used for
+    embedding, not text search) is unaffected. Pass ``None`` (or omit, or an
+    empty string) to skip filtering.
     """
     conn = get_neo4j_conn()
     attr_filter, attr_params = resolve_table_filter(
         zone_ids, "t.id", extra_params={"source": SEMANTIC_SOURCE}
     )
 
-    if zone_ids is None:
-        term_filter = ""
-        term_params: dict[str, Any] = {"source": SEMANTIC_SOURCE}
-    else:
-        table_ids = list(get_accessible_catalog_ids_for_zones(zone_ids)["table_ids"])
-        term_filter = (
-            f"WHERE NOT EXISTS {{"
+    term_params: dict[str, Any] = {"source": SEMANTIC_SOURCE}
+    term_conditions: list[str] = []
+
+    if zone_ids is not None:
+        term_params["table_ids"] = list(
+            get_accessible_catalog_ids_for_zones(zone_ids)["table_ids"]
+        )
+        term_conditions.append(
+            f"NOT EXISTS {{"
             f" (other:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)"
             f" WHERE NOT other.id IN $table_ids"
             f" }}"
         )
-        term_params = {"source": SEMANTIC_SOURCE, "table_ids": table_ids}
+
+    if search:
+        term_params["search"] = search.strip().lower()
+        term_conditions.append("toLower(term.name) CONTAINS $search")
+
+    term_filter = f"WHERE {' AND '.join(term_conditions)}" if term_conditions else ""
 
     terms = conn.query_read(
         f"""
@@ -420,11 +434,19 @@ def fetch_related_terms(
     """Return Term nodes related to *term_id* by co-location in the same table.
 
     Two terms are considered related when they are both connected to the same
-    Table node — either directly via a REPRESENTS edge, or indirectly through
-    the Column → ColumnAttribute → PROPERTY_OF path.
+    Table node.  A term is connected to a table through any of three paths:
 
-    Step 1 — collect every table connected to *term_id* (both paths).
-    Step 2 — collect every other term connected to those same tables (both paths).
+    * REPRESENTS — the table directly represents the term;
+    * PROPERTY_OF — the table owns a column whose ColumnAttribute is
+      PROPERTY_OF the term (``Table → Column → ColumnAttribute → Term``);
+    * SEMANTIC_FK — the table owns a foreign-key column that points, via a
+      SEMANTIC_FK edge, to a ColumnAttribute of the term
+      (``Table → Column → [SEMANTIC_FK] → ColumnAttribute → Term``).  This is
+      what links, e.g. ``Request`` (represented by ``requests``) to ``User``
+      when ``requests.creator_id`` references ``users.id``.
+
+    Step 1 — collect every table connected to *term_id* (all three paths).
+    Step 2 — collect every other term connected to those same tables (all three).
 
     *zone_ids* is a hard authorization boundary, not a relevance filter.
     When supplied: Step 1 only considers tables reachable through those
@@ -455,7 +477,7 @@ def fetch_related_terms(
         RETURN ta.id AS table_id
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
         WHERE true {step1_filter}
         RETURN ta.id AS table_id
@@ -496,7 +518,7 @@ def fetch_related_terms(
                         term_b.description AS description
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
               -[:{REL_PROPERTY_OF}]->(term_b:{LABEL_TERM})
         WHERE ta.id IN $shared_table_ids AND term_b.id <> $term_id
               {term_b_filter}
@@ -515,7 +537,10 @@ def fetch_related_terms_counts(
 
     Builds a ``term_id → set(table_id)`` map and a ``table_id → set(term_id)``
     reverse map from Neo4j, then computes for each term the number of distinct
-    other terms that share at least one table with it.
+    other terms that share at least one table with it.  A term is connected to
+    a table via REPRESENTS, PROPERTY_OF (its own ColumnAttribute) **or**
+    SEMANTIC_FK (a foreign-key column that references one of its
+    ColumnAttributes) — the same three paths used by ``fetch_related_terms``.
 
     *zone_ids* is a hard authorization boundary, not a relevance filter. A
     Term can be represented by more than one Table (see ``merge_term``), so
@@ -555,7 +580,7 @@ def fetch_related_terms_counts(
         RETURN term.id AS term_id, ta.id AS table_id
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         {filter_clause}
         RETURN term.id AS term_id, ta.id AS table_id

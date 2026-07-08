@@ -20,13 +20,15 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Props
 
 from gsf.connectors import get_connectors
 from gsf.dal.sql_attributes import (
+    SqlAttributeExpressionConflict,
     SqlAttributeNameConflict,
     SqlAttributeSqlError,
     delete_sql_attribute_node,
     detach_existing_sql_edges,
     fetch_sql_attribute_docs,
+    find_attr_by_expression,
     find_attr_by_name,
-    get_sql_attribute,
+    get_full_sql_attribute_by_id,
     get_sql_attribute_by_id,
     link_to_term,
     list_sql_attributes,
@@ -47,9 +49,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "SqlAttributeNameConflict",
+    "SqlAttributeExpressionConflict",
     "SqlAttributeSqlError",
     "list_sql_attributes",
-    "get_sql_attribute",
+    "get_full_sql_attribute_by_id",
+    "validate_sql_attribute",
     "create_sql_attribute",
     "update_sql_attribute",
     "delete_sql_attribute",
@@ -69,6 +73,29 @@ def _resolve_connector(connector: str) -> str:
         if db is not None and db.casefold() == key:
             return c.database_name
     raise ValueError(f"Connector {connector!r} not found among loaded connectors")
+
+
+def _resolve_database_name(connector: str | None) -> str | None:
+    """Resolve which database to validate SQL against.
+
+    The public create/update/validate API never asks the client for a
+    connector (see ``gsf/connectors/registry.py`` — connectors are a
+    server-side concept). When *connector* is omitted we resolve it
+    automatically: with exactly one configured connector there's no
+    ambiguity, so validation is scoped to its dialect/catalog; with zero
+    or multiple connectors we fall back to validating against the full
+    catalog (all dialects, all schemas), same as CustomAnalysis.
+
+    Internal callers that already know the target database (e.g. the
+    semantic pipeline, which processes one database at a time) may still
+    pass *connector* explicitly to keep that precision.
+    """
+    if connector is not None:
+        return _resolve_connector(connector)
+    connectors = get_connectors()
+    if len(connectors) == 1:
+        return connectors[0].database_name
+    return None
 
 
 def _persist_attr_with_sql(
@@ -91,6 +118,7 @@ def _persist_attr_with_sql(
         "description": props.get("description", ""),
         "expression": props.get("expression", ""),
         "source": props.get("source", ""),
+        "sql_id": query_obj.sql_node.get_id(),
         "sql": sql,
     }
 
@@ -113,6 +141,51 @@ def _embed_sql_attribute(
 
 
 # ---------------------------------------------------------------------------
+# Validation API
+# ---------------------------------------------------------------------------
+
+
+def validate_sql_attribute(
+    *,
+    expression: str,
+    term_id: str | None = None,
+    attribute_id: str | None = None,
+    connector: str | None = None,
+) -> dict[str, Any]:
+    """Validate a SQL expression against the catalog.
+
+    Does not persist anything — used by the "Validate SQL" step before a
+    SqlAttribute is created or updated. The connector is resolved
+    server-side (see :func:`_resolve_database_name`) — callers never need
+    to pass one.
+
+    When *term_id* is given, also checks that no other SqlAttribute of the
+    same term already uses an equivalent expression (*attribute_id*, when
+    editing an existing attribute, excludes it from that check).
+
+    Raises :class:`SqlAttributeExpressionConflict` on a duplicate SQL
+    snippet. Raises :class:`SqlAttributeSqlError` when the SQL can't be
+    resolved.
+    """
+    if term_id is not None:
+        conflict = find_attr_by_expression(
+            term_id=term_id,
+            expression=expression,
+            exclude_id=attribute_id,
+        )
+        if conflict is not None:
+            raise SqlAttributeExpressionConflict("SQL snippet already exists")
+
+    database_name = _resolve_database_name(connector)
+    validate_sql(
+        expression,
+        get_dialects(database_name),
+        get_schemas(database_name),
+    )
+    return {"valid": True, "expression": expression}
+
+
+# ---------------------------------------------------------------------------
 # Write API
 # ---------------------------------------------------------------------------
 
@@ -123,16 +196,19 @@ def create_sql_attribute(
     description: str,
     expression: str,
     term_id: str,
-    connector: str,
+    connector: str | None = None,
     source: str = "manual",
 ) -> dict[str, Any]:
     """Create a SqlAttribute, its Sql node, link to a Term, and embed.
 
+    The connector is resolved server-side (see
+    :func:`_resolve_database_name`) — callers never need to pass one.
+
     Raises :class:`SqlAttributeNameConflict` when ``name`` is already used.
     Raises :class:`SqlAttributeSqlError` when the SQL can't be resolved.
-    Raises ``ValueError`` when the Term or connector doesn't exist.
+    Raises ``ValueError`` when the Term doesn't exist.
     """
-    database_name = _resolve_connector(connector)
+    database_name = _resolve_database_name(connector)
 
     conflict = find_attr_by_name(name, exclude_id=None)
     if conflict is not None:
@@ -143,6 +219,14 @@ def create_sql_attribute(
     term = get_slim_term_by_id(term_id)
     if not term:
         raise ValueError(f"Term with id {term_id!r} not found")
+
+    expression_conflict = find_attr_by_expression(
+        term_id=term_id,
+        expression=expression,
+        exclude_id=None,
+    )
+    if expression_conflict is not None:
+        raise SqlAttributeExpressionConflict("SQL snippet already exists")
 
     query_obj = validate_sql(
         expression,
@@ -186,15 +270,18 @@ def update_sql_attribute(
     description: str,
     expression: str,
     term_id: str,
-    connector: str,
+    connector: str | None = None,
     source: str = "manual",
 ) -> dict[str, Any] | None:
     """Replace a SqlAttribute, re-parse SQL, re-link Term, and re-embed.
 
+    The connector is resolved server-side (see
+    :func:`_resolve_database_name`) — callers never need to pass one.
+
     Returns the updated row or ``None`` when no SqlAttribute with
     ``attr_id`` exists.
     """
-    database_name = _resolve_connector(connector)
+    database_name = _resolve_database_name(connector)
 
     if get_sql_attribute_by_id(attr_id) is None:
         return None

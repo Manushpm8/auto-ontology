@@ -25,6 +25,10 @@ export type SinglePageViewProps = {
 	isEditing?: boolean;
 	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
+	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
+	onEditSql?: (sectionId: string, sql: string) => void;
+	inlineSaveSectionId?: string;
+	hideEditToolbar?: boolean;
 };
 
 export const SinglePageView = ({
@@ -37,6 +41,10 @@ export const SinglePageView = ({
 	isEditing = false,
 	onSave,
 	onCancel,
+	onDataTableRowClick,
+	onEditSql,
+	inlineSaveSectionId,
+	hideEditToolbar,
 }: SinglePageViewProps): React.JSX.Element | null => {
 	const [loading, setLoading] = useState(true);
 	const [props, setProps] = useState<SinglePageFormat | null>(null);
@@ -112,6 +120,10 @@ export const SinglePageView = ({
 				isEditing={isEditing}
 				onSave={onSave}
 				onCancel={onCancel}
+				onDataTableRowClick={onDataTableRowClick}
+				onEditSql={onEditSql}
+				inlineSaveSectionId={inlineSaveSectionId}
+				hideEditToolbar={hideEditToolbar}
 			/>
 		</div>
 	);

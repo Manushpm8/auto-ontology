@@ -8,20 +8,29 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from gsf.dal import sql_attributes as sql_attr_dal
 from gsf.dal import terms as neo4j_dal
 
 router = APIRouter()
 
 
 @router.get("/terms")
-def list_terms(zone_ids: list[str] | None = Query(default=None)) -> dict:
+def list_terms(
+    zone_ids: list[str] | None = Query(default=None),
+    q: str | None = Query(default=None),
+) -> dict:
     """Return Term nodes zone-scoped to the provided zones.
 
     ``None`` (param absent) → no filter, return all (admin callers).
     ``[]`` (empty list) → viewer with no zone access, returns empty.
     ``[id, ...]`` → filter to terms reachable through those zones.
+
+    *q*, when given, additionally filters to terms whose name contains it
+    (case-insensitive).
     """
-    terms, _attrs = neo4j_dal.fetch_all_terms_and_attributes(zone_ids=zone_ids)
+    terms, _attrs = neo4j_dal.fetch_all_terms_and_attributes(
+        zone_ids=zone_ids, search=q
+    )
     return {"data": terms, "count": len(terms)}
 
 
@@ -31,6 +40,15 @@ def list_term_column_attributes(
 ) -> dict:
     """Return ColumnAttribute nodes (zone-scoped when zone_ids provided)."""
     attrs = neo4j_dal.fetch_column_attributes(zone_ids=zone_ids)
+    return {"data": attrs, "count": len(attrs)}
+
+
+@router.get("/terms/sql-attributes")
+def list_term_sql_attributes(
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Return SqlAttribute nodes (zone-scoped when zone_ids provided)."""
+    attrs = sql_attr_dal.fetch_sql_attributes(zone_ids=zone_ids)
     return {"data": attrs, "count": len(attrs)}
 
 
@@ -54,6 +72,20 @@ def list_term_column_attributes_by_id(
     of out-of-zone tables just because they belong to a term they can see.
     """
     attrs = neo4j_dal.fetch_column_attributes_by_term_id(term_id, zone_ids=zone_ids)
+    return {"data": attrs, "count": len(attrs)}
+
+
+@router.get("/terms/{term_id}/sql-attributes")
+def list_term_sql_attributes_by_id(
+    term_id: str,
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Return SqlAttribute nodes for a single Term.
+
+    Zone-scoped when zone_ids are provided, matching the term visibility
+    rules used by the single-term detail endpoint.
+    """
+    attrs = sql_attr_dal.fetch_sql_attributes_by_term_id(term_id, zone_ids=zone_ids)
     return {"data": attrs, "count": len(attrs)}
 
 

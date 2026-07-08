@@ -35,6 +35,10 @@ export type ComposerDataTableSection = {
 	title: string;
 	columns: { key: string; label: string }[];
 	rows: Record<string, string>[];
+	/** When set with `onDataTableRowClick`, rows become clickable using this field as id. */
+	rowIdKey?: string;
+	/** Shown instead of the table (columns included) when `rows` is empty. */
+	emptyMessage?: string;
 };
 
 export type ComposerLoadingPanelSection = {
@@ -77,6 +81,14 @@ export type ComposerRelatedTermsSection = {
 	terms: ComposerRelatedTermChip[];
 };
 
+export type ComposerSqlBlockSection = {
+	type: ComposerSectionKind.SQL_BLOCK;
+	id: string;
+	title: string;
+	sql: string;
+	editable?: boolean;
+};
+
 export type ComposerSection =
 	| ComposerTextCardSection
 	| ComposerTagListSection
@@ -84,7 +96,8 @@ export type ComposerSection =
 	| ComposerDataTableSection
 	| ComposerLoadingPanelSection
 	| ComposerZonesSection
-	| ComposerRelatedTermsSection;
+	| ComposerRelatedTermsSection
+	| ComposerSqlBlockSection;
 
 const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.TEXT_CARD,
@@ -94,6 +107,7 @@ const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.LOADING_PANEL,
 	ComposerSectionKind.ZONES_CHIPS,
 	ComposerSectionKind.RELATED_TERMS_CHIPS,
+	ComposerSectionKind.SQL_BLOCK,
 ];
 
 export function isComposerSection(x: unknown): x is ComposerSection {
