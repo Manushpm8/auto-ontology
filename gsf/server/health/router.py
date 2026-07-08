@@ -13,7 +13,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from gsf.dal.connections import verify_connectivity
-from gsf.vdb.config import get_postgres_connection_string
+from gsf.infra.postgres import get_postgres_connection_string
 
 router = APIRouter()
 

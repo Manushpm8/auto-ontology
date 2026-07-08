@@ -45,6 +45,17 @@ model Prompt {
   @@schema("public")
 }
 
+// Generic key/value application settings (e.g. feature flags). Read by the
+// Python ingestion service via psycopg to gate background jobs.
+model Configuration {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("configurations")
+  @@schema("public")
+}
+
 model Acronym {
   id          String   @id @default(uuid()) @db.Uuid
   name        String   @unique

@@ -32,6 +32,8 @@ const statement = {
 	connection: ['read', 'manage'],
 	// Zones (settings): everyone may view; only admins may add/edit/delete.
 	zone: ['read', 'manage'],
+	// Semantic compilation (settings): admin-only toggle + manual trigger.
+	semanticCompilation: ['read', 'manage'],
 } as const;
 
 export const ac = createAccessControl(statement);
@@ -50,6 +52,7 @@ export const roles = {
 		catalog: ['read', 'edit'],
 		connection: ['read', 'manage'],
 		zone: ['read', 'manage'],
+		semanticCompilation: ['read', 'manage'],
 	}),
 	// Viewer: read-only on glossary/prompts, full control of their own
 	// conversations, may run chat, may view custom analyses (not add/edit them),

@@ -23,7 +23,6 @@ from nemo_retriever.common.params.models import TabularExtractParams
 from gsf.vdb import get_data_vdb, get_semantic_vdb
 from gsf.connectors.registry import create_connector
 from gsf.dal.connections import delete_database_subgraph
-from gsf.semantic.compile import run_semantic_compilation
 
 logger = logging.getLogger("ingestion_service.ingest")
 
@@ -57,14 +56,6 @@ def run_ingest(connection_string: str) -> None:
             logger.info(
                 f"Tabular ingest result: {len(result_df)} rows written to pgvector",
             )
-
-        logger.info("Starting semantic compilation for database %s", database_name)
-        tables_processed = run_semantic_compilation(database_name)
-        logger.info(
-            "Finished semantic compilation for database %s: %d tables processed",
-            database_name,
-            tables_processed,
-        )
 
     finally:
         TABULAR_PARAMS.connector.close()

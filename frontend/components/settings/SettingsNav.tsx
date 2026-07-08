@@ -15,6 +15,10 @@ const CONNECTIONS_NAV_ITEM: NavItem = { label: 'Connections', href: '/settings/c
 const ZONES_NAV_ITEM: NavItem = { label: 'Zones', href: '/settings/zones' };
 const USERS_NAV_ITEM: NavItem = { label: 'Users', href: '/settings/users' };
 const SSO_NAV_ITEM: NavItem = { label: 'Single Sign-On', href: '/settings/sso' };
+const SEMANTIC_COMPILATION_NAV_ITEM: NavItem = {
+	label: 'Semantic Compilation',
+	href: '/settings/semantic-compilation',
+};
 
 function rowClassName(selected: boolean) {
 	return `flex min-h-9 items-center rounded-lg px-3 text-sm no-underline transition-colors ${
@@ -47,7 +51,7 @@ export const SettingsNav = () => {
 
 	const items: NavItem[] = [];
 	if (!envManaged) items.push(CONNECTIONS_NAV_ITEM);
-	items.push(ZONES_NAV_ITEM, USERS_NAV_ITEM, SSO_NAV_ITEM);
+	items.push(ZONES_NAV_ITEM, USERS_NAV_ITEM, SSO_NAV_ITEM, SEMANTIC_COMPILATION_NAV_ITEM);
 
 	return (
 		<nav

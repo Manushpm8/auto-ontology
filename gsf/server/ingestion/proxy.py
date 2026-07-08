@@ -51,3 +51,16 @@ def trigger_ingest_delete(database_name: str) -> None:
         ).raise_for_status()
     except Exception:
         logger.exception("Failed to trigger ingest delete via %s", url)
+
+
+def trigger_semantic_compile() -> None:
+    """Ask the ingestion service to run semantic compilation (best-effort).
+
+    The service starts its semantic scheduler if it isn't running yet, so this
+    also takes effect when compilation is enabled while the service is up.
+    """
+    url = f"{_base_url()}/semantic/compile"
+    try:
+        httpx.post(url, timeout=_REQUEST_TIMEOUT).raise_for_status()
+    except Exception:
+        logger.exception("Failed to trigger semantic compile via %s", url)
