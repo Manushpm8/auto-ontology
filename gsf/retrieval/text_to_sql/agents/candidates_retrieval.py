@@ -17,6 +17,7 @@ Responsibilities:
 
 import logging
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
 from langchain_core.messages import SystemMessage
@@ -31,6 +32,7 @@ from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import (
     CandidateFilterModel,
     ColumnAttributeSpec,
+    CombinedCandidateFilterModel,
     CustomAnalysisFilterModel,
 )
 from gsf.retrieval.text_to_sql.state import (
@@ -141,6 +143,22 @@ Candidates:
 Return the list of IDs to KEEP. If none are relevant, return an empty list.
 """
 
+_COMBINED_FILTER_PROMPT = """\
+You are filtering two sets of candidates for relevance to a user question.
+Keep only candidates that could meaningfully contribute to answering the question.
+Remove any that share no common domain, idea, or intent with the question.
+
+User question: {question}
+
+Custom analyses:
+{custom_block}
+
+SQL attributes:
+{sql_attr_block}
+
+Return the IDs to KEEP for each set separately. Use empty lists if none are relevant.
+"""
+
 
 def _llm_filter_candidates(
     llm, question: str, candidates: list[dict], candidate_type: str
@@ -180,6 +198,56 @@ def _llm_filter_candidates(
         kept_ids,
     )
     return filtered
+
+
+def _llm_filter_both(
+    llm,
+    question: str,
+    custom_hits: list[dict],
+    sql_attr_hits: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Filter custom analyses and SQL attributes in a single LLM call.
+
+    Falls back to the original lists on LLM failure.
+    """
+    if not custom_hits and not sql_attr_hits:
+        return [], []
+
+    def _fmt(candidates: list[dict]) -> str:
+        lines = [
+            f"- id: {c.get('id')} | {c.get('text', '')}"
+            for c in candidates
+            if c.get("id")
+        ]
+        return "\n".join(lines) if lines else "(none)"
+
+    messages = [
+        SystemMessage(
+            content=_COMBINED_FILTER_PROMPT.format(
+                question=question,
+                custom_block=_fmt(custom_hits),
+                sql_attr_block=_fmt(sql_attr_hits),
+            )
+        )
+    ]
+
+    result = invoke_with_structured_output(llm, messages, CombinedCandidateFilterModel)
+    if result is None:
+        return custom_hits, sql_attr_hits
+
+    kept_custom = set(result.custom_analysis_ids)
+    kept_sql = set(result.sql_attribute_ids)
+    filtered_custom = [c for c in custom_hits if str(c.get("id") or "") in kept_custom]
+    filtered_sql = [c for c in sql_attr_hits if str(c.get("id") or "") in kept_sql]
+
+    logger.debug(
+        "combined filter: custom %d→%d, sql_attr %d→%d",
+        len(custom_hits),
+        len(filtered_custom),
+        len(sql_attr_hits),
+        len(filtered_sql),
+    )
+    return filtered_custom, filtered_sql
 
 
 # ---------------------------------------------------------------------------
@@ -261,25 +329,37 @@ class CandidateRetrievalAgent(BaseAgent):
         all_sql_attr_hits: list[dict] = []
 
         if semantic_retriever is not None:
-            all_custom_hits = _search_by_label(
-                semantic_retriever, question, Labels.CUSTOM_ANALYSIS, 3
-            )
-            all_sql_attr_hits = _search_by_label(
-                semantic_retriever, question, LABEL_SQL_ATTRIBUTE, 3
-            )
             clean_entities = [e.strip() for e in entities if (e or "").strip()]
-            for entity in clean_entities:
-                all_col_attr_hits.extend(
-                    _search_by_label(
-                        semantic_retriever, entity, LABEL_COLUMN_ATTRIBUTE, 2
-                    )
-                )
 
-        all_custom_hits = _llm_filter_candidates(
-            llm, question, all_custom_hits, "custom analyses"
-        )
-        all_sql_attr_hits = _llm_filter_candidates(
-            llm, question, all_sql_attr_hits, "SQL attributes"
+            search_tasks: list[tuple[str, Any]] = [
+                ("custom", (semantic_retriever, question, Labels.CUSTOM_ANALYSIS, 3)),
+                ("sql_attr", (semantic_retriever, question, LABEL_SQL_ATTRIBUTE, 3)),
+                *[
+                    (
+                        f"col_attr:{entity}",
+                        (semantic_retriever, entity, LABEL_COLUMN_ATTRIBUTE, 2),
+                    )
+                    for entity in clean_entities
+                ],
+            ]
+
+            with ThreadPoolExecutor(max_workers=len(search_tasks) or 1) as pool:
+                futures = {
+                    pool.submit(_search_by_label, *args): key
+                    for key, args in search_tasks
+                }
+                for future in as_completed(futures):
+                    key = futures[future]
+                    result = future.result()
+                    if key == "custom":
+                        all_custom_hits = result
+                    elif key == "sql_attr":
+                        all_sql_attr_hits = result
+                    else:
+                        all_col_attr_hits.extend(result)
+
+        all_custom_hits, all_sql_attr_hits = _llm_filter_both(
+            llm, question, all_custom_hits, all_sql_attr_hits
         )
 
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
