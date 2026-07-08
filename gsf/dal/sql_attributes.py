@@ -25,7 +25,6 @@ from gsf.semantic.constants import (
     LABEL_TERM,
     REL_HAS_ATTRIBUTE,
     REL_PROPERTY_OF,
-    REL_REPRESENTS,
 )
 from gsf.server.sql_utils import SqlParseError
 from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
@@ -62,23 +61,30 @@ _SQL_ATTRIBUTE_FIELDS = """attr.id            AS id,
                sql.sql_full_query AS sql"""
 
 
-def _term_zone_filter(
+def _sql_attr_zone_filter(
     zone_ids: list[str] | None,
     extra_params: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Return a Cypher ``WHERE`` clause and params for term zone scoping."""
+    """Return a Cypher ``WHERE`` clause and params for SqlAttribute zone scoping.
+
+    The tables that scope a SqlAttribute are the ones its SQL actually
+    references (``SqlAttribute -[HAS_SQL]-> Sql -[SQL]-> Table``), not the
+    tables that represent its parent Term. The attribute is visible in the
+    given zones only when every table its SQL touches is accessible.
+    """
     params = dict(extra_params or {})
     if zone_ids is None:
         return "", params
     table_ids = list(get_accessible_catalog_ids_for_zones(zone_ids)["table_ids"])
-    term_filter = (
+    attr_filter = (
         f"WHERE NOT EXISTS {{"
-        f" (other:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)"
-        f" WHERE NOT other.id IN $table_ids"
+        f" (attr)-[:{Edges.HAS_SQL}]->(:{Labels.SQL})"
+        f"-[:{Edges.SQL}]->(tbl:{Labels.TABLE})"
+        f" WHERE NOT tbl.id IN $table_ids"
         f" }}"
     )
     params["table_ids"] = table_ids
-    return term_filter, params
+    return attr_filter, params
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +103,7 @@ def _query_sql_attributes(
 
     Every SqlAttribute read joins the same three things: the SqlAttribute
     itself, its Term (via PROPERTY_OF), and its SQL text (via HAS_SQL) —
-    this factors that join, the zone scoping (``_term_zone_filter``), and
+    this factors that join, the zone scoping (``_sql_attr_zone_filter``), and
     the shared RETURN projection into one place. Anchor on *attr_id* or
     *term_id* (mutually exclusive) to scope to one attribute/term, or leave
     both ``None`` for every SqlAttribute. Pass *order_by* as a raw ``ORDER
@@ -108,24 +114,24 @@ def _query_sql_attributes(
         extra_params["id"] = attr_id
     if term_id is not None:
         extra_params["term_id"] = term_id
-    term_filter, params = _term_zone_filter(zone_ids, extra_params=extra_params)
+    attr_filter, params = _sql_attr_zone_filter(zone_ids, extra_params=extra_params)
 
     if term_id is not None:
         anchor = f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        {term_filter}
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term)
+        {attr_filter}
         """
     elif attr_id is not None:
         anchor = f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        {term_filter}
+        {attr_filter}
         """
     else:
         anchor = f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        {term_filter}
+        {attr_filter}
         """
 
     return get_neo4j_conn().query_read(
