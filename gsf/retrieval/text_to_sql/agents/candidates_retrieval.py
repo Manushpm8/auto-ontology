@@ -16,6 +16,7 @@ Responsibilities:
 """
 
 import logging
+
 from typing import Any, Dict
 
 from langchain_core.messages import SystemMessage
@@ -260,19 +261,14 @@ class CandidateRetrievalAgent(BaseAgent):
         all_sql_attr_hits: list[dict] = []
 
         if semantic_retriever is not None:
-            # CustomAnalysis: search once with the full question.
             all_custom_hits = _search_by_label(
                 semantic_retriever, question, Labels.CUSTOM_ANALYSIS, 3
             )
-            # SqlAttribute: search once with the full question.
             all_sql_attr_hits = _search_by_label(
                 semantic_retriever, question, LABEL_SQL_ATTRIBUTE, 3
             )
-            # ColumnAttribute: search per entity.
-            for entity in entities:
-                entity = (entity or "").strip()
-                if not entity:
-                    continue
+            clean_entities = [e.strip() for e in entities if (e or "").strip()]
+            for entity in clean_entities:
                 all_col_attr_hits.extend(
                     _search_by_label(
                         semantic_retriever, entity, LABEL_COLUMN_ATTRIBUTE, 2
