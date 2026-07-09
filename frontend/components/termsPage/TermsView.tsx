@@ -160,6 +160,18 @@ export const TermsView = () => {
 	const [termEditing, setTermEditing] = useState(false);
 	const [sqlAttrEditing, setSqlAttrEditing] = useState(false);
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
+
+	// Term and SQL-attribute single pages always open in read mode. Reset synchronously
+	// when navigation changes so the next page never briefly renders in edit mode.
+	const [prevFocusId, setPrevFocusId] = useState(focusId);
+	const [prevSqlAttrId, setPrevSqlAttrId] = useState(sqlAttrId);
+	if (focusId !== prevFocusId || sqlAttrId !== prevSqlAttrId) {
+		setPrevFocusId(focusId);
+		setPrevSqlAttrId(sqlAttrId);
+		setTermEditing(false);
+		setSqlAttrEditing(false);
+		setSqlAttrEditError(null);
+	}
 	const [sqlEditModalOpen, setSqlEditModalOpen] = useState(false);
 	const [sqlEditValue, setSqlEditValue] = useState('');
 	const [sqlEditOriginalValue, setSqlEditOriginalValue] = useState('');
@@ -785,6 +797,7 @@ export const TermsView = () => {
 				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
+						key={sqlAttrId}
 						dataId={sqlAttrId}
 						title={sqlAttrTitle}
 						getSinglePage={getSqlAttributeSinglePage}
@@ -919,6 +932,7 @@ export const TermsView = () => {
 				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
+						key={focusId}
 						dataId={focusId}
 						title={termTitle}
 						getSinglePage={getSinglePage}
