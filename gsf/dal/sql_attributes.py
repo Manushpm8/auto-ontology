@@ -54,6 +54,7 @@ SqlAttributeSqlError = SqlParseError
 _SQL_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.name          AS name,
                attr.description   AS description,
+               attr.description_suggestion AS description_suggestion,
                attr.expression    AS expression,
                attr.source        AS source,
                sql.sql_full_query AS sql"""
@@ -331,6 +332,60 @@ def update_sql_attribute_props(
             "expression": expression,
             "source": source,
         },
+    )
+
+
+def update_sql_attribute_metadata_props(
+    attr_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+) -> None:
+    """SET editable metadata properties on an existing SqlAttribute node."""
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        SET attr.name = coalesce($name, attr.name),
+            attr.description = coalesce($description, attr.description)
+        """,
+        {"id": attr_id, "name": name, "description": description},
+    )
+
+
+def set_sql_attribute_description_suggestion(
+    attr_id: str,
+    description_suggestion: str,
+) -> None:
+    """SET the cached LLM description suggestion on a SqlAttribute node."""
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        SET attr.description_suggestion = $description_suggestion
+        """,
+        {"id": attr_id, "description_suggestion": description_suggestion},
+    )
+
+
+def clear_sql_attribute_description_suggestion(attr_id: str) -> None:
+    """REMOVE the cached LLM description suggestion from a SqlAttribute node."""
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        REMOVE attr.description_suggestion
+        """,
+        {"id": attr_id},
+    )
+
+
+def clear_sql_attribute_description_suggestions_for_term(term_id: str) -> None:
+    """REMOVE cached LLM suggestions from every SqlAttribute of a Term."""
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
+              (term:{LABEL_TERM} {{id: $term_id}})
+        REMOVE attr.description_suggestion
+        """,
+        {"term_id": term_id},
     )
 
 

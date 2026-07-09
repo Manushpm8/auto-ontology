@@ -10,6 +10,7 @@ export type ComposerTextCardSection = {
 	title: string;
 	body: string;
 	editable?: boolean;
+	suggestable?: boolean;
 };
 
 export type ComposerTagListSection = {

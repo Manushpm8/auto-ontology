@@ -23,6 +23,7 @@ from gsf.dal.sql_attributes import (
     SqlAttributeExpressionConflict,
     SqlAttributeNameConflict,
     SqlAttributeSqlError,
+    clear_sql_attribute_description_suggestion,
     delete_sql_attribute_node,
     detach_existing_sql_edges,
     fetch_sql_attribute_docs,
@@ -32,10 +33,14 @@ from gsf.dal.sql_attributes import (
     get_sql_attribute_by_id,
     link_to_term,
     list_sql_attributes,
+    update_sql_attribute_metadata_props,
     update_sql_attribute_props,
 )
 from gsf.dal.terms import get_slim_term_by_id
 from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
+from gsf.server.sql_attributes.description_suggester import (
+    suggest_sql_attribute_description,
+)
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
 from gsf.utils import get_embed_params
 from gsf.utils.embedding import embed_docs_into_vdb
@@ -53,10 +58,12 @@ __all__ = [
     "SqlAttributeSqlError",
     "list_sql_attributes",
     "get_full_sql_attribute_by_id",
+    "get_sql_attribute_by_id",
     "validate_sql_attribute",
     "create_sql_attribute",
     "update_sql_attribute",
     "delete_sql_attribute",
+    "suggest_sql_attribute_description",
 ]
 
 
@@ -283,8 +290,13 @@ def update_sql_attribute(
     """
     database_name = _resolve_database_name(connector)
 
-    if get_sql_attribute_by_id(attr_id) is None:
+    existing = get_full_sql_attribute_by_id(attr_id)
+    if existing is None:
         return None
+    name_changed = (existing.get("name") or "").strip() != name.strip()
+    expression_changed = (
+        existing.get("expression") or ""
+    ).strip() != expression.strip()
 
     conflict = find_attr_by_name(name, exclude_id=attr_id)
     if conflict is not None:
@@ -303,6 +315,8 @@ def update_sql_attribute(
     )
 
     detach_existing_sql_edges(attr_id)
+    if name_changed or expression_changed:
+        clear_sql_attribute_description_suggestion(attr_id)
     update_sql_attribute_props(
         attr_id,
         name=name,
@@ -347,6 +361,58 @@ def update_sql_attribute(
         "term_id": term_id,
         "sql": expression,
     }
+
+
+def update_sql_attribute_metadata(
+    *,
+    attr_id: str,
+    name: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any] | None:
+    """Patch SqlAttribute name/description without touching SQL expression."""
+    existing = get_full_sql_attribute_by_id(attr_id)
+    if existing is None:
+        return None
+
+    next_name = name.strip() if name is not None else existing.get("name", "")
+    if not next_name:
+        raise ValueError("SQL attribute name cannot be blank")
+
+    next_description = (
+        description if description is not None else existing.get("description", "")
+    )
+
+    name_changed = (existing.get("name") or "").strip() != next_name
+    description_changed = (existing.get("description") or "") != next_description
+    if not name_changed and not description_changed:
+        return existing
+
+    if name_changed:
+        conflict = find_attr_by_name(next_name, exclude_id=attr_id)
+        if conflict is not None:
+            raise SqlAttributeNameConflict(
+                f"SqlAttribute with name {next_name!r} already exists "
+                f"(id={conflict['id']!r})"
+            )
+        clear_sql_attribute_description_suggestion(attr_id)
+
+    update_sql_attribute_metadata_props(
+        attr_id,
+        name=next_name if name_changed else None,
+        description=next_description if description_changed else None,
+    )
+
+    vdb = get_semantic_vdb()
+    vdb.delete_by_id(attr_id)
+    _embed_sql_attribute(
+        embed_params=get_embed_params(),
+        vdb=vdb,
+        attr_id=attr_id,
+        database_name=existing.get("database_name"),
+    )
+
+    updated = get_full_sql_attribute_by_id(attr_id)
+    return updated
 
 
 def delete_sql_attribute(attr_id: str) -> dict[str, Any] | None:
