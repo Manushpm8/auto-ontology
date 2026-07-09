@@ -54,8 +54,9 @@ jobs:
         run: |
           set -euo pipefail
           # Staging app images: tag is stg.<UTC ts> only (no version prefix).
-          # The constant "stg." prefix lets roll-stg.sh pick app images and skip
-          # the OCI chart tags (<chartver>-stg.*) sharing this nvcr.io repo.
+          # The constant "stg." prefix lets the deploy repo's nightly roll
+          # (gsf/gsf-demo-deploy: ci/roll-stg.sh) pick app images and skip the
+          # OCI chart tags (<chartver>-stg.*) sharing this nvcr.io repo.
           t='${{ github.event.inputs.tag }}'
           if [ -z "$t" ]; then
             t="stg.$(date -u +%Y%m%d%H%M%S)"
