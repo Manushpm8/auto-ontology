@@ -38,6 +38,7 @@ from gsf.connectors.connection_string_factory import (  # noqa: E402
 from gsf.ingestion_service.ingest import run_ingest  # noqa: E402
 from gsf.ingestion_service.router import router  # noqa: E402
 from gsf.server.connections.dal import list_connections  # noqa: E402
+from gsf.version import get_app_version  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,7 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    logger.info("Starting GSF Ingestion Service — app version %s", get_app_version())
     uvicorn.run(
         app,
         host="0.0.0.0",
