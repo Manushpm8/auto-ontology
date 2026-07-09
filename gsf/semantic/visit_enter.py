@@ -9,6 +9,7 @@ from typing import Any
 
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
+from gsf.semantic.constants import LABEL_TERM, REL_REPRESENTS, SEMANTIC_SOURCE
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder
@@ -22,6 +23,90 @@ from gsf.server.sql_attributes.service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _term_exists(term_name: str) -> dict | None:
+    """Return the existing Term's schema context if it exists, else None."""
+    from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+    from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
+        Edges as NEdges,
+        Labels as NLabels,
+    )
+
+    rows = get_neo4j_conn().query_read(
+        f"MATCH (t:{NLabels.TABLE})-[:{REL_REPRESENTS}]->"
+        f"(term:{LABEL_TERM} {{name: $name, source: $src}}) "
+        f"OPTIONAL MATCH (t)<-[:{NEdges.CONTAINS}]-(sch:{NLabels.SCHEMA}) "
+        f"RETURN term.id AS id, t.name AS table_name, "
+        f"sch.name AS schema_name LIMIT 1",
+        {"name": term_name, "src": SEMANTIC_SOURCE},
+    )
+    return dict(rows[0]) if rows else None
+
+
+from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
+
+def _existing_attr_names(term_name: str, exclude_table_id: str) -> dict[str, str]:
+    """Return ``{attr_name: table_name}`` for attrs under *term_name* from other tables."""
+    from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+    from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
+        Labels as NLabels,
+    )
+
+    rows = get_neo4j_conn().query_read(
+        f"MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} "
+        f"{{term_name: $tn, source: $src}}) "
+        f"WHERE attr.table_id <> $tid "
+        f"MATCH (t:{NLabels.TABLE} {{id: attr.table_id}}) "
+        f"RETURN attr.name AS name, t.name AS table_name",
+        {"tn": term_name, "src": SEMANTIC_SOURCE, "tid": exclude_table_id},
+    )
+    return {r["name"]: r["table_name"] for r in rows if r.get("name")}
+
+
+def _rename_attr(term_name: str, old_name: str, new_name: str) -> None:
+    """Rename an existing ColumnAttribute under *term_name*."""
+    from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+
+    get_neo4j_conn().query_write(
+        f"MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} "
+        f"{{name: $old, term_name: $tn, source: $src}}) "
+        f"SET attr.name = $new",
+        {"old": old_name, "tn": term_name, "src": SEMANTIC_SOURCE, "new": new_name},
+    )
+
+
+_VARIANT_SUFFIXES = ("_archive", "_hist", "_history", "_staging", "_backup", "_old")
+
+_VARIANT_LABELS = {
+    "_archive": "Archived",
+    "_hist": "Historical",
+    "_history": "Historical",
+    "_staging": "Staging",
+    "_backup": "Backup",
+    "_old": "Legacy",
+}
+
+
+def _tables_are_variants(a: str, b: str) -> bool:
+    """True when one table name is a known variant of the other."""
+    a_low, b_low = a.lower(), b.lower()
+    if a_low == b_low:
+        return False
+    for suffix in _VARIANT_SUFFIXES:
+        if a_low == b_low + suffix or b_low == a_low + suffix:
+            return True
+    return False
+
+
+def _variant_label(variant_table: str, base_table: str) -> str:
+    """Return a human-readable prefix like 'Archived' for the variant table."""
+    v, b = variant_table.lower(), base_table.lower()
+    for suffix, label in _VARIANT_LABELS.items():
+        if v == b + suffix:
+            return label
+    return "Variant"
+
 
 # Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
 # the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
@@ -150,13 +235,29 @@ def process_table(
                             term.name, term.description, candidates
                         )
                         if merge_into:
-                            logger.info(
-                                "[%s] Merging proposed Term %r into existing %r",
-                                table_name,
-                                term.name,
-                                merge_into,
+                            target = _term_exists(merge_into)
+                            target_table = (
+                                target.get("table_name", "") if target else ""
                             )
-                            term.name = merge_into
+                            if _tables_are_variants(table_name, target_table):
+                                logger.info(
+                                    "[%s] Skipping merge of %r into %r "
+                                    "— tables are naming variants (%s / %s)",
+                                    table_name,
+                                    term.name,
+                                    merge_into,
+                                    table_name,
+                                    target_table,
+                                )
+                            else:
+                                logger.info(
+                                    "[%s] Merging proposed Term %r "
+                                    "into existing %r",
+                                    table_name,
+                                    term.name,
+                                    merge_into,
+                                )
+                                term.name = merge_into
                 except Exception:
                     logger.warning(
                         "[%s] Term dedup check failed for %r — proceeding as-is",
@@ -165,20 +266,81 @@ def process_table(
                         exc_info=True,
                     )
 
+        schema_name = table.get("schema_name", "")
+
         for term, assignments in persisted_terms:
-            merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
+            existing = _term_exists(term.name)
+            if existing:
+                ex_table = existing.get("table_name", "")
+                ex_schema = existing.get("schema_name", "")
+                if (
+                    ex_table == table_name
+                    and ex_schema
+                    and schema_name
+                    and ex_schema != schema_name
+                ):
+                    qualified = f"{schema_name.title()} {term.name}"
+                    logger.info(
+                        "[%s] Term qualified as %r (same table in schema %s "
+                        "already owns %r)",
+                        table_name,
+                        qualified,
+                        ex_schema,
+                        existing.get("id", "?"),
+                    )
+                    term.name = qualified
+                elif _tables_are_variants(table_name, ex_table):
+                    suffix = _variant_label(table_name, ex_table)
+                    qualified = f"{suffix} {term.name}"
+                    logger.info(
+                        "[%s] Term qualified as %r (variant of %s)",
+                        table_name,
+                        qualified,
+                        ex_table,
+                    )
+                    term.name = qualified
+
+            term_id = merge_term(
+                term.name, term.description, table_id, synonyms=term.synonyms
+            )
             result_term_names.append(term.name)
+
+            existing_attrs = _existing_attr_names(term.name, table_id)
+
             for assignment in assignments:
                 spec = spec_by_column[assignment.source_column]
+                attr_name = spec.display_name
+                if attr_name in existing_attrs:
+                    ex_table = existing_attrs[attr_name]
+                    ex_qualified = f"{attr_name} ({ex_table})"
+                    _rename_attr(term.name, attr_name, ex_qualified)
+                    logger.info(
+                        "[%s] Existing attribute %r renamed to %r",
+                        table_name,
+                        attr_name,
+                        ex_qualified,
+                    )
+                    del existing_attrs[attr_name]
+                    existing_attrs[ex_qualified] = ex_table
+
+                    attr_name = f"{attr_name} ({table_name})"
+                    logger.info(
+                        "[%s] Incoming attribute %r qualified as %r",
+                        table_name,
+                        spec.display_name,
+                        attr_name,
+                    )
+                existing_attrs[attr_name] = table_name
+
                 merge_column_attribute(
                     term_name=term.name,
                     table_id=table_id,
                     source_column=spec.source_column,
-                    attr_name=spec.display_name,
+                    attr_name=attr_name,
                     datatype=spec.datatype,
                     description=spec.description,
                 )
-                result_attr_names.append(spec.display_name)
+                result_attr_names.append(attr_name)
 
         logger.info(
             "[%s] → Terms %s (%d attrs, %d suspected FKs)",

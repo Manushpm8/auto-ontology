@@ -56,7 +56,14 @@ def fk_target_table_names(fks: list[dict[str, Any]]) -> list[str]:
 
 
 def _column_to_attr_name(column_name: str) -> str:
+    """Convert a physical column name to a human-readable Title Case label.
+
+    Handles snake_case, camelCase, PascalCase, and unseparated names.
+    """
     parts = re.split(r"[_\s]+", column_name.strip())
-    if not parts:
-        return column_name
-    return parts[0].lower() + "".join(p.capitalize() for p in parts[1:] if p)
+    words: list[str] = []
+    for part in parts:
+        words.extend(re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\d|\b)|[A-Z]+$|\d+", part))
+    if not words:
+        return column_name.capitalize() if column_name else column_name
+    return " ".join(w.capitalize() for w in words)

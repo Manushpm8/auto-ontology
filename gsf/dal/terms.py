@@ -87,9 +87,16 @@ def merge_term(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})
         MERGE (term:{LABEL_TERM} {{name: $name, source: $source}})
-        ON CREATE SET term.id = randomUUID()
-        SET term.description = $description,
-            term.synonyms = $synonyms
+        ON CREATE SET term.id = randomUUID(),
+                      term.description = $description,
+                      term.synonyms = $synonyms
+        ON MATCH SET  term.description = CASE
+                        WHEN $description = '' OR term.description CONTAINS $description
+                        THEN term.description
+                        ELSE term.description + ' ' + $description
+                      END,
+                      term.synonyms = [s IN (coalesce(term.synonyms, []) + $synonyms)
+                                       WHERE s <> '' | s]
         MERGE (t)-[:{REL_REPRESENTS}]->(term)
         RETURN term.id AS id
         """,
