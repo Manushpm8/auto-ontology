@@ -4,7 +4,7 @@
 
 """VDB initialization — data layer and semantic layer collections."""
 
-from gsf.vdb.config import get_postgres_connection_string
+from gsf.infra.postgres import get_postgres_connection_string
 from gsf.vdb.postgres import PostgresVDB
 
 DATA_VDB_COLLECTION: str = "data_objects_layer"

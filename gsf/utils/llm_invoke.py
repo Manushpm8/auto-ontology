@@ -6,8 +6,10 @@
 
 import logging
 import os
+import time
 from typing import Type, TypeVar
 
+import requests as _requests
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
@@ -15,6 +17,21 @@ from pydantic import BaseModel, ValidationError
 logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
+LLM_INVOKE_TIMEOUT_S = 50
+
+
+class _TimeoutSession(_requests.Session):
+    """requests.Session that enforces a default timeout on every request."""
+
+    def __init__(self, timeout: float = LLM_INVOKE_TIMEOUT_S, **kwargs):
+        super().__init__(**kwargs)
+        self._default_timeout = timeout
+
+    def request(self, method, url, **kwargs):
+        kwargs.setdefault("timeout", self._default_timeout)
+        return super().request(method, url, **kwargs)
+
+
 T = TypeVar("T", bound=BaseModel)
 
 _BASE_URL = os.environ.get("BASE_URL", "https://integrate.api.nvidia.com/v1")
@@ -24,17 +41,27 @@ _API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
 def get_llm_client(
     *,
+    model: str | None = None,
     temperature: float = 0.0,
     max_tokens: int = 4096,
 ) -> BaseChatModel:
+    """Create an LLM client.
+
+    Parameters
+    ----------
+    model : str | None
+        Override the default ``MODEL_NAME`` env var for this client.
+    """
     if not _API_KEY:
         raise EnvironmentError("NVIDIA_API_KEY is not set")
 
-    if _MODEL_NAME.startswith("openai/"):
+    resolved_model = model or _MODEL_NAME
+
+    if resolved_model.startswith("openai/"):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=_MODEL_NAME,
+            model=resolved_model,
             api_key=_API_KEY,
             base_url=_BASE_URL,
             temperature=temperature,
@@ -43,13 +70,15 @@ def get_llm_client(
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
-    return ChatNVIDIA(
-        model=_MODEL_NAME,
+    client = ChatNVIDIA(
+        model=resolved_model,
         api_key=_API_KEY,
         base_url=_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
+    return client
 
 
 def safe_invoke_with_structured_output(
@@ -65,6 +94,17 @@ def safe_invoke_with_structured_output(
         try:
             model_llm = llm.with_structured_output(schema)
             result = model_llm.invoke(current_messages)
+        except _requests.exceptions.ReadTimeout:
+            logger.error(
+                "LLM invoke timed out after %ds on attempt %d/%d for %s",
+                LLM_INVOKE_TIMEOUT_S,
+                attempt + 1,
+                RETRY_MAX_ATTEMPTS,
+                schema_name,
+            )
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                continue
+            raise
         except ValidationError as e:
             if attempt < RETRY_MAX_ATTEMPTS - 1:
                 current_messages.append(
@@ -84,6 +124,18 @@ def safe_invoke_with_structured_output(
                 )
                 raise
         except Exception as e:
+            is_rate_limit = "429" in str(e) or "Too Many Requests" in str(e)
+            if is_rate_limit and attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1)
+                logger.warning(
+                    "Rate-limited on attempt %d/%d for %s — retrying in %ds",
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                    schema_name,
+                    wait,
+                )
+                time.sleep(wait)
+                continue
             logger.error(
                 f"Unexpected error on attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} for {schema_name}: "
                 f"{type(e).__name__}: {e}",

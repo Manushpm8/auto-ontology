@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 
-LABEL_ZONE = "zone"
-REL_ZONE_OF = "zone_of"
+from gsf.server.zones.constants import LABEL_ZONE
+
 REL_CONTAINS = Edges.CONTAINS
 
 ZONE_DATA_LABELS = (
@@ -35,6 +35,7 @@ def format_zone(
     row: dict,
     *,
     items: list[dict] | list[str] | None = None,
+    enabled: bool | None = None,
 ) -> dict:
     """Shape a zone row for API responses."""
     result = {
@@ -43,6 +44,7 @@ def format_zone(
         "description": row.get("description"),
         "color": row.get("color"),
         "label": LABEL_ZONE,
+        "enabled": enabled if enabled is not None else row.get("enabled", True),
     }
     if items is not None:
         result["items"] = items

@@ -15,6 +15,11 @@ import type { CustomAnalysis } from '@/types/analysis';
 
 export type AnalysisViewProps = Record<string, never>;
 
+const FIELD_INPUT_CLASSNAME =
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+
+const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
+
 export const AnalysisView = () => {
 	const [items, setItems] = useState<CustomAnalysis[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -27,6 +32,9 @@ export const AnalysisView = () => {
 	const [sql, setSql] = useState('');
 	const [submitting, setSubmitting] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
+	const [validating, setValidating] = useState(false);
+	const [validationMessage, setValidationMessage] = useState<string | null>(null);
+	const [sqlValidated, setSqlValidated] = useState(false);
 
 	const [deletingItem, setDeletingItem] = useState<CustomAnalysis | null>(null);
 	const [deleting, setDeleting] = useState(false);
@@ -41,7 +49,7 @@ export const AnalysisView = () => {
 			setLoading(true);
 			const res = await analyses.list();
 			if (cancelled) return;
-			if (res.error === true) {
+			if (res.error) {
 				setError(res.message ?? 'Failed to load custom analyses');
 				setItems([]);
 			} else {
@@ -62,6 +70,8 @@ export const AnalysisView = () => {
 		setDescription('');
 		setSql('');
 		setSubmitError(null);
+		setValidationMessage(null);
+		setSqlValidated(false);
 		setModalOpen(true);
 	};
 
@@ -71,13 +81,23 @@ export const AnalysisView = () => {
 		setDescription(item.description);
 		setSql(item.sql);
 		setSubmitError(null);
+		setValidationMessage(null);
+		setSqlValidated(true);
 		setModalOpen(true);
 	};
 
+	const handleSqlChange = (value: string) => {
+		setSql(value);
+		setSqlValidated(false);
+		setValidationMessage(null);
+	};
+
 	const handleClose = () => {
-		if (submitting) return;
+		if (submitting || validating) return;
 		setModalOpen(false);
 		setSubmitError(null);
+		setValidationMessage(null);
+		setSqlValidated(false);
 	};
 
 	const openDeleteModal = (item: CustomAnalysis) => {
@@ -96,7 +116,7 @@ export const AnalysisView = () => {
 		setDeleting(true);
 		const res = await analyses.delete(deletingItem.id);
 		setDeleting(false);
-		if (res.error === true) {
+		if (res.error) {
 			setDeleteError(res.message ?? 'Failed to delete custom analysis');
 			return;
 		}
@@ -112,7 +132,24 @@ export const AnalysisView = () => {
 		!submitting &&
 		trimmedName.length > 0 &&
 		trimmedDescription.length > 0 &&
-		trimmedSql.length > 0;
+		trimmedSql.length > 0 &&
+		sqlValidated;
+
+	const handleValidateSql = async () => {
+		if (trimmedSql.length === 0) return;
+		setValidating(true);
+		setValidationMessage(null);
+		setSqlValidated(false);
+		const res = await analyses.validate(trimmedSql);
+		setValidating(false);
+		if (res.error) {
+			setValidationMessage(res.message ?? 'SQL validation failed');
+			return;
+		}
+		const isValid = res.data.valid === true;
+		setSqlValidated(isValid);
+		setValidationMessage(isValid ? 'SQL is valid.' : 'SQL validation failed');
+	};
 
 	const handleSubmit = async () => {
 		if (!canSubmit) return;
@@ -132,7 +169,7 @@ export const AnalysisView = () => {
 
 		setSubmitting(false);
 
-		if (res.error === true) {
+		if (res.error) {
 			setSubmitError(
 				res.message ??
 					(editingId !== null
@@ -253,32 +290,44 @@ export const AnalysisView = () => {
 				submitLabel={submitting ? 'Saving…' : 'Save'}
 				onSubmit={handleSubmit}
 				canSubmit={canSubmit}
+				secondaryAction={{
+					label: validating ? 'Validating…' : 'Validate SQL',
+					onClick: handleValidateSql,
+					disabled: trimmedSql.length === 0 || validating,
+				}}
 			>
 				<div>
-					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-						Name
-					</label>
+					<label className={FIELD_LABEL_CLASSNAME}>Name</label>
 					<input
 						type="text"
 						value={name}
 						onChange={(e) => setName(e.target.value)}
 						placeholder="Custom Analysis Name"
-						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
+						className={FIELD_INPUT_CLASSNAME}
 					/>
 				</div>
+
 				<div>
-					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-						Description
-					</label>
+					<label className={FIELD_LABEL_CLASSNAME}>Description</label>
 					<textarea
 						value={description}
 						onChange={(e) => setDescription(e.target.value)}
 						placeholder="Add Short Description"
 						rows={3}
-						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
+						className={`resize-y ${FIELD_INPUT_CLASSNAME}`}
 					/>
 				</div>
-				<SqlEditor value={sql} onChange={setSql} />
+
+				<div>
+					<SqlEditor value={sql} onChange={handleSqlChange} />
+				</div>
+
+				{validationMessage != null && (
+					<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+						{validationMessage}
+					</p>
+				)}
+
 				{submitError != null && (
 					<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
 						{submitError}

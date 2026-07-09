@@ -90,6 +90,9 @@ Key rules:
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,
   trimming only what does not apply. Do NOT copy its aliases.
+- SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.
+  If one matches the question's intent, incorporate its expression or SQL pattern
+  into your query. Treat them like reusable building blocks for calculations.
 - Prefer the fewest joins that still correctly answer the question. If all
   required fields exist in a single table, use only that table. If a shorter
   join path covers the question equally well, choose it over a longer chain.
@@ -99,6 +102,8 @@ Key rules:
 - Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
   RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
   NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
+- If the question filters by a single constant value on a column,
+  do NOT include that column in SELECT — it adds no information since every row has the same value.
 
 Output (fill fields in this exact order):
 - thought: 1-2 sentence internal reasoning — your approach and key decisions.

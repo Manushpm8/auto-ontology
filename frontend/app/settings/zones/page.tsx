@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Database } from '@/types/datasources';
 import { zonesApi } from '@/api/zones';
+import { usersApi } from '@/api/users';
 import { datasources } from '@/api/datasources';
 import { ModalWithSteps } from '@/components/ModalWithSteps';
 import { ConfirmModal } from '@/components/ConfirmModal';
@@ -16,8 +17,12 @@ import type { ColorOption } from '@/components/ColorPicker';
 import { Icon, IconName } from '@/components/icons';
 import { PopoverMenu } from '@/components/PopoverMenu';
 import { ZonesDataTree } from '@/components/settings/ZonesDataTree';
+import { UsersPicker } from '@/components/UsersPicker';
 import { mergeSchemasIntoDatabase, mergeTablesIntoSchema } from '@/lib/data/datasource-tree-merge';
 import type { Zone, ZoneCreated, ZoneUpdateInput } from '@/types/zones';
+import type { User } from '@/types/auth';
+import { useSession } from '@/auth/auth-client';
+import { Role } from '@/enums/auth';
 
 const ZONE_COLORS: readonly ColorOption[] = [
 	{ value: '#76b900', label: 'Lime', swatchClassName: 'bg-[#76b900]' },
@@ -142,27 +147,63 @@ const expandInitialZoneItemSelection = (
 	return expanded;
 };
 
+// ---------------------------------------------------------------------------
+// ZoneCard
+// ---------------------------------------------------------------------------
+
 const ZoneCard = ({
 	zone,
+	isAdmin,
+	toggling,
 	onEdit,
 	onDelete,
+	onToggleEnabled,
 }: {
 	zone: Zone;
+	isAdmin: boolean;
+	toggling: boolean;
 	onEdit: (zone: Zone) => void;
 	onDelete: (zone: Zone) => void;
+	onToggleEnabled: (zone: Zone) => void;
 }) => (
 	<div
-		className="rounded-lg border border-zinc-200/90 bg-white/90 p-4 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+		className={`rounded-lg border border-zinc-200/90 bg-white/90 p-4 shadow-sm ring-1 ring-zinc-950/[0.04] transition-opacity dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06] ${zone.enabled ? '' : 'opacity-60'}`}
 		style={{ borderTop: `4px solid ${zone.color ?? DEFAULT_ZONE_COLOR}` }}
 	>
 		<div className="flex items-start justify-between gap-4">
 			<div className="min-w-0">
-				<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-					{zone.name}
-				</h2>
+				<div className="flex items-center gap-2">
+					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{zone.name}
+					</h2>
+					{!zone.enabled ? (
+						<span className="shrink-0 rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-medium tracking-wide text-zinc-600 uppercase dark:bg-zinc-700 dark:text-zinc-300">
+							Disabled
+						</span>
+					) : null}
+				</div>
 				<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{zone.label}</p>
 			</div>
 			<div className="flex shrink-0 items-start gap-2">
+				{isAdmin ? (
+					<button
+						type="button"
+						role="switch"
+						aria-checked={zone.enabled}
+						aria-label={zone.enabled ? `Disable ${zone.name}` : `Enable ${zone.name}`}
+						disabled={toggling}
+						onClick={() => onToggleEnabled(zone)}
+						className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+							zone.enabled ? 'bg-[#76b900]' : 'bg-zinc-300 dark:bg-zinc-600'
+						}`}
+					>
+						<span
+							className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+								zone.enabled ? 'translate-x-5' : 'translate-x-0.5'
+							}`}
+						/>
+					</button>
+				) : null}
 				<div className="relative">
 					<PopoverMenu
 						items={[
@@ -198,7 +239,15 @@ const ZoneCard = ({
 	</div>
 );
 
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 export default function ZonesSettingsPage() {
+	const { data: session } = useSession();
+	const currentUserId = session?.user?.id ?? '';
+	const isAdmin = session?.user?.role === Role.Admin;
+
 	const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
 	const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
 	const [zones, setZones] = useState<Zone[]>([]);
@@ -227,6 +276,14 @@ export default function ZonesSettingsPage() {
 	const [confirmDeleteZone, setConfirmDeleteZone] = useState<Zone | null>(null);
 	const [deleteError, setDeleteError] = useState<string | null>(null);
 	const [deletingZone, setDeletingZone] = useState(false);
+	const [togglingZoneId, setTogglingZoneId] = useState<string | null>(null);
+	const [toggleError, setToggleError] = useState<string | null>(null);
+
+	// Users picker state
+	const [allUsers, setAllUsers] = useState<User[]>([]);
+	const [usersLoading, setUsersLoading] = useState(false);
+	const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+	const [initialEditUserIds, setInitialEditUserIds] = useState<Set<string>>(new Set());
 
 	const normalizedName = name.trim();
 	const normalizedDescription = normalizeDescription(description);
@@ -247,11 +304,13 @@ export default function ZonesSettingsPage() {
 		(normalizedName !== initialEditName ||
 			normalizedDescription !== initialEditDescription ||
 			color !== (initialEditColor ?? DEFAULT_ZONE_COLOR) ||
-			!setsAreEqual(normalizedSelectedItems, normalizedInitialEditSelectedItems));
+			!setsAreEqual(normalizedSelectedItems, normalizedInitialEditSelectedItems) ||
+			!setsAreEqual(selectedUserIds, initialEditUserIds));
 
 	const loadZones = useCallback(async () => {
+		if (!currentUserId) return;
 		setLoading(true);
-		const response = await zonesApi.getAll();
+		const response = await zonesApi.getAll(currentUserId);
 		if (response.error) {
 			setError(response.message ?? 'Failed to load zones.');
 			setZones([]);
@@ -261,11 +320,12 @@ export default function ZonesSettingsPage() {
 		setError(null);
 		setZones(response.data ?? []);
 		setLoading(false);
-	}, []);
+	}, [currentUserId]);
 
 	useEffect(() => {
+		if (!currentUserId) return;
 		let cancelled = false;
-		zonesApi.getAll().then((response) => {
+		zonesApi.getAll(currentUserId).then((response) => {
 			if (cancelled) return;
 			if (response.error) {
 				setError(response.message ?? 'Failed to load zones.');
@@ -276,6 +336,23 @@ export default function ZonesSettingsPage() {
 			}
 			setLoading(false);
 		});
+		return () => {
+			cancelled = true;
+		};
+	}, [currentUserId]);
+
+	// Load all users once on mount for the picker
+	useEffect(() => {
+		let cancelled = false;
+		const load = async () => {
+			setUsersLoading(true);
+			const { users } = await usersApi.list();
+			if (cancelled) return;
+			// Only show viewer users in picker — admins get access automatically
+			setAllUsers(users.filter((u) => u.role !== 'admin'));
+			setUsersLoading(false);
+		};
+		void load();
 		return () => {
 			cancelled = true;
 		};
@@ -297,11 +374,13 @@ export default function ZonesSettingsPage() {
 		setInitialEditDescription(null);
 		setInitialEditColor(null);
 		setInitialEditSelectedItems(new Set());
+		setSelectedUserIds(new Set());
+		setInitialEditUserIds(new Set());
 		setSubmitError(null);
 		setModalOpen(true);
 	};
 
-	const openEditModal = (zone: Zone) => {
+	const openEditModal = async (zone: Zone) => {
 		setModalMode('edit');
 		setEditingZoneId(zone.id);
 		setName(zone.name);
@@ -317,8 +396,18 @@ export default function ZonesSettingsPage() {
 		setInitialEditDescription(normalizeDescription(zone.description ?? ''));
 		setInitialEditColor(zone.color ?? DEFAULT_ZONE_COLOR);
 		setInitialEditSelectedItems(new Set());
+		setSelectedUserIds(new Set());
+		setInitialEditUserIds(new Set());
 		setSubmitError(null);
 		setModalOpen(true);
+
+		// Load current zone users asynchronously
+		const accessResponse = await zonesApi.listAccess(zone.id, currentUserId);
+		if (!accessResponse.error) {
+			const ids = new Set((accessResponse.data ?? []).map((u) => u.id));
+			setSelectedUserIds(ids);
+			setInitialEditUserIds(new Set(ids));
+		}
 	};
 
 	const closeZoneModal = () => {
@@ -404,7 +493,7 @@ export default function ZonesSettingsPage() {
 		let effectiveSelectedItems = selectedItems;
 
 		if (modalMode === 'edit' && editingZoneId != null && !editItemsHydrated) {
-			const detailResponse = await zonesApi.getById(editingZoneId);
+			const detailResponse = await zonesApi.getById(editingZoneId, currentUserId);
 			if (detailResponse.error) {
 				setSubmitError(detailResponse.message ?? 'Failed to load zone items.');
 			} else {
@@ -431,6 +520,16 @@ export default function ZonesSettingsPage() {
 		setTreeExpandSelectedOnlyKey((prev) => prev + 1);
 	};
 
+	const syncZoneAccess = async (zoneId: string) => {
+		const toGrant = [...selectedUserIds].filter((id) => !initialEditUserIds.has(id));
+		const toRevoke = [...initialEditUserIds].filter((id) => !selectedUserIds.has(id));
+
+		await Promise.all([
+			...toGrant.map((uid) => zonesApi.grantAccess(zoneId, uid, currentUserId)),
+			...toRevoke.map((uid) => zonesApi.revokeAccess(zoneId, uid, currentUserId)),
+		]);
+	};
+
 	const handleSubmit = async () => {
 		if (!canSubmit || activeStep !== 1) return;
 		setSubmitting(true);
@@ -446,27 +545,36 @@ export default function ZonesSettingsPage() {
 				description: normalizedDescription ?? undefined,
 				color,
 				items: Array.from(normalizedSelectedItems),
+				created_by: currentUserId,
 			});
 
-			setSubmitting(false);
 			if (response.error) {
+				setSubmitting(false);
 				setSubmitError(response.message ?? 'Failed to create zone.');
 				return;
 			}
 
 			const created: ZoneCreated | undefined = response.data;
 			if (created != null) {
-				const { id, name, label, description, color } = created;
+				// Grant access to selected viewer users
+				await Promise.all(
+					[...selectedUserIds].map((uid) =>
+						zonesApi.grantAccess(created.id, uid, currentUserId),
+					),
+				);
+
+				const { id, name: n, label, description: d, color: c, enabled: en } = created;
 				setZones((prev) => {
 					const next = [
 						...prev.filter((z) => z.id !== created.id),
-						{ id, name, label, description, color },
+						{ id, name: n, label, description: d, color: c, enabled: en },
 					];
 					return next.sort((a, b) => a.name.localeCompare(b.name));
 				});
 			} else {
 				await loadZones();
 			}
+			setSubmitting(false);
 			setModalOpen(false);
 			return;
 		}
@@ -490,14 +598,22 @@ export default function ZonesSettingsPage() {
 			patch.items = Array.from(normalizedSelectedItems);
 		}
 
-		const response = await zonesApi.update(editingZoneId, patch);
+		const hasFieldChanges = Object.keys(patch).length > 0;
+		const hasUserChanges = !setsAreEqual(selectedUserIds, initialEditUserIds);
+
+		const [response] = await Promise.all([
+			hasFieldChanges ? zonesApi.update(editingZoneId, patch) : Promise.resolve(null),
+			hasUserChanges ? syncZoneAccess(editingZoneId) : Promise.resolve(),
+		]);
+
 		setSubmitting(false);
-		if (response.error) {
+
+		if (response && response.error) {
 			setSubmitError(response.message ?? 'Failed to update zone.');
 			return;
 		}
 
-		const updated = response.data;
+		const updated = response?.data;
 		if (updated != null) {
 			setZones((prev) =>
 				prev.map((zone) =>
@@ -544,6 +660,26 @@ export default function ZonesSettingsPage() {
 		setConfirmDeleteZone(null);
 	};
 
+	const handleToggleZoneEnabled = async (zone: Zone) => {
+		if (togglingZoneId != null) return;
+		const nextEnabled = !zone.enabled;
+		setTogglingZoneId(zone.id);
+		setToggleError(null);
+		setZones((prev) =>
+			prev.map((z) => (z.id === zone.id ? { ...z, enabled: nextEnabled } : z)),
+		);
+
+		const response = await zonesApi.setEnabled(zone.id, nextEnabled, currentUserId);
+		setTogglingZoneId(null);
+
+		if (response.error) {
+			setZones((prev) =>
+				prev.map((z) => (z.id === zone.id ? { ...z, enabled: zone.enabled } : z)),
+			);
+			setToggleError(response.message ?? 'Failed to update zone status.');
+		}
+	};
+
 	return (
 		<main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 			<div className="w-full space-y-5">
@@ -574,6 +710,12 @@ export default function ZonesSettingsPage() {
 					</div>
 				) : null}
 
+				{toggleError ? (
+					<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+						{toggleError}
+					</div>
+				) : null}
+
 				{loading ? (
 					<div
 						className="flex min-h-[12rem] flex-col items-center justify-center gap-4 rounded-lg border border-zinc-200/90 bg-white/90 px-4 py-8 dark:border-zinc-700/90 dark:bg-zinc-950/50"
@@ -590,8 +732,15 @@ export default function ZonesSettingsPage() {
 							<ZoneCard
 								key={zone.id}
 								zone={zone}
-								onEdit={openEditModal}
+								isAdmin={isAdmin}
+								toggling={togglingZoneId === zone.id}
+								onEdit={(z) => {
+									void openEditModal(z);
+								}}
 								onDelete={handleRequestZoneDelete}
+								onToggleEnabled={(z) => {
+									void handleToggleZoneEnabled(z);
+								}}
 							/>
 						))}
 					</div>
@@ -696,6 +845,12 @@ export default function ZonesSettingsPage() {
 								className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 							/>
 						</div>
+						<UsersPicker
+							allUsers={allUsers}
+							selectedIds={selectedUserIds}
+							onChange={setSelectedUserIds}
+							loading={usersLoading}
+						/>
 					</>
 				) : (
 					<div className="space-y-3">
