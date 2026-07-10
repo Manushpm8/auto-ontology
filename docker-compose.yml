@@ -170,8 +170,10 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
     depends_on:
+      # Healthy (not just started): the frontend's seed-admin syncs the admin
+      # user to the backend at boot and fails if :3001 isn't accepting yet.
       gsf:
-        condition: service_started
+        condition: service_healthy
       frontend-migrate:
         condition: service_completed_successfully
 
