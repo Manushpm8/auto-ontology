@@ -104,6 +104,12 @@ To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 4. Open the UI at <http://localhost:3000> (the backend API is on `:3001`,
    pgAdmin on `:5050`).
 
+   > **Troubleshooting:** if the UI loads without the left navigation panel
+   > (or otherwise looks broken after a restart), your browser is holding a
+   > stale session cookie — this happens when `AUTH_SECRET` changes or the
+   > database is reset. Clear the site data for `localhost:3000` (or delete
+   > the `better-auth.session_token` cookie) and sign in again.
+
 ## Connections Management
 
 GSF resolves the source databases it connects to from two sources:
