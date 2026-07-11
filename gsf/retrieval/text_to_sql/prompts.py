@@ -184,10 +184,53 @@ Only fail validation for serious, critical errors that
 would make the query unusable."""
 
 
+def format_dual_question_block(original_question: str, sanitized_question: str) -> str:
+    """Format original and sanitized questions for SQL generation/validation."""
+    if original_question.strip() == sanitized_question.strip():
+        return sanitized_question
+    return (
+        f"Original user request:\n{original_question}\n\n"
+        f"Sanitized SQL intent:\n{sanitized_question}"
+    )
+
+
+def create_question_sanitization_prompt(question: str) -> str:
+    return f"""You rewrite conversational user requests into concise, SQL-ready questions.
+
+Rules:
+- Remove personal background, narrative fluff, and filler.
+- Preserve every factual constraint: numbers, product names, brands, categories, and qualifiers
+  such as "similar", "natural ingredients", or "expensive is okay".
+- Do NOT invent constraints that are not in the original text.
+- If the input is already a direct question, return it unchanged.
+- Output one concise question or search intent, not a paragraph.
+
+Examples:
+
+Input: We're planning a road trip next summer and my whole family loves hiking.
+I need a tent that can fit 4 people, and lighter is better since we'll carry it.
+Output: Find a 4-person tent, prioritizing lighter weight.
+
+Input: My old headphones broke. I mostly listen on the train so I'd really like
+good noise cancelling, and I'd prefer to stay under $200.
+Output: Find noise-cancelling headphones under $200.
+
+Input: How many shipments were delivered last month?
+Output: How many shipments were delivered last month?
+
+Input: {question}
+Output:"""
+
+
 def create_intent_validation_prompt(
-    question: str, entities_text: str, sql_code: str
+    original_question: str,
+    sanitized_question: str,
+    entities_text: str,
+    sql_code: str,
 ) -> str:
-    return f"""User's Question: {question}
+    question_block = format_dual_question_block(original_question, sanitized_question)
+    return f"""User's Question:
+{question_block}
 
 Generated SQL Query:
 ```sql

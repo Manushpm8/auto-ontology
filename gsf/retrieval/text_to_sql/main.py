@@ -29,7 +29,7 @@ except ValueError as e:
 entity_llm_client = None
 if _ENTITY_MODEL:
     try:
-        entity_llm_client = get_llm_client(model=_ENTITY_MODEL, max_tokens=512)
+        entity_llm_client = get_llm_client(model=_ENTITY_MODEL, max_tokens=2048)
         logger.info("Entity extraction will use model: %s", _ENTITY_MODEL)
     except ValueError as e:
         logger.warning("Failed to init entity LLM (%s): %s", _ENTITY_MODEL, e)

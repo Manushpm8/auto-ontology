@@ -17,6 +17,9 @@ from gsf.retrieval.text_to_sql.agents.candidates_retrieval import (
     CandidateRetrievalAgent,
 )
 from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionAgent
+from gsf.retrieval.text_to_sql.agents.question_sanitization import (
+    QuestionSanitizationAgent,
+)
 from gsf.retrieval.text_to_sql.agents.intent_validation import IntentValidationAgent
 from gsf.retrieval.text_to_sql.agents.response import ResponseAgent
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
@@ -185,6 +188,7 @@ def create_graph():
     # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
+    question_sanitization_agent = QuestionSanitizationAgent()
     entities_extraction_agent = EntitiesExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
@@ -201,6 +205,9 @@ def create_graph():
 
     # Routing nodes (using agent_wrapper)
 
+    sanitize_question_node = _make_node(
+        "sanitize_question", agent_wrapper(question_sanitization_agent)
+    )
     entities_extraction_node = _make_node(
         "entities_extraction", agent_wrapper(entities_extraction_agent)
     )
@@ -242,9 +249,10 @@ def create_graph():
     graph = StateGraph(AgentState)
 
     # -----------------    ENTRY POINT   ------------------
-    graph.set_entry_point("entities_extraction")
+    graph.set_entry_point("sanitize_question")
 
     # Add only nodes instantiated above.
+    graph.add_node("sanitize_question", sanitize_question_node)
     graph.add_node("entities_extraction", entities_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
@@ -260,6 +268,7 @@ def create_graph():
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
     # Minimal flow using only the defined nodes.
+    graph.add_edge("sanitize_question", "entities_extraction")
     graph.add_edge("entities_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
     graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
