@@ -20,6 +20,9 @@ from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtract
 from gsf.retrieval.text_to_sql.agents.question_sanitization import (
     QuestionSanitizationAgent,
 )
+from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
+    EmptyLikeResultCheckAgent,
+)
 from gsf.retrieval.text_to_sql.agents.intent_validation import IntentValidationAgent
 from gsf.retrieval.text_to_sql.agents.response import ResponseAgent
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
@@ -198,6 +201,7 @@ def create_graph():
     sql_validation_agent = SQLValidationAgent()
     intent_validation_agent = IntentValidationAgent()
     sql_execution_agent = SQLExecutionAgent()
+    empty_like_result_check_agent = EmptyLikeResultCheckAgent()
     response_agent = ResponseAgent()
     sql_unconstructable_agent = SQLUnconstructableAgent()
 
@@ -237,6 +241,9 @@ def create_graph():
     execute_sql_query_node = _make_node(
         "execute_sql_query", agent_wrapper(sql_execution_agent)
     )
+    check_empty_like_result_node = _make_node(
+        "check_empty_like_result", agent_wrapper(empty_like_result_check_agent)
+    )
     format_and_respond_node = _make_node(
         "format_and_respond", agent_wrapper(response_agent)
     )
@@ -264,6 +271,7 @@ def create_graph():
     graph.add_node("validate_sql_query", validate_sql_query_node)
     graph.add_node("validate_intent", validate_intent_node)
     graph.add_node("execute_sql_query", execute_sql_query_node)
+    graph.add_node("check_empty_like_result", check_empty_like_result_node)
     graph.add_node("format_and_respond", format_and_respond_node)
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
@@ -310,11 +318,20 @@ def create_graph():
         "execute_sql_query",
         route_sql_validation,
         {
-            "valid_sql": "format_and_respond",
+            "valid_sql": "check_empty_like_result",
             "invalid_sql": "reconstruct_sql",
             "fallback": "construct_sql_not_from_snippets",
             "unconstructable": "unconstructable_sql_response",
-            "skip_intent_validation": "format_and_respond",
+            "skip_intent_validation": "check_empty_like_result",
+        },
+    )
+
+    graph.add_conditional_edges(
+        "check_empty_like_result",
+        route_decision,
+        {
+            "valid_sql": "format_and_respond",
+            "invalid_sql": "reconstruct_sql",
         },
     )
 

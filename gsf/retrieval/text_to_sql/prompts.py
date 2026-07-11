@@ -194,6 +194,39 @@ def format_dual_question_block(original_question: str, sanitized_question: str) 
     )
 
 
+def create_empty_like_check_prompt(
+    question_block: str,
+    sql_code: str,
+) -> str:
+    return f"""You analyze a SQL query that executed successfully but returned zero rows.
+
+The SQL contains LIKE or ILIKE predicates. Your job is to classify each LIKE/ILIKE
+predicate as essential or non-essential.
+
+Definitions:
+- Essential: identifies the main subject of the question — the thing the user is
+  searching for.
+- Non-essential: constrains a feature, preference, descriptive attribute, or
+  additional filter that is not the main subject.
+
+Rules:
+- List every LIKE/ILIKE predicate from the SQL exactly as it appears (column,
+  operator, and pattern).
+- Put predicates to remove in non_essential_like_predicates.
+- Put predicates that must be preserved in essential_like_predicates.
+- If uncertain whether a predicate is essential, treat it as essential.
+- Do not suggest removing joins, numeric thresholds, or non-LIKE filters.
+
+User question:
+{question_block}
+
+SQL:
+```sql
+{sql_code}
+```
+"""
+
+
 def create_question_sanitization_prompt(question: str) -> str:
     return f"""You rewrite conversational user requests into concise, SQL-ready questions.
 
