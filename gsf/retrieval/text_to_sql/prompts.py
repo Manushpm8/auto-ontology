@@ -258,6 +258,15 @@ Guidelines for what to include in required_entity_name:
 - Subject nouns and domain terms ("invoice", "customer", "shipment")
 - Qualified entity phrases that combine a subject with its relevant action or attribute
   ("order shipment", "employee hire", "ticket resolution")
+- Filter-item rule: when several words together describe a single item the user wants to
+  filter or search for, keep them in one phrase. Do not split modifier, noun, and purpose
+  of the same filter item into separate entries.
+  Example: "waterproof hiking tent for family camping" → ["waterproof hiking tent for family camping"],
+  not ["waterproof hiking tent", "family camping"].
+  This rule applies only to one filterable item. Do not merge separate retrieval targets
+  (e.g. a subject entity and a time dimension still get separate entries when appropriate).
+- Keep names and descriptive text that identify something: brand names, product names,
+  vendor names, categories, and other named constants (e.g. "Salomon Speedcross", "Grip Rx").
 - For interrogative words (who/what/which/whose), resolve to the implied entity type
   AND, if the question contains a qualifying descriptor, include it twice: once alone
   and once combined with the resolved type.
@@ -265,8 +274,11 @@ Guidelines for what to include in required_entity_name:
 
 Guidelines for what to exclude from required_entity_name:
 - Bare action verbs ("submitted", "approved", "closed", "assigned")
-- Date/time values and granularity words ("January", "Q3", "monthly", "fiscal year")
+- Numeric values: counts, amounts, prices, years, and other number literals
+  (e.g. 1000, $150, 2023, Q2) — omit these from phrases; they are not entity names
+- Date/time values when they are numeric or calendar literals, not named descriptions
 - Aggregation indicators ("count", "total", "average", "sum", "min", "max")
+  when standing alone, not part of a measurable phrase
 - Status and filter adjectives when standing alone ("open", "active", "high-priority")
 
 Date rule: When a question references a time-qualified event, collapse subject + action
@@ -286,6 +298,12 @@ Examples:
 
   Q: "Who are the reviewers assigned to pending tasks?"
   → required_entity_name: ["task", "reviewer", "assigned reviewer"]
+
+  Q: "Find a waterproof hiking tent for family camping."
+  → required_entity_name: ["waterproof hiking tent for family camping"]
+
+  Q: "Recommend trail running shoes similar to Salomon Speedcross."
+  → required_entity_name: ["trail running shoes similar to Salomon Speedcross"]
 
 Question: {question}
 """
