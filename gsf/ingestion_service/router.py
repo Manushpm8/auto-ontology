@@ -11,7 +11,11 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel
 
-from gsf.ingestion_service.ingest import trigger_ingest, trigger_ingest_delete
+from gsf.ingestion_service.ingest import (
+    trigger_delete_ingest,
+    trigger_ingest,
+    trigger_reset_semantic,
+)
 
 router = APIRouter()
 
@@ -33,9 +37,20 @@ async def ingest_connection(connection: dict[str, Any] = Body(...)) -> dict[str,
 
 
 @router.post("/ingest/delete", status_code=202)
-async def delete_ingest(ref: DatabaseRef) -> dict[str, str]:
-    """Trigger a non-blocking teardown of a database's ingested data."""
-    trigger_ingest_delete(ref.database_name)
+async def reset_database(ref: DatabaseRef) -> dict[str, str]:
+    """Trigger a non-blocking reset of a database's ingested data."""
+    trigger_delete_ingest(ref.database_name)
+    return {"status": "accepted"}
+
+
+@router.post("/semantic/reset", status_code=202)
+async def reset_semantic(ref: DatabaseRef) -> dict[str, str]:
+    """Trigger a non-blocking reset of a database's semantic layer.
+
+    Deletes the semantic nodes and embeddings, then recompiles the semantic
+    layer for the database.
+    """
+    trigger_reset_semantic(ref.database_name)
     return {"status": "accepted"}
 
 

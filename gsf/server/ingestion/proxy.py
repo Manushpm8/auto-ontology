@@ -40,19 +40,6 @@ def trigger_ingest(connection: dict[str, Any]) -> None:
         logger.exception("Failed to trigger ingest via %s", url)
 
 
-def trigger_ingest_delete(database_name: str) -> None:
-    """Ask the ingestion service to tear down a database's data (best-effort)."""
-    url = f"{_base_url()}/ingest/delete"
-    try:
-        httpx.post(
-            url,
-            json={"database_name": database_name},
-            timeout=_REQUEST_TIMEOUT,
-        ).raise_for_status()
-    except Exception:
-        logger.exception("Failed to trigger ingest delete via %s", url)
-
-
 def trigger_semantic_compile() -> None:
     """Ask the ingestion service to run semantic compilation (best-effort).
 
@@ -64,3 +51,16 @@ def trigger_semantic_compile() -> None:
         httpx.post(url, timeout=_REQUEST_TIMEOUT).raise_for_status()
     except Exception:
         logger.exception("Failed to trigger semantic compile via %s", url)
+
+
+def trigger_reset(database_name: str) -> None:
+    """Ask the ingestion service to reset a database's data (best-effort)."""
+    url = f"{_base_url()}/ingest/delete"
+    try:
+        httpx.post(
+            url,
+            json={"database_name": database_name},
+            timeout=_REQUEST_TIMEOUT,
+        ).raise_for_status()
+    except Exception:
+        logger.exception("Failed to trigger reset via %s", url)

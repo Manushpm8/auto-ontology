@@ -20,9 +20,9 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import TabularExtractParams
-from gsf.vdb import get_data_vdb, get_semantic_vdb
+from gsf.vdb import get_data_vdb
 from gsf.connectors.registry import create_connector
-from gsf.dal.connections import delete_database_subgraph
+from gsf.dal.reset import delete_database, delete_semantic
 
 logger = logging.getLogger("ingestion_service.ingest")
 
@@ -82,39 +82,42 @@ def trigger_ingest(connection: dict[str, Any]) -> None:
     ).start()
 
 
-def trigger_ingest_delete(database_name: str) -> None:
-    """Remove ingested database graph and embeddings without blocking the caller."""
+def trigger_delete_ingest(database_name: str) -> None:
+    """Delete a database's ingested graph and embeddings without blocking."""
 
     def _run() -> None:
         try:
-            run_ingest_delete(database_name)
+            delete_database(database_name)
         except Exception:
             logger.exception(
-                "Background ingest delete failed for database %s",
+                "Background delete-ingest failed for database %s",
                 database_name,
             )
 
     threading.Thread(
         target=_run,
         daemon=True,
-        name=f"ingest-delete-{database_name}",
+        name=f"delete-ingest-{database_name}",
     ).start()
 
 
-def run_ingest_delete(database_name: str) -> None:
-    """Remove ingested database graph and embeddings for a database."""
-    database_name = database_name.strip()
-    if not database_name:
-        raise ValueError("Database name is required")
+def trigger_reset_semantic(database_name: str) -> None:
+    """Delete a database's semantic layer then recompile it, non-blocking."""
 
-    delete_database_subgraph(database_name)
+    def _run() -> None:
+        try:
+            delete_semantic(database_name)
+            from gsf.semantic.compile import run_semantic_compilation
 
-    data_vdb = get_data_vdb()
-    deleted_data_objects = data_vdb.delete_by_database(database_name)
+            run_semantic_compilation(database_name)
+        except Exception:
+            logger.exception(
+                "Background reset-semantic failed for database %s",
+                database_name,
+            )
 
-    semantic_vdb = get_semantic_vdb()
-    deleted_semantic = semantic_vdb.delete_by_database(database_name)
-    logger.info(
-        f"Tabular and semantic ingest delete: removed {len(deleted_data_objects) + len(deleted_semantic)} pgvector rows "
-        f"for database {database_name}",
-    )
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"reset-semantic-{database_name}",
+    ).start()
