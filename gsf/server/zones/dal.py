@@ -10,10 +10,16 @@ from typing import Any
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.users import LABEL_ADMIN, LABEL_USER_MATCH
+from gsf.server.zones.constants import (
+    LABEL_ZONE_DISABLED,
+    REL_PARTICIPANT_OF,
+    REL_ZONE_OF,
+    ZONE_LABEL_PATTERN,
+)
 from gsf.server.zones.utils import (
     LABEL_ZONE,
     REL_CONTAINS,
-    REL_ZONE_OF,
     ZONE_DATA_LABELS,
     _resolve_api_name,
     format_zone,
@@ -48,26 +54,60 @@ def _resolve_db_ids(conn, item_ids: list[str]) -> list[str]:
     return [row["db_id"] for row in rows]
 
 
-def list_zones() -> list[dict[str, Any]]:
-    """Return all zones ordered by name."""
+def list_zones(user_id: str) -> list[dict[str, Any]]:
+    """Return zones visible to *user_id*.
+
+    Admins see every zone.  Viewers see only zones to which they have been
+    explicitly granted access via a ``PARTICIPANT_OF`` relationship.
+    Returns an empty list when *user_id* is unknown.
+    """
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (z:{LABEL_ZONE})
-        RETURN z.id AS id,
-               z.name AS name,
+        MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
+        WITH u, u.role AS role
+        MATCH (z:{ZONE_LABEL_PATTERN})
+        WHERE role = 'admin'
+           OR EXISTS {{ MATCH (u)-[:{REL_PARTICIPANT_OF}]->(z) }}
+        RETURN z.id          AS id,
+               z.name        AS name,
                z.description AS description,
-               z.color AS color
+               z.color       AS color,
+               NOT z:{LABEL_ZONE_DISABLED} AS enabled
         ORDER BY z.name
-        """
+        """,
+        {"user_id": user_id},
     )
     return [format_zone(dict(r)) for r in rows]
 
 
-def get_zone_by_id(zone_id: str) -> dict[str, Any] | None:
-    """Return one zone with its linked catalog data items."""
-    rows = get_neo4j_conn().query_read(
+def get_zone_by_id(
+    zone_id: str, *, user_id: str | None = None
+) -> dict[str, Any] | None:
+    """Return one zone with its linked catalog data items.
+
+    When *user_id* is supplied the zone is only returned if the user has
+    access (admin role or explicit ``PARTICIPANT_OF`` relationship).
+    Passing ``user_id=None`` skips the access check (internal / admin use).
+    """
+    conn = get_neo4j_conn()
+    if user_id is not None:
+        access_rows = conn.query_read(
+            f"""
+            MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
+            MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
+            WHERE u.role = 'admin'
+               OR EXISTS {{ MATCH (u)-[:{REL_PARTICIPANT_OF}]->(z) }}
+            RETURN z.id AS id
+            LIMIT 1
+            """,
+            {"user_id": user_id, "zone_id": zone_id},
+        )
+        if not access_rows:
+            return None
+
+    rows = conn.query_read(
         f"""
-        MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
+        MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
         OPTIONAL MATCH (z)-[:{REL_ZONE_OF}]->(item:{_DATA_ITEM_PATTERN})
         WHERE coalesce(item.deleted, false) = false
         WITH z,
@@ -82,6 +122,7 @@ def get_zone_by_id(zone_id: str) -> dict[str, Any] | None:
                z.name AS name,
                z.description AS description,
                z.color AS color,
+               NOT z:{LABEL_ZONE_DISABLED} AS enabled,
                raw_items AS items
         """,
         {"zone_id": zone_id},
@@ -133,7 +174,7 @@ def _zone_name_exists(
         params["db_ids"] = db_ids
     rows = conn.query_read(
         f"""
-        MATCH (z:{LABEL_ZONE})
+        MATCH (z:{ZONE_LABEL_PATTERN})
         WHERE toLower(trim(z.name)) = toLower(trim($name))
           {exclude_clause}{db_clause}
         RETURN count(z) > 0 AS exists
@@ -176,7 +217,7 @@ def create_zone(
             "color": color,
         },
     )
-    zone = format_zone(dict(zone_rows[0]), items=[])
+    zone = format_zone(dict(zone_rows[0]), items=[], enabled=True)
 
     if item_ids:
         linked_rows = conn.query_write(
@@ -200,6 +241,19 @@ def create_zone(
             ordered_linked_ids.append(item_id)
         zone["items"] = ordered_linked_ids
 
+    # Link all admin users to the new zone so the graph reflects full admin
+    # access (User->zone->data paths visible in Neo4j).  Viewers are granted
+    # access explicitly via grant_zone_access.  Admins are filtered out of
+    # list_zone_users so they never appear in the UI access list.
+    conn.query_write(
+        f"""
+        MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
+        MATCH (u:{LABEL_ADMIN})
+        MERGE (u)-[:{REL_PARTICIPANT_OF}]->(z)
+        """,
+        {"zone_id": zone["id"]},
+    )
+
     return zone
 
 
@@ -219,7 +273,7 @@ def update_zone(
     conn = get_neo4j_conn()
     existing_rows = conn.query_read(
         f"""
-        MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
+        MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
         RETURN z.id AS id
         LIMIT 1
         """,
@@ -234,7 +288,7 @@ def update_zone(
         else:
             current_items = conn.query_read(
                 f"""
-                MATCH (z:{LABEL_ZONE} {{id: $zone_id}})-[:{REL_ZONE_OF}]->(item)
+                MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})-[:{REL_ZONE_OF}]->(item)
                 RETURN item.id AS id
                 """,
                 {"zone_id": zone_id},
@@ -249,7 +303,7 @@ def update_zone(
         set_clauses = ", ".join(f"z.{field} = ${field}" for field in updates)
         conn.query_write(
             f"""
-            MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
+            MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
             SET {set_clauses}
             """,
             {"zone_id": zone_id, **updates},
@@ -261,7 +315,7 @@ def update_zone(
             if db_ids:
                 conn.query_write(
                     f"""
-                    MATCH (z:{LABEL_ZONE} {{id: $zone_id}})-[r:{REL_ZONE_OF}]->(item)
+                    MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})-[r:{REL_ZONE_OF}]->(item)
                     WHERE EXISTS {{
                         MATCH (db:{ZONE_DATA_LABELS[0]})-[:{REL_CONTAINS}*0..2]->(item)
                         WHERE db.id IN $db_ids
@@ -273,7 +327,7 @@ def update_zone(
             conn.query_write(
                 f"""
                 UNWIND $item_ids AS item_id
-                MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
+                MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
                 MATCH (item:{_DATA_ITEM_PATTERN} {{id: item_id}})
                 WHERE coalesce(item.deleted, false) = false
                 MERGE (z)-[:{REL_ZONE_OF}]->(item)
@@ -283,12 +337,11 @@ def update_zone(
         else:
             conn.query_write(
                 f"""
-                MATCH (z:{LABEL_ZONE} {{id: $zone_id}})-[r:{REL_ZONE_OF}]->()
+                MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})-[r:{REL_ZONE_OF}]->()
                 DELETE r
                 """,
                 {"zone_id": zone_id},
             )
-
     return get_zone_by_id(zone_id)
 
 
@@ -297,7 +350,7 @@ def delete_zone(zone_id: str) -> bool:
     conn = get_neo4j_conn()
     existing_rows = conn.query_read(
         f"""
-        MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
+        MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
         RETURN z.id AS id
         LIMIT 1
         """,
@@ -308,9 +361,102 @@ def delete_zone(zone_id: str) -> bool:
 
     conn.query_write(
         f"""
-        MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
+        MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
         DETACH DELETE z
         """,
         {"zone_id": zone_id},
     )
     return True
+
+
+def set_zone_enabled(zone_id: str, enabled: bool) -> dict[str, Any] | None:
+    """Enable or disable a zone by swapping its Neo4j label.
+
+    Disabling relabels the node from ``Zone`` to ``disableZone`` (and
+    re-enabling reverses it), e.g.::
+
+        MATCH (n:Zone {id: '<zone_id>'})
+        SET n:disableZone
+        REMOVE n:Zone
+
+    Disabled zones are excluded from every plain ``:Zone`` match used for
+    catalog access, so disabling immediately revokes the access it granted,
+    without deleting the zone or its data links.
+
+    Idempotent: calling it again with the same target state is a no-op.
+    Returns the updated zone detail, or ``None`` if the zone does not exist.
+    """
+    conn = get_neo4j_conn()
+    target_label = LABEL_ZONE if enabled else LABEL_ZONE_DISABLED
+    other_label = LABEL_ZONE_DISABLED if enabled else LABEL_ZONE
+    rows = conn.query_write(
+        f"""
+        MATCH (n:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
+        SET n:{target_label}
+        REMOVE n:{other_label}
+        RETURN n.id AS id
+        """,
+        {"zone_id": zone_id},
+    )
+    if not rows:
+        return None
+    return get_zone_by_id(zone_id)
+
+
+def list_zone_users(zone_id: str) -> list[dict[str, Any]]:
+    """Return viewer users that have explicit access to *zone_id*.
+
+    Admins access all zones via role check and are excluded from the result —
+    only explicitly-granted viewer relationships are returned.
+    """
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (u:{LABEL_USER_MATCH})-[:{REL_PARTICIPANT_OF}]->(z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
+        WHERE u.role <> 'admin'
+        RETURN u.id    AS id,
+               u.email AS email,
+               u.name  AS name,
+               u.role  AS role
+        ORDER BY u.email
+        """,
+        {"zone_id": zone_id},
+    )
+    return [dict(r) for r in rows]
+
+
+def grant_zone_access(zone_id: str, user_id: str) -> bool:
+    """Create a ``PARTICIPANT_OF`` edge from *user_id* to *zone_id*.
+
+    Returns ``False`` when either the zone or the user does not exist.
+    """
+    conn = get_neo4j_conn()
+    rows = conn.query_write(
+        f"""
+        MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
+        MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
+        MERGE (u)-[:{REL_PARTICIPANT_OF}]->(z)
+        RETURN u.id AS user_id, z.id AS zone_id
+        """,
+        {"user_id": user_id, "zone_id": zone_id},
+    )
+    return bool(rows)
+
+
+def revoke_zone_access(zone_id: str, user_id: str) -> bool:
+    """Delete the ``PARTICIPANT_OF`` edge between *user_id* and *zone_id*.
+
+    Returns ``False`` when the edge (or either node) does not exist.
+    Admins always keep their implicit access — this only removes the stored
+    relationship, which is harmless for admins since their role check always
+    passes in ``list_zones`` / ``get_zone_by_id``.
+    """
+    conn = get_neo4j_conn()
+    rows = conn.query_write(
+        f"""
+        MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})-[r:{REL_PARTICIPANT_OF}]->(z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
+        DELETE r
+        RETURN u.id AS user_id
+        """,
+        {"user_id": user_id, "zone_id": zone_id},
+    )
+    return bool(rows)

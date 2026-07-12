@@ -4,19 +4,46 @@
 
 'use client';
 
-import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+	forwardRef,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	useCallback,
+	type ReactNode,
+} from 'react';
+import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
-import { isComposerSection, type ComposerSection } from '@/types/composer-section';
+import {
+	isComposerSection,
+	type ComposerSection,
+	type ComposerZonesSection,
+} from '@/types/composer-section';
 import { Icon, IconName } from '@/components/icons';
 import { TagInput } from '@/components/TagInput';
 import { Table } from '@/components/Table';
+import { SqlBlock } from '@/components/SqlBlock';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import { Toast } from '@/components/Toast';
 
 export type ComposerEditValue = string | string[];
+
+function zoneChipStyle(color: string): React.CSSProperties {
+	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };
+}
+
+const ZoneChip = ({ name, color }: { name: string; color: string | null }) => (
+	<span
+		className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+		style={color ? zoneChipStyle(color) : undefined}
+	>
+		{name}
+	</span>
+);
 
 export type SinglePageComposerProps = {
 	sections: unknown[];
@@ -34,12 +61,20 @@ export type SinglePageComposerProps = {
 	isEditing?: boolean;
 	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
+	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
+	onEditSql?: (sectionId: string, sql: string) => void;
+	inlineSaveSectionId?: string;
+	hideEditToolbar?: boolean;
 };
 
 function composerSectionHeading(section: ComposerSection): string {
 	switch (section.type) {
 		case ComposerSectionKind.LOADING_PANEL:
 			return section.message;
+		case ComposerSectionKind.ZONES_CHIPS:
+			return `${section.title} (${section.zones.length})`;
+		case ComposerSectionKind.RELATED_TERMS_CHIPS:
+			return `${section.title} (${section.terms.length})`;
 		default:
 			return section.title;
 	}
@@ -48,10 +83,14 @@ function composerSectionHeading(section: ComposerSection): string {
 const EditableTextCard = ({
 	section,
 	onChange,
+	onSave,
+	saving = false,
 	autoFocus = false,
 }: {
 	section: { id: string; title: string; body: string };
 	onChange: (sectionId: string, value: string) => void;
+	onSave?: () => void;
+	saving?: boolean;
 	autoFocus?: boolean;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -78,6 +117,25 @@ const EditableTextCard = ({
 				rows={4}
 				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
 			/>
+			{onSave != null && (
+				<div className="mt-3 flex justify-end">
+					<button
+						type="button"
+						disabled={saving}
+						onClick={onSave}
+						className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
+					>
+						{saving ? (
+							<>
+								<Spinner aria-label="Saving" className="h-3.5 w-3.5" />
+								Saving…
+							</>
+						) : (
+							'Save'
+						)}
+					</button>
+				</div>
+			)}
 		</div>
 	);
 };
@@ -153,7 +211,41 @@ const ReadOnlyTagList = ({
 	</div>
 );
 
-function renderComposerSection(section: ComposerSection): ReactNode {
+const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
+	const displayedZones = useMemo(() => {
+		if (Array.isArray(section.userZoneIds)) {
+			return section.zones.filter((z) => (section.userZoneIds as string[]).includes(z.id));
+		}
+		return section.zones;
+	}, [section.zones, section.userZoneIds]);
+
+	return (
+		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+				{section.title} ({displayedZones.length})
+			</h2>
+			{displayedZones.length === 0 ? (
+				<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+			) : (
+				<ul className="mt-3 flex flex-wrap gap-2">
+					{displayedZones.map((zone) => (
+						<li key={zone.id}>
+							<ZoneChip name={zone.name} color={zone.color} />
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+};
+
+function renderComposerSection(
+	section: ComposerSection,
+	onTermClick?: (termId: string) => void,
+	onDataTableRowClick?: (sectionId: string, rowId: string) => void,
+	isEditingActive = false,
+	onEditSql?: (sectionId: string, sql: string) => void,
+): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
 			return (
@@ -200,7 +292,9 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 					</dl>
 				</div>
 			);
-		case ComposerSectionKind.DATA_TABLE:
+		case ComposerSectionKind.DATA_TABLE: {
+			const isClickable =
+				section.rowIdKey != null && onDataTableRowClick != null && section.rowIdKey !== '';
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
 					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -221,10 +315,26 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 							cell: (row: Record<string, string>) => row[col.key] || '—',
 						}))}
 						rows={section.rows}
-						rowKey={(_, index) => String(index)}
+						rowKey={(row, index) =>
+							isClickable && section.rowIdKey
+								? (row[section.rowIdKey] ?? String(index))
+								: String(index)
+						}
+						onRowClick={
+							isClickable && section.rowIdKey
+								? (row) => {
+										const rowId = row[section.rowIdKey as string];
+										if (rowId) {
+											onDataTableRowClick(section.id, rowId);
+										}
+									}
+								: undefined
+						}
+						emptyMessage={section.emptyMessage}
 					/>
 				</div>
 			);
+		}
 		case ComposerSectionKind.LOADING_PANEL:
 			return (
 				<div
@@ -235,6 +345,74 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 					<p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
 						{section.message}
 					</p>
+				</div>
+			);
+		case ComposerSectionKind.ZONES_CHIPS:
+			return <ZonesSection section={section} />;
+		case ComposerSectionKind.RELATED_TERMS_CHIPS:
+			return (
+				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{section.title} ({section.terms.length})
+					</h2>
+					{section.terms.length === 0 ? (
+						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+					) : (
+						<ul className="mt-3 flex flex-wrap gap-2">
+							{section.terms.map((term) => (
+								<li key={term.id}>
+									{onTermClick ? (
+										<button
+											type="button"
+											title={term.description ?? undefined}
+											onClick={() => onTermClick(term.id)}
+											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
+										>
+											{term.name}
+										</button>
+									) : (
+										<span
+											title={term.description ?? undefined}
+											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+										>
+											{term.name}
+										</span>
+									)}
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			);
+		case ComposerSectionKind.SQL_BLOCK:
+			return (
+				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+					{isEditingActive && section.editable === true && (
+						<div className="mb-3 flex justify-end">
+							<div className="flex shrink-0 items-center gap-1">
+								<button
+									type="button"
+									onClick={() => {
+										if (onEditSql) {
+											onEditSql(section.id, section.sql);
+											return;
+										}
+										console.log('edit sql section', section.id);
+									}}
+									aria-label={`Edit ${section.title}`}
+									title="Edit"
+									className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+								>
+									<Icon name={IconName.Pencil} className="h-4 w-4" />
+								</button>
+							</div>
+						</div>
+					)}
+					{section.sql.trim() !== '' ? (
+						<SqlBlock sql={section.sql} />
+					) : (
+						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+					)}
 				</div>
 			);
 		default:
@@ -263,7 +441,20 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			isEditing,
 			onSave,
 			onCancel,
+			onDataTableRowClick,
+			onEditSql,
+			inlineSaveSectionId,
+			hideEditToolbar = false,
 		} = props;
+		const router = useRouter();
+
+		const handleTermClick = useCallback(
+			(termId: string) => {
+				router.push(`/terms?focus=${encodeURIComponent(termId)}`);
+			},
+			[router],
+		);
+
 		const hh = header?.header;
 		const title = (hh?.title as string) ?? 'Untitled';
 		const entityId = (hh?.entityId as string) ?? '';
@@ -286,6 +477,28 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
 
+		// Reset the save error when an *externally* controlled `isEditing` prop
+		// flips to true (e.g. a parent toggling edit mode) — mirrors what the
+		// internal "Edit" button already does for `localIsEditing`. Adjusted
+		// during render (not in an effect) per
+		// https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes.
+		const [prevIsEditingActive, setPrevIsEditingActive] = useState(isEditingActive);
+		if (isEditingActive !== prevIsEditingActive) {
+			setPrevIsEditingActive(isEditingActive);
+			if (isEditingActive) {
+				setSaveError(null);
+			}
+		}
+
+		// Refs can't be mutated during render, so the pending-edits reset for
+		// that same transition lives in its own effect (no setState here, so
+		// it doesn't trip the "no setState in effects" rule above).
+		useEffect(() => {
+			if (isEditingActive) {
+				pendingEditsRef.current = {};
+			}
+		}, [isEditingActive]);
+
 		const handleSave = async () => {
 			const edits = pendingEditsRef.current;
 			if (saving) return;
@@ -302,7 +515,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			const res = await datasources.updateNode(entityId, edits as NodePatch);
 			setSaving(false);
 
-			if (res.error === true) {
+			if (res.error) {
 				setSaveError(res.message ?? 'Failed to save changes');
 				return;
 			}
@@ -382,7 +595,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</div>
 				) : null}
 
-				{(hasEditableSections && entityId && !isEditingActive) || isEditingActive ? (
+				{!hideEditToolbar &&
+				((hasEditableSections && entityId && !isEditingActive) || isEditingActive) ? (
 					<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
 						{hasEditableSections && entityId && !isEditingActive && (
 							<button
@@ -413,23 +627,28 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								>
 									Cancel
 								</button>
-								<button
-									type="button"
-									disabled={saving}
-									onClick={() => {
-										void handleSave();
-									}}
-									className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
-								>
-									{saving ? (
-										<>
-											<Spinner aria-label="Saving" className="h-3.5 w-3.5" />
-											Saving…
-										</>
-									) : (
-										'Save'
-									)}
-								</button>
+								{inlineSaveSectionId == null && (
+									<button
+										type="button"
+										disabled={saving}
+										onClick={() => {
+											void handleSave();
+										}}
+										className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
+									>
+										{saving ? (
+											<>
+												<Spinner
+													aria-label="Saving"
+													className="h-3.5 w-3.5"
+												/>
+												Saving…
+											</>
+										) : (
+											'Save'
+										)}
+									</button>
+								)}
 							</div>
 						)}
 					</div>
@@ -508,7 +727,6 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										isEditingActive &&
 										section.type === ComposerSectionKind.TAG_LIST &&
 										section.editable === true;
-
 									return (
 										<div key={section.id}>
 											{isEditableTextCard ? (
@@ -518,6 +736,14 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													onChange={(id, val) => {
 														pendingEditsRef.current[id] = val;
 													}}
+													onSave={
+														section.id === inlineSaveSectionId
+															? () => {
+																	void handleSave();
+																}
+															: undefined
+													}
+													saving={saving}
 												/>
 											) : isEditableTagList ? (
 												<EditableTagListCard
@@ -528,7 +754,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													}}
 												/>
 											) : (
-												renderComposerSection(section)
+												renderComposerSection(
+													section,
+													handleTermClick,
+													onDataTableRowClick,
+													isEditingActive,
+													onEditSql,
+												)
 											)}
 										</div>
 									);

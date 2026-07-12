@@ -6,11 +6,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
-from gsf.server.custom_analyses import dal as custom_analyses_dal
-from gsf.server.datasources import dal
+from gsf.server.custom_analyses import service as custom_analyses_dal
+from gsf.server.datasources import service as dal
 
 
 class NodeUpdate(BaseModel):
@@ -18,10 +18,14 @@ class NodeUpdate(BaseModel):
     sample_values: list[str] | None = None
 
 
+class CustomAnalysisValidate(BaseModel):
+    sql: str = Field(..., min_length=1)
+
+
 class CustomAnalysisCreate(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1)
     description: str
-    sql: str
+    sql: str = Field(..., min_length=1)
 
 
 router = APIRouter()
@@ -44,9 +48,12 @@ def _count_payload(data: object) -> dict:
 
 
 @router.get("/schemas/{db_id}")
-def list_schemas_by_database(db_id: str) -> dict:
-    """Schemas for a database."""
-    result = dal.list_schemas_for_database(db_id)
+def list_schemas_by_database(
+    db_id: str,
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Schemas for a database, zone-scoped when zone_ids are provided."""
+    result = dal.fetch_schemas_for_database(db_id, zone_ids=zone_ids)
     return result
 
 
@@ -54,16 +61,19 @@ def list_schemas_by_database(db_id: str) -> dict:
 def list_tables_by_schema(
     schema_id: str,
     database_name: str | None = None,
+    zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
-    """Tables under a schema (lazy tree)."""
-    rows = dal.list_tables_for_schema(schema_id, database_name=database_name)
+    """Tables under a schema (lazy tree), zone-scoped when zone_ids are provided."""
+    rows = dal.fetch_tables_for_schema(
+        schema_id, database_name=database_name, zone_ids=zone_ids
+    )
     return _count_payload(rows)
 
 
 @router.get("/columns/{table_id}")
 def list_columns_by_table(table_id: str) -> dict:
     """Columns for a table."""
-    result = dal.list_columns_for_table(table_id)
+    result = dal.fetch_columns_for_table(table_id)
     return _count_payload(result)
 
 
@@ -73,8 +83,9 @@ def list_columns_by_table(table_id: str) -> dict:
 
 
 @router.get("/datasources/dbs")
-def list_databases() -> dict:
-    rows = dal.list_databases()
+def list_databases(zone_ids: list[str] | None = Query(default=None)) -> dict:
+    """Databases visible via the given zones (all when zone_ids is absent)."""
+    rows = dal.fetch_databases(zone_ids=zone_ids)
     return _count_payload(rows)
 
 
@@ -84,10 +95,24 @@ def list_databases() -> dict:
 
 
 @router.get("/custom-analyses")
-def list_custom_analyses() -> dict:
-    """All CustomAnalysis nodes joined with their HAS_SQL neighbour."""
-    rows = custom_analyses_dal.list_custom_analyses()
+def list_custom_analyses(zone_ids: list[str] | None = Query(default=None)) -> dict:
+    """CustomAnalysis nodes joined with their HAS_SQL neighbour, zone-scoped when zone_ids are provided."""
+    rows = custom_analyses_dal.list_custom_analyses(zone_ids=zone_ids)
     return _count_payload(rows)
+
+
+@router.post("/custom-analyses/validate")
+def validate_custom_analysis_sql(body: CustomAnalysisValidate) -> dict:
+    """Validate a SQL expression against the full catalog.
+
+    Does not create a CustomAnalysis. Returns 422 when the SQL can't be
+    parsed or doesn't resolve to a known table.
+    """
+    try:
+        result = custom_analyses_dal.validate_custom_analysis_sql(body.sql)
+    except custom_analyses_dal.CustomAnalysisSqlError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": result}
 
 
 @router.post("/custom-analyses", status_code=201)

@@ -14,6 +14,12 @@ const ACCENT_CLASSES: Record<Accent, string> = {
 	teal: 'bg-teal-600 text-white hover:bg-teal-700 dark:bg-teal-600 dark:hover:bg-teal-500',
 };
 
+export type ModalSecondaryAction = {
+	label: string;
+	onClick: () => void | Promise<void>;
+	disabled?: boolean;
+};
+
 export type ModalCreateNewItemProps = {
 	open: boolean;
 	onClose: () => void;
@@ -24,6 +30,8 @@ export type ModalCreateNewItemProps = {
 	children: ReactNode;
 	accent?: Accent;
 	className?: string;
+	/** Optional secondary button rendered left of the submit button, e.g. "Validate SQL". */
+	secondaryAction?: ModalSecondaryAction;
 };
 
 export const ModalCreateNewItem = ({
@@ -36,6 +44,7 @@ export const ModalCreateNewItem = ({
 	children,
 	accent = 'emerald',
 	className = 'min-h-[400px] w-[800px] max-w-full',
+	secondaryAction,
 }: ModalCreateNewItemProps) => (
 	<Modal open={open} onClose={onClose} className={className}>
 		<div className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
@@ -53,7 +62,19 @@ export const ModalCreateNewItem = ({
 		</div>
 		<div className="space-y-4 p-6">
 			{children}
-			<div className="flex justify-end">
+			<div className="flex justify-end gap-3">
+				{secondaryAction && (
+					<button
+						type="button"
+						onClick={() => {
+							void secondaryAction.onClick();
+						}}
+						disabled={secondaryAction.disabled}
+						className={`cursor-pointer rounded-lg border bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 disabled:cursor-default disabled:opacity-50 dark:bg-zinc-900 dark:hover:bg-zinc-800 ${secondaryAction.disabled ? 'border-zinc-300 text-zinc-700 dark:border-zinc-600 dark:text-zinc-300' : 'border-[#76b900] text-[#76b900] dark:border-[#76b900] dark:text-[#76b900]'}`}
+					>
+						{secondaryAction.label}
+					</button>
+				)}
 				<button
 					type="button"
 					onClick={() => {

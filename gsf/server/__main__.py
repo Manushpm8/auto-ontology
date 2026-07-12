@@ -31,7 +31,13 @@ from gsf.server.chat.worker import get_pool, shutdown_pool  # noqa: E402
 from gsf.server.connections.router import router as connections_router  # noqa: E402
 from gsf.server.datasources.router import router as datasources_router  # noqa: E402
 from gsf.server.health.router import router as health_router  # noqa: E402
+from gsf.server.semantic_compilation.router import (  # noqa: E402
+    router as semantic_compilation_router,
+)
+from gsf.server.sql_attributes.router import router as sql_attributes_router  # noqa: E402
 from gsf.server.zones.router import router as zones_router  # noqa: E402
+from gsf.server.terms.router import router as terms_router  # noqa: E402
+from gsf.server.users.router import router as users_router  # noqa: E402
 
 
 @asynccontextmanager
@@ -72,7 +78,13 @@ def main() -> None:
     app.include_router(connections_router, prefix="/api", tags=["connections"])
     app.include_router(chat_router, prefix="/api", tags=["chat"])
     app.include_router(health_router, prefix="/api", tags=["health"])
+    app.include_router(sql_attributes_router, prefix="/api", tags=["sql-attributes"])
+    app.include_router(
+        semantic_compilation_router, prefix="/api", tags=["semantic-compilation"]
+    )
     app.include_router(zones_router, prefix="/api", tags=["zones"])
+    app.include_router(terms_router, prefix="/api", tags=["terms"])
+    app.include_router(users_router, prefix="/api", tags=["users"])
 
     uvicorn.run(
         app,

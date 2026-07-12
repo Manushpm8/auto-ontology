@@ -26,6 +26,14 @@ const DEFAULT_ROW = 'transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/4
 
 const cx = (...classes: (string | false | undefined)[]) => classes.filter(Boolean).join(' ');
 
+// Rows without a click handler shouldn't get a hover affordance, even when
+// `rowClassName` (or the default) bakes in `hover:`/`dark:hover:` utilities.
+const stripHoverClasses = (classes: string): string =>
+	classes
+		.split(/\s+/)
+		.filter((token) => token !== '' && !token.includes('hover:'))
+		.join(' ');
+
 const bodyCellClasses = <T,>(column: TableColumn<T>, cellClassName: string): string =>
 	cx(
 		cellClassName,
@@ -59,7 +67,24 @@ export const Table = <T,>({
 	rowClassName,
 	scrollClassName,
 	className,
+	onRowClick,
+	emptyMessage,
 }: TableProps<T>) => {
+	const baseRowClassName = rowClassName ?? DEFAULT_ROW;
+	const interactiveRowClassName = onRowClick
+		? cx(baseRowClassName, 'cursor-pointer')
+		: stripHoverClasses(baseRowClassName);
+
+	if (rows.length === 0) {
+		return (
+			<div className={cx(containerClassName ?? DEFAULT_CONTAINER, className)}>
+				<p className="p-4 text-sm italic text-zinc-500 dark:text-zinc-400">
+					{emptyMessage ?? '—'}
+				</p>
+			</div>
+		);
+	}
+
 	const tableElement = (
 		<table
 			className={cx(
@@ -83,7 +108,23 @@ export const Table = <T,>({
 			</thead>
 			<tbody className={bodyClassName ?? DEFAULT_TBODY}>
 				{rows.map((row, index) => (
-					<tr key={rowKey(row, index)} className={rowClassName ?? DEFAULT_ROW}>
+					<tr
+						key={rowKey(row, index)}
+						className={interactiveRowClassName}
+						onClick={onRowClick ? () => onRowClick(row, index) : undefined}
+						onKeyDown={
+							onRowClick
+								? (e) => {
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											onRowClick(row, index);
+										}
+									}
+								: undefined
+						}
+						role={onRowClick ? 'button' : undefined}
+						tabIndex={onRowClick ? 0 : undefined}
+					>
 						{columns.map((column) => (
 							<td key={column.key} className={bodyCellClasses(column, cellClassName)}>
 								{column.truncate ? (

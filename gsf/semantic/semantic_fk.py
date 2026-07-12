@@ -19,12 +19,17 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.graph.retriever import Retriever
 
-from gsf.semantic import neo4j_dal
+from gsf.dal.attributes import (
+    find_column_attribute_by_column_id,
+    find_unlinked_fk_columns,
+    merge_semantic_fk,
+)
 from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
@@ -34,10 +39,11 @@ logger = logging.getLogger(__name__)
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
 )
-_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
+_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2")
 _NVIDIA_API_KEY = os.environ.get("EMBED_API_KEY", "") or os.environ.get(
     "NVIDIA_API_KEY", ""
 )
+_WORKERS = 2
 
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
@@ -59,7 +65,7 @@ def resolve_semantic_fks(database_name: str) -> int:
     Runs after the taxonomy while-loop in ``compile_semantic_layer``.
     Returns the total number of SEMANTIC_FK edges created.
     """
-    candidates = neo4j_dal.find_unlinked_fk_columns()
+    candidates = find_unlinked_fk_columns()
     if not candidates:
         logger.info("resolve_semantic_fks: no unlinked FK columns found")
         return 0
@@ -74,9 +80,9 @@ def resolve_semantic_fks(database_name: str) -> int:
     for col in candidates:
         fk_target_col_id: str | None = col.get("fk_target_col_id")
         if fk_target_col_id:
-            attr_id = neo4j_dal.find_column_attribute_by_column_id(fk_target_col_id)
+            attr_id = find_column_attribute_by_column_id(fk_target_col_id)
             if attr_id:
-                neo4j_dal.merge_semantic_fk(col["id"], attr_id)
+                merge_semantic_fk(col["id"], attr_id)
                 declared_written += 1
                 logger.debug(
                     "resolve_semantic_fks [declared]: %s.%s → attr %s",
@@ -112,23 +118,31 @@ def resolve_semantic_fks(database_name: str) -> int:
         return declared_written
 
     llm_written = 0
-    for col in llm_queue:
+
+    def _resolve_one(col: dict[str, Any]) -> bool:
         try:
             attr_id = _resolve_via_vdb(col, retriever)
             if attr_id:
-                neo4j_dal.merge_semantic_fk(col["id"], attr_id)
-                llm_written += 1
+                merge_semantic_fk(col["id"], attr_id)
                 logger.debug(
                     "resolve_semantic_fks [llm]: %s.%s → attr %s",
                     col.get("table_name"),
                     col.get("name"),
                     attr_id,
                 )
+                return True
         except Exception:
             logger.exception(
                 "resolve_semantic_fks [llm]: unexpected error for column %s",
                 col.get("id"),
             )
+        return False
+
+    with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
+        futures = {pool.submit(_resolve_one, col): col for col in llm_queue}
+        for future in as_completed(futures):
+            if future.result():
+                llm_written += 1
 
     total = declared_written + llm_written
     logger.info(

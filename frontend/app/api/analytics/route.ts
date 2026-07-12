@@ -4,8 +4,8 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAdmin } from '@/auth/api-auth';
-import { getCurrentSession } from '@/auth/auth-guards';
+import { withPermission } from '@/auth/with-auth';
+import { Role } from '@/enums/auth';
 
 // Analytics always cover a fixed trailing window; not configurable per-request.
 const ANALYTICS_DAYS = 30;
@@ -16,11 +16,8 @@ const parseIntParam = (value: string | null, fallback: number): number => {
 	return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-export async function GET(request: Request) {
-	// Viewing analytics (the report) is admin-only.
-	const denied = await requireApiAdmin();
-	if (denied) return denied;
-
+// Viewing the analytics report requires the analytics:read permission (admin).
+export const GET = withPermission({ analytics: ['read'] })(async (request) => {
 	const prisma = getPrisma();
 	const { searchParams } = new URL(request.url);
 
@@ -32,34 +29,19 @@ export async function GET(request: Request) {
 	const where = { questionTimestamp: { gte: cutoff } };
 
 	const total = await prisma.conversationAnalytics.count({ where });
-	// userName is denormalized onto the row at capture time (see POST), so the
-	// report reads it directly — no join back to message/conversation/user.
-	const data = await prisma.conversationAnalytics.findMany({
+	// The row stores only `userId`; join the User to resolve the display name.
+	const rows = await prisma.conversationAnalytics.findMany({
 		where,
 		orderBy: { questionTimestamp: 'desc' },
 		skip,
 		...(limit != null ? { take: limit } : {}),
+		include: { user: { select: { id: true, name: true, email: true, role: true } } },
 	});
+
+	const data = rows.map((row) => ({
+		...row,
+		user: { ...row.user, role: (row.user.role as Role) ?? Role.Viewer },
+	}));
 
 	return NextResponse.json({ data, total });
-}
-
-export async function POST(req: Request) {
-	// Capture runs for the signed-in user; their display name is recorded on the
-	// analytics row so the report is self-contained.
-	const session = await getCurrentSession();
-	if (!session) {
-		return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-	}
-
-	const prisma = getPrisma();
-	const body = await req.json();
-	const row = await prisma.conversationAnalytics.create({
-		data: {
-			questionMessageId: body.questionMessageId,
-			question: body.question ?? '',
-			userName: session.user.name || session.user.email || null,
-		},
-	});
-	return NextResponse.json(row, { status: 201 });
-}
+});

@@ -62,3 +62,14 @@ export const acronymsApi = {
 
 	delete: (id: string) => fetch(`/api/acronyms/${id}`, { method: 'DELETE' }),
 };
+
+export const semanticCompilationApi = {
+	get: () => json<{ enabled: boolean }>('/api/configurations/semantic-compilation'),
+
+	setEnabled: (enabled: boolean) =>
+		json<{ enabled: boolean }>('/api/configurations/semantic-compilation', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ enabled }),
+		}),
+};

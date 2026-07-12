@@ -72,4 +72,8 @@ export type TableProps<T> = {
 	scrollClassName?: string;
 	/** Extra classes appended to the outer container (e.g. margins). */
 	className?: string;
+	/** When set, rows become clickable and receive pointer/hover affordances. */
+	onRowClick?: (row: T, index: number) => void;
+	/** Shown instead of the table (columns included) when `rows` is empty. Defaults to `—`. */
+	emptyMessage?: string;
 };
