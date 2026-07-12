@@ -274,10 +274,20 @@ def get_full_term_by_id(
         f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         {term_filter}
-        OPTIONAL MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
+        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
+        WITH term, collect(DISTINCT CASE WHEN t IS NULL THEN NULL ELSE {{
+                 id: t.id,
+                 name: t.name,
+                 schema_id: sch.id,
+                 db_id: db.id
+             }} END) AS raw_tables
+        WITH term, [tbl IN raw_tables WHERE tbl IS NOT NULL] AS tables
         RETURN term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id,
-               count(DISTINCT t) AS table_count
+               size(tables) AS table_count,
+               tables AS tables
         LIMIT 1
         """,
         term_params,

@@ -82,6 +82,20 @@ export type ComposerRelatedTermsSection = {
 	terms: ComposerRelatedTermChip[];
 };
 
+export type ComposerEntityChip = {
+	id: string;
+	name: string;
+	/** Catalog focus path (`dbId|schemaId|tableId`) used to navigate to the entity. */
+	focusId: string;
+};
+
+export type ComposerEntitiesSection = {
+	type: ComposerSectionKind.ENTITY_CHIPS;
+	id: string;
+	title: string;
+	entities: ComposerEntityChip[];
+};
+
 export type ComposerSqlBlockSection = {
 	type: ComposerSectionKind.SQL_BLOCK;
 	id: string;
@@ -98,6 +112,7 @@ export type ComposerSection =
 	| ComposerLoadingPanelSection
 	| ComposerZonesSection
 	| ComposerRelatedTermsSection
+	| ComposerEntitiesSection
 	| ComposerSqlBlockSection;
 
 const composerSectionTypes: readonly ComposerSectionKind[] = [
@@ -108,6 +123,7 @@ const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.LOADING_PANEL,
 	ComposerSectionKind.ZONES_CHIPS,
 	ComposerSectionKind.RELATED_TERMS_CHIPS,
+	ComposerSectionKind.ENTITY_CHIPS,
 	ComposerSectionKind.SQL_BLOCK,
 ];
 

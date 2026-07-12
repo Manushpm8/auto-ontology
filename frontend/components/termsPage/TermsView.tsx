@@ -161,8 +161,6 @@ export const TermsView = () => {
 	const [sqlAttrEditing, setSqlAttrEditing] = useState(false);
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
 
-	// Term and SQL-attribute single pages always open in read mode. Reset synchronously
-	// when navigation changes so the next page never briefly renders in edit mode.
 	const [prevFocusId, setPrevFocusId] = useState(focusId);
 	const [prevSqlAttrId, setPrevSqlAttrId] = useState(sqlAttrId);
 	if (focusId !== prevFocusId || sqlAttrId !== prevSqlAttrId) {
@@ -673,10 +671,14 @@ export const TermsView = () => {
 						values: term.synonyms ?? [],
 					},
 					{
-						type: ComposerSectionKind.TEXT_CARD,
+						type: ComposerSectionKind.ENTITY_CHIPS,
 						id: 'entities',
 						title: 'Entities',
-						body: `Tables (${term.table_count})`,
+						entities: (term.tables ?? []).map((table) => ({
+							id: table.id,
+							name: table.name,
+							focusId: [table.db_id, table.schema_id, table.id].join('|'),
+						})),
 					},
 					{
 						type: ComposerSectionKind.ZONES_CHIPS,

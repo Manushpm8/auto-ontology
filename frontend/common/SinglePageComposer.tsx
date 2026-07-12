@@ -26,6 +26,7 @@ import { Icon, IconName } from '@/components/icons';
 import { TagInput } from '@/components/TagInput';
 import { Table } from '@/components/Table';
 import { SqlBlock } from '@/components/SqlBlock';
+import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import { Toast } from '@/components/Toast';
@@ -337,6 +338,7 @@ function renderComposerSection(
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void,
 	isEditingActive = false,
 	onEditSql?: (sectionId: string, sql: string) => void,
+	onEntityClick?: (focusId: string) => void,
 ): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
@@ -476,6 +478,41 @@ function renderComposerSection(
 					)}
 				</div>
 			);
+		case ComposerSectionKind.ENTITY_CHIPS:
+			return (
+				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{section.title} ({section.entities.length})
+					</h2>
+					{section.entities.length === 0 ? (
+						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+					) : (
+						<ul className="mt-3 flex flex-wrap gap-2">
+							{section.entities.map((entity) => (
+								<li key={entity.id}>
+									{onEntityClick ? (
+										<button
+											type="button"
+											title={entity.name}
+											onClick={() => onEntityClick(entity.focusId)}
+											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
+										>
+											{entity.name}
+										</button>
+									) : (
+										<span
+											title={entity.name}
+											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+										>
+											{entity.name}
+										</span>
+									)}
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			);
 		case ComposerSectionKind.SQL_BLOCK:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
@@ -545,6 +582,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const handleTermClick = useCallback(
 			(termId: string) => {
 				router.push(`/terms?focus=${encodeURIComponent(termId)}`);
+			},
+			[router],
+		);
+
+		const handleEntityClick = useCallback(
+			(focusId: string) => {
+				router.push(catalogPathFromFocusId(focusId));
 			},
 			[router],
 		);
@@ -904,6 +948,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													onDataTableRowClick,
 													isEditingActive,
 													onEditSql,
+													handleEntityClick,
 												)
 											)}
 										</div>
