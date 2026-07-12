@@ -27,7 +27,14 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.dal.users import get_accessible_catalog_ids_for_zones, resolve_table_filter
 
-from gsf.semantic.constants import REL_REPRESENTS
+from gsf.semantic.constants import (
+    LABEL_COLUMN_ATTRIBUTE,
+    LABEL_TERM,
+    REL_HAS_ATTRIBUTE,
+    REL_PROPERTY_OF,
+    REL_REPRESENTS,
+    REL_SEMANTIC_FK,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +272,7 @@ def fetch_tables_for_schema(
     | None = None,  # accepted for API compat; schema_id is globally unique
     zone_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return Table payloads with column counts for a given schema.
+    """Return Table payloads with column, SQL, and Term counts for a schema.
 
     When *zone_ids* is supplied only tables reachable through those zones are
     returned.
@@ -278,14 +285,39 @@ def fetch_tables_for_schema(
         f"""
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
               (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{Edges.CONTAINS}]->
-              (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+              (t:{Labels.TABLE})
         {where_clause}
+        OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+        WITH db, s, t, count(DISTINCT c) AS columns_count
+        OPTIONAL MATCH (t)<-[:{Edges.SQL}]-(sql:{Labels.SQL})
+        WITH db, s, t, columns_count, count(DISTINCT sql) AS sql_count
+        OPTIONAL MATCH (t)-[:{REL_REPRESENTS}]->(represented:{LABEL_TERM})
+        WITH db, s, t, columns_count, sql_count,
+             collect(DISTINCT represented.id) AS represented_term_ids
+        OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->
+              (:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
+              (attribute_term:{LABEL_TERM})
+        WITH db, s, t, columns_count, sql_count,
+             represented_term_ids,
+             collect(DISTINCT attribute_term.id) AS attribute_term_ids
+        WITH db, s, t, columns_count, sql_count,
+             represented_term_ids + attribute_term_ids AS all_term_ids
+        WITH db, s, t, columns_count, sql_count,
+             reduce(unique_ids = [], term_id IN all_term_ids |
+                 CASE
+                     WHEN term_id IS NULL OR term_id IN unique_ids THEN unique_ids
+                     ELSE unique_ids + term_id
+                 END
+             ) AS unique_term_ids
         RETURN t.id AS id,
                t.name AS name,
                t.table_type AS table_type,
                db.name AS database_name,
                s.name AS schema_name, t.description AS description,
-               count(c) AS columns_count
+               columns_count,
+               sql_count,
+               size(unique_term_ids) AS terms_count
         ORDER BY name
         """,
         params,
@@ -374,6 +406,106 @@ def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
 def fetch_join_edges() -> list[dict[str, Any]]:
     """Return all JOIN edges between tables."""
     return get_neo4j_conn().query_read(_FETCH_JOINS_QUERY)
+
+
+def fetch_data_exploration_edges(
+    zone_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return table pairs connected by SQL queries.
+
+    A query becomes an exploration edge when its ``Sql`` node references at
+    least two visible tables. Each edge includes the SQL text shown when the
+    user selects that connection.
+    """
+    accessible = (
+        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    )
+    if accessible is not None:
+        table_ids = list(accessible["table_ids"])
+        if not table_ids:
+            return []
+        where_clause = (
+            "WHERE source.id IN $table_ids AND target.id IN $table_ids "
+            "AND source.id < target.id"
+        )
+        params: dict[str, Any] = {"table_ids": table_ids}
+    else:
+        where_clause = "WHERE source.id < target.id"
+        params = {}
+
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (source:{Labels.TABLE})<-[:{Edges.SQL}]-(sql:{Labels.SQL})
+              -[:{Edges.SQL}]->(target:{Labels.TABLE})
+        {where_clause}
+        WITH source, target,
+             collect(DISTINCT sql.sql_full_query) AS raw_queries
+        RETURN source.id AS source,
+               target.id AS target,
+               [query IN raw_queries
+                WHERE query IS NOT NULL AND trim(toString(query)) <> ''] AS queries
+        ORDER BY source, target
+        """,
+        params,
+    )
+    return [
+        {
+            "source": row["source"],
+            "target": row["target"],
+            "queries": list(row.get("queries") or []),
+        }
+        for row in rows
+        if row.get("source") and row.get("target") and row.get("queries")
+    ]
+
+
+def fetch_table_exploration_details(
+    table_id: str,
+    zone_ids: list[str] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return SQL queries and Terms linked to one visible Table."""
+    accessible = (
+        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    )
+    if accessible is not None and table_id not in accessible["table_ids"]:
+        return {"queries": [], "terms": []}
+
+    conn = get_neo4j_conn()
+    queries = conn.query_read(
+        f"""
+        MATCH (sql:{Labels.SQL})-[:{Edges.SQL}]->
+              (t:{Labels.TABLE} {{id: $table_id}})
+        RETURN DISTINCT sql.id AS id, sql.sql_full_query AS sql
+        ORDER BY id
+        """,
+        {"table_id": table_id},
+    )
+    terms = conn.query_read(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})
+              -[:{REL_REPRESENTS}]->(term:{LABEL_TERM})
+        RETURN DISTINCT term.id AS id, term.name AS name,
+                        term.description AS description
+        UNION
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})
+              -[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->
+              (:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
+              (term:{LABEL_TERM})
+        RETURN DISTINCT term.id AS id, term.name AS name,
+                        term.description AS description
+        """,
+        {"table_id": table_id},
+    )
+    unique_terms = {row["id"]: row for row in terms if row.get("id")}
+    return {
+        "queries": [
+            {"id": row.get("id") or "", "sql": row.get("sql") or ""}
+            for row in queries
+            if row.get("sql")
+        ],
+        "terms": list(unique_terms.values()),
+    }
 
 
 # ---------------------------------------------------------------------------

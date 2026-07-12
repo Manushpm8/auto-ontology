@@ -26,6 +26,8 @@ import ChartLineSvg from './svg/chart-line.svg';
 import UsersSvg from './svg/users.svg';
 import KeySvg from './svg/key.svg';
 import TermsSvg from './svg/terms.svg';
+import ExplorationSvg from './svg/exploration.svg';
+import LinkSvg from './svg/link.svg';
 
 export enum IconName {
 	Menu = 'menu',
@@ -50,6 +52,8 @@ export enum IconName {
 	Users = 'users',
 	Key = 'key',
 	Terms = 'terms',
+	Exploration = 'exploration',
+	Link = 'link',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -75,6 +79,8 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Users]: UsersSvg,
 	[IconName.Key]: KeySvg,
 	[IconName.Terms]: TermsSvg,
+	[IconName.Exploration]: ExplorationSvg,
+	[IconName.Link]: LinkSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

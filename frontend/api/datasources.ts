@@ -4,6 +4,7 @@
 
 import { requests } from './requests';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
+import type { ExplorationLink, TableExplorationDetails } from '@/types/exploration';
 import type { Params } from '@/types/params';
 import type {
 	ApiResponse,
@@ -24,6 +25,14 @@ const columnsByTableMap = new Map<string, Promise<ApiResponse<Column[]>>>();
 
 export const datasources = {
 	getDBs: () => requests.get<ResponseWithCount<Database[]>>('datasources/dbs'),
+
+	getExplorationEdges: () =>
+		requests.get<ResponseWithCount<ExplorationLink[]>>('datasources/exploration-edges'),
+
+	getTableExplorationDetails: (tableId: string) =>
+		requests.get<{ data: TableExplorationDetails }>(
+			`datasources/tables/${tableId}/exploration-details`,
+		),
 
 	/** Schemas for one database; parallel callers with the same key share one HTTP request. */
 	getSchemasForDatabase: (dbId: string): Promise<ApiResponse<Schema[]>> => {

@@ -89,6 +89,24 @@ def list_databases(zone_ids: list[str] | None = Query(default=None)) -> dict:
     return _count_payload(rows)
 
 
+@router.get("/datasources/exploration-edges")
+def list_data_exploration_edges(
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Table connections backed by SQL queries, scoped to visible tables."""
+    rows = dal.fetch_data_exploration_edges(zone_ids=zone_ids)
+    return _count_payload(rows)
+
+
+@router.get("/datasources/tables/{table_id}/exploration-details")
+def get_table_exploration_details(
+    table_id: str,
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Columns-adjacent SQL and Term details for Exploration modals."""
+    return {"data": dal.fetch_table_exploration_details(table_id, zone_ids=zone_ids)}
+
+
 # ---------------------------------------------------------------------------
 # Custom analyses (/api/custom-analyses)
 # ---------------------------------------------------------------------------
