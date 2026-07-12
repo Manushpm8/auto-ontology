@@ -903,34 +903,34 @@ export const TermsView = () => {
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{termTitle}
 					</span>
-					<button
-						type="button"
-						onClick={() => setCreateSqlAttrModalOpen(true)}
-						className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
-					>
-						<svg
-							className="h-4 w-4"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-							aria-hidden
-						>
-							<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
-						</svg>
-						Create new sql attribute
-					</button>
-					{termEditing ? null : (
+					<div className="ml-auto flex items-center gap-2">
+						{termEditing ? null : (
+							<button
+								type="button"
+								onClick={() => {
+									setTermEditing(true);
+								}}
+								className="cursor-pointer rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+							>
+								Edit term
+							</button>
+						)}
 						<button
 							type="button"
-							onClick={() => {
-								setTermEditing(true);
-							}}
-							aria-label={`Edit ${termTitle}`}
-							title="Edit"
-							className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+							onClick={() => setCreateSqlAttrModalOpen(true)}
+							className="flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
 						>
-							<Icon name={IconName.Pencil} className="h-4 w-4" />
+							<svg
+								className="h-4 w-4"
+								viewBox="0 0 20 20"
+								fill="currentColor"
+								aria-hidden
+							>
+								<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
+							</svg>
+							Create new sql attribute
 						</button>
-					)}
+					</div>
 				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
