@@ -37,6 +37,37 @@ def resolve_connection_strings() -> list[str]:
         return []
 
 
+def _schema_filter(connection: dict) -> list[str] | None:
+    """Clean optional ``schemas`` allowlist off a connection dict (None = all)."""
+    raw = connection.get("schemas")
+    if not isinstance(raw, list):
+        return None
+    schemas = [str(s).strip() for s in raw if str(s).strip()]
+    return schemas or None
+
+
+def resolve_connections() -> list[tuple[str, list[str] | None]]:
+    """Return ``(connection_string, schema_allowlist)`` pairs for this pass.
+
+    Env-var connections carry no schema filter (``None``). Neo4j connections may
+    include an optional ``schemas`` list that scopes ingestion to those schemas.
+    """
+    raw = os.environ.get("CONNECTION_STRINGS", "")
+    env_conns = [cs.strip() for cs in raw.split(",") if cs.strip()]
+    if env_conns:
+        logger.info("connections: using CONNECTION_STRINGS env (%d)", len(env_conns))
+        return [(cs, None) for cs in env_conns]
+
+    try:
+        return [
+            (build_connection_string(conn), _schema_filter(conn))
+            for conn in list_connections()
+        ]
+    except Exception:
+        logger.exception("connections: failed to load from Neo4j")
+        return []
+
+
 def resolve_database_names() -> list[str]:
     """Return the distinct database names behind the configured connections.
 

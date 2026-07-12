@@ -43,8 +43,16 @@ def invalidate_connectors_cache() -> None:
     _connectors = None
 
 
-def create_connector(connection_string: str) -> SQLDatabase:
-    """Parse *connection_string*, select a connector class, and return an instance."""
+def create_connector(
+    connection_string: str,
+    schemas: list[str] | None = None,
+) -> SQLDatabase:
+    """Parse *connection_string*, select a connector class, and return an instance.
+
+    *schemas* is an optional ingestion allowlist. It is only honoured by
+    connectors that support schema filtering (currently Snowflake); for others
+    it is ignored so their behaviour is unchanged.
+    """
     try:
         parsed = urlparse(connection_string)
         scheme = parsed.scheme
@@ -61,6 +69,8 @@ def create_connector(connection_string: str) -> SQLDatabase:
                 f"Connection string: {connection_string}"
             )
 
+        if schemas and connector_class is SnowflakeDatabase:
+            return connector_class(connection_string, schemas=schemas)
         return connector_class(connection_string)
 
     except Exception:

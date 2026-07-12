@@ -27,9 +27,12 @@ from gsf.dal.connections import delete_database_subgraph
 logger = logging.getLogger("ingestion_service.ingest")
 
 
-def run_ingest(connection_string: str) -> None:
+def run_ingest(
+    connection_string: str,
+    schemas: list[str] | None = None,
+) -> None:
     TABULAR_PARAMS = TabularExtractParams(
-        connector=create_connector(connection_string),
+        connector=create_connector(connection_string, schemas=schemas),
     )
 
     if not TABULAR_PARAMS.connector:
@@ -61,14 +64,28 @@ def run_ingest(connection_string: str) -> None:
         TABULAR_PARAMS.connector.close()
 
 
+def _parse_schema_filter(connection: dict[str, Any]) -> list[str] | None:
+    """Extract an optional schema allowlist from a connection dict.
+
+    Returns a clean list of non-empty schema names, or ``None`` when the
+    connection has no ``schemas`` filter (meaning: ingest all schemas).
+    """
+    raw = connection.get("schemas")
+    if not isinstance(raw, list):
+        return None
+    schemas = [str(s).strip() for s in raw if str(s).strip()]
+    return schemas or None
+
+
 def trigger_ingest(connection: dict[str, Any]) -> None:
     """Run ingest for a new connection without blocking the caller."""
     connection_string = build_connection_string(connection)
     database_name = str(connection.get("database") or "")
+    schemas = _parse_schema_filter(connection)
 
     def _run() -> None:
         try:
-            run_ingest(connection_string)
+            run_ingest(connection_string, schemas=schemas)
         except Exception:
             logger.exception(
                 "Background ingest failed for database %s",
