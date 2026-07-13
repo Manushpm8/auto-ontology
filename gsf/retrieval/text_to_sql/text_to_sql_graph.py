@@ -20,6 +20,10 @@ from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtract
 from gsf.retrieval.text_to_sql.agents.question_sanitization import (
     QuestionSanitizationAgent,
 )
+from gsf.retrieval.text_to_sql.agents.prediction_classification import (
+    PredictionClassificationAgent,
+)
+from gsf.retrieval.text_to_sql.agents.kumo_prediction import KumoPredictionAgent
 from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
     EmptyLikeResultCheckAgent,
 )
@@ -192,6 +196,8 @@ def create_graph():
 
     # Routing agents
     question_sanitization_agent = QuestionSanitizationAgent()
+    prediction_classification_agent = PredictionClassificationAgent()
+    kumo_prediction_agent = KumoPredictionAgent()
     entities_extraction_agent = EntitiesExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
@@ -212,6 +218,10 @@ def create_graph():
     sanitize_question_node = _make_node(
         "sanitize_question", agent_wrapper(question_sanitization_agent)
     )
+    classify_prediction_node = _make_node(
+        "classify_prediction", agent_wrapper(prediction_classification_agent)
+    )
+    kumo_predict_node = _make_node("kumo_predict", agent_wrapper(kumo_prediction_agent))
     entities_extraction_node = _make_node(
         "entities_extraction", agent_wrapper(entities_extraction_agent)
     )
@@ -260,6 +270,8 @@ def create_graph():
 
     # Add only nodes instantiated above.
     graph.add_node("sanitize_question", sanitize_question_node)
+    graph.add_node("classify_prediction", classify_prediction_node)
+    graph.add_node("kumo_predict", kumo_predict_node)
     graph.add_node("entities_extraction", entities_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
@@ -275,8 +287,20 @@ def create_graph():
     graph.add_node("format_and_respond", format_and_respond_node)
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
+    # After sanitization, a decision tree routes prediction questions to the
+    # KumoRFM tool and everything else into the text-to-SQL flow.
+    graph.add_edge("sanitize_question", "classify_prediction")
+    graph.add_conditional_edges(
+        "classify_prediction",
+        route_decision,
+        {
+            "prediction": "kumo_predict",
+            "sql": "entities_extraction",
+        },
+    )
+    graph.add_edge("kumo_predict", END)
+
     # Minimal flow using only the defined nodes.
-    graph.add_edge("sanitize_question", "entities_extraction")
     graph.add_edge("entities_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
     graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
