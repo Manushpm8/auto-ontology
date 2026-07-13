@@ -11,6 +11,39 @@ from gsf.semantic.visit_enter import calculate_columns_profiling, process_table
 
 @patch("gsf.semantic.visit_enter.store_column_uniqueness")
 @patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_unhashable_values(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+) -> None:
+    # Postgres array / JSON columns come back as Python lists/dicts, which are
+    # unhashable — profiling must not crash on them.
+    df = pd.DataFrame(
+        {
+            "id": [1, 2],
+            "tags": [["a", "b"], ["a", "b"]],
+            "meta": [{"k": 1}, {"k": 2}],
+        }
+    )
+    connector = MagicMock()
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "tags", "data_type": "ARRAY"},
+        {"name": "meta", "data_type": "jsonb"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert set(result) == {"id", "tags", "meta"}
+    assert result["tags"]["is_unique"] is False  # ["a","b"] repeated
+    assert result["meta"]["is_unique"] is True
+    assert result["id"]["is_unique"] is True
+
+
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,

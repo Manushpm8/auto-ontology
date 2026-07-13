@@ -166,13 +166,25 @@ def calculate_columns_profiling(
     uniqueness: dict[str, bool] = {}
 
     for column in df.columns:
-        series = df[column].dropna()
         col_name = str(column)
+        try:
+            # Cast to string first: some columns hold unhashable values (e.g.
+            # Postgres array columns come back as Python lists, JSON/JSONB as
+            # dict/list), and both is_unique and value_counts hash values.
+            series = df[column].dropna().map(str)
 
-        is_unique = bool(len(series) > 0 and series.is_unique)
+            is_unique = bool(len(series) > 0 and series.is_unique)
+            top5 = list(series.value_counts().head(_PROFILING_TOP_N).index)
+        except Exception:
+            logger.warning(
+                "[%s] profiling failed for column %r — skipping column",
+                table_name,
+                col_name,
+                exc_info=True,
+            )
+            continue
+
         uniqueness[col_name] = is_unique
-
-        top5 = [str(v) for v in series.value_counts().head(_PROFILING_TOP_N).index]
         profiling[col_name] = {"sample_values": top5, "is_unique": is_unique}
 
         if _is_excluded_sample_type(type_by_column.get(col_name)):
@@ -206,9 +218,16 @@ def process_table(
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
     if connector is not None:
-        columns_profiling_samples = calculate_columns_profiling(
-            table, ctx.get("columns", []), connector
-        )
+        try:
+            columns_profiling_samples = calculate_columns_profiling(
+                table, ctx.get("columns", []), connector
+            )
+        except Exception:
+            logger.warning(
+                "[%s] column profiling failed — continuing without it",
+                table_name,
+                exc_info=True,
+            )
 
     # --- FK detection (LLM + declared); results not written to Neo4j ---
     declared_fks = ctx.get("fks", [])
@@ -226,6 +245,7 @@ def process_table(
         ctx.get("columns", []),
         declared_fks,
         suggested_fk_columns=suggested_fk_names,
+        columns_profiling_samples=columns_profiling_samples,
     )
     if not specs:
         logger.warning("[%s] no non-FK columns — skipping Term creation", table_name)
