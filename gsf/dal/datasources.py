@@ -520,6 +520,31 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
     )
 
 
+def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
+    """Write is_unique flags onto Column nodes for a given table.
+
+    Skips silently when *uniqueness* is empty.
+    """
+    if not uniqueness:
+        return
+    entries = [
+        {"column_name": col, "is_unique": bool(is_unique)}
+        for col, is_unique in uniqueness.items()
+    ]
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.is_unique][0]
+             AS iu
+        WHERE iu IS NOT NULL
+        SET col.is_unique = iu
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cross-entity (Table + Column batch operations)
 # ---------------------------------------------------------------------------

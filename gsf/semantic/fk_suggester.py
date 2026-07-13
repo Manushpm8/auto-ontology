@@ -90,8 +90,14 @@ def _format_column_line(col: dict[str, Any]) -> str:
 def suggest_potential_foreign_keys(
     table: dict[str, Any],
     ctx: dict[str, Any],
+    columns_profiling_samples: dict[str, dict[str, Any]] | None = None,
 ) -> PotentialFkResult:
-    """Ask the LLM which non-PK, non-declared-FK columns may be foreign keys."""
+    """Ask the LLM which non-PK, non-declared-FK columns may be foreign keys.
+
+    *columns_profiling_samples* maps each column to its profiling data
+    (``{"sample_values": [...], "is_unique": bool}``) when a live sample was
+    available.
+    """
     columns = ctx.get("columns", [])
     fks = ctx.get("fks", [])
     pk_names = _pk_column_names(table)
