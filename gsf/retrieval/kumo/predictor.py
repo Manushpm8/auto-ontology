@@ -64,9 +64,16 @@ def _quote(schema: str, table: str) -> str:
     return f'"{schema}"."{table}"' if schema else f'"{table}"'
 
 
-def _load_catalog_frames(connectors: list[Any]) -> dict[str, pd.DataFrame]:
-    """Load a bounded sample of each ingested-catalog table into a DataFrame."""
+def _load_catalog_frames(
+    connectors: list[Any],
+) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
+    """Load a bounded sample of each ingested-catalog table into a DataFrame.
+
+    Returns ``(frames, name_map)`` where ``name_map`` maps each graph table name
+    to its schema-qualified SQL name (for :class:`_SchemaQualifyingConnector`).
+    """
     frames: dict[str, pd.DataFrame] = {}
+    name_map: dict[str, str] = {}
     for connector in connectors:
         db = getattr(connector, "database_name", "?")
         try:
@@ -82,7 +89,7 @@ def _load_catalog_frames(connectors: list[Any]) -> dict[str, pd.DataFrame]:
                     "kumo: reached table cap (%d); remaining tables skipped",
                     _MAX_TABLES,
                 )
-                return frames
+                return frames, name_map
             schema = str(row.get("table_schema") or "").strip()
             table = str(row.get("table_name") or "").strip()
             if not table:
@@ -98,7 +105,9 @@ def _load_catalog_frames(connectors: list[Any]) -> dict[str, pd.DataFrame]:
             if df is None or df.empty:
                 continue
             frames[name] = df
-    return frames
+            if schema:
+                name_map[name] = _quote(schema, table)
+    return frames, name_map
 
 
 def _error_response(message: str) -> dict[str, Any]:
@@ -109,6 +118,34 @@ def _error_response(message: str) -> dict[str, Any]:
         "custom_analyses_used": [],
         "sql_response_from_db": None,
     }
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert a prediction-frame cell into a JSON-serializable Python value.
+
+    KumoRFM returns pandas ``Timestamp`` (e.g. ``ANCHOR_TIMESTAMP``) and numpy
+    scalars (``float64`` / ``bool_`` / ``int64``) that ``json.dumps`` can't
+    encode. Timestamps/datetimes become ISO strings, numpy scalars become native
+    Python, and NaN/NaT become ``None``.
+    """
+    import datetime
+
+    import numpy as np
+
+    try:
+        if not isinstance(value, (list, dict, tuple)) and pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (pd.Timestamp, datetime.datetime, datetime.date)):
+        return value.isoformat()
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _json_safe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{k: _json_safe(v) for k, v in row.items()} for row in rows]
 
 
 def _format_result(result: Any) -> dict[str, Any]:
@@ -134,7 +171,7 @@ def _format_result(result: Any) -> dict[str, Any]:
         "sql_code": result.pql or "",
         "sql_columns": result.columns,
         "custom_analyses_used": [],
-        "sql_response_from_db": result.rows or None,
+        "sql_response_from_db": _json_safe_rows(result.rows) or None,
     }
 
 
@@ -152,7 +189,7 @@ def predict_from_question(
     if not connectors:
         return _error_response("No database connection is configured.")
 
-    frames = _load_catalog_frames(connectors)
+    frames, name_map = _load_catalog_frames(connectors)
     if not frames:
         return _error_response(
             "No catalog tables were available to build a prediction graph."
@@ -169,7 +206,8 @@ def predict_from_question(
     kumo_model = KumoModel(rfm.KumoRFM(graph, verbose=False))
 
     # Entity-selection SQL runs against the live GSF database connection (the
-    # first configured connector — the source of the catalog tables).
+    # first configured connector — the source of the catalog tables). ``table_names``
+    # maps bare graph table names to their schema-qualified form so the SQL resolves.
     result = generate_pql(
         question,
         llm=llm,
@@ -179,6 +217,7 @@ def predict_from_question(
         graph_edges=edges,
         graph_col_stypes=col_stypes,
         time_columns=time_columns,
+        table_names=name_map,
         max_entities=_MAX_ENTITIES,
         max_preview_rows=_MAX_PREVIEW_ROWS,
     )

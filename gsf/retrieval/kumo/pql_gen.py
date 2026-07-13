@@ -48,6 +48,41 @@ def quote_ident(identifier: str, char: str = '"') -> str:
     return char + identifier.replace(char, char * 2) + char
 
 
+def _sql_table(table: str, table_names: dict[str, str] | None) -> str:
+    """Schema-qualified SQL name for a graph table, else a quoted bare name.
+
+    The Kumo graph refers to tables by their bare name (``GPUS``); the live
+    database needs ``"SCHEMA"."GPUS"``. ``table_names`` maps the graph name to
+    that qualified form (matched case-insensitively).
+    """
+    if table_names:
+        for name, qualified in table_names.items():
+            if name.lower() == table.lower():
+                return qualified
+    return quote_ident(table)
+
+
+_FROM_JOIN_RE = re.compile(r'\b(FROM|JOIN)\s+"?([A-Za-z_]\w*)"?', re.IGNORECASE)
+
+
+def _qualify_from_clauses(sql: str, table_names: dict[str, str] | None) -> str:
+    """Schema-qualify bare table names after FROM / JOIN in model-authored SQL.
+
+    Only the table token following FROM / JOIN is rewritten (quoted or not), so
+    column references are untouched. Used for the LLM's entity-selection SQL,
+    whose table names are the bare graph names.
+    """
+    if not table_names:
+        return sql
+    lookup = {name.lower(): qualified for name, qualified in table_names.items()}
+
+    def repl(match: "re.Match[str]") -> str:
+        qualified = lookup.get(match.group(2).lower())
+        return f"{match.group(1)} {qualified}" if qualified else match.group(0)
+
+    return _FROM_JOIN_RE.sub(repl, sql)
+
+
 _PQL_FENCE = re.compile(r"```pql\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _GENERIC_FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _PREDICT_START = re.compile(r"\bPREDICT\b", re.IGNORECASE)
@@ -390,6 +425,7 @@ def aggregate_prediction_by(
     pk: str,
     group_by: str,
     connector: SQLDatabase,
+    table_names: dict[str, str] | None = None,
 ) -> Any:
     """Roll a per-entity prediction up to per-group totals — the post-hoc aggregation PQL cannot do itself.
 
@@ -401,15 +437,17 @@ def aggregate_prediction_by(
     """
     id_col = _entity_id_column(prediction, pk)
     value_col = _prediction_value_column(prediction, id_col=id_col)
-    q = quote_ident
     try:
         dim = connector.execute(
-            f"SELECT {q(pk)}, {q(group_by)} FROM {q(table)} WHERE {q(pk)} IS NOT NULL"
+            f"SELECT {pk}, {group_by} FROM {_sql_table(table, table_names)} "
+            f"WHERE {pk} IS NOT NULL"
         )
     except Exception as exc:  # noqa: BLE001 - turn an opaque warehouse error into an actionable group-by error
         try:
             valid = list(
-                connector.execute(f"SELECT * FROM {quote_ident(table)} LIMIT 1").columns
+                connector.execute(
+                    f"SELECT * FROM {_sql_table(table, table_names)} LIMIT 1"
+                ).columns
             )
         except Exception:  # noqa: BLE001 - best-effort column listing for the message
             valid = []
@@ -933,22 +971,31 @@ def prefer_explicit_change_targets(
 
 
 def _resolve_indices(
-    pql: str, entity_sql: str | None, connector: SQLDatabase, max_entities: int
+    pql: str,
+    entity_sql: str | None,
+    connector: SQLDatabase,
+    max_entities: int,
+    table_names: dict[str, str] | None = None,
 ) -> list[Any]:
     """Resolve the entity-id list to score: from ``entity_sql`` if given, else all PKs of the entity table.
 
     Both paths go through the connector's ``execute`` seam, capped at ``max_entities``.
+    Bare graph table names are schema-qualified via ``table_names`` so the SQL
+    resolves against the live database.
     """
     if entity_sql:
-        df = connector.execute(entity_sql)
+        df = connector.execute(_qualify_from_clauses(entity_sql, table_names))
     else:
         entity = parse_entity(pql)
         if entity is None:
             return []
         table, pk = entity
-        q = quote_ident
+        # Bare (unquoted) column identifier: the connector lower-cased the graph
+        # column names, so a quoted lower-case name won't match a Snowflake column
+        # (stored upper-case). Bare lets each dialect apply its default casing.
         df = connector.execute(
-            f"SELECT DISTINCT {q(pk)} FROM {q(table)} WHERE {q(pk)} IS NOT NULL LIMIT {int(max_entities)}"
+            f"SELECT DISTINCT {pk} FROM {_sql_table(table, table_names)} "
+            f"WHERE {pk} IS NOT NULL LIMIT {int(max_entities)}"
         )
     if df.empty:
         return []
@@ -1018,6 +1065,7 @@ def _forecast_anchor(
     time_columns: dict[str, str | None] | None,
     *,
     now: Any = None,
+    table_names: dict[str, str] | None = None,
 ) -> Any:
     """Anchor a forward prediction at *now* (a true "forecast from today"), capped so the
     ``[anchor, anchor + horizon]`` window never runs past the data.
@@ -1041,8 +1089,9 @@ def _forecast_anchor(
     try:
         import pandas as pd
 
-        q = quote_ident
-        df = connector.execute(f"SELECT MAX({q(time_col)}) AS m FROM {q(tm.group(1))}")
+        df = connector.execute(
+            f"SELECT MAX({time_col}) AS m FROM {_sql_table(tm.group(1), table_names)}"
+        )
         data_max = (
             pd.Timestamp(df.iloc[0, 0])
             if (not df.empty and df.iloc[0, 0] is not None)
@@ -1062,7 +1111,10 @@ def _forecast_anchor(
 
 
 def _resolve_single_index(
-    pql: str, entity: str | None, connector: SQLDatabase
+    pql: str,
+    entity: str | None,
+    connector: SQLDatabase,
+    table_names: dict[str, str] | None = None,
 ) -> list[Any]:
     """Resolve one entity-id (the PK value to explain) to its correctly-typed value via the read-only guard.
 
@@ -1073,10 +1125,10 @@ def _resolve_single_index(
         return []
     table, pk = parsed
     safe = str(entity).replace("'", "''")
-    q = quote_ident
     string_type = "VARCHAR"
     df = connector.execute(
-        f"SELECT {q(pk)} FROM {q(table)} WHERE CAST({q(pk)} AS {string_type}) = '{safe}' LIMIT 1"
+        f"SELECT {pk} FROM {_sql_table(table, table_names)} "
+        f"WHERE CAST({pk} AS {string_type}) = '{safe}' LIMIT 1"
     )
     return df.iloc[:, 0].tolist() if not df.empty else []
 
@@ -1155,6 +1207,7 @@ def predict_all(
     entity_sql: str | None = None,
     max_entities: int = 2000,
     time_columns: dict[str, str | None] | None = None,
+    table_names: dict[str, str] | None = None,
 ) -> Any:
     """Run a pre-built, known-good PQL over the full entity scope and return the COMPLETE prediction frame.
 
@@ -1164,8 +1217,8 @@ def predict_all(
     runs the same accuracy-first resilient predict path as :func:`generate_pql`.
     """
     scope = entity_sql if entity_sql is not None else extract_entity_sql(pql)
-    indices = _resolve_indices(pql, scope, connector, max_entities)
-    anchor = _forecast_anchor(pql, connector, time_columns)
+    indices = _resolve_indices(pql, scope, connector, max_entities, table_names)
+    anchor = _forecast_anchor(pql, connector, time_columns, table_names=table_names)
 
     def _predict_call(idx: list[Any] | None, num_neighbors: list[int] | None) -> Any:
         kw: dict[str, Any] = {}
@@ -1206,6 +1259,7 @@ def generate_pql(
     persist_table: str | None = None,
     persist_lock: Any = None,
     time_columns: dict[str, str | None] | None = None,
+    table_names: dict[str, str] | None = None,
 ) -> PqlGenerationResult:
     """Generate a PQL, validate it cheaply against the graph, scope entities, and predict (with repair).
 
@@ -1272,13 +1326,17 @@ def generate_pql(
             validate_pql_static(pql, edges=graph_edges, col_stypes=graph_col_stypes)
             kumo_model.validate_pql(pql)
             if explain:
-                indices = _resolve_single_index(pql, explain_entity, connector)
+                indices = _resolve_single_index(
+                    pql, explain_entity, connector, table_names
+                )
                 if not indices:
                     raise ValueError(
                         f"Entity '{explain_entity}' not found in the dataset for this query."
                     )
 
-                _anchor = _forecast_anchor(pql, connector, time_columns)
+                _anchor = _forecast_anchor(
+                    pql, connector, time_columns, table_names=table_names
+                )
 
                 def _explain_call(num_neighbors: list[int] | None) -> Any:
                     kw: dict[str, Any] = {"explain": True, "run_mode": "fast"}
@@ -1330,7 +1388,9 @@ def generate_pql(
                             "cover the whole population. Ask without grouping to filter a sub-population."
                         )
                     result.entity_sql = None
-                indices = _resolve_indices(pql, scope_sql, connector, entity_cap)
+                indices = _resolve_indices(
+                    pql, scope_sql, connector, entity_cap, table_names
+                )
                 if forecast:
                     if len(indices) > 1:
                         parsed = parse_entity(pql)
@@ -1348,7 +1408,9 @@ def generate_pql(
                         )
                     indices = indices[:1]
 
-                _anchor = _forecast_anchor(pql, connector, time_columns)
+                _anchor = _forecast_anchor(
+                    pql, connector, time_columns, table_names=table_names
+                )
 
                 def _predict_call(
                     idx: list[Any] | None, num_neighbors: list[int] | None
@@ -1382,6 +1444,7 @@ def generate_pql(
                         pk=entity[1],
                         group_by=group_by,
                         connector=connector,
+                        table_names=table_names,
                     )
                     result.group_by = group_by
                     result.num_entities = len(raw)
