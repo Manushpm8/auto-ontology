@@ -51,15 +51,24 @@ class _DescriptionSuggestionResponse(BaseModel):
 
 
 def _fit_description_suggestion(description: str) -> str:
-    """Keep LLM output within the description-size budget before caching it."""
+    """Keep LLM output within the description-size budget before caching it.
+
+    Also guards against a response that was itself cut off mid-sentence
+    (e.g. by the LLM's ``max_tokens`` limit) by trimming back to the last
+    complete sentence, even when the raw text is already within budget.
+    """
     suggestion = " ".join(description.split())
-    if len(suggestion) <= _DESCRIPTION_SUGGESTION_MAX_CHARS:
+    if len(suggestion) > _DESCRIPTION_SUGGESTION_MAX_CHARS:
+        suggestion = suggestion[:_DESCRIPTION_SUGGESTION_MAX_CHARS].rstrip()
+
+    if suggestion and suggestion[-1] in ".!?":
         return suggestion
 
-    truncated = suggestion[:_DESCRIPTION_SUGGESTION_MAX_CHARS].rstrip()
-    sentence_end = max(truncated.rfind("."), truncated.rfind("!"), truncated.rfind("?"))
+    sentence_end = max(
+        suggestion.rfind("."), suggestion.rfind("!"), suggestion.rfind("?")
+    )
     if sentence_end > 0:
-        return truncated[: sentence_end + 1]
+        return suggestion[: sentence_end + 1]
     return ""
 
 
@@ -89,7 +98,7 @@ def suggest_sql_attribute_description(attr_id: str) -> str | None:
         f"the term that contains the attribute: '{row.get('term_name', '')}'."
     )
 
-    llm = get_llm_client(temperature=0.0, max_tokens=192)
+    llm = get_llm_client(temperature=0.0, max_tokens=400)
     response = invoke_with_structured_output(
         llm,
         [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=prompt)],
