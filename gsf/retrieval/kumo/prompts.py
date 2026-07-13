@@ -119,6 +119,13 @@ _REPAIR_BODY = (
     "filter to make the query run. Keep the user's requested population; the tool resolves entity ids separately."
 )
 
+_SNOWFLAKE_CASE_NOTE = (
+    "## Identifier casing (Snowflake)\n"
+    "This warehouse is Snowflake, where unquoted identifiers are stored UPPERCASE. Write every table name in\n"
+    "the PQL in UPPERCASE, exactly as it appears in the Graph section above (e.g. `GPU_ALLOCATIONS.*`, not\n"
+    "`gpu_allocations.*`; `FOR EACH GPUS.gpu_id`). A lowercased table name fails to parse against the graph."
+)
+
 _ENTITY_SQL_INSTRUCTION = (
     "2. To scope WHICH entities to score, a read-only SELECT returning ONLY the entity primary-key column in a\n"
     "   ```sql fenced block. This is REQUIRED whenever the question restricts the entities to a named subset —\n"
@@ -140,6 +147,7 @@ def build_pql_prompt(
     explain_entity: str | None = None,
     prev_pql: str | None = None,
     prev_error: str | None = None,
+    dialect: str | None = None,
 ) -> str:
     """Assemble the text-to-PQL prompt (pure Python; mirrors the old Jinja template)."""
     docs = docs or []
@@ -147,6 +155,11 @@ def build_pql_prompt(
     sections: list[str] = [_PQL_HEADER]
 
     sections.append("## Graph (tables, keys, links)\n```\n" + graph_ddl + "\n```")
+
+    # Snowflake stores unquoted identifiers uppercase, so the graph tables are
+    # uppercase — require the LLM to match that case or the PQL won't parse.
+    if (dialect or "").lower() == "snowflake":
+        sections.append(_SNOWFLAKE_CASE_NOTE)
 
     if columns:
         sections.append("## Columns (types, values, notes)\n" + columns)

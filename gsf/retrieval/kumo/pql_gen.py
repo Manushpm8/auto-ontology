@@ -1275,6 +1275,13 @@ def generate_pql(
     prev_pql: str | None = None
     prev_error: str | None = None
 
+    # Snowflake stores unquoted identifiers uppercase (so the graph tables are
+    # uppercase); tell the LLM to match that case in the PQL.
+    try:
+        dialect = getattr(connector, "dialect", None)
+    except Exception:  # noqa: BLE001 - dialect is a property; never fail generation over it
+        dialect = None
+
     for attempt in range(1, max_tries + 1):
         active_llm = (
             escalation_llm
@@ -1290,6 +1297,7 @@ def generate_pql(
             explain_entity=explain_entity if explain else None,
             prev_pql=prev_pql,
             prev_error=prev_error,
+            dialect=dialect,
         )
         result.attempts = attempt
         try:
