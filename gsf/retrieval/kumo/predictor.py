@@ -64,49 +64,56 @@ def _quote(schema: str, table: str) -> str:
     return f'"{schema}"."{table}"' if schema else f'"{table}"'
 
 
-def _load_catalog_frames(
+def _load_relevant_frames(
     connectors: list[Any],
+    relevant_tables: list[dict[str, Any]],
 ) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
-    """Load a bounded sample of each ingested-catalog table into a DataFrame.
+    """Load a bounded sample of each relevant table into a DataFrame.
+
+    Iterates only the tables the candidate-preparation step already found relevant
+    (no full-catalog scan). Each table's connector is resolved by ``database_name``,
+    falling back to the first connector.
 
     Returns ``(frames, name_map)`` where ``name_map`` maps each graph table name
-    to its schema-qualified SQL name (for :class:`_SchemaQualifyingConnector`).
+    to its schema-qualified SQL name (used to schema-qualify entity-selection SQL).
     """
+    if not connectors or not relevant_tables:
+        return {}, {}
+
+    db_to_connector = {
+        str(getattr(c, "database_name", "") or ""): c for c in connectors
+    }
+    default_connector = connectors[0]
+
     frames: dict[str, pd.DataFrame] = {}
     name_map: dict[str, str] = {}
-    for connector in connectors:
-        db = getattr(connector, "database_name", "?")
+    for t in relevant_tables:
+        if len(frames) >= _MAX_TABLES:
+            logger.warning(
+                "kumo: reached table cap (%d); remaining tables skipped",
+                _MAX_TABLES,
+            )
+            break
+        table = str(t.get("name") or "").strip()
+        if not table:
+            continue
+        schema = str(t.get("schema_name") or "").strip()
+        connector = db_to_connector.get(
+            str(t.get("database_name") or ""), default_connector
+        )
+        name = table if table not in frames else f"{schema}_{table}"
         try:
-            tables = connector.get_tables()
+            df = connector.execute(
+                f"SELECT * FROM {_quote(schema, table)} LIMIT {_MAX_ROWS_PER_TABLE}"
+            )
         except Exception:
-            logger.exception("kumo: get_tables failed for %s", db)
+            logger.exception("kumo: failed to load rows for %s.%s", schema, table)
             continue
-        if tables is None or tables.empty:
+        if df is None or df.empty:
             continue
-        for _, row in tables.iterrows():
-            if len(frames) >= _MAX_TABLES:
-                logger.warning(
-                    "kumo: reached table cap (%d); remaining tables skipped",
-                    _MAX_TABLES,
-                )
-                return frames, name_map
-            schema = str(row.get("table_schema") or "").strip()
-            table = str(row.get("table_name") or "").strip()
-            if not table:
-                continue
-            name = table if table not in frames else f"{schema}_{table}"
-            try:
-                df = connector.execute(
-                    f"SELECT * FROM {_quote(schema, table)} LIMIT {_MAX_ROWS_PER_TABLE}"
-                )
-            except Exception:
-                logger.exception("kumo: failed to load rows for %s.%s", schema, table)
-                continue
-            if df is None or df.empty:
-                continue
-            frames[name] = df
-            if schema:
-                name_map[name] = _quote(schema, table)
+        frames[name] = df
+        if schema:
+            name_map[name] = _quote(schema, table)
     return frames, name_map
 
 
@@ -176,9 +183,16 @@ def _format_result(result: Any) -> dict[str, Any]:
 
 
 def predict_from_question(
-    question: str, connectors: list[Any], llm: Any
+    question: str,
+    connectors: list[Any],
+    llm: Any,
+    relevant_tables: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Answer a prediction question via KumoRFM; returns a final_response dict."""
+    """Answer a prediction question via KumoRFM; returns a final_response dict.
+
+    ``relevant_tables`` (as produced by the candidate-preparation step) scopes the
+    KumoRFM graph to the tables relevant to the question.
+    """
     _ensure_init()
 
     import kumoai.rfm as rfm
@@ -189,10 +203,10 @@ def predict_from_question(
     if not connectors:
         return _error_response("No database connection is configured.")
 
-    frames, name_map = _load_catalog_frames(connectors)
+    frames, name_map = _load_relevant_frames(connectors, relevant_tables or [])
     if not frames:
         return _error_response(
-            "No catalog tables were available to build a prediction graph."
+            "No relevant tables were available to build a prediction graph."
         )
     logger.info("kumo: building graph from %d table(s)", len(frames))
 

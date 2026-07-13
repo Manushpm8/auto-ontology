@@ -287,23 +287,24 @@ def create_graph():
     graph.add_node("format_and_respond", format_and_respond_node)
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
-    # After sanitization, a decision tree routes prediction questions to the
-    # KumoRFM tool and everything else into the text-to-SQL flow.
-    graph.add_edge("sanitize_question", "classify_prediction")
+    # Minimal flow using only the defined nodes.
+    graph.add_edge("sanitize_question", "entities_extraction")
+    graph.add_edge("entities_extraction", "retrieve_candidates")
+    graph.add_edge("retrieve_candidates", "prepare_candidates")
+
+    # After candidate preparation, a decision tree routes prediction questions to
+    # the KumoRFM tool (scoped to the relevant tables just prepared) and everything
+    # else into SQL construction.
+    graph.add_edge("prepare_candidates", "classify_prediction")
     graph.add_conditional_edges(
         "classify_prediction",
         route_decision,
         {
             "prediction": "kumo_predict",
-            "sql": "entities_extraction",
+            "sql": "construct_sql_from_candidates",
         },
     )
     graph.add_edge("kumo_predict", END)
-
-    # Minimal flow using only the defined nodes.
-    graph.add_edge("entities_extraction", "retrieve_candidates")
-    graph.add_edge("retrieve_candidates", "prepare_candidates")
-    graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
 
     graph.add_conditional_edges(
         "construct_sql_from_candidates",

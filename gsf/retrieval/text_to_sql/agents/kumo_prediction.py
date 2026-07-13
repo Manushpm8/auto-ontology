@@ -34,9 +34,14 @@ class KumoPredictionAgent(BaseAgent):
         # Predict from the raw question (per requirement).
         question = get_original_question(state)
         connectors = state.get("connectors", []) or []
+        # Scope the KumoRFM graph to the tables the candidate-preparation step
+        # already found relevant to this question.
+        relevant_tables = path_state.get("relevant_tables") or []
 
         try:
-            final_response = predict_from_question(question, connectors, state["llm"])
+            final_response = predict_from_question(
+                question, connectors, state["llm"], relevant_tables=relevant_tables
+            )
         except Exception as exc:
             self.logger.exception("KumoRFM prediction failed")
             final_response = {
