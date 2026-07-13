@@ -35,13 +35,16 @@ from gsf.retrieval.data_access.custom_analyses import (
 )
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
+    get_evidence,
     get_original_question,
     get_question_for_processing,
 )
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_dialect_rules,
     format_dual_question_block,
+    format_evidence_block,
 )
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 
@@ -51,12 +54,17 @@ logger = logging.getLogger(__name__)
 def _format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
+    dialect: str | None = None,
 ) -> str:
     """Format the semantic anchor + join-path context for the SQL prompt.
 
     Produces a human-readable block describing the anchor table/column and
     how to reach every other retrieved column via JOIN conditions derived
     from the semantic graph.
+
+    ``dialect`` controls qualification: SQLite can't resolve schema/database
+    qualifiers, so table references are emitted bare (``orders`` /
+    ``orders.id``); other dialects keep the ``schema.table`` form.
 
     Example output::
 
@@ -69,11 +77,16 @@ def _format_semantic_context(
             Join path from anchor:
               public.orders.creator_id = public.users.id
     """
-    anchor_schema = primary_attribute.get("schema_name", "")
+    is_sqlite = (dialect or "").strip().lower() == "sqlite"
+
+    def _qualify(schema: str, table: str) -> str:
+        """``schema.table`` for most dialects, bare ``table`` for SQLite."""
+        return table if is_sqlite or not schema else f"{schema}.{table}"
+
     anchor_table = primary_attribute.get("table_name", "")
     anchor_col = primary_attribute.get("col_name", "")
     anchor_name = primary_attribute.get("attr_name", "")
-    anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
+    anchor_full = _qualify(primary_attribute.get("schema_name", ""), anchor_table)
 
     lines: list[str] = [
         "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
@@ -89,40 +102,45 @@ def _format_semantic_context(
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
             col_name = entry.get("col_name", "")
-            schema = entry.get("schema_name", "")
-            table = entry.get("table_name", "")
-            full_table = f"{schema}.{table}" if schema else table
+            full_table = _qualify(entry.get("schema_name", ""), entry.get("table_name", ""))
             lines.append(f"  {attr_name}: {full_table}.{col_name}")
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
                 for hop in path:
-                    src_s = hop.get("source_schema", "")
-                    src_t = hop.get("source_table", "")
-                    src_c = hop.get("source_column", "")
-                    tgt_s = hop.get("target_schema", "")
-                    tgt_t = hop.get("target_table", "")
-                    tgt_c = hop.get("target_column", "")
-                    src = f"{src_s}.{src_t}.{src_c}" if src_s else f"{src_t}.{src_c}"
-                    tgt = f"{tgt_s}.{tgt_t}.{tgt_c}" if tgt_s else f"{tgt_t}.{tgt_c}"
+                    src = (
+                        f"{_qualify(hop.get('source_schema', ''), hop.get('source_table', ''))}"
+                        f".{hop.get('source_column', '')}"
+                    )
+                    tgt = (
+                        f"{_qualify(hop.get('target_schema', ''), hop.get('target_table', ''))}"
+                        f".{hop.get('target_column', '')}"
+                    )
                     lines.append(f"      {src} = {tgt}")
 
     return "\n".join(lines)
 
 
-def format_tables_for_prompt(tables: list[dict]) -> str:
+def format_tables_for_prompt(tables: list[dict], dialect: str | None = None) -> str:
     """
     Format tables with clear column information to prevent cross-table column confusion.
 
     Args:
         tables: Table dicts from ``path_state["relevant_tables"]`` — each must expose
             ``columns`` as a list of dicts (from ``_normalize_table_to_relevant_shape`` / prep).
+        dialect: Target SQL dialect. SQLite only resolves bare table names (or
+            ``main.<table>``); any other qualifier (``<db>.<schema>.<table>`` or
+            ``<schema>.<table>``) refers to a non-existent attached database and
+            fails to execute, so SQLite gets the bare table name. Other dialects
+            keep the fully-qualified ``database.schema.table`` name.
 
     Returns:
         Formatted string clearly showing which columns belong to each table
     """
     if not tables:
         return "No tables available"
+
+    is_sqlite = (dialect or "").strip().lower() == "sqlite"
 
     formatted_tables = []
     for table in tables:
@@ -137,8 +155,12 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
         database_name = table.get("database_name", "")
         schema_name = table.get("schema_name", "")
 
-        # Build table header
-        if database_name and schema_name:
+        # Build table header. SQLite can't resolve schema/database qualifiers
+        # (they map to attached databases that don't exist), so use the bare
+        # table name to keep the reference executable.
+        if is_sqlite:
+            full_name = table_name
+        elif database_name and schema_name:
             full_name = f"{database_name}.{schema_name}.{table_name}"
         elif schema_name:
             full_name = f"{schema_name}.{table_name}"
@@ -250,6 +272,7 @@ class SQLFromCandidatesAgent(BaseAgent):
         main_question = format_dual_question_block(
             original_question, sanitized_question
         )
+        evidence_block = format_evidence_block(get_evidence(state))
 
         primary_attribute: dict | None = path_state.get("primary_attribute")
         attribute_join_paths: list[dict] = path_state.get("attribute_join_paths") or []
@@ -356,12 +379,14 @@ class SQLFromCandidatesAgent(BaseAgent):
             parts = []
             if primary_attribute:
                 parts.append(
-                    _format_semantic_context(primary_attribute, attribute_join_paths)
+                    _format_semantic_context(
+                        primary_attribute, attribute_join_paths, dialect
+                    )
                 )
             if relevant_tables:
                 parts.append(
                     "AVAILABLE TABLES (schema context):\n"
-                    + format_tables_for_prompt(relevant_tables)
+                    + format_tables_for_prompt(relevant_tables, dialect)
                 )
             tables_section = "\n\n".join(parts) if parts else "No tables available."
 
@@ -374,10 +399,12 @@ class SQLFromCandidatesAgent(BaseAgent):
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
                 custom_analyses=ca_section + sa_section,
+                dialect_rules=format_dialect_rules(dialect),
+                evidence_block=evidence_block,
             )
 
             # Choose system prompt based on context
-            system_prompt = create_sql_from_candidates_prompt()
+            system_prompt = create_sql_from_candidates_prompt(dialect)
 
             messages = state["messages"] + [
                 SystemMessage(content=system_prompt),

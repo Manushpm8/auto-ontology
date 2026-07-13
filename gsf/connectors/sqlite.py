@@ -101,6 +101,24 @@ class SQLiteDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._database_name
 
+    @property
+    def _schema_name(self) -> str:
+        """Logical schema name reported for every table/column.
+
+        SQLite has no real schema catalog (all objects live in ``main``), but the
+        graph + prompts key off ``table_schema``. We surface the database name
+        here so schema-qualified references match the graph's ``database_name``
+        (already the bare slug, e.g. ``bank_sales_trading``, via
+        ``metadata_database``).
+        """
+        return self._database_name
+
+    @property
+    def _schema_sql_literal(self) -> str:
+        """``_schema_name`` as a single-quote-escaped SQL string literal."""
+        escaped = self._schema_name.replace("'", "''")
+        return f"'{escaped}'"
+
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
         cur = self._conn.execute(sql, parameters or [])
         if cur.description is None:
@@ -114,7 +132,7 @@ class SQLiteDatabase(SQLDatabase):
         return self.execute(
             f"""
             SELECT
-                'main' AS table_schema,
+                {self._schema_sql_literal} AS table_schema,
                 name   AS table_name,
                 CASE type
                     WHEN 'view' THEN '{view_type}'
@@ -135,7 +153,7 @@ class SQLiteDatabase(SQLDatabase):
             for cid, name, data_type, notnull, _default, _pk in info:
                 rows.append(
                     {
-                        "table_schema": "main",
+                        "table_schema": self._schema_name,
                         "table_name": table_name,
                         "column_name": name,
                         "data_type": data_type or "TEXT",
@@ -150,9 +168,9 @@ class SQLiteDatabase(SQLDatabase):
 
     def get_views(self) -> pd.DataFrame:
         return self.execute(
-            """
+            f"""
             SELECT
-                'main' AS table_schema,
+                {self._schema_sql_literal} AS table_schema,
                 name   AS table_name,
                 sql    AS view_definition
             FROM sqlite_master
@@ -170,7 +188,7 @@ class SQLiteDatabase(SQLDatabase):
                 if pk > 0:
                     rows.append(
                         {
-                            "table_schema": "main",
+                            "table_schema": self._schema_name,
                             "table_name": table_name,
                             "column_name": name,
                             "ordinal_position": pk,
@@ -186,10 +204,10 @@ class SQLiteDatabase(SQLDatabase):
             for _id, _seq, ref_table, from_col, ref_col, *_rest in fks:
                 rows.append(
                     {
-                        "table_schema": "main",
+                        "table_schema": self._schema_name,
                         "table_name": table_name,
                         "column_name": from_col,
-                        "referenced_schema": "main",
+                        "referenced_schema": self._schema_name,
                         "referenced_table": ref_table,
                         "referenced_column": ref_col,
                     }

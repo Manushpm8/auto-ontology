@@ -51,6 +51,7 @@ create_sql_user_prompt = (
     "or any other vendor-specific or non-standard syntax.\n"
     "- Preserve the exact capitalization of values, names, and identifiers "
     "from the user's question.\n\n"
+    "{dialect_rules}"
     "**Style**\n"
     "- Prefer name columns over ID columns when both are available.\n"
     "- Time windows: 'last week/month/year' means the most recent "
@@ -64,16 +65,94 @@ create_sql_user_prompt = (
     "otherwise do not add LIMIT.\n"
     "- Do NOT include comments in the SQL.\n"
     "- Do NOT use ellipsis as placeholder — output the complete SQL.\n"
+    "{evidence_block}"
 )
 
 
-def create_sql_from_candidates_prompt() -> str:
-    """System prompt for SQL generation from semantic retrieval candidates."""
-    return """You are an expert SQL query builder. You MUST always produce a SQL query.
+def format_evidence_block(evidence: str | None) -> str:
+    """Return an '## Evidence' section for the SQL user prompt, or '' when empty.
+
+    Rendered into the ``evidence_block`` slot at the very end of
+    ``create_sql_user_prompt``; carries external-knowledge hints supplied
+    alongside the question.
+    """
+    evidence = (evidence or "").strip()
+    if not evidence:
+        return ""
+    return f"\n## Evidence\n{evidence}\n"
+
+
+# Functions the LLM reaches for (Postgres / Snowflake / BigQuery / PostGIS
+# habits) that are absent from the stdlib SQLite build used at execution time.
+# Math builtins (sin/cos/acos/radians/sqrt/pi/pow/ln/log/exp/mod/…) ARE
+# available, so distance math can be written by hand.
+_SQLITE_DIALECT_RULES = (
+    "**SQLite-specific (STRICT — these will error at execution)**\n"
+    "- No LEAST / GREATEST. Use scalar MIN(a, b, …) / MAX(a, b, …) instead.\n"
+    "- No spatial / PostGIS functions (ST_Distance, ST_X, ST_Y, ST_DWithin, "
+    "POINT, distance(), …). Compute great-circle distance by hand with the "
+    "Haversine formula using sin/cos/acos/radians/sqrt (all available).\n"
+    "- No statistical aggregates (STDDEV, STDDEV_POP, VARIANCE, VAR_POP, "
+    "PERCENTILE_CONT, PERCENTILE_DISC, MEDIAN, CORR, REGR_*). Derive them with "
+    "plain arithmetic (AVG, SUM, COUNT, window functions).\n"
+    "- No STRING_AGG / ARRAY_AGG — use GROUP_CONCAT. No generate_series.\n"
+    "- No EXTRACT(...) / DATE_TRUNC / DATE_PART / AGE / NOW() / INTERVAL "
+    "literals. Use strftime(), date(), datetime() for all date/time work.\n"
+    "- No :: casts and no ILIKE. Use CAST(x AS type); LIKE is case-insensitive "
+    "for ASCII.\n"
+    "- Coordinates and other composite columns are stored as TEXT, not JSON or "
+    "arrays. Do NOT use json_extract on non-JSON text — inspect the value shape "
+    "and parse with substr()/instr()/CAST as needed.\n"
+    "- Prefer built-in aggregate/math functions and window functions only.\n\n"
+)
+
+
+def format_dialect_rules(dialect: str | None) -> str:
+    """Return dialect-specific SQL rules for the ``dialect_rules`` prompt slot.
+
+    Currently only SQLite needs extra guidance: the stdlib build lacks many
+    functions the model habitually emits (spatial, LEAST/GREATEST, stats
+    aggregates, EXTRACT/DATE_TRUNC), which otherwise trigger repeated
+    reconstruction loops. Returns '' for every other dialect.
+    """
+    if (dialect or "").strip().lower() == "sqlite":
+        return _SQLITE_DIALECT_RULES
+    return ""
+
+
+def create_sql_from_candidates_prompt(dialect: str | None = None) -> str:
+    """System prompt for SQL generation from semantic retrieval candidates.
+
+    ``dialect`` tunes the table-naming rules: SQLite can't resolve
+    schema/database qualifiers, so it's told to use bare table names; every
+    other dialect keeps the fully-qualified ``schema.table`` convention.
+    """
+    is_sqlite = (dialect or "").strip().lower() == "sqlite"
+
+    if is_sqlite:
+        naming_rule = (
+            "- Use the exact table names as provided (bare table names, e.g.\n"
+            "  table_name). Do NOT add a schema or database prefix — this database\n"
+            "  does not support qualified names and they will fail to execute."
+        )
+        join_template = (
+            "    JOIN target_table ON source_table.source_column\n"
+            "         = target_table.target_column"
+        )
+    else:
+        naming_rule = (
+            "- Use fully qualified table names exactly as provided (e.g., schema.table_name).\n"
+            "  Never drop the schema/database prefix."
+        )
+        join_template = (
+            "    JOIN target_schema.target_table ON source_schema.source_table.source_column\n"
+            "         = target_schema.target_table.target_column"
+        )
+
+    return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
 
 Key rules:
-- Use fully qualified table names exactly as provided (e.g., schema.table_name).
-  Never drop the schema/database prefix.
+{naming_rule}
 - When SQL snippets are provided as reference, do NOT copy their aliases.
   Define your own aliases in FROM/JOIN and use only those.
 - File contents (if present) are inputs only — use them as literals, filters,
@@ -84,8 +163,7 @@ Key rules:
   use them instead. Never force the semantic hint if it doesn't match the question.
 - SUGGESTED JOIN PATHS show column-level join conditions. Use only the hops you
   actually need:
-    JOIN target_schema.target_table ON source_schema.source_table.source_column
-         = target_schema.target_table.target_column
+{join_template}
   Follow hops in order when the path spans more than one table.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,

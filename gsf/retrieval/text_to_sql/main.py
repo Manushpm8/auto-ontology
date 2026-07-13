@@ -86,6 +86,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "semantic_retriever": semantic_retriever,
         "decision": "",
         "domain_rules": domain_rules,
+        "evidence": payload.get("evidence", ""),
     }
     if entity_llm_client is not None:
         state["entity_llm"] = entity_llm_client

@@ -29,10 +29,16 @@ from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_t
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
-from gsf.retrieval.text_to_sql.state import AgentState, get_question_for_processing
+from gsf.retrieval.text_to_sql.state import (
+    AgentState,
+    get_evidence,
+    get_question_for_processing,
+)
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_general_prompt,
     create_sql_user_prompt,
+    format_dialect_rules,
+    format_evidence_block,
 )
 from gsf.retrieval.data_access.relevant_tables import get_relevant_tables
 
@@ -99,9 +105,10 @@ class SQLFromTablesAgent(BaseAgent):
             main_question=question,
             observation_block="",
             queries=[],
-            tables=format_tables_for_prompt(relevant_tables),
+            tables=format_tables_for_prompt(relevant_tables, dialect),
             qa_from_conversations=similar_questions,
             custom_analyses="",
+            evidence_block=format_evidence_block(get_evidence(state)),
         )
 
         messages = state["messages"] + [

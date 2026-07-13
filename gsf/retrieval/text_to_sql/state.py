@@ -42,6 +42,7 @@ class TextToSQLPayload(TypedDict):
     connectors: NotRequired[list[SQLDatabase]]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
+    evidence: NotRequired[str]
 
 
 class AgentState(TypedDict):
@@ -57,6 +58,7 @@ class AgentState(TypedDict):
     data_retriever: Retriever
     semantic_retriever: Retriever
     domain_rules: list[dict[str, str]]
+    evidence: NotRequired[str]
 
 
 def get_original_question(state: AgentState) -> str:
@@ -78,6 +80,11 @@ def get_question_for_processing(state: AgentState) -> str:
     return state.get("initial_question", "")
 
 
+def get_evidence(state: AgentState) -> str:
+    """External-knowledge evidence supplied with the question ('' when none)."""
+    return (state.get("evidence") or "").strip()
+
+
 def rules_to_text(rules: list[dict[str, str]]) -> str:
     """Convert a list of ``{"name": ..., "description": ...}`` rules to a prompt string."""
     if not rules:
@@ -94,5 +101,6 @@ __all__ = [
     "AgentState",
     "get_original_question",
     "get_question_for_processing",
+    "get_evidence",
     "rules_to_text",
 ]

@@ -36,9 +36,13 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
     format_tables_for_prompt,
 )
+from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
-from gsf.retrieval.text_to_sql.prompts import format_dual_question_block
+from gsf.retrieval.text_to_sql.prompts import (
+    format_dialect_rules,
+    format_dual_question_block,
+)
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -309,12 +313,23 @@ class SQLReconstructionAgent(BaseAgent):
         path_state["failed_attempts"] = failed_attempts
 
         # --- Step 3: Build reconstruction prompt ---
+        connector = resolve_connector_from_tables(
+            relevant_tables, state.get("connectors")
+        )
+        dialect = getattr(connector, "dialect", None)
+
         tables_section = ""
         if relevant_tables:
             tables_section = (
                 "\nAvailable tables and columns (use ONLY these):\n\n"
-                f"{format_tables_for_prompt(relevant_tables)}\n\n"
+                f"{format_tables_for_prompt(relevant_tables, dialect)}\n\n"
             )
+
+        # Re-assert dialect-specific constraints here: the model repeatedly
+        # re-emits unsupported functions (ST_*, LEAST/GREATEST, …) across
+        # reconstruction turns even though they were stated up front.
+        dialect_rules = format_dialect_rules(dialect)
+        dialect_section = f"\n{dialect_rules}\n" if dialect_rules else ""
 
         history_section = ""
         if len(failed_attempts) > 1:
@@ -339,6 +354,7 @@ class SQLReconstructionAgent(BaseAgent):
             "it is invalid.\n"
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
+            f"{dialect_section}"
             f"{tables_section}"
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"

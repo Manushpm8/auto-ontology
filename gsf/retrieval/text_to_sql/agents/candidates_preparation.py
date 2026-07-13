@@ -45,6 +45,7 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables_from_candidates,
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
@@ -62,10 +63,19 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.utils.llm_invoke import invoke_with_structured_output
 
 
-def _qualified_name(t: dict) -> str:
-    """Build schema-qualified table name (e.g. 'public.users') for dedup/filtering."""
-    schema = t.get("schema_name", "")
+def _qualified_name(t: dict, dialect: str | None = None) -> str:
+    """Build a table name for dedup / relevance-filter prompts.
+
+    Schema-qualified (e.g. ``public.users``) for most dialects. SQLite can't
+    resolve schema/database qualifiers, so it gets the bare table name — this
+    keeps the relevance-filter prompt from teaching the model a qualifier it
+    would then carry into generated SQL. Dedup/removal matching stays correct
+    because every call for a given run uses the same dialect.
+    """
     name = t.get("name", "")
+    if (dialect or "").strip().lower() == "sqlite":
+        return name
+    schema = t.get("schema_name", "")
     return f"{schema}.{name}" if schema else name
 
 
@@ -215,6 +225,13 @@ class CandidatePreparationAgent(BaseAgent):
         # --- 4. Retrieve relevant tables ---
         relevant_tables = get_relevant_tables_from_candidates(candidates)
 
+        # Dialect drives table-name qualification below: SQLite gets bare names so
+        # the relevance-filter prompt doesn't seed a qualifier the model can't run.
+        connector = resolve_connector_from_tables(
+            relevant_tables, state.get("connectors") or []
+        )
+        dialect = getattr(connector, "dialect", None)
+
         if attr_contexts:
             ca_table_ids = list(
                 dict.fromkeys(
@@ -257,7 +274,7 @@ class CandidatePreparationAgent(BaseAgent):
         seen_qnames: set[str] = set()
         deduped_tables: list[dict] = []
         for t in relevant_tables + additional_tables:
-            qn = _qualified_name(t).lower()
+            qn = _qualified_name(t, dialect).lower()
             if qn in seen_qnames:
                 continue
             seen_qnames.add(qn)
@@ -267,7 +284,7 @@ class CandidatePreparationAgent(BaseAgent):
         self.logger.info(
             "Found %d relevant tables (after dedupe, capped at 20): %s",
             len(relevant_tables),
-            [_qualified_name(t) for t in relevant_tables],
+            [_qualified_name(t, dialect) for t in relevant_tables],
         )
 
         # --- 4b. Add tables referenced by custom analyses via Neo4j ---
@@ -323,11 +340,12 @@ class CandidatePreparationAgent(BaseAgent):
             question,
             relevant_tables,
             custom_analyses,
+            dialect=dialect,
         )
         self.logger.info(
             "Kept %d relevant tables (after relevance filter): %s",
             len(relevant_tables),
-            [_qualified_name(t) for t in relevant_tables],
+            [_qualified_name(t, dialect) for t in relevant_tables],
         )
 
         return {
@@ -438,6 +456,8 @@ class CandidatePreparationAgent(BaseAgent):
         question: str,
         tables: list[dict],
         custom_analyses: list[dict] | None = None,
+        *,
+        dialect: str | None = None,
     ) -> tuple[list[dict], str]:
         """Use the LLM to decide which candidate tables are actually needed."""
         if len(tables) <= 2:
@@ -450,7 +470,7 @@ class CandidatePreparationAgent(BaseAgent):
             return tables, ""
 
         tables_summary = "\n".join(
-            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
+            f"- {_qualified_name(t, dialect)}: {t.get('description', '(no description)')}"
             for t in tables
         )
 
@@ -521,12 +541,12 @@ class CandidatePreparationAgent(BaseAgent):
         names_to_remove = {name.lower() for name in result.tables_to_remove}
 
         filtered = [
-            t for t in tables if _qualified_name(t).lower() not in names_to_remove
+            t for t in tables if _qualified_name(t, dialect).lower() not in names_to_remove
         ]
         removed = [
-            _qualified_name(t)
+            _qualified_name(t, dialect)
             for t in tables
-            if _qualified_name(t).lower() in names_to_remove
+            if _qualified_name(t, dialect).lower() in names_to_remove
         ]
 
         self.logger.info(
