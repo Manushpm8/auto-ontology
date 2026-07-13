@@ -59,10 +59,12 @@ export type SinglePageComposerProps = {
 		headerProps: Record<string, unknown>;
 	};
 	entityUpdatingProperties?: Record<string, string | string[]>;
-	isEditing?: boolean;
-	onPersistEdits?: (
+	isEditingMode?: boolean;
+	/** Saves pending field edits. Overrides the default `datasources.updateNode` path used for catalog nodes. */
+	onPatchEdits?: (
 		edits: Record<string, ComposerEditValue>,
 	) => Promise<{ error?: boolean; message?: string }>;
+	/** Called after Save succeeds, or when Save has nothing to persist. */
 	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
@@ -567,8 +569,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			rightPanel,
 			pdfProps,
 			entityUpdatingProperties,
-			isEditing,
-			onPersistEdits,
+			isEditingMode: controlledEditingMode = false,
+			onPatchEdits,
 			onSave,
 			onCancel,
 			onDataTableRowClick,
@@ -611,17 +613,17 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					s.editable === true,
 			)?.id ?? null;
 		const hasEditableSections = firstEditableId !== null;
-		const [localIsEditing, setLocalIsEditing] = useState(false);
+		const [localEditingMode, setLocalEditingMode] = useState(false);
 		const [saving, setSaving] = useState(false);
 		const [saveError, setSaveError] = useState<string | null>(null);
-		const isEditingActive = isEditing || localIsEditing;
+		const isEditingActive = controlledEditingMode || localEditingMode;
 
 		const titleInputRef = useRef<HTMLInputElement>(null);
 		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
 
-		// Reset the save error when an *externally* controlled `isEditing` prop
+		// Reset the save error when an *externally* controlled `isEditingMode` prop
 		// flips to true (e.g. a parent toggling edit mode) — mirrors what the
-		// internal "Edit" button already does for `localIsEditing`. Adjusted
+		// internal "Edit" button already does for `localEditingMode`. Adjusted
 		// during render (not in an effect) per
 		// https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes.
 		const [prevIsEditingActive, setPrevIsEditingActive] = useState(isEditingActive);
@@ -650,13 +652,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const handleSave = async () => {
 			const edits = pendingEditsRef.current;
 			if (saving) return;
-			const hasCustomPersist = onPersistEdits != null;
 
-			if (
-				(!entityId && !hasCustomPersist) ||
-				(Object.keys(edits).length === 0 && !hasCustomPersist)
-			) {
-				setLocalIsEditing(false);
+			const hasPendingEdits = Object.keys(edits).length > 0;
+			const usesDefaultCatalogSave = onPatchEdits == null;
+			const hasNothingToSave = !entityId || !hasPendingEdits;
+
+			if (usesDefaultCatalogSave && hasNothingToSave) {
+				setLocalEditingMode(false);
 				setSaveError(null);
 				onSave?.(edits);
 				return;
@@ -664,8 +666,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 			setSaving(true);
 			setSaveError(null);
-			const res = hasCustomPersist
-				? await onPersistEdits(edits)
+			const res = onPatchEdits
+				? await onPatchEdits(edits)
 				: await datasources.updateNode(entityId, edits as NodePatch);
 			setSaving(false);
 
@@ -674,7 +676,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				return;
 			}
 
-			setLocalIsEditing(false);
+			setLocalEditingMode(false);
 			onSave?.(edits);
 		};
 
@@ -758,7 +760,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								onClick={() => {
 									pendingEditsRef.current = {};
 									setSaveError(null);
-									setLocalIsEditing(true);
+									setLocalEditingMode(true);
 								}}
 								className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
 							>
@@ -773,7 +775,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 									disabled={saving}
 									onClick={() => {
 										if (saving) return;
-										setLocalIsEditing(false);
+										setLocalEditingMode(false);
 										setSaveError(null);
 										onCancel?.();
 									}}

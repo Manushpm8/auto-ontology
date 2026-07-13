@@ -178,7 +178,7 @@ def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
         )
 
     try:
-        row = dal.update_sql_attribute_metadata(
+        row = dal.update_sql_attribute(
             attr_id=attr_id,
             name=name if isinstance(name, str) else None,
             description=patch.get("description"),

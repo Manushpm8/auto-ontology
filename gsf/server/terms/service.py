@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from gsf.dal import sql_attributes as sql_attr_dal
-from gsf.dal import terms as neo4j_dal
+from gsf.dal import terms as terms_dal
 from gsf.semantic.embed import build_semantic_embedder
 from gsf.utils import get_embed_params
 from gsf.utils.embedding import embed_docs_into_vdb
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def refresh_term_embeddings(term_id: str, *, refresh_dependent_attrs: bool) -> None:
     """Best-effort semantic VDB refresh for one Term update."""
-    term, column_attrs = neo4j_dal.fetch_term_and_column_attributes_for_embedding(
+    term, column_attrs = terms_dal.fetch_term_and_column_attributes_for_embedding(
         term_id
     )
     if term is None:

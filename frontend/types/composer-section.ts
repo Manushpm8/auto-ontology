@@ -82,7 +82,7 @@ export type ComposerRelatedTermsSection = {
 	terms: ComposerRelatedTermChip[];
 };
 
-export type ComposerEntityChip = {
+export type ComposerEntity = {
 	id: string;
 	name: string;
 	/** Catalog focus path (`dbId|schemaId|tableId`) used to navigate to the entity. */
@@ -93,7 +93,7 @@ export type ComposerEntitiesSection = {
 	type: ComposerSectionKind.ENTITY_CHIPS;
 	id: string;
 	title: string;
-	entities: ComposerEntityChip[];
+	entities: ComposerEntity[];
 };
 
 export type ComposerSqlBlockSection = {

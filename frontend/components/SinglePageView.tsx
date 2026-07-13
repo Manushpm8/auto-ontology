@@ -23,7 +23,7 @@ export type SinglePageViewProps = {
 	treeDataEpoch?: number;
 	parentId?: string;
 	isEditing?: boolean;
-	onPersistEdits?: (
+	onPatchEdits?: (
 		edits: Record<string, ComposerEditValue>,
 	) => Promise<{ error?: boolean; message?: string }>;
 	onSave?: (edits: Record<string, ComposerEditValue>) => void;
@@ -43,7 +43,7 @@ export const SinglePageView = ({
 	treeFocusId = null,
 	treeDataEpoch = 0,
 	isEditing = false,
-	onPersistEdits,
+	onPatchEdits,
 	onSave,
 	onCancel,
 	onDataTableRowClick,
@@ -123,8 +123,8 @@ export const SinglePageView = ({
 				rightPanel={props?.rightPanel}
 				leftPanel={props?.leftPanel}
 				entityUpdatingProperties={props?.entityUpdatingProperties}
-				isEditing={isEditing}
-				onPersistEdits={onPersistEdits}
+				isEditingMode={isEditing}
+				onPatchEdits={onPatchEdits}
 				onSave={onSave}
 				onCancel={onCancel}
 				onDataTableRowClick={onDataTableRowClick}

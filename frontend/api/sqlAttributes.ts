@@ -23,7 +23,7 @@ export type SqlAttributeValidatePayload = {
 	attribute_id?: string;
 };
 
-export type SqlAttributeMetadataPatchPayload = {
+export type SqlAttributePatchPayload = {
 	name?: string;
 	description?: string | null;
 };
@@ -45,10 +45,7 @@ export const sqlAttributesApi = {
 		requests.post<SingleResult>('sql-attributes', payload),
 	update: (id: string, payload: SqlAttributeCreatePayload): Promise<UpdateResponse> =>
 		requests.put<SingleResult>(`sql-attributes/${encodeURIComponent(id)}`, payload),
-	patchMetadata: (
-		id: string,
-		payload: SqlAttributeMetadataPatchPayload,
-	): Promise<UpdateResponse> =>
+	patch: (id: string, payload: SqlAttributePatchPayload): Promise<UpdateResponse> =>
 		requests.patch<SingleResult>(`sql-attributes/${encodeURIComponent(id)}`, payload),
 	delete: (id: string): Promise<DeleteResponse> =>
 		requests.delete<{ data: { id: string } }>(`sql-attributes/${encodeURIComponent(id)}`),

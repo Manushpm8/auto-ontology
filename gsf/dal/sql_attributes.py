@@ -308,22 +308,25 @@ def link_to_term(attr_id: str, term_id: str) -> None:
     )
 
 
-def update_sql_attribute_props(
+def update_sql_attribute(
     attr_id: str,
     *,
-    name: str,
-    description: str,
-    expression: str,
-    source: str,
+    name: str | None = None,
+    description: str | None = None,
+    expression: str | None = None,
+    source: str | None = None,
 ) -> None:
-    """SET properties on an existing SqlAttribute node."""
+    """SET properties on an existing SqlAttribute node.
+
+    Omitted fields (``None``) are left unchanged.
+    """
     get_neo4j_conn().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
-        SET attr.name        = $name,
-            attr.description = $description,
-            attr.expression  = $expression,
-            attr.source      = $source
+        SET attr.name        = coalesce($name, attr.name),
+            attr.description = coalesce($description, attr.description),
+            attr.expression  = coalesce($expression, attr.expression),
+            attr.source      = coalesce($source, attr.source)
         """,
         {
             "id": attr_id,
@@ -332,23 +335,6 @@ def update_sql_attribute_props(
             "expression": expression,
             "source": source,
         },
-    )
-
-
-def update_sql_attribute_metadata_props(
-    attr_id: str,
-    *,
-    name: str | None = None,
-    description: str | None = None,
-) -> None:
-    """SET editable metadata properties on an existing SqlAttribute node."""
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
-        SET attr.name = coalesce($name, attr.name),
-            attr.description = coalesce($description, attr.description)
-        """,
-        {"id": attr_id, "name": name, "description": description},
     )
 
 

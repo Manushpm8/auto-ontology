@@ -393,16 +393,16 @@ export const TermsView = () => {
 		return res;
 	};
 
-	const handleSqlAttrEditSave = async (edits: Record<string, ComposerEditValue>) => {
+	const handleSqlAttrEditSave = async (payload: Record<string, ComposerEditValue>) => {
 		if (focusedSqlAttr == null || focusId == null) {
 			return { error: true, message: 'SQL attribute not found' };
 		}
 		setSqlAttrEditError(null);
 		const description =
-			typeof edits.description === 'string'
-				? edits.description
+			typeof payload.description === 'string'
+				? payload.description
 				: (focusedSqlAttr.description ?? '');
-		const name = typeof edits.name === 'string' ? edits.name.trim() : focusedSqlAttr.name;
+		const name = typeof payload.name === 'string' ? payload.name.trim() : focusedSqlAttr.name;
 		if (!name) {
 			return { error: true, message: 'SQL attribute name cannot be blank' };
 		}
@@ -418,7 +418,7 @@ export const TermsView = () => {
 			return { error: false };
 		}
 
-		const res = await sqlAttributesApi.patchMetadata(focusedSqlAttr.id, patch);
+		const res = await sqlAttributesApi.patch(focusedSqlAttr.id, patch);
 		if (res.error) {
 			return { error: true, message: res.message ?? 'Failed to update SQL attribute' };
 		}
@@ -429,19 +429,20 @@ export const TermsView = () => {
 		return { error: false };
 	};
 
-	const handleTermEditSave = async (edits: Record<string, ComposerEditValue>) => {
+	const handleTermEditSave = async (payload: Record<string, ComposerEditValue>) => {
 		if (focusedTerm == null || focusId == null) {
 			return { error: true, message: 'Term not found' };
 		}
 
-		const name = typeof edits.name === 'string' ? edits.name.trim() : focusedTerm.name.trim();
+		const name =
+			typeof payload.name === 'string' ? payload.name.trim() : focusedTerm.name.trim();
 		if (!name) {
 			return { error: true, message: 'Term name cannot be blank' };
 		}
 
 		const description =
-			typeof edits.description === 'string'
-				? edits.description
+			typeof payload.description === 'string'
+				? payload.description
 				: (focusedTerm.description ?? '');
 
 		const patch: { name?: string; description?: string } = {};
@@ -805,7 +806,7 @@ export const TermsView = () => {
 						getSinglePage={getSqlAttributeSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
 						isEditing={sqlAttrEditing}
-						onPersistEdits={handleSqlAttrEditSave}
+						onPatchEdits={handleSqlAttrEditSave}
 						onSave={() => {
 							setSqlAttrEditing(false);
 							setSqlAttrEditError(null);
@@ -940,7 +941,7 @@ export const TermsView = () => {
 						getSinglePage={getSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
 						isEditing={termEditing}
-						onPersistEdits={handleTermEditSave}
+						onPatchEdits={handleTermEditSave}
 						onSave={() => {
 							setTermEditing(false);
 						}}
