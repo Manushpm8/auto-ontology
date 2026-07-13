@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
@@ -182,23 +183,41 @@ def _format_result(result: Any) -> dict[str, Any]:
     }
 
 
-def predict_from_question(
-    question: str,
+@dataclass
+class PredictionContext:
+    """Everything :func:`run_prediction` needs, built once from the relevant tables.
+
+    Holds live, non-serializable KumoRFM handles (``kumo_model``) plus the graph
+    context strings. It is passed between the ``prepare_prediction_graph`` and
+    ``kumo_predict`` graph nodes via ``path_state`` within a single run only — it
+    is never checkpointed or serialized.
+    """
+
+    kumo_model: Any
+    connector: Any
+    graph_ddl: str
+    graph_edges: Any
+    graph_col_stypes: Any
+    time_columns: Any
+    table_names: dict[str, str]
+
+
+def build_prediction_context(
     connectors: list[Any],
-    llm: Any,
     relevant_tables: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Answer a prediction question via KumoRFM; returns a final_response dict.
+) -> PredictionContext | dict[str, Any]:
+    """Build the KumoRFM graph + model scoped to the relevant tables.
 
     ``relevant_tables`` (as produced by the candidate-preparation step) scopes the
-    KumoRFM graph to the tables relevant to the question.
+    KumoRFM graph to the tables relevant to the question. Returns a
+    :class:`PredictionContext` on success, or a graceful error response dict when
+    there is nothing to build a graph from.
     """
     _ensure_init()
 
     import kumoai.rfm as rfm
 
     from gsf.retrieval.kumo.kumo_model import KumoModel, build_graph_context
-    from gsf.retrieval.kumo.pql_gen import generate_pql
 
     if not connectors:
         return _error_response("No database connection is configured.")
@@ -222,9 +241,7 @@ def predict_from_question(
     # Entity-selection SQL runs against the live GSF database connection (the
     # first configured connector — the source of the catalog tables). ``table_names``
     # maps bare graph table names to their schema-qualified form so the SQL resolves.
-    result = generate_pql(
-        question,
-        llm=llm,
+    return PredictionContext(
         kumo_model=kumo_model,
         connector=connectors[0],
         graph_ddl=graph_ddl,
@@ -232,6 +249,25 @@ def predict_from_question(
         graph_col_stypes=col_stypes,
         time_columns=time_columns,
         table_names=name_map,
+    )
+
+
+def run_prediction(
+    question: str, llm: Any, context: PredictionContext
+) -> dict[str, Any]:
+    """Generate + repair the PQL, predict, and format — given a prepared context."""
+    from gsf.retrieval.kumo.pql_gen import generate_pql
+
+    result = generate_pql(
+        question,
+        llm=llm,
+        kumo_model=context.kumo_model,
+        connector=context.connector,
+        graph_ddl=context.graph_ddl,
+        graph_edges=context.graph_edges,
+        graph_col_stypes=context.graph_col_stypes,
+        time_columns=context.time_columns,
+        table_names=context.table_names,
         max_entities=_MAX_ENTITIES,
         max_preview_rows=_MAX_PREVIEW_ROWS,
     )

@@ -4,6 +4,14 @@
 
 """KumoRFM-backed prediction for the text-to-SQL agent."""
 
-from gsf.retrieval.kumo.predictor import predict_from_question
+from gsf.retrieval.kumo.predictor import (
+    PredictionContext,
+    build_prediction_context,
+    run_prediction,
+)
 
-__all__ = ["predict_from_question"]
+__all__ = [
+    "PredictionContext",
+    "build_prediction_context",
+    "run_prediction",
+]

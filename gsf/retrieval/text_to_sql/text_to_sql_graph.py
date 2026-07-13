@@ -23,6 +23,7 @@ from gsf.retrieval.text_to_sql.agents.question_sanitization import (
 from gsf.retrieval.text_to_sql.agents.prediction_classification import (
     PredictionClassificationAgent,
 )
+from gsf.retrieval.text_to_sql.agents.prediction_graph import PredictionGraphAgent
 from gsf.retrieval.text_to_sql.agents.kumo_prediction import KumoPredictionAgent
 from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
     EmptyLikeResultCheckAgent,
@@ -197,6 +198,7 @@ def create_graph():
     # Routing agents
     question_sanitization_agent = QuestionSanitizationAgent()
     prediction_classification_agent = PredictionClassificationAgent()
+    prediction_graph_agent = PredictionGraphAgent()
     kumo_prediction_agent = KumoPredictionAgent()
     entities_extraction_agent = EntitiesExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
@@ -220,6 +222,9 @@ def create_graph():
     )
     classify_prediction_node = _make_node(
         "classify_prediction", agent_wrapper(prediction_classification_agent)
+    )
+    prepare_prediction_graph_node = _make_node(
+        "prepare_prediction_graph", agent_wrapper(prediction_graph_agent)
     )
     kumo_predict_node = _make_node("kumo_predict", agent_wrapper(kumo_prediction_agent))
     entities_extraction_node = _make_node(
@@ -271,6 +276,7 @@ def create_graph():
     # Add only nodes instantiated above.
     graph.add_node("sanitize_question", sanitize_question_node)
     graph.add_node("classify_prediction", classify_prediction_node)
+    graph.add_node("prepare_prediction_graph", prepare_prediction_graph_node)
     graph.add_node("kumo_predict", kumo_predict_node)
     graph.add_node("entities_extraction", entities_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
@@ -294,14 +300,24 @@ def create_graph():
 
     # After candidate preparation, a decision tree routes prediction questions to
     # the KumoRFM tool (scoped to the relevant tables just prepared) and everything
-    # else into SQL construction.
+    # else into SQL construction. The prediction path itself is two nodes:
+    # ``prepare_prediction_graph`` (build the graph/model) → ``kumo_predict``
+    # (generate PQL + predict), so the slow build step streams its own progress.
     graph.add_edge("prepare_candidates", "classify_prediction")
     graph.add_conditional_edges(
         "classify_prediction",
         route_decision,
         {
-            "prediction": "kumo_predict",
+            "prediction": "prepare_prediction_graph",
             "sql": "construct_sql_from_candidates",
+        },
+    )
+    graph.add_conditional_edges(
+        "prepare_prediction_graph",
+        route_decision,
+        {
+            "predict_ready": "kumo_predict",
+            "predict_failed": END,
         },
     )
     graph.add_edge("kumo_predict", END)

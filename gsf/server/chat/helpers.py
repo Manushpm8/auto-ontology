@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 NODE_LABELS: dict[str, str] = {
     "sanitize_question": "Understanding the question",
     "classify_prediction": "Checking for a prediction",
+    "prepare_prediction_graph": "Preparing prediction graph",
     "kumo_predict": "Predicting with KumoRFM",
     "entities_extraction": "Extracting entities",
     "retrieve_candidates": "Retrieving candidates",
