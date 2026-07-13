@@ -9,6 +9,7 @@ from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
+from gsf.connectors.sqlite import SQLiteDatabase
 from gsf.connectors.snowflake import SnowflakeDatabase
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "DuckDBDatabase",
     "HeavyDBDatabase",
     "PostgresDatabase",
+    "SQLiteDatabase",
     "SnowflakeDatabase",
     "get_connectors",
     "invalidate_connectors_cache",
