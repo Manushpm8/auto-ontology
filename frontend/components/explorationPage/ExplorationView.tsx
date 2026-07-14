@@ -342,7 +342,10 @@ const GraphCanvas = ({
 		controller.on('pan zoom', () => onHoverNode(null));
 		controller.on('mouseover', 'edge', (event) => event.target.addClass('hovered'));
 		controller.on('mouseout', 'edge', (event) => event.target.removeClass('hovered'));
-		controller.one('layoutstop', () => controller.center());
+		controller.one('layoutstop', () => {
+			controller.zoom(1);
+			controller.center();
+		});
 		const layout = controller.layout(EULER_LAYOUT);
 		layout.run();
 
@@ -436,7 +439,9 @@ const ZoomControls = ({ controller }: ZoomControlsProps) => {
 	};
 
 	const resetView = () => {
-		controller?.fit(undefined, 80);
+		if (controller == null) return;
+		controller.zoom(1);
+		controller.center();
 	};
 
 	return (
@@ -466,8 +471,8 @@ const ZoomControls = ({ controller }: ZoomControlsProps) => {
 				type="button"
 				onClick={resetView}
 				className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 shadow-md transition-colors hover:text-[#76b900] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-				aria-label="Fit graph to view"
-				title="Fit graph to view"
+				aria-label="Reset view to initial position"
+				title="Reset view to initial position"
 			>
 				<svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor">
 					<path
@@ -898,6 +903,25 @@ const RelationshipsModal = ({ node, rows, onClose, onFocus }: RelationshipsModal
 			header: 'Relationships',
 			width: 'w-32',
 			cell: (row) => row.relationshipCount,
+		},
+		{
+			key: 'link',
+			header: '',
+			width: 'w-10',
+			cell: (row) => (
+				<NextLink
+					href={
+						row.layer === 'semantic'
+							? `/terms?focus=${encodeURIComponent(row.id)}`
+							: catalogPathFromFocusId(`${row.databaseId}|${row.schemaId}|${row.id}`)
+					}
+					className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+					aria-label={`Open ${row.name}`}
+					title={`Open ${row.name}`}
+				>
+					<Icon name={IconName.ExternalLink} className="h-3.5 w-3.5" />
+				</NextLink>
+			),
 		},
 		{
 			key: 'focus',
@@ -1617,7 +1641,7 @@ export const ExplorationView = () => {
 	const filteredNodes = useMemo(() => {
 		const query = search.trim().toLowerCase();
 		if (query === '') return [];
-		return graph.nodes.filter((node) => node.name.toLowerCase().includes(query)).slice(0, 8);
+		return graph.nodes.filter((node) => node.name.toLowerCase().includes(query));
 	}, [graph.nodes, search]);
 
 	const activeNode = useMemo(
@@ -1699,7 +1723,7 @@ export const ExplorationView = () => {
 							className="h-10 bg-white shadow-md dark:bg-zinc-900"
 						/>
 						{filteredNodes.length > 0 && (
-							<ul className="absolute top-12 max-h-72 w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+							<ul className="absolute top-12 max-h-[calc(100dvh-8.5rem)] w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
 								{filteredNodes.map((node) => (
 									<li key={node.id}>
 										<button
