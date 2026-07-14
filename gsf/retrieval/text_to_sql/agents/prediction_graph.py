@@ -49,11 +49,17 @@ class PredictionGraphAgent(BaseAgent):
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
         connectors = state.get("connectors", []) or []
-        # Scope the KumoRFM graph to the tables candidate-preparation found relevant.
+        # Scope the KumoRFM graph to the tables candidate-preparation found relevant,
+        # and use the catalog-derived join paths as the graph's table relationships.
         relevant_tables = path_state.get("relevant_tables") or []
+        join_paths = path_state.get("attribute_join_paths") or []
 
         try:
-            context = build_prediction_context(connectors, relevant_tables)
+            context = build_prediction_context(
+                connectors,
+                relevant_tables,
+                join_paths=join_paths,
+            )
         except Exception as exc:
             self.logger.exception("KumoRFM graph preparation failed")
             context = _error_response(

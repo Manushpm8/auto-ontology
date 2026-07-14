@@ -202,16 +202,119 @@ class PredictionContext:
     table_names: dict[str, str]
 
 
+def _col_name_lower(col: Any) -> str | None:
+    """Lowercased name of a KumoRFM primary-key/column object (``None`` if unset)."""
+    name = getattr(col, "name", None)
+    return name.lower() if name else None
+
+
+def _resolve_column(table: Any, col: str) -> str | None:
+    """Case-insensitive column-name match within a graph table (connectors lowercase)."""
+    target = (col or "").lower()
+    for c in table.columns:
+        if c.name.lower() == target:
+            return c.name
+    return None
+
+
+def _path_columns(entry: dict[str, Any]) -> list[tuple[str, str]]:
+    """Flatten a join-path entry into its ``(table, column)`` node sequence.
+
+    ``entry["path"]`` is a list of hop dicts ``{source_table, source_column,
+    target_table, target_column, ...}`` that ``find_join_path`` produced by pairing
+    consecutive columns of a Neo4j traversal. Flattening the hops back to
+    ``[h0.source, h0.target, h1.source, h1.target, ...]`` restores that column
+    sequence, so consecutive columns in DIFFERENT tables are the cross-table
+    semantic foreign-key joins (columns within the same table are attribute hops).
+    """
+    seq: list[tuple[str, str]] = []
+    for hop in entry.get("path") or []:
+        seq.append(
+            (str(hop.get("source_table") or ""), str(hop.get("source_column") or ""))
+        )
+        seq.append(
+            (str(hop.get("target_table") or ""), str(hop.get("target_column") or ""))
+        )
+    return seq
+
+
+def _apply_join_paths(graph: Any, join_paths: list[dict[str, Any]] | None) -> int:
+    """Link graph tables using the cross-table joins in the catalog join paths.
+
+    ``join_paths`` is ``attribute_join_paths`` from the text-to-SQL state. Each entry
+    encodes a traversal from the anchor column to a destination column; the joins are
+    the adjacent columns that cross tables (see :func:`_path_columns`). For each such
+    join the side whose column is that table's primary key becomes the KumoRFM
+    destination and the other side's column becomes the foreign key. Joins that don't
+    map cleanly (unknown table/column, neither side a primary key, incompatible key
+    dtype) are skipped.
+
+    An edge already present in the graph (e.g. auto-inferred by ``from_data``) still
+    counts as covered, so the caller doesn't fall back to heuristic inference for a
+    relationship the catalog already describes.
+
+    Returns the number of distinct cross-table joins covered (added or pre-existing).
+    """
+    lookup = {name.lower(): name for name in graph.tables}
+    existing = {(e.src_table, e.fkey, e.dst_table) for e in graph.edges}
+    covered = 0
+    processed: set[tuple[str, str, str]] = set()
+    for entry in join_paths or []:
+        seq = _path_columns(entry)
+        for (a_tbl, a_col_raw), (b_tbl, b_col_raw) in zip(seq, seq[1:]):
+            a_name = lookup.get(a_tbl.lower())
+            b_name = lookup.get(b_tbl.lower())
+            if not a_name or not b_name or a_name == b_name:
+                continue
+            a_graph, b_graph = graph[a_name], graph[b_name]
+            a_col = _resolve_column(a_graph, a_col_raw)
+            b_col = _resolve_column(b_graph, b_col_raw)
+            if not a_col or not b_col:
+                continue
+            # Orient the edge FK(src) -> PK(dst): the side whose join column is that
+            # table's primary key is the destination.
+            if _col_name_lower(b_graph.primary_key) == b_col.lower():
+                src, fkey, dst = a_name, a_col, b_name
+            elif _col_name_lower(a_graph.primary_key) == a_col.lower():
+                src, fkey, dst = b_name, b_col, a_name
+            else:
+                continue
+            key = (src, fkey, dst)
+            if key in processed:
+                continue
+            processed.add(key)
+            if key in existing:
+                covered += 1
+                continue
+            try:
+                graph.link(src, fkey, dst)
+            except Exception:
+                logger.debug(
+                    "kumo: skipped join-path link %s.%s -> %s",
+                    src,
+                    fkey,
+                    dst,
+                    exc_info=True,
+                )
+                continue
+            covered += 1
+    return covered
+
+
 def build_prediction_context(
     connectors: list[Any],
     relevant_tables: list[dict[str, Any]] | None = None,
+    join_paths: list[dict[str, Any]] | None = None,
 ) -> PredictionContext | dict[str, Any]:
     """Build the KumoRFM graph + model scoped to the relevant tables.
 
     ``relevant_tables`` (as produced by the candidate-preparation step) scopes the
-    KumoRFM graph to the tables relevant to the question. Returns a
-    :class:`PredictionContext` on success, or a graceful error response dict when
-    there is nothing to build a graph from.
+    KumoRFM graph to the tables relevant to the question. ``join_paths``
+    (``attribute_join_paths``) from the text-to-SQL state supplies the table
+    relationships: its catalog-derived joins are used as the graph's edges, and
+    KumoRFM's own heuristic ``infer_links`` is used only as a fallback when no usable
+    join path is available. Returns a :class:`PredictionContext` on success, or a
+    graceful error response dict when there is nothing to build a graph from.
     """
     _ensure_init()
 
@@ -230,10 +333,18 @@ def build_prediction_context(
     logger.info("kumo: building graph from %d table(s)", len(frames))
 
     graph = rfm.LocalGraph.from_data(frames, infer_metadata=True, verbose=False)
-    try:
-        graph.infer_links()
-    except Exception:
-        logger.exception("kumo: infer_links failed; proceeding without inferred links")
+    covered = _apply_join_paths(graph, join_paths)
+    if covered:
+        logger.info("kumo: using %d catalog join edge(s)", covered)
+    else:
+        # No usable catalog join paths — fall back to KumoRFM's link heuristics.
+        logger.info("kumo: no catalog join paths; inferring links heuristically")
+        try:
+            graph.infer_links()
+        except Exception:
+            logger.exception(
+                "kumo: infer_links failed; proceeding without inferred links"
+            )
 
     graph_ddl, edges, col_stypes, time_columns = build_graph_context(graph)
     kumo_model = KumoModel(rfm.KumoRFM(graph, verbose=False))
