@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import NextLink from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import cytoscape, { type Core, type ElementDefinition, type EventObject } from 'cytoscape';
 import euler from 'cytoscape-euler';
@@ -35,6 +36,7 @@ import type { Column } from '@/types/datasources';
 import type { ColumnAttribute, SqlAttribute } from '@/types/terms';
 import type { TableColumn } from '@/types/table';
 import { ZoneChip, ZonesRow } from '@/common/SinglePageComposer';
+import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 
 cytoscape.use(euler);
 
@@ -521,17 +523,20 @@ const HoverNodeCard = ({ node, x, y }: { node: ExplorationNode; x: number; y: nu
 			</div>
 
 			{node.layer === 'data' ? (
-				<dl className="mt-3 grid grid-cols-3 overflow-hidden rounded-md border border-zinc-200 text-xs dark:border-zinc-700">
+				<dl className="mt-3 grid grid-cols-2 overflow-hidden rounded-md border border-zinc-200 text-xs dark:border-zinc-700">
 					{[
 						{ label: 'Columns', value: node.columnsCount },
 						{ label: 'SQL Queries', value: node.sqlCount },
 						{ label: 'Terms', value: node.termsCount },
+						{ label: 'Related Tables', value: node.relationshipCount },
 					].map((item, index) => (
 						<div
 							key={item.label}
 							className={`px-3 py-2 ${
-								index < 2 ? 'border-r border-zinc-200 dark:border-zinc-700' : ''
-							}`}
+								index % 2 === 0
+									? 'border-r border-zinc-200 dark:border-zinc-700'
+									: ''
+							} ${index < 2 ? 'border-b border-zinc-200 dark:border-zinc-700' : ''}`}
 						>
 							<dt className="text-zinc-400">{item.label}</dt>
 							<dd className="mt-0.5 font-medium text-zinc-700 dark:text-zinc-200">
@@ -804,11 +809,6 @@ const ActiveDataCard = ({
 							</p>
 						</div>
 						<div className="flex shrink-0 items-center gap-1">
-							<DetailLinkButton
-								count={node.relationshipCount}
-								onClick={onShowRelationships}
-								label="View related entities"
-							/>
 							<button
 								type="button"
 								onClick={onView}
@@ -841,6 +841,14 @@ const ActiveDataCard = ({
 								count={node.termsCount}
 								onClick={onShowTerms}
 								label="View Terms"
+							/>
+						</span>
+						<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+							Related Tables: {node.relationshipCount}
+							<DetailLinkButton
+								count={node.relationshipCount}
+								onClick={onShowRelationships}
+								label="View related tables"
 							/>
 						</span>
 					</div>
@@ -1174,15 +1182,30 @@ const DataDetailsModal = ({ node, kind, onClose }: DataDetailsModalProps) => {
 	const renderTable = () => {
 		if (kind === 'columns') {
 			const tableColumns: TableColumn<Column>[] = [
-				{ key: 'type', header: 'Type', width: 'w-28', cell: (row) => row.data_type },
-				{ key: 'schema', header: 'Schema', cell: (row) => row.schema_name },
-				{ key: 'table', header: 'Table', cell: (row) => row.table_name },
 				{
 					key: 'column',
-					header: 'Column',
+					header: 'Name',
 					cell: (row) => row.column_name,
 					title: (row) => row.column_name,
 					truncate: true,
+				},
+				{
+					key: 'link',
+					header: '',
+					width: 'w-10',
+					cell: (row) =>
+						node != null ? (
+							<NextLink
+								href={catalogPathFromFocusId(
+									`${node.databaseId}|${node.schemaId}|${node.id}|${row.id}`,
+								)}
+								className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+								aria-label={`Open ${row.column_name} in Data`}
+								title={`Open ${row.column_name} in Data`}
+							>
+								<Icon name={IconName.ExternalLink} className="h-3.5 w-3.5" />
+							</NextLink>
+						) : null,
 				},
 			];
 			return (
@@ -1198,25 +1221,21 @@ const DataDetailsModal = ({ node, kind, onClose }: DataDetailsModalProps) => {
 		}
 
 		if (kind === 'queries') {
-			const queryColumns: TableColumn<TableExplorationDetails['queries'][number]>[] = [
-				{ key: 'id', header: 'Query ID', width: 'w-48', cell: (row) => row.id || '—' },
-				{
-					key: 'sql',
-					header: 'SQL',
-					cell: (row) => row.sql,
-					title: (row) => row.sql,
-					truncate: true,
-				},
-			];
+			if (details.queries.length === 0) {
+				return (
+					<p className="text-sm italic text-zinc-500 dark:text-zinc-400">
+						No SQL queries
+					</p>
+				);
+			}
 			return (
-				<Table
-					columns={queryColumns}
-					rows={details.queries}
-					rowKey={(row, index) => row.id || `${index}`}
-					containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
-					scrollClassName="max-h-[28rem] overflow-auto"
-					emptyMessage="No SQL queries"
-				/>
+				<ul className="space-y-4">
+					{details.queries.map((query, index) => (
+						<li key={query.id || `${index}`}>
+							<SqlBlock sql={query.sql} label={`Query ${index + 1}`} />
+						</li>
+					))}
+				</ul>
 			);
 		}
 
@@ -1228,6 +1247,21 @@ const DataDetailsModal = ({ node, kind, onClose }: DataDetailsModalProps) => {
 				cell: (row) => row.description || 'No Description',
 				title: (row) => row.description ?? '',
 				truncate: true,
+			},
+			{
+				key: 'link',
+				header: '',
+				width: 'w-10',
+				cell: (row) => (
+					<NextLink
+						href={`/terms?focus=${encodeURIComponent(row.id)}`}
+						className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+						aria-label={`Open ${row.name} term`}
+						title={`Open ${row.name} term`}
+					>
+						<Icon name={IconName.ExternalLink} className="h-3.5 w-3.5" />
+					</NextLink>
+				),
 			},
 		];
 		return (
