@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.users import get_accessible_catalog_ids_for_zones
+from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.server.sql_utils import SqlParseError
 
 if TYPE_CHECKING:
@@ -68,8 +68,8 @@ def list_custom_analyses(
     """
     params: dict[str, Any] = {}
     if zone_ids is not None:
-        accessible = get_accessible_catalog_ids_for_zones(zone_ids)
-        params["table_ids"] = list(accessible["table_ids"])
+        data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
+        params["table_ids"] = list(data_ids_by_zone["table_ids"])
         zone_filter = (
             f"WHERE NOT EXISTS {{"
             f" (sql)-[:{Edges.SQL}]->(tbl:{Labels.TABLE})"

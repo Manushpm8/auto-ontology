@@ -9,8 +9,10 @@ import type {
 	RelatedTermCount,
 	SqlAttribute,
 	Term,
+	TermCount,
 	TermDetail,
 } from '@/types/terms';
+import type { SemanticExplorationGraph } from '@/types/exploration';
 import type { ResponseWithError } from './types';
 
 type ListResult = { data: Term[]; count: number };
@@ -34,6 +36,12 @@ type RelatedTermsResponse = ResponseWithError<RelatedTermsResult>;
 type RelatedCountsResult = { data: RelatedTermCount[]; count: number };
 type RelatedCountsResponse = ResponseWithError<RelatedCountsResult>;
 
+type AttributeCountsResult = { data: TermCount[]; count: number };
+type AttributeCountsResponse = ResponseWithError<AttributeCountsResult>;
+
+type SemanticGraphResult = { data: SemanticExplorationGraph };
+type SemanticGraphResponse = ResponseWithError<SemanticGraphResult>;
+
 export type TermsListParams = {
 	/** Case-insensitive substring filter on the term name. */
 	q?: string;
@@ -48,6 +56,10 @@ export const termsApi = {
 		requests.get<SqlAttributeListResult>('terms/sql-attributes'),
 	listRelatedCounts: (): Promise<RelatedCountsResponse> =>
 		requests.get<RelatedCountsResult>('terms/related-counts'),
+	listColumnAttributeCounts: (): Promise<AttributeCountsResponse> =>
+		requests.get<AttributeCountsResult>('terms/column-attributes/counts'),
+	listSqlAttributeCounts: (): Promise<AttributeCountsResponse> =>
+		requests.get<AttributeCountsResult>('terms/sql-attributes/counts'),
 	get: (id: string): Promise<SingleResponse> => requests.get<SingleResult>(`terms/${id}`),
 	update: (id: string, payload: TermUpdatePayload): Promise<UpdateResponse> =>
 		requests.patch<UpdateResult>(`terms/${encodeURIComponent(id)}`, payload),
@@ -57,4 +69,7 @@ export const termsApi = {
 		requests.get<SqlAttributeListResult>(`terms/${id}/sql-attributes`),
 	getRelatedTerms: (id: string): Promise<RelatedTermsResponse> =>
 		requests.get<RelatedTermsResult>(`terms/${id}/related-terms`),
+	/** Full semantic-layer Exploration graph ({nodes, links}) in a single request. */
+	getSemanticExplorationGraph: (): Promise<SemanticGraphResponse> =>
+		requests.get<SemanticGraphResult>('terms/exploration-graph'),
 };

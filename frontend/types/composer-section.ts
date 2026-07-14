@@ -53,6 +53,7 @@ export type ComposerZoneChip = {
 	id: string;
 	name: string;
 	color: string | null;
+	enabled: boolean;
 };
 
 export type ComposerZonesSection = {

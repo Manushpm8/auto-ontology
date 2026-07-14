@@ -25,7 +25,7 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.users import get_accessible_catalog_ids_for_zones, resolve_table_filter
+from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
@@ -34,6 +34,11 @@ from gsf.semantic.constants import (
     REL_PROPERTY_OF,
     REL_REPRESENTS,
     REL_SEMANTIC_FK,
+)
+from gsf.server.zones.constants import (
+    LABEL_ZONE_DISABLED,
+    REL_ZONE_OF,
+    ZONE_LABEL_PATTERN,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,12 +58,10 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
     counts) reachable through those zones.  Pass ``None`` (or omit) to return
     the full unfiltered catalog (admin / internal callers).
     """
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
-    )
-    if accessible is not None:
-        db_ids = list(accessible["db_ids"])
-        schema_ids = list(accessible["schema_ids"])
+    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
+    if data_ids_by_zone is not None:
+        db_ids = list(data_ids_by_zone["db_ids"])
+        schema_ids = list(data_ids_by_zone["schema_ids"])
         where_clause = "WHERE db.id IN $db_ids AND s.id IN $schema_ids"
         params: dict[str, Any] = {"db_ids": db_ids, "schema_ids": schema_ids}
     else:
@@ -106,12 +109,10 @@ def fetch_schemas_for_database(
     When *zone_ids* is supplied only schemas (and their table counts) reachable
     through those zones are returned.
     """
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
-    )
-    if accessible is not None:
-        schema_ids = list(accessible["schema_ids"])
-        table_ids = list(accessible["table_ids"])
+    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
+    if data_ids_by_zone is not None:
+        schema_ids = list(data_ids_by_zone["schema_ids"])
+        table_ids = list(data_ids_by_zone["table_ids"])
         where_clause = "WHERE s.id IN $schema_ids AND t.id IN $table_ids"
         params: dict[str, Any] = {
             "db_id": db_id,
@@ -265,6 +266,40 @@ SET c.description = coalesce(row.description, c.description),
 """
 
 
+# Shared middle segment of the Table Cypher queries below: given `db, s, t`
+# in scope, computes `columns_count`, `sql_count` and `unique_term_ids` (a
+# Table's terms via both REPRESENTS and the ColumnAttribute/SEMANTIC_FK
+# path, deduplicated). Interpolate between a query's initial MATCH/WHERE and
+# its RETURN — used by both ``fetch_tables_for_schema`` (one schema) and
+# ``fetch_data_exploration_graph`` (every visible table) so the two stay in
+# sync instead of drifting as separately-maintained copies.
+_TABLE_COUNTS_SUBQUERY = f"""
+OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+WITH db, s, t, count(DISTINCT c) AS columns_count
+OPTIONAL MATCH (t)<-[:{Edges.SQL}]-(sql:{Labels.SQL})
+WITH db, s, t, columns_count, count(DISTINCT sql) AS sql_count
+OPTIONAL MATCH (t)-[:{REL_REPRESENTS}]->(represented:{LABEL_TERM})
+WITH db, s, t, columns_count, sql_count,
+     collect(DISTINCT represented.id) AS represented_term_ids
+OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+      -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->
+      (:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
+      (attribute_term:{LABEL_TERM})
+WITH db, s, t, columns_count, sql_count,
+     represented_term_ids,
+     collect(DISTINCT attribute_term.id) AS attribute_term_ids
+WITH db, s, t, columns_count, sql_count,
+     represented_term_ids + attribute_term_ids AS all_term_ids
+WITH db, s, t, columns_count, sql_count,
+     reduce(unique_ids = [], term_id IN all_term_ids |
+         CASE
+             WHEN term_id IS NULL OR term_id IN unique_ids THEN unique_ids
+             ELSE unique_ids + term_id
+         END
+     ) AS unique_term_ids
+"""
+
+
 def fetch_tables_for_schema(
     schema_id: str,
     *,
@@ -287,29 +322,7 @@ def fetch_tables_for_schema(
               (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{Edges.CONTAINS}]->
               (t:{Labels.TABLE})
         {where_clause}
-        OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-        WITH db, s, t, count(DISTINCT c) AS columns_count
-        OPTIONAL MATCH (t)<-[:{Edges.SQL}]-(sql:{Labels.SQL})
-        WITH db, s, t, columns_count, count(DISTINCT sql) AS sql_count
-        OPTIONAL MATCH (t)-[:{REL_REPRESENTS}]->(represented:{LABEL_TERM})
-        WITH db, s, t, columns_count, sql_count,
-             collect(DISTINCT represented.id) AS represented_term_ids
-        OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->
-              (:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
-              (attribute_term:{LABEL_TERM})
-        WITH db, s, t, columns_count, sql_count,
-             represented_term_ids,
-             collect(DISTINCT attribute_term.id) AS attribute_term_ids
-        WITH db, s, t, columns_count, sql_count,
-             represented_term_ids + attribute_term_ids AS all_term_ids
-        WITH db, s, t, columns_count, sql_count,
-             reduce(unique_ids = [], term_id IN all_term_ids |
-                 CASE
-                     WHEN term_id IS NULL OR term_id IN unique_ids THEN unique_ids
-                     ELSE unique_ids + term_id
-                 END
-             ) AS unique_term_ids
+        {_TABLE_COUNTS_SUBQUERY}
         RETURN t.id AS id,
                t.name AS name,
                t.table_type AS table_type,
@@ -410,18 +423,19 @@ def fetch_join_edges() -> list[dict[str, Any]]:
 
 def fetch_data_exploration_edges(
     zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return table pairs connected by SQL queries.
 
     A query becomes an exploration edge when its ``Sql`` node references at
     least two visible tables. Each edge includes the SQL text shown when the
-    user selects that connection.
+    user selects that connection. Pass a pre-resolved *data_ids_by_zone*
+    (see ``resolve_accessible_catalog_ids``) when the caller already
+    resolved *zone_ids* for this request, to skip a repeat Neo4j round trip.
     """
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
-    )
-    if accessible is not None:
-        table_ids = list(accessible["table_ids"])
+    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
+    if data_ids_by_zone is not None:
+        table_ids = list(data_ids_by_zone["table_ids"])
         if not table_ids:
             return []
         where_clause = (
@@ -464,10 +478,8 @@ def fetch_table_exploration_details(
     zone_ids: list[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Return SQL queries and Terms linked to one visible Table."""
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
-    )
-    if accessible is not None and table_id not in accessible["table_ids"]:
+    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
+    if data_ids_by_zone is not None and table_id not in data_ids_by_zone["table_ids"]:
         return {"queries": [], "terms": []}
 
     conn = get_neo4j_conn()
@@ -505,6 +517,134 @@ def fetch_table_exploration_details(
             if row.get("sql")
         ],
         "terms": list(unique_terms.values()),
+    }
+
+
+def fetch_table_zones_map(
+    zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return ``{table_id: [zone, ...]}`` for every visible Table.
+
+    Zones are resolved via ``Zone -[ZONE_OF]-> item`` where *item* is the
+    table itself or one of its ancestors (Schema, Database), matching the
+    resolution used by ``get_full_term_by_id`` / ``get_full_sql_attribute_by_id``.
+    Used to render Zone chips in the Exploration graph without a per-node
+    request. When *zone_ids* is supplied, both the visible tables and the
+    returned zone names/colors are restricted to that set. Disabled zones
+    are included (with ``enabled: False``) so admins can see and manage
+    them; they never grant access since *zone_ids* itself is computed from
+    enabled zones only. Pass ``None`` to return zones for every table
+    (admin / internal callers). Pass a pre-resolved *data_ids_by_zone*
+    (see ``resolve_accessible_catalog_ids``) when the caller already
+    resolved *zone_ids* for this request, to skip a repeat Neo4j round trip.
+    """
+    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
+    params: dict[str, Any] = {}
+    table_filter = ""
+    if data_ids_by_zone is not None:
+        table_ids = list(data_ids_by_zone["table_ids"])
+        if not table_ids:
+            return {}
+        table_filter = "WHERE t.id IN $table_ids"
+        params["table_ids"] = table_ids
+
+    # A viewer never sees a disabled zone's chip, even if its id ended up in
+    # zone_ids (e.g. access granted before the zone was disabled) — admins
+    # (zone_ids=None) still see disabled zones so they can manage them.
+    zone_filter = (
+        ""
+        if zone_ids is None
+        else f"AND z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
+    )
+    if zone_ids is not None:
+        params["zone_ids"] = zone_ids
+
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (t:{Labels.TABLE})
+        {table_filter}
+        MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
+        WHERE (item = t
+           OR (item)-[:{Edges.CONTAINS}*1..2]->(t))
+              {zone_filter}
+        RETURN DISTINCT t.id   AS table_id,
+                        z.id    AS id,
+                        z.name  AS name,
+                        z.color AS color,
+                        NOT z:{LABEL_ZONE_DISABLED} AS enabled
+        ORDER BY t.id, z.name
+        """,
+        params,
+    )
+    result: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        result.setdefault(row["table_id"], []).append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "color": row["color"],
+                "enabled": row["enabled"],
+            }
+        )
+    return result
+
+
+def fetch_data_exploration_graph(
+    zone_ids: list[str] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return the whole data-layer Exploration graph in one payload.
+
+    Builds ``{"nodes": [...], "links": [...]}`` server-side so the client
+    renders the data graph from a single request instead of walking the
+    catalog tree (databases → schemas → tables) with one request per level.
+
+    Each node is a visible Table with its column / SQL / Term counts,
+    owning Database and Schema ids and names, and resolved Zone chips.
+    Links are the SQL-backed table connections from
+    ``fetch_data_exploration_edges``. When *zone_ids* is supplied both nodes
+    and links are restricted to tables reachable through those zones.
+
+    *zone_ids* is resolved to accessible catalog ids exactly once (see
+    ``resolve_accessible_catalog_ids``) and threaded through the node query,
+    ``fetch_table_zones_map`` and ``fetch_data_exploration_edges`` — those
+    three previously each re-resolved the same *zone_ids* independently,
+    tripling the Neo4j round trips this endpoint made per request.
+    """
+    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
+    where_clause, params = resolve_table_filter(
+        zone_ids, "t.id", data_ids_by_zone=data_ids_by_zone
+    )
+    nodes = get_neo4j_conn().query_read(
+        f"""
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+              (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (t:{Labels.TABLE})
+        {where_clause}
+        {_TABLE_COUNTS_SUBQUERY}
+        RETURN t.id AS id,
+               t.name AS name,
+               t.table_type AS table_type,
+               db.id AS database_id,
+               db.name AS database_name,
+               s.id AS schema_id,
+               s.name AS schema_name,
+               t.description AS description,
+               columns_count,
+               sql_count,
+               size(unique_term_ids) AS terms_count
+        ORDER BY name
+        """,
+        params,
+    )
+    zones_by_table = fetch_table_zones_map(zone_ids, data_ids_by_zone=data_ids_by_zone)
+    return {
+        "nodes": [
+            {**dict(row), "zones": zones_by_table.get(row["id"], [])} for row in nodes
+        ],
+        "links": fetch_data_exploration_edges(
+            zone_ids=zone_ids, data_ids_by_zone=data_ids_by_zone
+        ),
     }
 
 

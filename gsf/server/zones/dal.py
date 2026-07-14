@@ -57,9 +57,13 @@ def _resolve_db_ids(conn, item_ids: list[str]) -> list[str]:
 def list_zones(user_id: str) -> list[dict[str, Any]]:
     """Return zones visible to *user_id*.
 
-    Admins see every zone.  Viewers see only zones to which they have been
-    explicitly granted access via a ``PARTICIPANT_OF`` relationship.
-    Returns an empty list when *user_id* is unknown.
+    Admins see every zone, including disabled ones, so they can manage them.
+    Viewers see only *enabled* zones to which they have been explicitly
+    granted access via a ``PARTICIPANT_OF`` relationship — a disabled zone
+    is invisible to a viewer even if they were granted access to it before
+    it was disabled, since this list is also the source of the ``zone_ids``
+    forwarded to every other data endpoint (see ``resolveZoneIds`` on the
+    frontend). Returns an empty list when *user_id* is unknown.
     """
     rows = get_neo4j_conn().query_read(
         f"""
@@ -67,7 +71,10 @@ def list_zones(user_id: str) -> list[dict[str, Any]]:
         WITH u, u.role AS role
         MATCH (z:{ZONE_LABEL_PATTERN})
         WHERE role = 'admin'
-           OR EXISTS {{ MATCH (u)-[:{REL_PARTICIPANT_OF}]->(z) }}
+           OR (
+             NOT z:{LABEL_ZONE_DISABLED}
+             AND EXISTS {{ MATCH (u)-[:{REL_PARTICIPANT_OF}]->(z) }}
+           )
         RETURN z.id          AS id,
                z.name        AS name,
                z.description AS description,
@@ -86,8 +93,12 @@ def get_zone_by_id(
     """Return one zone with its linked catalog data items.
 
     When *user_id* is supplied the zone is only returned if the user has
-    access (admin role or explicit ``PARTICIPANT_OF`` relationship).
-    Passing ``user_id=None`` skips the access check (internal / admin use).
+    access: an admin always does; a viewer only does when the zone is
+    *enabled* and they hold an explicit ``PARTICIPANT_OF`` relationship — a
+    disabled zone 404s for a viewer even if they were granted access before
+    it was disabled, matching ``list_zones``. Passing ``user_id=None`` skips
+    the access check entirely (internal / admin use, e.g. after an admin
+    write), so disabled zones remain visible to admin tooling.
     """
     conn = get_neo4j_conn()
     if user_id is not None:
@@ -96,7 +107,10 @@ def get_zone_by_id(
             MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
             MATCH (z:{ZONE_LABEL_PATTERN} {{id: $zone_id}})
             WHERE u.role = 'admin'
-               OR EXISTS {{ MATCH (u)-[:{REL_PARTICIPANT_OF}]->(z) }}
+               OR (
+                 NOT z:{LABEL_ZONE_DISABLED}
+                 AND EXISTS {{ MATCH (u)-[:{REL_PARTICIPANT_OF}]->(z) }}
+               )
             RETURN z.id AS id
             LIMIT 1
             """,

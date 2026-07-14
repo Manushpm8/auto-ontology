@@ -107,6 +107,29 @@ def get_table_exploration_details(
     return {"data": dal.fetch_table_exploration_details(table_id, zone_ids=zone_ids)}
 
 
+@router.get("/datasources/tables/zones")
+def list_table_zones(zone_ids: list[str] | None = Query(default=None)) -> dict:
+    """Return ``{table_id: [zone, ...]}`` for every visible Table.
+
+    Used by the Exploration graph to render Zone chips on every data node
+    without a per-node request.
+    """
+    return {"data": dal.fetch_table_zones_map(zone_ids=zone_ids)}
+
+
+@router.get("/datasources/exploration-graph")
+def get_data_exploration_graph(
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Return the full data-layer Exploration graph (``{nodes, links}``).
+
+    Lets the client render the data graph from one request instead of
+    walking the catalog tree (databases → schemas → tables) with a request
+    per level. Zone-scoped when zone_ids are provided.
+    """
+    return {"data": dal.fetch_data_exploration_graph(zone_ids=zone_ids)}
+
+
 # ---------------------------------------------------------------------------
 # Custom analyses (/api/custom-analyses)
 # ---------------------------------------------------------------------------

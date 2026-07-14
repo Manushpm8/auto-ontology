@@ -22,12 +22,14 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 
 from gsf.dal.datasources import (
     fetch_data_exploration_edges,
+    fetch_data_exploration_graph,
     fetch_parent_table_id_for_column,
     fetch_tables_and_columns_by_node_ids,
     fetch_columns_for_table,
     fetch_databases,
     fetch_schemas_for_database,
     fetch_table_exploration_details,
+    fetch_table_zones_map,
     fetch_tables_for_schema,
     patch_catalog_node,
 )
@@ -39,8 +41,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "fetch_databases",
     "fetch_data_exploration_edges",
+    "fetch_data_exploration_graph",
     "fetch_schemas_for_database",
     "fetch_table_exploration_details",
+    "fetch_table_zones_map",
     "fetch_tables_for_schema",
     "fetch_columns_for_table",
     "fetch_parent_table_id_for_column",

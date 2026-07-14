@@ -27,11 +27,14 @@ import type {
 	ExplorationLink,
 	ExplorationNode,
 	ExplorationTermNode,
+	DataExplorationGraph,
+	SemanticExplorationGraph,
 	TableExplorationDetails,
 } from '@/types/exploration';
-import type { Column, Database, Schema, Table as DataTable } from '@/types/datasources';
+import type { Column } from '@/types/datasources';
+import type { ColumnAttribute, SqlAttribute } from '@/types/terms';
 import type { TableColumn } from '@/types/table';
-import type { RelatedTerm, Term } from '@/types/terms';
+import { ZoneChip, ZonesRow } from '@/common/SinglePageComposer';
 
 cytoscape.use(euler);
 
@@ -67,36 +70,25 @@ const EULER_LAYOUT: cytoscapeEuler.EulerLayoutOptions = {
 	randomize: true,
 };
 
-const buildSemanticGraph = async (terms: Term[]): Promise<ExplorationGraph> => {
-	const relatedResponses = await Promise.all(
-		terms.map((term) => termsApi.getRelatedTerms(term.id)),
-	);
-	const termIds = new Set(terms.map((term) => term.id));
-	const linksByKey = new Map<string, ExplorationLink>();
-	const relationshipCountById = new Map<string, number>();
-
-	terms.forEach((term, index) => {
-		const response = relatedResponses[index];
-		const relatedTerms: RelatedTerm[] = response.error ? [] : (response.data ?? []);
-		relationshipCountById.set(term.id, relatedTerms.length);
-
-		relatedTerms.forEach((relatedTerm) => {
-			if (!termIds.has(relatedTerm.id) || relatedTerm.id === term.id) return;
-			const [source, target] = [term.id, relatedTerm.id].sort();
-			linksByKey.set(`${source}:${target}`, { source, target, queries: [] });
-		});
-	});
-
-	return {
-		nodes: terms.map((term) => ({
-			...term,
-			layer: 'semantic' as const,
-			nodeType: 'term' as const,
-			relationshipCount: relationshipCountById.get(term.id) ?? 0,
-		})),
-		links: [...linksByKey.values()],
-	};
-};
+const buildSemanticGraph = (graph: SemanticExplorationGraph): ExplorationGraph => ({
+	nodes: graph.nodes.map((node) => ({
+		id: node.id,
+		name: node.name,
+		description: node.description,
+		synonyms: node.synonyms,
+		zones: node.zones,
+		layer: 'semantic' as const,
+		nodeType: 'term' as const,
+		relationshipCount: node.relationship_count,
+		columnAttributesCount: node.column_attributes_count,
+		sqlAttributesCount: node.sql_attributes_count,
+	})),
+	links: graph.links.map((link) => ({
+		source: link.source,
+		target: link.target,
+		queries: [],
+	})),
+});
 
 const getDataNodeType = (tableType: TableType): ExplorationDataNode['nodeType'] => {
 	if (tableType === TableType.VIEW) return 'view';
@@ -104,63 +96,26 @@ const getDataNodeType = (tableType: TableType): ExplorationDataNode['nodeType'] 
 	return 'table';
 };
 
-const buildDataGraph = async (): Promise<ExplorationGraph> => {
-	const databasesResponse = await datasources.getDBs();
-	if (databasesResponse.error) {
-		throw new Error(databasesResponse.message ?? 'Failed to load databases');
-	}
-
-	const databases: Database[] = databasesResponse.data ?? [];
-	const schemaResponses = await Promise.all(
-		databases.map((database) => datasources.getSchemasForDatabase(database.id)),
-	);
-	const schemasWithDatabase: Array<{ database: Database; schema: Schema }> = [];
-
-	schemaResponses.forEach((response, index) => {
-		if (response.error) return;
-		const database = databases[index];
-		if (database == null) return;
-		(response.data ?? []).forEach((schema) => {
-			schemasWithDatabase.push({ database, schema });
-		});
-	});
-
-	const tableResponses = await Promise.all(
-		schemasWithDatabase.map(({ database, schema }) =>
-			datasources.getTablesForSchema(schema.id, { databaseName: database.name }),
-		),
-	);
-	const nodes: ExplorationDataNode[] = [];
-
-	tableResponses.forEach((response, index) => {
-		if (response.error) return;
-		const owner = schemasWithDatabase[index];
-		if (owner == null) return;
-		(response.data ?? []).forEach((table: DataTable) => {
-			nodes.push({
-				id: table.id,
-				name: table.name,
-				description: table.description ?? null,
-				layer: 'data',
-				nodeType: getDataNodeType(table.table_type),
-				relationshipCount: 0,
-				databaseId: owner.database.id,
-				databaseName: owner.database.name,
-				schemaId: owner.schema.id,
-				schemaName: owner.schema.schema_name,
-				columnsCount: table.columns_count,
-				sqlCount: table.sql_count ?? 0,
-				termsCount: table.terms_count ?? 0,
-			});
-		});
-	});
+const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph => {
+	const nodes: ExplorationDataNode[] = graph.nodes.map((table) => ({
+		id: table.id,
+		name: table.name,
+		description: table.description ?? null,
+		layer: 'data',
+		nodeType: getDataNodeType(table.table_type as TableType),
+		relationshipCount: 0,
+		databaseId: table.database_id,
+		databaseName: table.database_name,
+		schemaId: table.schema_id,
+		schemaName: table.schema_name,
+		columnsCount: table.columns_count,
+		sqlCount: table.sql_count ?? 0,
+		termsCount: table.terms_count ?? 0,
+		zones: table.zones ?? [],
+	}));
 
 	const tableIds = new Set(nodes.map((node) => node.id));
-	const edgesResponse = await datasources.getExplorationEdges();
-	if (edgesResponse.error) {
-		throw new Error(edgesResponse.message ?? 'Failed to load data object relationships');
-	}
-	const links = (edgesResponse.data ?? []).filter(
+	const links = graph.links.filter(
 		(link) => tableIds.has(link.source) && tableIds.has(link.target) && link.queries.length > 0,
 	);
 
@@ -531,6 +486,8 @@ const HoverNodeCard = ({ node, x, y }: { node: ExplorationNode; x: number; y: nu
 	return (
 		<aside
 			// Cytoscape positions are runtime canvas coordinates and cannot be static Tailwind classes.
+			// Read-only preview: pointer-events-none so it never intercepts hover/click
+			// on the graph beneath it. Actionable links only live in the click card.
 			style={{ left: x, top: y }}
 			className="pointer-events-none absolute z-30 w-[min(25rem,calc(100%-2rem))] rounded-lg border border-zinc-200 bg-white p-3 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
 		>
@@ -584,22 +541,56 @@ const HoverNodeCard = ({ node, x, y }: { node: ExplorationNode; x: number; y: nu
 					))}
 				</dl>
 			) : (
-				<dl className="mt-3 overflow-hidden rounded-md border border-zinc-200 text-xs dark:border-zinc-700">
-					<div className="px-3 py-2">
-						<dt className="text-zinc-400">Related Terms</dt>
-						<dd className="mt-0.5 font-medium text-zinc-700 dark:text-zinc-200">
-							{node.relationshipCount}
-						</dd>
-					</div>
+				<dl className="mt-3 grid grid-cols-3 overflow-hidden rounded-md border border-zinc-200 text-xs dark:border-zinc-700">
+					{[
+						{ label: 'Related Terms', value: node.relationshipCount },
+						{ label: 'Attribute Columns', value: node.columnAttributesCount },
+						{ label: 'SQL Attributes', value: node.sqlAttributesCount },
+					].map((item, index) => (
+						<div
+							key={item.label}
+							className={`px-3 py-2 ${
+								index < 2 ? 'border-r border-zinc-200 dark:border-zinc-700' : ''
+							}`}
+						>
+							<dt className="text-zinc-400">{item.label}</dt>
+							<dd className="mt-0.5 font-medium text-zinc-700 dark:text-zinc-200">
+								{item.value}
+							</dd>
+						</div>
+					))}
 				</dl>
 			)}
 
-			{node.layer === 'semantic' && node.synonyms.length > 0 && (
-				<p className="mt-2 truncate text-xs text-zinc-400">
-					Synonyms: {node.synonyms.join(', ')}
-				</p>
-			)}
+			<ZonesRow zones={node.zones} />
 		</aside>
+	);
+};
+
+// Description text is width-constrained by the caller and truncated; hovering
+// reveals the full text in a floating popover instead of relying on the
+// native `title` tooltip.
+const TruncatedDescription = ({ text }: { text: string | null }) => {
+	const [hovered, setHovered] = useState(false);
+	const value = text?.trim() ?? '';
+
+	if (value === '') {
+		return <span className="italic text-zinc-400 dark:text-zinc-500">No Description</span>;
+	}
+
+	return (
+		<span
+			className="relative inline-block max-w-full"
+			onMouseEnter={() => setHovered(true)}
+			onMouseLeave={() => setHovered(false)}
+		>
+			<span className="block truncate">{value}</span>
+			{hovered && (
+				<span className="absolute left-0 top-full z-40 mt-1 block w-72 max-w-[min(22rem,90vw)] whitespace-normal rounded-lg border border-zinc-200 bg-white p-2.5 text-xs leading-5 text-zinc-600 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+					{value}
+				</span>
+			)}
+		</span>
 	);
 };
 
@@ -629,9 +620,18 @@ type ActiveTermCardProps = {
 	onClose: () => void;
 	onView: () => void;
 	onShowRelationships: () => void;
+	onShowColumnAttributes: () => void;
+	onShowSqlAttributes: () => void;
 };
 
-const ActiveTermCard = ({ node, onClose, onView, onShowRelationships }: ActiveTermCardProps) => {
+const ActiveTermCard = ({
+	node,
+	onClose,
+	onView,
+	onShowRelationships,
+	onShowColumnAttributes,
+	onShowSqlAttributes,
+}: ActiveTermCardProps) => {
 	const [minimized, setMinimized] = useState(false);
 
 	return (
@@ -682,7 +682,7 @@ const ActiveTermCard = ({ node, onClose, onView, onShowRelationships }: ActiveTe
 							View Term
 						</button>
 					</div>
-					<div className="flex items-center gap-2">
+					<div className="flex flex-wrap items-center gap-2">
 						<span className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
 							Related Terms: {node.relationshipCount}
 							<DetailLinkButton
@@ -691,11 +691,37 @@ const ActiveTermCard = ({ node, onClose, onView, onShowRelationships }: ActiveTe
 								label="View related Terms"
 							/>
 						</span>
-						{node.synonyms.length > 0 && (
-							<span className="truncate rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
-								{node.synonyms.join(', ')}
-							</span>
-						)}
+						<span className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+							Attribute Columns: {node.columnAttributesCount}
+							<DetailLinkButton
+								count={node.columnAttributesCount}
+								onClick={onShowColumnAttributes}
+								label="View attribute columns"
+							/>
+						</span>
+						<span className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+							SQL Attributes: {node.sqlAttributesCount}
+							<DetailLinkButton
+								count={node.sqlAttributesCount}
+								onClick={onShowSqlAttributes}
+								label="View SQL attributes"
+							/>
+						</span>
+						<span className="flex items-center gap-1.5 text-xs text-zinc-400">
+							Zones:
+							{node.zones.length > 0 ? (
+								node.zones.map((zone) => (
+									<ZoneChip
+										key={zone.id}
+										name={zone.name}
+										color={zone.color}
+										enabled={zone.enabled}
+									/>
+								))
+							) : (
+								<span className="text-zinc-500 dark:text-zinc-400">-</span>
+							)}
+						</span>
 					</div>
 				</div>
 			)}
@@ -818,6 +844,7 @@ const ActiveDataCard = ({
 							/>
 						</span>
 					</div>
+					<ZonesRow zones={node.zones} />
 				</div>
 			)}
 		</section>
@@ -907,6 +934,186 @@ const RelationshipsModal = ({ node, rows, onClose, onFocus }: RelationshipsModal
 					scrollClassName="max-h-[28rem] overflow-auto"
 					emptyMessage="No related entities"
 				/>
+			</div>
+		</Modal>
+	);
+};
+
+type ColumnAttributesModalProps = {
+	node: ExplorationTermNode | null;
+	onClose: () => void;
+};
+
+const ColumnAttributesModal = ({ node, onClose }: ColumnAttributesModalProps) => {
+	const [attributes, setAttributes] = useState<ColumnAttribute[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (node == null) return undefined;
+		let cancelled = false;
+
+		const load = async () => {
+			setLoading(true);
+			setError(null);
+			const response = await termsApi.getColumnAttributes(node.id);
+			if (cancelled) return;
+			if (response.error) {
+				setError(response.message ?? 'Failed to load attribute columns');
+			} else {
+				setAttributes(response.data ?? []);
+			}
+			setLoading(false);
+		};
+
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [node]);
+
+	const columns: TableColumn<ColumnAttribute>[] = [
+		{
+			key: 'name',
+			header: 'Attribute Name',
+			cell: (row) => row.name,
+			title: (row) => row.name,
+			truncate: true,
+		},
+	];
+
+	return (
+		<Modal open={node != null} onClose={onClose} className="w-full max-w-lg">
+			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
+				<div className="flex min-w-0 items-center gap-2">
+					<Icon name={IconName.Column} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{node?.name} — Attribute Columns ({attributes.length})
+					</h2>
+				</div>
+				<button
+					type="button"
+					onClick={onClose}
+					className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+					aria-label="Close attribute columns"
+				>
+					×
+				</button>
+			</header>
+			<div className="max-h-[70dvh] overflow-y-auto p-5">
+				{loading ? (
+					<div className="flex h-32 items-center justify-center">
+						<div
+							className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900]"
+							role="status"
+							aria-label="Loading attribute columns"
+						/>
+					</div>
+				) : error != null ? (
+					<p className="text-sm text-red-600 dark:text-red-300">{error}</p>
+				) : (
+					<Table
+						columns={columns}
+						rows={attributes}
+						rowKey={(row) => row.id}
+						containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
+						scrollClassName="max-h-[28rem] overflow-auto"
+						emptyMessage="No attribute columns"
+					/>
+				)}
+			</div>
+		</Modal>
+	);
+};
+
+type SqlAttributesModalProps = {
+	node: ExplorationTermNode | null;
+	onClose: () => void;
+};
+
+const SqlAttributesModal = ({ node, onClose }: SqlAttributesModalProps) => {
+	const [attributes, setAttributes] = useState<SqlAttribute[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (node == null) return undefined;
+		let cancelled = false;
+
+		const load = async () => {
+			setLoading(true);
+			setError(null);
+			const response = await termsApi.getSqlAttributes(node.id);
+			if (cancelled) return;
+			if (response.error) {
+				setError(response.message ?? 'Failed to load SQL attributes');
+			} else {
+				setAttributes(response.data ?? []);
+			}
+			setLoading(false);
+		};
+
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [node]);
+
+	return (
+		<Modal open={node != null} onClose={onClose} className="w-full max-w-2xl">
+			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
+				<div className="flex min-w-0 items-center gap-2">
+					<Icon name={IconName.Link} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{node?.name} — SQL Attributes ({attributes.length})
+					</h2>
+				</div>
+				<button
+					type="button"
+					onClick={onClose}
+					className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+					aria-label="Close SQL attributes"
+				>
+					×
+				</button>
+			</header>
+			<div className="max-h-[70dvh] overflow-y-auto p-5">
+				{loading ? (
+					<div className="flex h-32 items-center justify-center">
+						<div
+							className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900]"
+							role="status"
+							aria-label="Loading SQL attributes"
+						/>
+					</div>
+				) : error != null ? (
+					<p className="text-sm text-red-600 dark:text-red-300">{error}</p>
+				) : attributes.length === 0 ? (
+					<p className="text-sm italic text-zinc-500 dark:text-zinc-400">
+						No SQL attributes
+					</p>
+				) : (
+					<ul className="space-y-4">
+						{attributes.map((attr) => (
+							<li
+								key={attr.id}
+								className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700"
+							>
+								<h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+									{attr.name}
+								</h3>
+								<div className="mt-1 max-w-md text-xs text-zinc-500 dark:text-zinc-400">
+									<TruncatedDescription text={attr.description} />
+								</div>
+								<SqlBlock
+									className="mt-2"
+									sql={attr.expression || attr.sql || ''}
+									label="SQL"
+								/>
+							</li>
+						))}
+					</ul>
+				)}
 			</div>
 		</Modal>
 	);
@@ -1081,6 +1288,78 @@ const DataDetailsModal = ({ node, kind, onClose }: DataDetailsModalProps) => {
 	);
 };
 
+type SemanticRelationshipModalProps = {
+	sourceNode: ExplorationTermNode | null;
+	targetNode: ExplorationTermNode | null;
+	onClose: () => void;
+	onView: (nodeId: string) => void;
+};
+
+const SemanticRelationshipModal = ({
+	sourceNode,
+	targetNode,
+	onClose,
+	onView,
+}: SemanticRelationshipModalProps) => {
+	const open = sourceNode != null && targetNode != null;
+
+	return (
+		<Modal open={open} onClose={onClose} className="w-full max-w-2xl">
+			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
+				<div className="flex min-w-0 items-center gap-2">
+					<Icon name={IconName.Connection} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{sourceNode?.name} (Term) &lt;&gt; {targetNode?.name} (Term)
+					</h2>
+				</div>
+				<button
+					type="button"
+					onClick={onClose}
+					className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+					aria-label="Close term relationship"
+				>
+					×
+				</button>
+			</header>
+			<div className="p-5">
+				<div className="grid grid-cols-2 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
+					{[sourceNode, targetNode].map((node, index) => (
+						<div
+							key={node?.id ?? index}
+							className={
+								index === 0 ? 'border-r border-zinc-200 dark:border-zinc-700' : ''
+							}
+						>
+							<div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-800/60">
+								<span className="truncate text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+									{node?.name}
+								</span>
+							</div>
+							<button
+								type="button"
+								onClick={() => node != null && onView(node.id)}
+								className="flex w-full cursor-pointer items-center justify-between gap-2 px-4 py-3 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/40"
+							>
+								<span className="flex min-w-0 items-center gap-1.5">
+									<Icon
+										name={IconName.Terms}
+										className="h-3.5 w-3.5 shrink-0 text-[#76b900]"
+									/>
+									<span className="truncate">{node?.name}</span>
+								</span>
+								<Icon
+									name={IconName.ExternalLink}
+									className="h-4 w-4 shrink-0 text-zinc-400"
+								/>
+							</button>
+						</div>
+					))}
+				</div>
+			</div>
+		</Modal>
+	);
+};
+
 type QueryCarouselModalProps = {
 	link: ExplorationLink | null;
 	sourceName: string;
@@ -1173,8 +1452,11 @@ export const ExplorationView = () => {
 	const [activeNodeId, setActiveNodeId] = useState<string | null>(activeNodeIdFromUrl);
 	const [hoveredNodePosition, setHoveredNodePosition] = useState<HoveredNode | null>(null);
 	const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
+	const [selectedSemanticEdgeId, setSelectedSemanticEdgeId] = useState<string | null>(null);
 	const [relationshipsNodeId, setRelationshipsNodeId] = useState<string | null>(null);
 	const [dataDetailsKind, setDataDetailsKind] = useState<DataDetailsKind | null>(null);
+	const [columnAttributesNodeId, setColumnAttributesNodeId] = useState<string | null>(null);
+	const [sqlAttributesNodeId, setSqlAttributesNodeId] = useState<string | null>(null);
 	const [controller, setController] = useState<Core | null>(null);
 
 	useEffect(() => {
@@ -1182,16 +1464,16 @@ export const ExplorationView = () => {
 
 		const loadGraph = async () => {
 			setSemanticLoading(true);
-			const termsResponse = await termsApi.list();
+			const response = await termsApi.getSemanticExplorationGraph();
 			if (cancelled) return;
 
-			if (termsResponse.error) {
-				setSemanticError(termsResponse.message ?? 'Failed to load terms');
+			if (response.error) {
+				setSemanticError(response.message ?? 'Failed to load terms');
 				setSemanticLoading(false);
 				return;
 			}
 
-			const nextGraph = await buildSemanticGraph(termsResponse.data ?? []);
+			const nextGraph = buildSemanticGraph(response.data ?? { nodes: [], links: [] });
 			if (cancelled) return;
 			setSemanticGraph(nextGraph);
 			setSemanticError(null);
@@ -1211,7 +1493,12 @@ export const ExplorationView = () => {
 		const loadGraph = async () => {
 			setDataLoading(true);
 			try {
-				const nextGraph = await buildDataGraph();
+				const response = await datasources.getDataExplorationGraph();
+				if (cancelled) return;
+				if (response.error) {
+					throw new Error(response.message ?? 'Failed to load data objects');
+				}
+				const nextGraph = buildDataGraph(response.data ?? { nodes: [], links: [] });
 				if (cancelled) return;
 				setDataGraph(nextGraph);
 				setDataError(null);
@@ -1240,8 +1527,11 @@ export const ExplorationView = () => {
 		(nodeId: string | null) => {
 			setHoveredNodePosition(null);
 			setSelectedLinkId(null);
+			setSelectedSemanticEdgeId(null);
 			setRelationshipsNodeId(null);
 			setDataDetailsKind(null);
+			setColumnAttributesNodeId(null);
+			setSqlAttributesNodeId(null);
 			setActiveNodeId(nodeId);
 			let nextUrl = '/exploration';
 			if (layer === 'data') {
@@ -1259,6 +1549,7 @@ export const ExplorationView = () => {
 	const handleSelectEdge = useCallback(
 		(edgeId: string) => {
 			if (layer === 'data') setSelectedLinkId(edgeId);
+			else setSelectedSemanticEdgeId(edgeId);
 		},
 		[layer],
 	);
@@ -1268,8 +1559,11 @@ export const ExplorationView = () => {
 		setActiveNodeId(null);
 		setHoveredNodePosition(null);
 		setSelectedLinkId(null);
+		setSelectedSemanticEdgeId(null);
 		setRelationshipsNodeId(null);
 		setDataDetailsKind(null);
+		setColumnAttributesNodeId(null);
+		setSqlAttributesNodeId(null);
 		router.replace(layer === 'semantic' ? '/exploration?view=data' : '/exploration', {
 			scroll: false,
 		});
@@ -1309,6 +1603,14 @@ export const ExplorationView = () => {
 		});
 		return graph.nodes.filter((node) => relatedIds.has(node.id));
 	}, [graph.links, graph.nodes, relationshipsNodeId]);
+	const columnAttributesNode = useMemo(() => {
+		const found = graph.nodes.find((node) => node.id === columnAttributesNodeId) ?? null;
+		return found?.layer === 'semantic' ? found : null;
+	}, [columnAttributesNodeId, graph.nodes]);
+	const sqlAttributesNode = useMemo(() => {
+		const found = graph.nodes.find((node) => node.id === sqlAttributesNodeId) ?? null;
+		return found?.layer === 'semantic' ? found : null;
+	}, [graph.nodes, sqlAttributesNodeId]);
 	const hoveredNode = useMemo(
 		() => graph.nodes.find((node) => node.id === hoveredNodePosition?.id) ?? null,
 		[graph.nodes, hoveredNodePosition?.id],
@@ -1322,6 +1624,22 @@ export const ExplorationView = () => {
 		graph.nodes.find((node) => node.id === selectedLink?.source)?.name ?? '';
 	const selectedLinkTarget =
 		graph.nodes.find((node) => node.id === selectedLink?.target)?.name ?? '';
+
+	const selectedSemanticEdge = useMemo(
+		() =>
+			graph.links.find(
+				(link) => `${link.source}:${link.target}` === selectedSemanticEdgeId,
+			) ?? null,
+		[graph.links, selectedSemanticEdgeId],
+	);
+	const semanticEdgeSourceNode = useMemo(() => {
+		const found = graph.nodes.find((node) => node.id === selectedSemanticEdge?.source) ?? null;
+		return found?.layer === 'semantic' ? found : null;
+	}, [graph.nodes, selectedSemanticEdge?.source]);
+	const semanticEdgeTargetNode = useMemo(() => {
+		const found = graph.nodes.find((node) => node.id === selectedSemanticEdge?.target) ?? null;
+		return found?.layer === 'semantic' ? found : null;
+	}, [graph.nodes, selectedSemanticEdge?.target]);
 
 	const graphBackground =
 		'bg-[radial-gradient(circle,#e4e4e7_1px,transparent_1px)] bg-[size:8px_8px] dark:bg-[radial-gradient(circle,#3f3f46_1px,transparent_1px)]';
@@ -1432,6 +1750,8 @@ export const ExplorationView = () => {
 					onClose={() => handleSelectNode(null)}
 					onView={() => router.push(`/terms?focus=${encodeURIComponent(activeNode.id)}`)}
 					onShowRelationships={() => setRelationshipsNodeId(activeNode.id)}
+					onShowColumnAttributes={() => setColumnAttributesNodeId(activeNode.id)}
+					onShowSqlAttributes={() => setSqlAttributesNodeId(activeNode.id)}
 				/>
 			)}
 
@@ -1520,6 +1840,20 @@ export const ExplorationView = () => {
 				node={activeNode?.layer === 'data' ? activeNode : null}
 				kind={dataDetailsKind}
 				onClose={() => setDataDetailsKind(null)}
+			/>
+			<ColumnAttributesModal
+				node={columnAttributesNode}
+				onClose={() => setColumnAttributesNodeId(null)}
+			/>
+			<SqlAttributesModal
+				node={sqlAttributesNode}
+				onClose={() => setSqlAttributesNodeId(null)}
+			/>
+			<SemanticRelationshipModal
+				sourceNode={semanticEdgeSourceNode}
+				targetNode={semanticEdgeTargetNode}
+				onClose={() => setSelectedSemanticEdgeId(null)}
+				onView={(nodeId) => router.push(`/terms?focus=${encodeURIComponent(nodeId)}`)}
 			/>
 		</main>
 	);

@@ -4,7 +4,12 @@
 
 import { requests } from './requests';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
-import type { ExplorationLink, TableExplorationDetails } from '@/types/exploration';
+import type {
+	DataExplorationGraph,
+	ExplorationLink,
+	ExplorationZonesMap,
+	TableExplorationDetails,
+} from '@/types/exploration';
 import type { Params } from '@/types/params';
 import type {
 	ApiResponse,
@@ -29,10 +34,16 @@ export const datasources = {
 	getExplorationEdges: () =>
 		requests.get<ResponseWithCount<ExplorationLink[]>>('datasources/exploration-edges'),
 
+	/** Full data-layer Exploration graph ({nodes, links}) in a single request. */
+	getDataExplorationGraph: () =>
+		requests.get<{ data: DataExplorationGraph }>('datasources/exploration-graph'),
+
 	getTableExplorationDetails: (tableId: string) =>
 		requests.get<{ data: TableExplorationDetails }>(
 			`datasources/tables/${tableId}/exploration-details`,
 		),
+
+	getTableZonesMap: () => requests.get<{ data: ExplorationZonesMap }>('datasources/tables/zones'),
 
 	/** Schemas for one database; parallel callers with the same key share one HTTP request. */
 	getSchemasForDatabase: (dbId: string): Promise<ApiResponse<Schema[]>> => {

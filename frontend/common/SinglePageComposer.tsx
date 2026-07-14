@@ -29,6 +29,7 @@ import { SqlBlock } from '@/components/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
+import type { TermZone } from '@/types/terms';
 import { Toast } from '@/components/Toast';
 
 export type ComposerEditValue = string | string[];
@@ -37,13 +38,43 @@ function zoneChipStyle(color: string): React.CSSProperties {
 	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };
 }
 
-const ZoneChip = ({ name, color }: { name: string; color: string | null }) => (
+export const ZoneChip = ({
+	name,
+	color,
+	enabled = true,
+}: {
+	name: string;
+	color: string | null;
+	enabled?: boolean;
+}) => (
 	<span
-		className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-		style={color ? zoneChipStyle(color) : undefined}
+		className={
+			enabled
+				? 'inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+				: 'inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-500'
+		}
+		style={enabled && color ? zoneChipStyle(color) : undefined}
 	>
 		{name}
 	</span>
+);
+
+export const ZonesRow = ({ zones }: { zones: TermZone[] }) => (
+	<div className="mt-2 flex flex-wrap items-center gap-1.5">
+		<span className="text-xs text-zinc-400">Zones:</span>
+		{zones.length > 0 ? (
+			zones.map((zone) => (
+				<ZoneChip
+					key={zone.id}
+					name={zone.name}
+					color={zone.color}
+					enabled={zone.enabled}
+				/>
+			))
+		) : (
+			<span className="text-xs text-zinc-500 dark:text-zinc-400">-</span>
+		)}
+	</div>
 );
 
 export type SinglePageComposerProps = {
@@ -325,7 +356,7 @@ const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
 				<ul className="mt-3 flex flex-wrap gap-2">
 					{displayedZones.map((zone) => (
 						<li key={zone.id}>
-							<ZoneChip name={zone.name} color={zone.color} />
+							<ZoneChip name={zone.name} color={zone.color} enabled={zone.enabled} />
 						</li>
 					))}
 				</ul>

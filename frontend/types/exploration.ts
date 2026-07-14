@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Term } from '@/types/terms';
+import type { Term, TermZone } from '@/types/terms';
 
 export type ExplorationLayer = 'semantic' | 'data';
 
@@ -10,6 +10,8 @@ export type ExplorationTermNode = Term & {
 	layer: 'semantic';
 	nodeType: 'term';
 	relationshipCount: number;
+	columnAttributesCount: number;
+	sqlAttributesCount: number;
 };
 
 export type ExplorationDataNode = {
@@ -26,6 +28,7 @@ export type ExplorationDataNode = {
 	columnsCount: number;
 	sqlCount: number;
 	termsCount: number;
+	zones: TermZone[];
 };
 
 export type ExplorationNode = ExplorationTermNode | ExplorationDataNode;
@@ -38,6 +41,47 @@ export type ExplorationLink = {
 
 export type ExplorationGraph = {
 	nodes: ExplorationNode[];
+	links: ExplorationLink[];
+};
+
+/** Maps a Table or Term id to the Zones it belongs to. */
+export type ExplorationZonesMap = Record<string, TermZone[]>;
+
+/** Server DTO for a semantic (Term) node in the Exploration graph endpoint. */
+export type SemanticGraphNodeDto = {
+	id: string;
+	name: string;
+	description: string | null;
+	synonyms: string[];
+	zones: TermZone[];
+	relationship_count: number;
+	column_attributes_count: number;
+	sql_attributes_count: number;
+};
+
+/** Server DTO for a data (Table) node in the Exploration graph endpoint. */
+export type DataGraphNodeDto = {
+	id: string;
+	name: string;
+	description: string | null;
+	table_type: string;
+	database_id: string;
+	database_name: string;
+	schema_id: string;
+	schema_name: string;
+	columns_count: number;
+	sql_count: number;
+	terms_count: number;
+	zones: TermZone[];
+};
+
+export type SemanticExplorationGraph = {
+	nodes: SemanticGraphNodeDto[];
+	links: Array<{ source: string; target: string }>;
+};
+
+export type DataExplorationGraph = {
+	nodes: DataGraphNodeDto[];
 	links: ExplorationLink[];
 };
 

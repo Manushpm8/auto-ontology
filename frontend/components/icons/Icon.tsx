@@ -28,6 +28,8 @@ import KeySvg from './svg/key.svg';
 import TermsSvg from './svg/terms.svg';
 import ExplorationSvg from './svg/exploration.svg';
 import LinkSvg from './svg/link.svg';
+import ExternalLinkSvg from './svg/external-link.svg';
+import ConnectionSvg from './svg/connection.svg';
 
 export enum IconName {
 	Menu = 'menu',
@@ -54,6 +56,8 @@ export enum IconName {
 	Terms = 'terms',
 	Exploration = 'exploration',
 	Link = 'link',
+	ExternalLink = 'external-link',
+	Connection = 'connection',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -81,6 +85,8 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Terms]: TermsSvg,
 	[IconName.Exploration]: ExplorationSvg,
 	[IconName.Link]: LinkSvg,
+	[IconName.ExternalLink]: ExternalLinkSvg,
+	[IconName.Connection]: ConnectionSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {
