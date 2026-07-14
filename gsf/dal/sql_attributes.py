@@ -18,6 +18,7 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.cypher_fragments import column_description_expr
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.constants import (
     LABEL_SQL_ATTRIBUTE,
@@ -499,7 +500,7 @@ def fetch_tables_from_sql_attributes(
     OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
     OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
     WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                             description: col.description}}) AS cols
+                             description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
            sch.name AS schema_name, cols
     """

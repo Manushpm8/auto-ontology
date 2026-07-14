@@ -43,7 +43,7 @@ def get_llm_client(
     *,
     model: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 8192,
+    max_tokens: int = 4096,
 ) -> BaseChatModel:
     """Create an LLM client.
 
@@ -79,6 +79,17 @@ def get_llm_client(
     )
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
     return client
+
+
+def invoke_text(llm: BaseChatModel, prompt: str) -> str:
+    """Invoke the LLM with a single system-message *prompt* and return its text.
+
+    Free-text counterpart to :func:`invoke_with_structured_output`, for callers
+    that parse the raw response themselves (e.g. the text-to-PQL pipeline).
+    """
+    response = llm.invoke([SystemMessage(content=prompt)])
+    content = getattr(response, "content", response)
+    return content if isinstance(content, str) else str(content)
 
 
 def safe_invoke_with_structured_output(
