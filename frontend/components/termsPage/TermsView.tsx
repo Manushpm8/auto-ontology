@@ -737,9 +737,15 @@ export const TermsView = () => {
 						type: ComposerSectionKind.DATA_TABLE,
 						id: 'column_attributes',
 						title: 'Column Attributes',
-						columns: [{ key: 'name', label: 'Attribute Name' }],
+						columns: [
+							{ key: 'name', label: 'Attribute Name' },
+							{ key: 'description', label: 'Description', truncate: true },
+							{ key: 'sample_values', label: 'Sample Values', kind: 'tags' },
+						],
 						rows: termAttrs.map((attr) => ({
 							name: attr.name,
+							description: attr.description ?? '',
+							sample_values: attr.sample_values ?? [],
 						})),
 					},
 					{

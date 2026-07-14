@@ -35,7 +35,8 @@ import type {
 import type { Column } from '@/types/datasources';
 import type { ColumnAttribute, SqlAttribute } from '@/types/terms';
 import type { TableColumn } from '@/types/table';
-import { ZoneChip, ZonesRow } from '@/common/SinglePageComposer';
+import { DataTablePills, ZoneChip, ZonesRow } from '@/common/SinglePageComposer';
+import { TruncatedText } from '@/components/TruncatedText';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 
 cytoscape.use(euler);
@@ -1011,11 +1012,28 @@ const ColumnAttributesModal = ({ node, onClose }: ColumnAttributesModalProps) =>
 			cell: (row) => row.name,
 			title: (row) => row.name,
 			truncate: true,
+			width: 'w-40',
+		},
+		{
+			key: 'description',
+			header: 'Description',
+			cell: (row) =>
+				row.description ? (
+					<TruncatedText text={row.description} maxWidthClass="max-w-none" />
+				) : (
+					'—'
+				),
+		},
+		{
+			key: 'sample_values',
+			header: 'Sample Values',
+			width: 'w-56',
+			cell: (row) => <DataTablePills values={row.sample_values ?? []} />,
 		},
 	];
 
 	return (
-		<Modal open={node != null} onClose={onClose} className="w-full max-w-lg">
+		<Modal open={node != null} onClose={onClose} className="w-full max-w-2xl">
 			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex min-w-0 items-center gap-2">
 					<Icon name={IconName.Column} className="h-5 w-5 shrink-0 text-[#76b900]" />

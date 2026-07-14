@@ -36,13 +36,16 @@ logger = logging.getLogger(__name__)
 
 # Shared RETURN projection for ColumnAttribute rows — keep fetch_column_attributes
 # and fetch_column_attributes_by_term_id in sync when adding/removing fields.
+# Both queries pair this with an `OPTIONAL MATCH (col:Column)-[:REL_HAS_ATTRIBUTE]->(attr)`
+# clause so `col.sample_values` (profiled at ingestion time) is available.
 _COLUMN_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.name          AS name,
                attr.description   AS description,
                attr.term_name     AS term_name,
                attr.source_column AS source_column,
                attr.datatype      AS datatype,
-               attr.table_id      AS table_id"""
+               attr.table_id      AS table_id,
+               col.sample_values  AS sample_values"""
 
 
 def table_has_term(table_id: str) -> bool:
@@ -657,6 +660,7 @@ def fetch_column_attributes(
         f"""
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
         {table_filter}
+        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
         RETURN {_COLUMN_ATTRIBUTE_FIELDS}
         ORDER BY attr.term_name, attr.name
         """,
@@ -685,6 +689,7 @@ def fetch_column_attributes_by_term_id(
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{term_name: term.name, source: $source}})
         {table_filter}
+        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
         RETURN {_COLUMN_ATTRIBUTE_FIELDS}
         ORDER BY attr.name
         """,

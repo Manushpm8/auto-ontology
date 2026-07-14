@@ -25,6 +25,7 @@ import {
 import { Icon, IconName } from '@/components/icons';
 import { TagInput } from '@/components/TagInput';
 import { Table } from '@/components/Table';
+import { TruncatedText } from '@/components/TruncatedText';
 import { SqlBlock } from '@/components/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
@@ -33,6 +34,24 @@ import type { TermZone } from '@/types/terms';
 import { Toast } from '@/components/Toast';
 
 export type ComposerEditValue = string | string[];
+
+export const DataTablePills = ({ values }: { values: string[] }) => {
+	if (values.length === 0) return <span>—</span>;
+	return (
+		<ul className="flex flex-wrap gap-1">
+			{values.map((v, i) => (
+				<li
+					key={`${v}-${i}`}
+					className="inline-flex max-w-full items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
+				>
+					<span className="max-w-[16rem] truncate" title={v}>
+						{v}
+					</span>
+				</li>
+			))}
+		</ul>
+	);
+};
 
 function zoneChipStyle(color: string): React.CSSProperties {
 	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };
@@ -439,19 +458,34 @@ function renderComposerSection(
 						columns={section.columns.map((col) => ({
 							key: col.key,
 							header: col.label,
-							cell: (row: Record<string, string>) => row[col.key] || '—',
+							cell: (row: Record<string, string | string[]>) => {
+								const value = row[col.key];
+								if (col.kind === 'tags') {
+									return (
+										<DataTablePills
+											values={Array.isArray(value) ? value : []}
+										/>
+									);
+								}
+								const text = typeof value === 'string' ? value : '';
+								if (!text) return '—';
+								return col.truncate ? (
+									<TruncatedText text={text} maxWidthClass={col.maxWidthClass} />
+								) : (
+									text
+								);
+							},
 						}))}
 						rows={section.rows}
-						rowKey={(row, index) =>
-							isClickable && section.rowIdKey
-								? (row[section.rowIdKey] ?? String(index))
-								: String(index)
-						}
+						rowKey={(row, index) => {
+							const rowId = section.rowIdKey ? row[section.rowIdKey] : undefined;
+							return isClickable && typeof rowId === 'string' ? rowId : String(index);
+						}}
 						onRowClick={
 							isClickable && section.rowIdKey
 								? (row) => {
 										const rowId = row[section.rowIdKey as string];
-										if (rowId) {
+										if (typeof rowId === 'string' && rowId) {
 											onDataTableRowClick(section.id, rowId);
 										}
 									}

@@ -37,6 +37,8 @@ export type ColumnAttribute = {
 	source_column: string;
 	datatype: string | null;
 	table_id: string;
+	/** Profiled sample values from the owning Column, when available. */
+	sample_values: string[] | null;
 };
 
 export type SqlAttribute = {
