@@ -522,6 +522,11 @@ const HoverNodeCard = ({ node, x, y }: { node: ExplorationNode; x: number; y: nu
 							{node.databaseName} • {node.schemaName}
 						</p>
 					)}
+					{node.layer === 'semantic' && node.synonyms.length > 0 && (
+						<p className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
+							Synonyms: {node.synonyms.join(', ')}
+						</p>
+					)}
 					<p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
 						{node.description || 'No Description'}
 					</p>
@@ -681,6 +686,11 @@ const ActiveTermCard = ({
 							<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 								{node.name}
 							</h2>
+							{node.synonyms.length > 0 && (
+								<p className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
+									Synonyms: {node.synonyms.join(', ')}
+								</p>
+							)}
 							<p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
 								{node.description || 'No Description'}
 							</p>
