@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
+
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
 from gsf.retrieval.text_to_sql.state import (
@@ -130,6 +132,16 @@ def route_translation(state: AgentState) -> str:
     return "end"
 
 
+def _prediction_enabled() -> bool:
+    """Whether the KumoRFM prediction branch should be built into the graph.
+
+    Evaluated ONCE at graph-creation (startup), not per request: when
+    ``KUMO_RFM_API_KEY`` is unset the prediction nodes/edges are never added, so
+    the classify → prepare-graph → predict path simply does not exist.
+    """
+    return bool(os.environ.get("KUMO_RFM_API_KEY"))
+
+
 def route_decision(state: AgentState) -> str:
     """
     Generic router — returns the current ``decision`` value from state,
@@ -193,13 +205,15 @@ def wrap_node_with_logging(node_name: str, fn):
 
 def create_graph():
 
+    # KumoRFM prediction is wired in only when configured — decided once here at
+    # graph creation (startup), never per request.
+    prediction_enabled = _prediction_enabled()
+    logger.info("Text-to-SQL graph: prediction branch %s", prediction_enabled)
+
     # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
     question_sanitization_agent = QuestionSanitizationAgent()
-    prediction_classification_agent = PredictionClassificationAgent()
-    prediction_graph_agent = PredictionGraphAgent()
-    kumo_prediction_agent = KumoPredictionAgent()
     entities_extraction_agent = EntitiesExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
@@ -220,13 +234,6 @@ def create_graph():
     sanitize_question_node = _make_node(
         "sanitize_question", agent_wrapper(question_sanitization_agent)
     )
-    classify_prediction_node = _make_node(
-        "classify_prediction", agent_wrapper(prediction_classification_agent)
-    )
-    prepare_prediction_graph_node = _make_node(
-        "prepare_prediction_graph", agent_wrapper(prediction_graph_agent)
-    )
-    kumo_predict_node = _make_node("kumo_predict", agent_wrapper(kumo_prediction_agent))
     entities_extraction_node = _make_node(
         "entities_extraction", agent_wrapper(entities_extraction_agent)
     )
@@ -275,9 +282,6 @@ def create_graph():
 
     # Add only nodes instantiated above.
     graph.add_node("sanitize_question", sanitize_question_node)
-    graph.add_node("classify_prediction", classify_prediction_node)
-    graph.add_node("prepare_prediction_graph", prepare_prediction_graph_node)
-    graph.add_node("kumo_predict", kumo_predict_node)
     graph.add_node("entities_extraction", entities_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
@@ -298,29 +302,52 @@ def create_graph():
     graph.add_edge("entities_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
 
-    # After candidate preparation, a decision tree routes prediction questions to
-    # the KumoRFM tool (scoped to the relevant tables just prepared) and everything
-    # else into SQL construction. The prediction path itself is two nodes:
-    # ``prepare_prediction_graph`` (build the graph/model) → ``kumo_predict``
-    # (generate PQL + predict), so the slow build step streams its own progress.
-    graph.add_edge("prepare_candidates", "classify_prediction")
-    graph.add_conditional_edges(
-        "classify_prediction",
-        route_decision,
-        {
-            "prediction": "prepare_prediction_graph",
-            "sql": "construct_sql_from_candidates",
-        },
-    )
-    graph.add_conditional_edges(
-        "prepare_prediction_graph",
-        route_decision,
-        {
-            "predict_ready": "kumo_predict",
-            "predict_failed": END,
-        },
-    )
-    graph.add_edge("kumo_predict", END)
+    if prediction_enabled:
+        # After candidate preparation, a decision tree routes prediction questions
+        # to the KumoRFM tool (scoped to the relevant tables just prepared) and
+        # everything else into SQL construction. The prediction path itself is two
+        # nodes: ``prepare_prediction_graph`` (build the graph/model) →
+        # ``kumo_predict`` (generate PQL + predict), so the slow build step streams
+        # its own progress. Built only when KumoRFM is configured (KUMO_RFM_API_KEY).
+        graph.add_node(
+            "classify_prediction",
+            _make_node(
+                "classify_prediction",
+                agent_wrapper(PredictionClassificationAgent()),
+            ),
+        )
+        graph.add_node(
+            "prepare_prediction_graph",
+            _make_node(
+                "prepare_prediction_graph", agent_wrapper(PredictionGraphAgent())
+            ),
+        )
+        graph.add_node(
+            "kumo_predict",
+            _make_node("kumo_predict", agent_wrapper(KumoPredictionAgent())),
+        )
+
+        graph.add_edge("prepare_candidates", "classify_prediction")
+        graph.add_conditional_edges(
+            "classify_prediction",
+            route_decision,
+            {
+                "prediction": "prepare_prediction_graph",
+                "sql": "construct_sql_from_candidates",
+            },
+        )
+        graph.add_conditional_edges(
+            "prepare_prediction_graph",
+            route_decision,
+            {
+                "predict_ready": "kumo_predict",
+                "predict_failed": END,
+            },
+        )
+        graph.add_edge("kumo_predict", END)
+    else:
+        # KumoRFM not configured — skip the prediction branch entirely.
+        graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
 
     graph.add_conditional_edges(
         "construct_sql_from_candidates",
