@@ -93,7 +93,7 @@ def list_databases(zone_ids: list[str] | None = Query(default=None)) -> dict:
 def list_data_exploration_edges(
     zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
-    """Table connections backed by SQL queries, scoped to visible tables."""
+    """Table connections backed by a shared SQL query or a foreign key, scoped to visible tables."""
     rows = dal.fetch_data_exploration_edges(zone_ids=zone_ids)
     return _count_payload(rows)
 

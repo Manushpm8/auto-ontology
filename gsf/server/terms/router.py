@@ -111,7 +111,7 @@ def list_term_column_attributes_by_id(
     term_id: str,
     zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
-    """Return ColumnAttribute nodes for a single Term with FK count.
+    """Return ColumnAttribute nodes for a single Term.
 
     Zone-scoped when zone_ids are provided, so a viewer can't see attributes
     of out-of-zone tables just because they belong to a term they can see.
@@ -139,7 +139,11 @@ def list_related_terms(
     term_id: str,
     zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
-    """Return Term nodes related to the given term via SEMANTIC_FK join paths.
+    """Return Term nodes related to the given term via co-located tables.
+
+    A related term shares at least one table with *term_id*, reached
+    through any of REPRESENTS, ColumnAttribute PROPERTY_OF, or SEMANTIC_FK
+    join paths — see ``fetch_related_terms`` for the full breakdown.
 
     Zone-scoped when zone_ids are provided, so related terms outside the
     caller's zones are never surfaced as clickable chips.
