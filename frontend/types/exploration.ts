@@ -37,6 +37,8 @@ export type ExplorationLink = {
 	source: string;
 	target: string;
 	queries: string[];
+	/** True when this pair of tables is also (or only) linked by a foreign key. */
+	viaForeignKey?: boolean;
 };
 
 export type ExplorationGraph = {
@@ -80,9 +82,17 @@ export type SemanticExplorationGraph = {
 	links: Array<{ source: string; target: string }>;
 };
 
+/** Server DTO for a data-layer Exploration edge (Table ↔ Table). */
+export type DataGraphEdgeDto = {
+	source: string;
+	target: string;
+	queries: string[];
+	via_foreign_key: boolean;
+};
+
 export type DataExplorationGraph = {
 	nodes: DataGraphNodeDto[];
-	links: ExplorationLink[];
+	links: DataGraphEdgeDto[];
 };
 
 export type TableExplorationDetails = {

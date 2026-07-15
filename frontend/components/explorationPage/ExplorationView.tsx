@@ -119,9 +119,19 @@ const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph => {
 	}));
 
 	const tableIds = new Set(nodes.map((node) => node.id));
-	const links = graph.links.filter(
-		(link) => tableIds.has(link.source) && tableIds.has(link.target) && link.queries.length > 0,
-	);
+	const links: ExplorationLink[] = graph.links
+		.filter(
+			(link) =>
+				tableIds.has(link.source) &&
+				tableIds.has(link.target) &&
+				(link.queries.length > 0 || link.via_foreign_key),
+		)
+		.map((link) => ({
+			source: link.source,
+			target: link.target,
+			queries: link.queries,
+			viaForeignKey: link.via_foreign_key,
+		}));
 
 	const relationshipCountById = new Map<string, number>();
 	links.forEach(({ source, target }) => {
@@ -1458,6 +1468,7 @@ const QueryCarouselModal = ({ link, sourceName, targetName, onClose }: QueryCaro
 	const [queryIndex, setQueryIndex] = useState(0);
 	const queries = link?.queries ?? [];
 	const query = queries[queryIndex] ?? '';
+	const viaForeignKey = link?.viaForeignKey ?? false;
 
 	return (
 		<Modal open={link != null} onClose={onClose} className="w-full max-w-3xl">
@@ -1465,9 +1476,16 @@ const QueryCarouselModal = ({ link, sourceName, targetName, onClose }: QueryCaro
 				<div className="flex min-w-0 items-center gap-2">
 					<Icon name={IconName.Terms} className="h-5 w-5 shrink-0 text-[#76b900]" />
 					<div className="min-w-0">
-						<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-							Query
-						</h2>
+						<div className="flex items-center gap-2">
+							<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+								Query
+							</h2>
+							{viaForeignKey && (
+								<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+									Foreign key
+								</span>
+							)}
+						</div>
 						<p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
 							{sourceName} ↔ {targetName}
 						</p>
@@ -1514,7 +1532,14 @@ const QueryCarouselModal = ({ link, sourceName, targetName, onClose }: QueryCaro
 				</div>
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">
-				<SqlBlock sql={query} label="SQL Query" />
+				{queries.length > 0 ? (
+					<SqlBlock sql={query} label="SQL Query" />
+				) : (
+					<p className="text-sm text-zinc-500 dark:text-zinc-400">
+						These tables share a foreign key relationship; no stored SQL query
+						references both of them together.
+					</p>
+				)}
 			</div>
 		</Modal>
 	);

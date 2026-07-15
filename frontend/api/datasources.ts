@@ -6,7 +6,7 @@ import { requests } from './requests';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import type {
 	DataExplorationGraph,
-	ExplorationLink,
+	DataGraphEdgeDto,
 	ExplorationZonesMap,
 	TableExplorationDetails,
 } from '@/types/exploration';
@@ -32,7 +32,7 @@ export const datasources = {
 	getDBs: () => requests.get<ResponseWithCount<Database[]>>('datasources/dbs'),
 
 	getExplorationEdges: () =>
-		requests.get<ResponseWithCount<ExplorationLink[]>>('datasources/exploration-edges'),
+		requests.get<ResponseWithCount<DataGraphEdgeDto[]>>('datasources/exploration-edges'),
 
 	/** Full data-layer Exploration graph ({nodes, links}) in a single request. */
 	getDataExplorationGraph: () =>

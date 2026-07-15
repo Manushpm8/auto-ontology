@@ -426,52 +426,87 @@ def fetch_data_exploration_edges(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return table pairs connected by SQL queries.
+    """Return table pairs connected by a shared SQL query or a foreign key.
 
     A query becomes an exploration edge when its ``Sql`` node references at
-    least two visible tables. Each edge includes the SQL text shown when the
-    user selects that connection. Pass a pre-resolved *data_ids_by_zone*
-    (see ``resolve_accessible_catalog_ids``) when the caller already
-    resolved *zone_ids* for this request, to skip a repeat Neo4j round trip.
+    least two visible tables — each such edge includes the SQL text shown
+    when the user selects that connection. A foreign key between two
+    tables' columns also becomes an edge (flagged ``via_foreign_key``), even
+    when no stored SQL query ever referenced both tables together; that
+    edge carries an empty ``queries`` list unless a shared SQL query also
+    connects the same pair, in which case the two are merged into one edge.
+    Pass a pre-resolved *data_ids_by_zone* (see
+    ``resolve_accessible_catalog_ids``) when the caller already resolved
+    *zone_ids* for this request, to skip a repeat Neo4j round trip.
     """
     data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
     if data_ids_by_zone is not None:
         table_ids = list(data_ids_by_zone["table_ids"])
         if not table_ids:
             return []
-        where_clause = (
-            "WHERE source.id IN $table_ids AND target.id IN $table_ids "
-            "AND source.id < target.id"
-        )
+        table_filter = "source.id IN $table_ids AND target.id IN $table_ids AND "
         params: dict[str, Any] = {"table_ids": table_ids}
     else:
-        where_clause = "WHERE source.id < target.id"
+        table_filter = ""
         params = {}
 
-    rows = get_neo4j_conn().query_read(
+    conn = get_neo4j_conn()
+    sql_rows = conn.query_read(
         f"""
         MATCH (source:{Labels.TABLE})<-[:{Edges.SQL}]-(sql:{Labels.SQL})
               -[:{Edges.SQL}]->(target:{Labels.TABLE})
-        {where_clause}
+        WHERE {table_filter}source.id < target.id
         WITH source, target,
              collect(DISTINCT sql.sql_full_query) AS raw_queries
         RETURN source.id AS source,
                target.id AS target,
                [query IN raw_queries
                 WHERE query IS NOT NULL AND trim(toString(query)) <> ''] AS queries
-        ORDER BY source, target
         """,
         params,
     )
-    return [
-        {
-            "source": row["source"],
-            "target": row["target"],
-            "queries": list(row.get("queries") or []),
+    fk_rows = conn.query_read(
+        f"""
+        MATCH (source:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-
+              (target:{Labels.TABLE})
+        WHERE {table_filter}source.id <> target.id
+        RETURN DISTINCT source.id AS source, target.id AS target
+        """,
+        params,
+    )
+
+    edges: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in sql_rows:
+        source, target = row.get("source"), row.get("target")
+        if not source or not target:
+            continue
+        edges[(source, target)] = {
+            "source": source,
+            "target": target,
+            "queries": [q for q in (row.get("queries") or []) if q],
+            "via_foreign_key": False,
         }
-        for row in rows
-        if row.get("source") and row.get("target") and row.get("queries")
-    ]
+    for row in fk_rows:
+        a, b = row.get("source"), row.get("target")
+        if not a or not b:
+            continue
+        key = (a, b) if a < b else (b, a)
+        edge = edges.get(key)
+        if edge is None:
+            edges[key] = {
+                "source": key[0],
+                "target": key[1],
+                "queries": [],
+                "via_foreign_key": True,
+            }
+        else:
+            edge["via_foreign_key"] = True
+
+    return sorted(
+        (edge for edge in edges.values() if edge["queries"] or edge["via_foreign_key"]),
+        key=lambda edge: (edge["source"], edge["target"]),
+    )
 
 
 def fetch_table_exploration_details(

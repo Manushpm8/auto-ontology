@@ -442,8 +442,8 @@ function renderComposerSection(
 							isClickable && section.rowIdKey
 								? (row) => {
 										const rowId = row[section.rowIdKey as string];
-										if (typeof rowId === 'string' && rowId) {
-											onDataTableRowClick(section.id, rowId);
+										if (rowId) {
+											onDataTableRowClick(section.id, rowId as string);
 										}
 									}
 								: undefined
