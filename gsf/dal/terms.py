@@ -329,22 +329,26 @@ def get_full_term_by_id(
     zone_filter = (
         ""
         if zone_ids is None
-        else f"AND z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
+        else f"WHERE z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
     )
     zone_params: dict[str, Any] = {"term_id": term_id}
     if zone_ids is not None:
         zone_params["zone_ids"] = zone_ids
 
+    # Each branch's zone MATCH is chained through `item` (found by walking
+    # CONTAINS backwards from `t`, 0..2 hops) rather than matched independently
+    # and filtered via WHERE afterwards — see fetch_table_zones_map in
+    # gsf/dal/datasources.py for why the disconnected-pattern version forces a
+    # cartesian product between every zone/item pair and every candidate `t`.
     zone_rows = conn.query_read(
         f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         MATCH (term)<-[:{REL_PROPERTY_OF}]-(:{LABEL_COLUMN_ATTRIBUTE})
               <-[:{REL_HAS_ATTRIBUTE}]-(:{Labels.COLUMN})
               <-[:{Edges.CONTAINS}]-(t:{Labels.TABLE})
+        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
         MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        WHERE (item = t
-           OR (item)-[:{Edges.CONTAINS}*1..2]->(t))
-              {zone_filter}
+        {zone_filter}
         RETURN DISTINCT z.id    AS id,
                         z.name  AS name,
                         z.color AS color,
@@ -356,10 +360,9 @@ def get_full_term_by_id(
         MATCH (term)<-[:{REL_PROPERTY_OF}]-(:{LABEL_SQL_ATTRIBUTE})
               -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
               -[:{Edges.SQL}]->(t:{Labels.TABLE})
+        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
         MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        WHERE (item = t
-           OR (item)-[:{Edges.CONTAINS}*1..2]->(t))
-              {zone_filter}
+        {zone_filter}
         RETURN DISTINCT z.id    AS id,
                         z.name  AS name,
                         z.color AS color,
@@ -390,21 +393,24 @@ def fetch_term_zones_map(
     zone_filter = (
         ""
         if zone_ids is None
-        else f"AND z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
+        else f"WHERE z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
     )
     params: dict[str, Any] = {}
     if zone_ids is not None:
         params["zone_ids"] = zone_ids
 
+    # See the comment in get_full_term_by_id: chaining every MATCH through
+    # `item` (rather than matching `t` and zone/item independently and
+    # filtering via WHERE) avoids a cartesian product — this scans every
+    # Term in the graph, so it matters even more here than there.
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (term:{LABEL_TERM})<-[:{REL_PROPERTY_OF}]-(:{LABEL_COLUMN_ATTRIBUTE})
               <-[:{REL_HAS_ATTRIBUTE}]-(:{Labels.COLUMN})
               <-[:{Edges.CONTAINS}]-(t:{Labels.TABLE})
+        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
         MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        WHERE (item = t
-           OR (item)-[:{Edges.CONTAINS}*1..2]->(t))
-              {zone_filter}
+        {zone_filter}
         RETURN DISTINCT term.id AS term_id,
                         z.id     AS id,
                         z.name   AS name,
@@ -416,10 +422,9 @@ def fetch_term_zones_map(
         MATCH (term:{LABEL_TERM})<-[:{REL_PROPERTY_OF}]-(:{LABEL_SQL_ATTRIBUTE})
               -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
               -[:{Edges.SQL}]->(t:{Labels.TABLE})
+        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
         MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        WHERE (item = t
-           OR (item)-[:{Edges.CONTAINS}*1..2]->(t))
-              {zone_filter}
+        {zone_filter}
         RETURN DISTINCT term.id AS term_id,
                         z.id     AS id,
                         z.name   AS name,

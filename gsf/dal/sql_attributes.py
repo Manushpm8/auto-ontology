@@ -497,8 +497,8 @@ def fetch_tables_from_sql_attributes(
     MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: attr_id}})
           -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
           -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
-    OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
-    OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
+    MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
+    MATCH (tbl)-[:CONTAINS]->(col:Column)
     WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
                              description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,

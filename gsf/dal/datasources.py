@@ -204,20 +204,20 @@ ORDER BY query_count DESC
 
 _FETCH_TABLE_BY_ID = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})
-OPTIONAL MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
+MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
 RETURN t.id AS id,
        t.name AS name,
-       coalesce(s.name, '') AS schema_name,
+       s.name AS schema_name,
        t.description AS description,
        t.pk as pk
 """
 
 _FETCH_TABLE_BY_NAME = f"""
 MATCH (t:{Labels.TABLE} {{name: $name}})
-OPTIONAL MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
+MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
 RETURN t.id AS id,
        t.name AS name,
-       coalesce(s.name, '') AS schema_name,
+       s.name AS schema_name,
        t.description AS description,
        t.pk as pk
 LIMIT 1
@@ -242,8 +242,8 @@ RETURN t1.name AS source_table,
 _FETCH_TABLES_BY_IDS = f"""
 UNWIND $table_ids AS tid
 MATCH (tbl:{Labels.TABLE} {{id: tid}})
-OPTIONAL MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-OPTIONAL MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: {column_description_expr("col")}}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
@@ -275,7 +275,7 @@ SET c.description = coalesce(row.description, c.description),
 # ``fetch_data_exploration_graph`` (every visible table) so the two stay in
 # sync instead of drifting as separately-maintained copies.
 _TABLE_COUNTS_SUBQUERY = f"""
-OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
 WITH db, s, t, count(DISTINCT c) AS columns_count
 OPTIONAL MATCH (t)<-[:{Edges.SQL}]-(sql:{Labels.SQL})
 WITH db, s, t, columns_count, count(DISTINCT sql) AS sql_count
@@ -404,7 +404,7 @@ def fetch_all_tables_without_term() -> list[dict[str, Any]]:
         f"""
         MATCH (t:{Labels.TABLE})
         WHERE NOT (t)-[:{REL_REPRESENTS}]->()
-        OPTIONAL MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+        MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
         RETURN t.id AS id, t.name AS name, t.description AS description,
                sch.name AS schema_name
         ORDER BY t.name
@@ -694,7 +694,7 @@ def fetch_data_exploration_graph(
 
 _FETCH_COLUMNS_QUERY = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})
-OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
 RETURN c.id AS id,
        c.name AS name,
        c.data_type AS data_type,
