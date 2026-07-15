@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from gsf.dal import users as users_dal
-from gsf.server.zones import dal
+from gsf.dal import zones as dal
 
 router = APIRouter()
 
