@@ -200,6 +200,7 @@ class PredictionContext:
     graph_col_stypes: Any
     time_columns: Any
     table_names: dict[str, str]
+    examples: list[dict[str, str]]
 
 
 def _col_name_lower(col: Any) -> str | None:
@@ -305,6 +306,7 @@ def build_prediction_context(
     connectors: list[Any],
     relevant_tables: list[dict[str, Any]] | None = None,
     join_paths: list[dict[str, Any]] | None = None,
+    examples: list[dict[str, str]] | None = None,
 ) -> PredictionContext | dict[str, Any]:
     """Build the KumoRFM graph + model scoped to the relevant tables.
 
@@ -313,8 +315,10 @@ def build_prediction_context(
     (``attribute_join_paths``) from the text-to-SQL state supplies the table
     relationships: its catalog-derived joins are used as the graph's edges, and
     KumoRFM's own heuristic ``infer_links`` is used only as a fallback when no usable
-    join path is available. Returns a :class:`PredictionContext` on success, or a
-    graceful error response dict when there is nothing to build a graph from.
+    join path is available. ``examples`` are verified ``{question, query}`` PQL
+    few-shots carried into generation. Returns a :class:`PredictionContext` on
+    success, or a graceful error response dict when there is nothing to build a graph
+    from.
     """
     _ensure_init()
 
@@ -360,6 +364,7 @@ def build_prediction_context(
         graph_col_stypes=col_stypes,
         time_columns=time_columns,
         table_names=name_map,
+        examples=examples or [],
     )
 
 
@@ -381,6 +386,7 @@ def run_prediction(
         table_names=context.table_names,
         max_entities=_MAX_ENTITIES,
         max_preview_rows=_MAX_PREVIEW_ROWS,
+        examples=context.examples,
     )
 
     return _format_result(result)
