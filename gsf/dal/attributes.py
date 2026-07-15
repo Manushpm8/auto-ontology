@@ -173,6 +173,39 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     return result
 
 
+def fetch_column_attribute_fk_counts(attr_ids: list[str]) -> dict[str, int]:
+    """Return the number of incoming SEMANTIC_FK edges for each ColumnAttribute ID.
+
+    A higher count means more FK columns reference this attribute, making it a
+    more join-central candidate for query construction.
+
+    Returns a mapping ``{attr_id: incoming_fk_count}``.  IDs not found in the
+    graph are omitted (treat as 0 on the caller side).
+    """
+    if not attr_ids:
+        return {}
+    try:
+        rows = get_neo4j_conn().query_read(
+            f"""
+            UNWIND $attr_ids AS attr_id
+            MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: attr_id}})
+            OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->(attr)
+            RETURN attr.id AS attr_id, count(col) AS fk_count
+            """,
+            {"attr_ids": attr_ids},
+        )
+    except Exception:
+        logger.warning(
+            "fetch_column_attribute_fk_counts: Neo4j query failed", exc_info=True
+        )
+        return {}
+    return {
+        row["attr_id"]: int(row["fk_count"])
+        for row in rows
+        if row.get("attr_id") is not None
+    }
+
+
 # ---------------------------------------------------------------------------
 # SemanticFK
 # ---------------------------------------------------------------------------

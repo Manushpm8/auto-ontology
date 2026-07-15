@@ -26,6 +26,7 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
 
+from gsf.dal.attributes import fetch_column_attribute_fk_counts
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -72,7 +73,7 @@ def _search_by_label(
 
 
 def _dedupe_best_score(hits: list[dict]) -> list[dict]:
-    """Deduplicate by id, keeping the hit with the lowest score."""
+    """Deduplicate by id, keeping the hit with the most FK connections (then lowest score)."""
     best: dict[str, dict] = {}
     for hit in hits:
         hid = hit.get("id")
@@ -80,13 +81,21 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
             continue
         key = str(hid)
         prev = best.get(key)
-        if prev is None or float(hit.get("score") or float("inf")) < float(
-            prev.get("score") or float("inf")
-        ):
+        if prev is None:
             best[key] = hit
+        else:
+            cur_fk = int(hit.get("fk_count") or 0)
+            prev_fk = int(prev.get("fk_count") or 0)
+            cur_score = float(hit.get("score") or float("inf"))
+            prev_score = float(prev.get("score") or float("inf"))
+            if (cur_fk, -cur_score) > (prev_fk, -prev_score):
+                best[key] = hit
     return sorted(
         best.values(),
-        key=lambda h: float(h.get("score") or float("inf")),
+        key=lambda h: (
+            -int(h.get("fk_count") or 0),
+            float(h.get("score") or float("inf")),
+        ),
     )
 
 
@@ -396,6 +405,14 @@ class CandidateRetrievalAgent(BaseAgent):
         all_custom_hits, all_sql_attr_hits = _llm_filter_both(
             llm, question, all_custom_hits, all_sql_attr_hits
         )
+
+        # Annotate each ColumnAttribute hit with its incoming SEMANTIC_FK count so
+        # that join-central candidates are ranked higher than VDB-score alone.
+        if all_col_attr_hits:
+            col_attr_ids = [str(h.get("id")) for h in all_col_attr_hits if h.get("id")]
+            fk_counts = fetch_column_attribute_fk_counts(col_attr_ids)
+            for hit in all_col_attr_hits:
+                hit["fk_count"] = fk_counts.get(str(hit.get("id") or ""), 0)
 
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
