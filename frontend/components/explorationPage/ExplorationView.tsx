@@ -35,7 +35,7 @@ import type {
 import type { Column } from '@/types/datasources';
 import type { ColumnAttribute, SqlAttribute } from '@/types/terms';
 import type { TableColumn } from '@/types/table';
-import { DataTablePills, ZonesRow } from '@/common/SinglePageComposer';
+import { LabelList, ZonesRow } from '@/common/SinglePageComposer';
 import { Label } from '@/components/Label';
 import { TruncatedText } from '@/components/TruncatedText';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
@@ -1039,7 +1039,7 @@ const ColumnAttributesModal = ({ node, onClose }: ColumnAttributesModalProps) =>
 			key: 'sample_values',
 			header: 'Sample Values',
 			width: 'w-56',
-			cell: (row) => <DataTablePills values={row.sample_values ?? []} />,
+			cell: (row) => <LabelList values={row.sample_values ?? []} />,
 		},
 	];
 

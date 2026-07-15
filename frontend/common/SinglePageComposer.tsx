@@ -36,7 +36,7 @@ import { Label } from '@/components/Label';
 
 export type ComposerEditValue = string | string[];
 
-export const DataTablePills = ({ values }: { values: string[] }) => {
+export const LabelList = ({ values }: { values: string[] }) => {
 	if (values.length === 0) return <span>—</span>;
 	return (
 		<ul className="flex flex-wrap gap-1">
@@ -422,11 +422,7 @@ function renderComposerSection(
 							cell: (row: Record<string, string | string[]>) => {
 								const value = row[col.key];
 								if (col.kind === 'tags') {
-									return (
-										<DataTablePills
-											values={Array.isArray(value) ? value : []}
-										/>
-									);
+									return <LabelList values={Array.isArray(value) ? value : []} />;
 								}
 								const text = typeof value === 'string' ? value : '';
 								if (!text) return '—';
