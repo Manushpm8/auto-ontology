@@ -33,12 +33,22 @@ export type ExplorationDataNode = {
 
 export type ExplorationNode = ExplorationTermNode | ExplorationDataNode;
 
+/** One FK column pair joining two tables in an `ExplorationLink`. */
+export type ExplorationForeignKey = {
+	sourceColumn: string;
+	targetColumn: string;
+	sourceSampleValues: string[] | null;
+	targetSampleValues: string[] | null;
+};
+
 export type ExplorationLink = {
 	source: string;
 	target: string;
 	queries: string[];
 	/** True when this pair of tables is also (or only) linked by a foreign key. */
 	viaForeignKey?: boolean;
+	/** FK column pairs joining the two tables; empty for SQL-only links. */
+	foreignKeys?: ExplorationForeignKey[];
 };
 
 export type ExplorationGraph = {
@@ -82,12 +92,21 @@ export type SemanticExplorationGraph = {
 	links: Array<{ source: string; target: string }>;
 };
 
+/** Server DTO for one FK column pair joining two tables in a `DataGraphEdgeDto`. */
+export type DataGraphForeignKeyDto = {
+	source_column: string;
+	target_column: string;
+	source_sample_values: string[] | null;
+	target_sample_values: string[] | null;
+};
+
 /** Server DTO for a data-layer Exploration edge (Table ↔ Table). */
 export type DataGraphEdgeDto = {
 	source: string;
 	target: string;
 	queries: string[];
 	via_foreign_key: boolean;
+	foreign_keys: DataGraphForeignKeyDto[];
 };
 
 export type DataExplorationGraph = {

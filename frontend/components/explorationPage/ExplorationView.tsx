@@ -23,6 +23,7 @@ import TermsSvg from '@/components/icons/svg/terms.svg';
 import { TableType } from '@/enums/datasources';
 import type {
 	ExplorationDataNode,
+	ExplorationForeignKey,
 	ExplorationGraph,
 	ExplorationLayer,
 	ExplorationLink,
@@ -131,6 +132,12 @@ const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph => {
 			target: link.target,
 			queries: link.queries,
 			viaForeignKey: link.via_foreign_key,
+			foreignKeys: (link.foreign_keys ?? []).map((fk) => ({
+				sourceColumn: fk.source_column,
+				targetColumn: fk.target_column,
+				sourceSampleValues: fk.source_sample_values,
+				targetSampleValues: fk.target_sample_values,
+			})),
 		}));
 
 	const relationshipCountById = new Map<string, number>();
@@ -1535,13 +1542,65 @@ const QueryCarouselModal = ({ link, sourceName, targetName, onClose }: QueryCaro
 				{queries.length > 0 ? (
 					<SqlBlock sql={query} label="SQL Query" />
 				) : (
-					<p className="text-sm text-zinc-500 dark:text-zinc-400">
-						These tables share a foreign key relationship; no stored SQL query
-						references both of them together.
-					</p>
+					<ForeignKeyColumnsPanel
+						foreignKeys={link?.foreignKeys ?? []}
+						sourceName={sourceName}
+						targetName={targetName}
+					/>
 				)}
 			</div>
 		</Modal>
+	);
+};
+
+const ForeignKeyColumnsPanel = ({
+	foreignKeys,
+	sourceName,
+	targetName,
+}: {
+	foreignKeys: ExplorationForeignKey[];
+	sourceName: string;
+	targetName: string;
+}) => {
+	if (foreignKeys.length === 0) {
+		return (
+			<p className="text-sm text-zinc-500 dark:text-zinc-400">
+				These tables share a foreign key relationship; no stored SQL query references both
+				of them together.
+			</p>
+		);
+	}
+
+	return (
+		<div className="space-y-4">
+			<p className="text-sm text-zinc-500 dark:text-zinc-400">
+				No stored SQL query references both tables together. They are joined by the
+				following foreign key column{foreignKeys.length > 1 ? 's' : ''}:
+			</p>
+			{foreignKeys.map((fk, index) => (
+				<div
+					key={`${fk.sourceColumn}-${fk.targetColumn}-${index}`}
+					className="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 p-3 sm:grid-cols-2 dark:border-zinc-700"
+				>
+					<div className="min-w-0">
+						<p className="truncate text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+							{sourceName}.{fk.sourceColumn}
+						</p>
+						<div className="mt-1.5">
+							<LabelList values={fk.sourceSampleValues ?? []} />
+						</div>
+					</div>
+					<div className="min-w-0">
+						<p className="truncate text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+							{targetName}.{fk.targetColumn}
+						</p>
+						<div className="mt-1.5">
+							<LabelList values={fk.targetSampleValues ?? []} />
+						</div>
+					</div>
+				</div>
+			))}
+		</div>
 	);
 };
 

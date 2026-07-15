@@ -435,6 +435,11 @@ def fetch_data_exploration_edges(
     when no stored SQL query ever referenced both tables together; that
     edge carries an empty ``queries`` list unless a shared SQL query also
     connects the same pair, in which case the two are merged into one edge.
+    Every edge also carries a ``foreign_keys`` list — one entry per FK
+    column pair between the two tables (``source_column``,
+    ``target_column``, and each column's ``sample_values``) — so the
+    client can show which columns join the pair even when there's no
+    stored SQL query to display. Empty for edges that are SQL-only.
     Pass a pre-resolved *data_ids_by_zone* (see
     ``resolve_accessible_catalog_ids``) when the caller already resolved
     *zone_ids* for this request, to skip a repeat Neo4j round trip.
@@ -467,11 +472,14 @@ def fetch_data_exploration_edges(
     )
     fk_rows = conn.query_read(
         f"""
-        MATCH (source:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-
+        MATCH (source:{Labels.TABLE})-[:{Edges.CONTAINS}]->(src_col:{Labels.COLUMN})
+              -[:{Edges.FOREIGN_KEY}]->(tgt_col:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-
               (target:{Labels.TABLE})
         WHERE {table_filter}source.id <> target.id
-        RETURN DISTINCT source.id AS source, target.id AS target
+        RETURN DISTINCT source.id AS source, target.id AS target,
+               src_col.name AS source_column, tgt_col.name AS target_column,
+               src_col.sample_values AS source_sample_values,
+               tgt_col.sample_values AS target_sample_values
         """,
         params,
     )
@@ -486,22 +494,43 @@ def fetch_data_exploration_edges(
             "target": target,
             "queries": [q for q in (row.get("queries") or []) if q],
             "via_foreign_key": False,
+            "foreign_keys": [],
         }
     for row in fk_rows:
         a, b = row.get("source"), row.get("target")
         if not a or not b:
             continue
-        key = (a, b) if a < b else (b, a)
+        # Edge keys are normalized to (min id, max id) above; when a FK row's
+        # (source, target) came in reversed relative to that order, the
+        # column pair it carries must be swapped along with it so
+        # `foreign_keys[].source_column` always names a column on
+        # `edge["source"]`, never on `edge["target"]`.
+        flipped = a > b
+        key = (b, a) if flipped else (a, b)
+        fk_detail = {
+            "source_column": row.get("target_column" if flipped else "source_column"),
+            "target_column": row.get("source_column" if flipped else "target_column"),
+            "source_sample_values": row.get(
+                "target_sample_values" if flipped else "source_sample_values"
+            ),
+            "target_sample_values": row.get(
+                "source_sample_values" if flipped else "target_sample_values"
+            ),
+        }
         edge = edges.get(key)
         if edge is None:
-            edges[key] = {
+            edge = {
                 "source": key[0],
                 "target": key[1],
                 "queries": [],
                 "via_foreign_key": True,
+                "foreign_keys": [],
             }
+            edges[key] = edge
         else:
             edge["via_foreign_key"] = True
+        if fk_detail not in edge["foreign_keys"]:
+            edge["foreign_keys"].append(fk_detail)
 
     return sorted(
         (edge for edge in edges.values() if edge["queries"] or edge["via_foreign_key"]),
