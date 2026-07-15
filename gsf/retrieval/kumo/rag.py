@@ -61,11 +61,12 @@ def fetch_pql_examples(
         analysis = analyses.get(str(row.get("id")))
         if not analysis or not analysis.get("pql"):
             continue
-        description = analysis.get("description") or ""
-        example_question = description or analysis.get("name") or ""
-        example = {"question": example_question, "query": analysis["pql"]}
-        if description:
-            example["reasoning"] = description
+        # name is the natural-language question; description is the reasoning.
+        name = analysis.get("name") or ""
+        reasoning = analysis.get("description") or ""
+        example = {"question": name or reasoning, "query": analysis["pql"]}
+        if reasoning:
+            example["reasoning"] = reasoning
         examples.append(example)
     logger.info("kumo: retrieved %d verified PQL example(s)", len(examples))
     return examples
