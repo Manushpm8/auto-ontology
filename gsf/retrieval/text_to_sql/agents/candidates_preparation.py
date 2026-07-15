@@ -541,7 +541,9 @@ class CandidatePreparationAgent(BaseAgent):
         names_to_remove = {name.lower() for name in result.tables_to_remove}
 
         filtered = [
-            t for t in tables if _qualified_name(t, dialect).lower() not in names_to_remove
+            t
+            for t in tables
+            if _qualified_name(t, dialect).lower() not in names_to_remove
         ]
         removed = [
             _qualified_name(t, dialect)
@@ -600,7 +602,11 @@ class CandidatePreparationAgent(BaseAgent):
                     f"Question: {question}\n\n"
                     f"Available column attributes:\n{attrs_block}\n\n"
                     "Return the id of the single column attribute that best represents "
-                    "the primary subject of the question."
+                    "the primary subject of the question.\n"
+                    "The anchor must be a noun — the main entity being asked about (e.g. 'order', "
+                    "'customer', 'product'). Do NOT select a feature, property, or adjective of "
+                    "the main subject (e.g. 'status', 'amount', 'is_active', 'region') — those "
+                    "describe the subject but are not the subject itself."
                 )
             ),
         ]
