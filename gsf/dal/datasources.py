@@ -565,6 +565,11 @@ def fetch_table_zones_map(
     Zones are resolved via ``Zone -[ZONE_OF]-> item`` where *item* is the
     table itself or one of its ancestors (Schema, Database), matching the
     resolution used by ``get_full_term_by_id`` / ``get_full_sql_attribute_by_id``.
+    ``item`` is found by walking ``CONTAINS`` backwards from ``t`` (0..2 hops,
+    0 meaning ``item`` is ``t`` itself) rather than matching ``t`` and ``item``
+    independently and filtering afterwards — keeping every ``MATCH`` chained
+    through a shared variable avoids a cartesian product between all tables
+    and all zone/item pairs on large catalogs.
     Used to render Zone chips in the Exploration graph without a per-node
     request. When *zone_ids* is supplied, both the visible tables and the
     returned zone names/colors are restricted to that set. Disabled zones
@@ -591,7 +596,7 @@ def fetch_table_zones_map(
     zone_filter = (
         ""
         if zone_ids is None
-        else f"AND z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
+        else f"WHERE z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
     )
     if zone_ids is not None:
         params["zone_ids"] = zone_ids
@@ -600,10 +605,9 @@ def fetch_table_zones_map(
         f"""
         MATCH (t:{Labels.TABLE})
         {table_filter}
+        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
         MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        WHERE (item = t
-           OR (item)-[:{Edges.CONTAINS}*1..2]->(t))
-              {zone_filter}
+        {zone_filter}
         RETURN DISTINCT t.id   AS table_id,
                         z.id    AS id,
                         z.name  AS name,
@@ -637,7 +641,7 @@ def fetch_data_exploration_graph(
 
     Each node is a visible Table with its column / SQL / Term counts,
     owning Database and Schema ids and names, and resolved Zone chips.
-    Links are the SQL-backed table connections from
+    Links are the SQL- and foreign-key-backed table connections from
     ``fetch_data_exploration_edges``. When *zone_ids* is supplied both nodes
     and links are restricted to tables reachable through those zones.
 
@@ -691,14 +695,13 @@ def fetch_data_exploration_graph(
 _FETCH_COLUMNS_QUERY = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})
 OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-OPTIONAL MATCH (c)-[fk:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})
 RETURN c.id AS id,
        c.name AS name,
        c.data_type AS data_type,
        {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
-       fk IS NOT NULL AS is_foreign_key
+       EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key
 ORDER BY c.ordinal_position
 """
 
@@ -977,12 +980,12 @@ def fetch_node_properties_by_id(id: str, label: str | list[str]) -> dict | None:
             )
             return None
     label_filter = "|".join(labels_list)
-    props = get_neo4j_conn().query_read_only(
+    props = get_neo4j_conn().query_read(
         f"""
         MATCH (n:{label_filter} {{id: $id}})
         RETURN apoc.map.setKey(properties(n), "label", labels(n)[0]) AS props
         """,
-        parameters={"id": id},
+        {"id": id},
     )
     return props[0]["props"] if props else None
 
