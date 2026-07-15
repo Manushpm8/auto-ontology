@@ -16,7 +16,8 @@ import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { zonesApi } from '@/api/zones';
 import { useSession } from '@/auth/auth-client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import { type ComposerEditValue, ZoneChip } from '@/common/SinglePageComposer';
+import { type ComposerEditValue } from '@/common/SinglePageComposer';
+import { Label } from '@/components/Label';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
@@ -133,11 +134,11 @@ const TermCard = ({
 				<div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
 					{term.zones.length > 0 ? (
 						term.zones.map((zone) => (
-							<ZoneChip
+							<Label
 								key={zone.id}
-								name={zone.name}
+								label={zone.name}
 								color={zone.color}
-								enabled={zone.enabled}
+								muted={!zone.enabled}
 							/>
 						))
 					) : (

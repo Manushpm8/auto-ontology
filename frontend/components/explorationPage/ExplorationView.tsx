@@ -35,7 +35,8 @@ import type {
 import type { Column } from '@/types/datasources';
 import type { ColumnAttribute, SqlAttribute } from '@/types/terms';
 import type { TableColumn } from '@/types/table';
-import { DataTablePills, ZoneChip, ZonesRow } from '@/common/SinglePageComposer';
+import { DataTablePills, ZonesRow } from '@/common/SinglePageComposer';
+import { Label } from '@/components/Label';
 import { TruncatedText } from '@/components/TruncatedText';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 
@@ -732,11 +733,11 @@ const ActiveTermCard = ({
 							Zones:
 							{node.zones.length > 0 ? (
 								node.zones.map((zone) => (
-									<ZoneChip
+									<Label
 										key={zone.id}
-										name={zone.name}
+										label={zone.name}
 										color={zone.color}
-										enabled={zone.enabled}
+										muted={!zone.enabled}
 									/>
 								))
 							) : (

@@ -25,14 +25,14 @@ import { useSession } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
 
 const ZONE_COLORS: readonly ColorOption[] = [
-	{ value: '#76b900', label: 'Lime', swatchClassName: 'bg-[#76b900]' },
 	{ value: '#0ea5e9', label: 'Sky', swatchClassName: 'bg-sky-500' },
 	{ value: '#8b5cf6', label: 'Violet', swatchClassName: 'bg-violet-500' },
 	{ value: '#ec4899', label: 'Pink', swatchClassName: 'bg-pink-500' },
 	{ value: '#f97316', label: 'Orange', swatchClassName: 'bg-orange-500' },
 	{ value: '#14b8a6', label: 'Teal', swatchClassName: 'bg-teal-500' },
+	{ value: '#eab308', label: 'Amber', swatchClassName: 'bg-yellow-500' },
 ];
-const DEFAULT_ZONE_COLOR = '#76b900';
+const DEFAULT_ZONE_COLOR = '#0ea5e9';
 
 const normalizeDescription = (value: string): string | null => {
 	const trimmed = value.trim();
@@ -830,7 +830,7 @@ export default function ZonesSettingsPage() {
 								colors={ZONE_COLORS}
 								value={color}
 								onChange={setColor}
-								fallbackSwatchClassName="bg-[#76b900]"
+								fallbackSwatchClassName="bg-sky-500"
 							/>
 						</div>
 						<div>

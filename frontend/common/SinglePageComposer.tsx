@@ -32,6 +32,7 @@ import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import type { TermZone } from '@/types/terms';
 import { Toast } from '@/components/Toast';
+import { Label } from '@/components/Label';
 
 export type ComposerEditValue = string | string[];
 
@@ -40,55 +41,20 @@ export const DataTablePills = ({ values }: { values: string[] }) => {
 	return (
 		<ul className="flex flex-wrap gap-1">
 			{values.map((v, i) => (
-				<li
-					key={`${v}-${i}`}
-					className="inline-flex max-w-full items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
-				>
-					<span className="max-w-[16rem] truncate" title={v}>
-						{v}
-					</span>
+				<li key={`${v}-${i}`}>
+					<Label label={v} maxWidthClass="max-w-[16rem]" />
 				</li>
 			))}
 		</ul>
 	);
 };
 
-function zoneChipStyle(color: string): React.CSSProperties {
-	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };
-}
-
-export const ZoneChip = ({
-	name,
-	color,
-	enabled = true,
-}: {
-	name: string;
-	color: string | null;
-	enabled?: boolean;
-}) => (
-	<span
-		className={
-			enabled
-				? 'inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-				: 'inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-500'
-		}
-		style={enabled && color ? zoneChipStyle(color) : undefined}
-	>
-		{name}
-	</span>
-);
-
 export const ZonesRow = ({ zones }: { zones: TermZone[] }) => (
 	<div className="mt-2 flex flex-wrap items-center gap-1.5">
 		<span className="text-xs text-zinc-400">Zones:</span>
 		{zones.length > 0 ? (
 			zones.map((zone) => (
-				<ZoneChip
-					key={zone.id}
-					name={zone.name}
-					color={zone.color}
-					enabled={zone.enabled}
-				/>
+				<Label key={zone.id} label={zone.name} color={zone.color} muted={!zone.enabled} />
 			))
 		) : (
 			<span className="text-xs text-zinc-500 dark:text-zinc-400">-</span>
@@ -342,13 +308,8 @@ const ReadOnlyTagList = ({
 		) : (
 			<ul className="mt-3 flex flex-wrap gap-1.5">
 				{values.map((v, i) => (
-					<li
-						key={`${v}-${i}`}
-						className="inline-flex max-w-full items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
-					>
-						<span className="max-w-[24rem] truncate" title={v}>
-							{v}
-						</span>
+					<li key={`${v}-${i}`}>
+						<Label label={v} maxWidthClass="max-w-[24rem]" />
 					</li>
 				))}
 			</ul>
@@ -375,7 +336,7 @@ const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
 				<ul className="mt-3 flex flex-wrap gap-2">
 					{displayedZones.map((zone) => (
 						<li key={zone.id}>
-							<ZoneChip name={zone.name} color={zone.color} enabled={zone.enabled} />
+							<Label label={zone.name} color={zone.color} muted={!zone.enabled} />
 						</li>
 					))}
 				</ul>
@@ -522,23 +483,13 @@ function renderComposerSection(
 						<ul className="mt-3 flex flex-wrap gap-2">
 							{section.terms.map((term) => (
 								<li key={term.id}>
-									{onTermClick ? (
-										<button
-											type="button"
-											title={term.description ?? undefined}
-											onClick={() => onTermClick(term.id)}
-											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
-										>
-											{term.name}
-										</button>
-									) : (
-										<span
-											title={term.description ?? undefined}
-											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-										>
-											{term.name}
-										</span>
-									)}
+									<Label
+										label={term.name}
+										title={term.description ?? undefined}
+										onClick={
+											onTermClick ? () => onTermClick(term.id) : undefined
+										}
+									/>
 								</li>
 							))}
 						</ul>
@@ -557,23 +508,15 @@ function renderComposerSection(
 						<ul className="mt-3 flex flex-wrap gap-2">
 							{section.entities.map((entity) => (
 								<li key={entity.id}>
-									{onEntityClick ? (
-										<button
-											type="button"
-											title={entity.name}
-											onClick={() => onEntityClick(entity.focusId)}
-											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
-										>
-											{entity.name}
-										</button>
-									) : (
-										<span
-											title={entity.name}
-											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-										>
-											{entity.name}
-										</span>
-									)}
+									<Label
+										label={entity.name}
+										title={entity.name}
+										onClick={
+											onEntityClick
+												? () => onEntityClick(entity.focusId)
+												: undefined
+										}
+									/>
 								</li>
 							))}
 						</ul>
