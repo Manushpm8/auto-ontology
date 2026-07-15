@@ -499,7 +499,9 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
 def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
     """Write sample_values JSON onto Column nodes for a given table.
 
-    Skips silently when *samples* is empty.
+    Preserves any existing ``sample_values`` (e.g. curated ``value_examples``
+    stamped during ingest): ``coalesce`` keeps the current value and only fills
+    columns that don't already have one. Skips silently when *samples* is empty.
     """
     if not samples:
         return
@@ -515,7 +517,7 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
              [e IN $entries WHERE e.column_name = col.name | e.sample_values][0]
              AS sv
         WHERE sv IS NOT NULL
-        SET col.sample_values = sv
+        SET col.sample_values = coalesce(col.sample_values, sv)
         """,
         {"table_id": table_id, "entries": entries},
     )

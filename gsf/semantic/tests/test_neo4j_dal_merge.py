@@ -43,6 +43,14 @@ def test_store_column_sample_values_writes_json(mock_conn: MagicMock) -> None:
 
 
 @patch("gsf.dal.datasources.get_neo4j_conn")
+def test_store_column_sample_values_preserves_existing(mock_conn: MagicMock) -> None:
+    mock_conn.return_value = MagicMock()
+    neo4j_datasources.store_column_sample_values("table-1", {"amount": [10, 20, 30]})
+    query = mock_conn.return_value.query_write.call_args[0][0]
+    assert "SET col.sample_values = coalesce(col.sample_values, sv)" in query
+
+
+@patch("gsf.dal.datasources.get_neo4j_conn")
 def test_store_column_uniqueness_skips_empty(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
     neo4j_datasources.store_column_uniqueness("table-1", {})
