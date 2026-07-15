@@ -108,6 +108,7 @@ class SQLFromTablesAgent(BaseAgent):
             tables=format_tables_for_prompt(relevant_tables, dialect),
             qa_from_conversations=similar_questions,
             custom_analyses="",
+            dialect_rules=format_dialect_rules(dialect),
             evidence_block=format_evidence_block(get_evidence(state)),
         )
 

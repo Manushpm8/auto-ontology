@@ -79,7 +79,7 @@ def format_evidence_block(evidence: str | None) -> str:
     evidence = (evidence or "").strip()
     if not evidence:
         return ""
-    return f"\n## Evidence\n{evidence}\n"
+    return f"\n## Evidence is available and THE EVIDENCE IS VERY IMPORTANT:\n{evidence}\n"
 
 
 # Functions the LLM reaches for (Postgres / Snowflake / BigQuery / PostGIS
@@ -107,16 +107,47 @@ _SQLITE_DIALECT_RULES = (
 )
 
 
+# Snowflake folds unquoted identifiers to UPPERCASE. Datasets loaded from
+# BigQuery/Google-public-data (e.g. Spider2 PATENTS) keep their original
+# lowercase, case-sensitive column names, so an unquoted/upper reference raises
+# "invalid identifier". Nested BigQuery RECORD/REPEATED fields land as VARIANT
+# arrays that need LATERAL FLATTEN to unnest.
+_SNOWFLAKE_DIALECT_RULES = (
+    "**Snowflake-specific (STRICT — these OVERRIDE the generic syntax bans above)**\n"
+    "- The general rule against `::` casts and LATERAL joins does NOT apply here: "
+    "Snowflake REQUIRES `::type` casts and `LATERAL FLATTEN` to read VARIANT data.\n"
+    "- Identifiers are CASE-SENSITIVE when quoted, and Snowflake folds unquoted "
+    "names to UPPERCASE. The schema above lists the real stored names. Wrap every "
+    'table and column identifier in double quotes using the EXACT case shown, e.g. '
+    '`SELECT t.\"publication_number\" FROM \"PATENTS\".\"PUBLICATIONS\" AS t`. '
+    "Never reference a lowercase column unquoted — it will fail as 'invalid identifier'.\n"
+    "- Aliases you define may stay unquoted; only real table/column names need the "
+    "exact-case double quotes.\n"
+    "- VARIANT / ARRAY / OBJECT columns hold nested (semi-structured) data. To read "
+    "fields inside them, use LATERAL FLATTEN: "
+    '`FROM \"T\", LATERAL FLATTEN(input => \"T\".\"assignee_harmonized\") f` then '
+    'access `f.value:\"name\"::string`. Selecting a VARIANT column directly returns '
+    "the whole JSON, not scalar fields.\n"
+    "- Use `:` / `[...]` path syntax for OBJECT fields and `::type` casts on the "
+    "extracted values (e.g. `f.value:\"name\"::string`).\n"
+    "- Date columns loaded from BigQuery are often integer epoch/`YYYYMMDD` NUMBERs, "
+    "not DATE types — check the sample values and cast/parse accordingly.\n\n"
+)
+
+
 def format_dialect_rules(dialect: str | None) -> str:
     """Return dialect-specific SQL rules for the ``dialect_rules`` prompt slot.
 
-    Currently only SQLite needs extra guidance: the stdlib build lacks many
-    functions the model habitually emits (spatial, LEAST/GREATEST, stats
-    aggregates, EXTRACT/DATE_TRUNC), which otherwise trigger repeated
-    reconstruction loops. Returns '' for every other dialect.
+    SQLite lacks many functions the model habitually emits (spatial,
+    LEAST/GREATEST, stats aggregates, EXTRACT/DATE_TRUNC). Snowflake needs
+    identifier-quoting and VARIANT/FLATTEN guidance for case-sensitive
+    lowercase columns (Spider2 PATENTS etc.). Returns '' for other dialects.
     """
-    if (dialect or "").strip().lower() == "sqlite":
+    normalized = (dialect or "").strip().lower()
+    if normalized == "sqlite":
         return _SQLITE_DIALECT_RULES
+    if normalized == "snowflake":
+        return _SNOWFLAKE_DIALECT_RULES
     return ""
 
 
