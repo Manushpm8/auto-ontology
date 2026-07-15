@@ -106,6 +106,8 @@ class SQLFromTablesAgent(BaseAgent):
             observation_block="",
             queries=[],
             tables=format_tables_for_prompt(relevant_tables, dialect),
+            join_paths="",
+            search_values="",
             qa_from_conversations=similar_questions,
             custom_analyses="",
             dialect_rules=format_dialect_rules(dialect),
