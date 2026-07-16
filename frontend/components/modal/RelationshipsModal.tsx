@@ -6,7 +6,8 @@
 
 import NextLink from 'next/link';
 
-import { EXPLORATION_DATA_NODE_ICON, ExplorationLayer } from '@/enums/exploration';
+import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { ExplorationLayer } from '@/enums/exploration';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import type { ExplorationNode } from '@/types/exploration';
 import type { TableColumn } from '@/types/table';
@@ -34,13 +35,13 @@ export const RelationshipsModal = ({ node, rows, onClose, onFocus }: Relationshi
 						name={
 							row.layer === ExplorationLayer.Semantic
 								? IconName.Terms
-								: EXPLORATION_DATA_NODE_ICON[row.nodeType]
+								: catalogNodeInfo[row.nodeType].icon
 						}
 						className="h-4 w-4 text-[#76b900]"
 					/>
 					{row.layer === ExplorationLayer.Semantic
 						? 'Term'
-						: row.nodeType.replace('-', ' ')}
+						: catalogNodeInfo[row.nodeType].title}
 				</div>
 			),
 		},

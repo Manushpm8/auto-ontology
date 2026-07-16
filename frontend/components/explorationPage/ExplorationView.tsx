@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import type { Core } from 'cytoscape';
 
 import { explorationApi } from '@/api/exploration';
+import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { Icon, IconName } from '@/components/icons';
 import { SearchInput } from '@/components/SearchInput';
 import {
@@ -20,11 +21,8 @@ import {
 	SqlAttributesModal,
 	type DataDetailsKind,
 } from '@/components/modal';
-import {
-	EXPLORATION_DATA_NODE_ICON,
-	ExplorationDataNodeKind,
-	ExplorationLayer,
-} from '@/enums/exploration';
+import { DataModels } from '@/enums/datasources';
+import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationGraph } from '@/types/exploration';
 import { GraphCanvas, type HoveredNode } from './graph/GraphCanvas';
 import { ViewToggle } from './graph/ViewToggle';
@@ -293,7 +291,7 @@ export const ExplorationView = () => {
 												name={
 													node.layer === ExplorationLayer.Semantic
 														? IconName.Terms
-														: EXPLORATION_DATA_NODE_ICON[node.nodeType]
+														: catalogNodeInfo[node.nodeType].icon
 												}
 												className={`h-4 w-4 shrink-0 ${
 													node.layer === ExplorationLayer.Semantic
@@ -407,27 +405,18 @@ export const ExplorationView = () => {
 				) : (
 					<div className="mt-2 flex items-center gap-3">
 						{[
-							{
-								type: ExplorationDataNodeKind.Table,
-								label: 'Tables',
-								icon: IconName.Table,
-							},
-							{
-								type: ExplorationDataNodeKind.View,
-								label: 'Views',
-								icon: IconName.View,
-							},
-							{
-								type: ExplorationDataNodeKind.MaterializedView,
-								label: 'Materialized',
-								icon: IconName.MaterializedView,
-							},
+							{ type: DataModels.TABLE, label: 'Tables' },
+							{ type: DataModels.VIEW, label: 'Views' },
+							{ type: DataModels.MATERIALIZED_VIEW, label: 'Materialized' },
 						].map((item) => (
 							<span
 								key={item.type}
 								className="flex items-center gap-1 text-xs font-medium text-zinc-700 dark:text-zinc-200"
 							>
-								<Icon name={item.icon} className="h-4 w-4 text-[#3b82b6]" />
+								<Icon
+									name={catalogNodeInfo[item.type].icon}
+									className="h-4 w-4 text-[#3b82b6]"
+								/>
 								{item.label}{' '}
 								{
 									graph.nodes.filter(

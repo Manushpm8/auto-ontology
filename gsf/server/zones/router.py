@@ -9,8 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from gsf.dal import zones as dal
 from gsf.server.users import postgres_dal
-from gsf.server.zones import dal
 
 router = APIRouter()
 

@@ -7,11 +7,8 @@
 import { useState } from 'react';
 
 import { Icon } from '@/components/icons';
-import {
-	EXPLORATION_DATA_NODE_ICON,
-	ExplorationDataNodeKind,
-	ExplorationLayer,
-} from '@/enums/exploration';
+import { catalogKindForTableType, catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { ExplorationLayer } from '@/enums/exploration';
 import { TableType } from '@/enums/datasources';
 import { DetailLinkButton } from '@/components/DetailLinkButton';
 import type {
@@ -22,12 +19,6 @@ import type {
 } from '@/types/exploration';
 import { ZonesRow } from '@/common/SinglePageComposer';
 
-const getDataNodeKind = (tableType: TableType): ExplorationDataNodeKind => {
-	if (tableType === TableType.VIEW) return ExplorationDataNodeKind.View;
-	if (tableType === TableType.MATERIALIZED_VIEW) return ExplorationDataNodeKind.MaterializedView;
-	return ExplorationDataNodeKind.Table;
-};
-
 /** Build the data-layer graph (Tables/Views + their relationships) from the server DTO. */
 export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph => {
 	const nodes: ExplorationDataNode[] = graph.nodes.map((table) => ({
@@ -35,7 +26,7 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 		name: table.name,
 		description: table.description ?? null,
 		layer: ExplorationLayer.Data,
-		nodeType: getDataNodeKind(table.table_type as TableType),
+		nodeType: catalogKindForTableType(table.table_type as TableType),
 		relationshipCount: 0,
 		databaseId: table.database_id,
 		databaseName: table.database_name,
@@ -138,7 +129,7 @@ export const ActiveDataCard = ({
 				<div className="space-y-3 p-4">
 					<div className="flex items-start gap-3">
 						<Icon
-							name={EXPLORATION_DATA_NODE_ICON[node.nodeType]}
+							name={catalogNodeInfo[node.nodeType].icon}
 							className="mt-0.5 h-5 w-5 shrink-0 text-[#3b82b6]"
 						/>
 						<div className="min-w-0 flex-1">

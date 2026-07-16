@@ -5,7 +5,8 @@
 'use client';
 
 import { Icon, IconName } from '@/components/icons';
-import { EXPLORATION_DATA_NODE_ICON, ExplorationLayer } from '@/enums/exploration';
+import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationNode } from '@/types/exploration';
 import { ZonesRow } from '@/common/SinglePageComposer';
 
@@ -32,7 +33,7 @@ export const HoverNodeCard = ({ node, x, y }: HoverNodeCardProps) => {
 					name={
 						node.layer === ExplorationLayer.Semantic
 							? IconName.Terms
-							: EXPLORATION_DATA_NODE_ICON[node.nodeType]
+							: catalogNodeInfo[node.nodeType].icon
 					}
 					className={`mt-0.5 h-5 w-5 shrink-0 ${
 						isSemantic ? 'text-[#47bac5]' : 'text-[#31b9c5]'
@@ -46,7 +47,7 @@ export const HoverNodeCard = ({ node, x, y }: HoverNodeCardProps) => {
 						<span className="shrink-0 text-xs capitalize text-zinc-400">
 							{node.layer === ExplorationLayer.Semantic
 								? 'Term'
-								: node.nodeType.replace('-', ' ')}
+								: catalogNodeInfo[node.nodeType].title}
 						</span>
 					</div>
 					{node.layer === ExplorationLayer.Data && (

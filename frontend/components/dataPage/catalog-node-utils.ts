@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { IconName } from '@/components/icons';
-import { DataModels, TableType } from '@/enums/datasources';
+import { DataModels, TableCatalogKind, TableType } from '@/enums/datasources';
 
-const tableTypeToCatalogKind: Record<TableType, DataModels> = {
+const tableTypeToCatalogKind: Record<TableType, TableCatalogKind> = {
 	[TableType.BASE_TABLE]: DataModels.TABLE,
 	[TableType.VIEW]: DataModels.VIEW,
 	[TableType.MATERIALIZED_VIEW]: DataModels.MATERIALIZED_VIEW,
@@ -20,6 +20,6 @@ export const catalogNodeInfo: Record<DataModels, { icon: IconName; title: string
 	[DataModels.COLUMN]: { icon: IconName.Column, title: 'column' },
 };
 
-export function catalogKindForTableType(tableType: TableType): DataModels {
+export function catalogKindForTableType(tableType: TableType): TableCatalogKind {
 	return tableTypeToCatalogKind[tableType] ?? DataModels.TABLE;
 }

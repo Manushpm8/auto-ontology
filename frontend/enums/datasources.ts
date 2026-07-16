@@ -11,6 +11,9 @@ export enum DataModels {
 	COLUMN = 'column',
 }
 
+/** Catalog kind for table-like entities (table, view, materialized view). */
+export type TableCatalogKind = DataModels.TABLE | DataModels.VIEW | DataModels.MATERIALIZED_VIEW;
+
 /** Postgres ``table_type`` values stamped on Neo4j ``Table`` nodes. */
 export enum TableType {
 	BASE_TABLE = 'base table',
