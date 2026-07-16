@@ -40,6 +40,15 @@ _COLUMN_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.table_id      AS table_id"""
 
 
+def semantic_layer_calculated() -> bool:
+    """True if at least one semantic Term exists in the graph."""
+    rows = get_neo4j_conn().query_read(
+        f"MATCH (term:{LABEL_TERM} {{source: $source}}) RETURN term.id AS id LIMIT 1",
+        {"source": SEMANTIC_SOURCE},
+    )
+    return bool(rows)
+
+
 def table_has_term(table_id: str) -> bool:
     rows = get_neo4j_conn().query_read(
         f"""

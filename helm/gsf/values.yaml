@@ -42,10 +42,21 @@ modelName: "nvidia/nemotron-3-nano-30b-a3b"
 # Optional dedicated model for entity extraction in the text-to-SQL pipeline.
 # When empty, entity extraction falls back to modelName.
 entityExtractionModel: "meta/llama-3.1-8b-instruct"
+# KumoRFM (predictions). Leave the key empty to disable the prediction tool.
+kumoRfmApiKey: ""
+kumoRfmApiUrl: "https://kumorfm.ai/api"
 embedEndpoint: "https://integrate.api.nvidia.com/v1"
 embedModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
+# HashiCorp Vault (AppRole) credentials for pulling secrets at runtime.
+vaultAddr: ""
+vaultNamespace: ""
+vaultRoleId: ""
+vaultSecretId: ""
+# Optional Vault mount overrides (defaults shown).
+vaultAuthMount: "approle/nvdcs/dc1"
+vaultKvMount: "gsf"
 # Better Auth signing key (sessions, CSRF, OIDC state). Leave empty to
 # auto-generate a stable random secret on first install and preserve it across
 # upgrades. Set explicitly to share one value across environments/replicas.
