@@ -102,7 +102,9 @@ def _format_semantic_context(
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
             col_name = entry.get("col_name", "")
-            full_table = _qualify(entry.get("schema_name", ""), entry.get("table_name", ""))
+            full_table = _qualify(
+                entry.get("schema_name", ""), entry.get("table_name", "")
+            )
             lines.append(f"  {attr_name}: {full_table}.{col_name}")
             path = entry.get("path") or []
             if path:
@@ -400,20 +402,24 @@ class SQLFromCandidatesAgent(BaseAgent):
                     + "\n\n"
                 )
 
-            # Build tables/schema section — semantic hint and available tables are co-equal.
-            parts = []
+            # Build the join-paths section (semantic hint + suggested joins).
+            join_paths = ""
             if primary_attribute:
-                parts.append(
-                    _format_semantic_context(
+                join_paths = (
+                    "## Semantic Hints & Join Paths\n"
+                    + _format_semantic_context(
                         primary_attribute, attribute_join_paths, dialect
                     )
+                    + "\n\n"
                 )
-            if relevant_tables:
-                parts.append(
-                    "AVAILABLE TABLES (schema context):\n"
-                    + format_tables_for_prompt(relevant_tables, dialect)
-                )
-            tables_section = "\n\n".join(parts) if parts else "No tables available."
+
+            # Build the available-tables schema section.
+            tables_section = (
+                "AVAILABLE TABLES (schema context):\n"
+                + format_tables_for_prompt(relevant_tables, dialect)
+                if relevant_tables
+                else "No tables available."
+            )
 
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
