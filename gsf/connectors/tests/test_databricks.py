@@ -30,6 +30,24 @@ def test_parse_connection_string() -> None:
     assert catalog == "main"
 
 
+def test_build_connection_string() -> None:
+    connection_string = build_connection_string(
+        {
+            "type": "databricks",
+            "host": "https://example.databricks.com",
+            "http_path": "/sql/1.0/warehouses/warehouse-id",
+            "password": "token/with@reserved",
+            "database": "main",
+            "schemas": ["analytics"],
+        }
+    )
+
+    assert connection_string == (
+        "databricks://token:token%2Fwith%40reserved@example.databricks.com/main"
+        "?http_path=%2Fsql%2F1.0%2Fwarehouses%2Fwarehouse-id"
+    )
+
+
 def test_schema_selection_filters_introspection() -> None:
     database = DatabricksDatabase(_connection_string(), schemas=["analytics"])
     tables = pd.DataFrame(

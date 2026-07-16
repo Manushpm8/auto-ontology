@@ -1,8 +1,6 @@
 import json
 from unittest.mock import patch
 
-from pytest import MonkeyPatch
-
 from gsf.server.connections import service
 from gsf.server.connections.router import _serialize_connection
 
@@ -19,10 +17,7 @@ def _snowflake_connection() -> dict[str, object]:
     }
 
 
-def test_create_connection_persists_only_environment_reference(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("SNOWFLAKE_PASSWORD", "secret")
+def test_create_connection_persists_connection_without_vault() -> None:
     connection = _snowflake_connection()
 
     with (
@@ -36,8 +31,7 @@ def test_create_connection_persists_only_environment_reference(
         service.create_connection(connection=connection)
 
     stored = json.loads(insert_connection.call_args.kwargs["connection"])
-    assert stored["password_env"] == "SNOWFLAKE_PASSWORD"
-    assert "password" not in stored
+    assert stored["password"] == "secret"
     assert stored["schemas"] == ["GPU_FLEET"]
     trigger_ingest.assert_called_once_with(connection)
 
