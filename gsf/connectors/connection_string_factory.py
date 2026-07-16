@@ -56,6 +56,18 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
             f"?warehouse={_enc(warehouse)}&database={_enc(database)}"
         )
 
+    if conn_type == "databricks":
+        host = _require(connection, "host").rstrip("/")
+        if host.startswith(("https://", "http://")):
+            host = host.split("://", 1)[1]
+        http_path = _require(connection, "http_path")
+        access_token = _require(connection, "password")
+        catalog = _require(connection, "database")
+        return (
+            f"databricks://token:{_enc(access_token)}@{host}/{_enc(catalog)}"
+            f"?http_path={_enc(http_path)}"
+        )
+
     if conn_type == "heavydb":
         host = _require(connection, "host").rstrip("/")
         user = _require(connection, "user")
