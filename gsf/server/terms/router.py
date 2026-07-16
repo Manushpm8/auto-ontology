@@ -48,19 +48,6 @@ def list_terms(
     return {"data": terms, "count": len(terms)}
 
 
-@router.get("/terms/exploration-graph")
-def get_semantic_exploration_graph(
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """Return the full semantic-layer Exploration graph (``{nodes, links}``).
-
-    Lets the client render the semantic graph from one request instead of
-    fetching related terms once per term (an N+1). Zone-scoped when zone_ids
-    are provided.
-    """
-    return {"data": terms_dal.fetch_semantic_exploration_graph(zone_ids=zone_ids)}
-
-
 @router.get("/terms/column-attributes")
 def list_term_column_attributes(
     zone_ids: list[str] | None = Query(default=None),

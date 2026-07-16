@@ -2,12 +2,11 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ExplorationDataNodeKind, ExplorationLayer } from '@/enums/exploration';
 import type { Term, TermZone } from '@/types/terms';
 
-export type ExplorationLayer = 'semantic' | 'data';
-
 export type ExplorationTermNode = Term & {
-	layer: 'semantic';
+	layer: ExplorationLayer.Semantic;
 	nodeType: 'term';
 	relationshipCount: number;
 	columnAttributesCount: number;
@@ -18,8 +17,8 @@ export type ExplorationDataNode = {
 	id: string;
 	name: string;
 	description: string | null;
-	layer: 'data';
-	nodeType: 'table' | 'view' | 'materialized-view';
+	layer: ExplorationLayer.Data;
+	nodeType: ExplorationDataNodeKind;
 	relationshipCount: number;
 	databaseId: string;
 	databaseName: string;

@@ -6,8 +6,14 @@ import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
 import { resolveZoneIds } from '@/auth/resolve-zones';
 
-// datasources.getTableZonesMap — {table_id: [zone, ...]} map, zone-scoped for viewers.
+// explorationApi.getDataExplorationGraph — full data-layer graph ({nodes, links}), zone-scoped for viewers.
 export const GET = withPermission({ catalog: ['read'] })(async (req, { user }) => {
 	const zoneIds = await resolveZoneIds(user.id, user.role);
-	return proxyToBackend(req, { zoneIds: zoneIds ?? undefined });
+	return proxyToBackend(req, {
+		zoneIds: zoneIds ?? undefined,
+		emptyResponse: {
+			data: { nodes: [], links: [] },
+			meta: { noZoneAccess: true },
+		},
+	});
 });

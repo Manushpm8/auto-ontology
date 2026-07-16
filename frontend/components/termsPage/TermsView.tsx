@@ -9,7 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Icon, IconName } from '@/components/icons';
-import { ConfirmModal } from '@/components/ConfirmModal';
+import { ConfirmModal, ModalCreateNewItem } from '@/components/modal';
 import { SearchInput } from '@/components/SearchInput';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
@@ -19,7 +19,6 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
 import { Label } from '@/components/Label';
 import { ComposerSectionKind } from '@/enums/datasources';
-import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
 import { SqlEditor } from '@/components/SqlBlock';
 import type { SqlAttribute, Term } from '@/types/terms';

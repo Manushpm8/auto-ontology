@@ -197,9 +197,9 @@ def fetch_all_terms_and_attributes(
 
     Pass a pre-resolved *data_ids_by_zone* (see
     ``resolve_accessible_catalog_ids``) when the caller already resolved
-    *zone_ids* for this request — e.g. ``fetch_semantic_exploration_graph``
-    — to skip the repeat Neo4j round trip this function would otherwise
-    make on its own.
+    *zone_ids* for this request — e.g.
+    ``gsf.dal.exploration.fetch_semantic_exploration_graph`` — to skip the
+    repeat Neo4j round trip this function would otherwise make on its own.
     """
     conn = get_neo4j_conn()
     data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
@@ -338,7 +338,7 @@ def get_full_term_by_id(
     # Each branch's zone MATCH is chained through `item` (found by walking
     # CONTAINS backwards from `t`, 0..2 hops) rather than matched independently
     # and filtered via WHERE afterwards — see fetch_table_zones_map in
-    # gsf/dal/datasources.py for why the disconnected-pattern version forces a
+    # gsf/dal/exploration.py for why the disconnected-pattern version forces a
     # cartesian product between every zone/item pair and every candidate `t`.
     zone_rows = conn.query_read(
         f"""
@@ -846,7 +846,7 @@ def fetch_related_terms_counts(
 
     Each entry is ``{term_id: str, count: int}``.
     """
-    term_tables, table_terms = _build_term_table_maps(_fetch_term_table_pairs(zone_ids))
+    term_tables, table_terms = build_term_table_maps(fetch_term_table_pairs(zone_ids))
     result: list[dict[str, Any]] = []
     for term_id, tables in term_tables.items():
         related: set[str] = set()
@@ -857,7 +857,7 @@ def fetch_related_terms_counts(
     return result
 
 
-def _fetch_term_table_pairs(
+def fetch_term_table_pairs(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -866,10 +866,11 @@ def _fetch_term_table_pairs(
     A term is linked to a table via REPRESENTS or via its ColumnAttribute
     (PROPERTY_OF, reached through HAS_ATTRIBUTE or SEMANTIC_FK) — the same
     three paths used by ``fetch_related_terms``. Shared by
-    ``fetch_related_terms_counts`` and ``fetch_semantic_exploration_graph``
-    so per-term related counts and the Exploration graph's term↔term edges
-    are always computed from one definition of "related". *zone_ids* applies
-    the same all-or-nothing scoping as ``fetch_related_terms_counts``. Pass a
+    ``fetch_related_terms_counts`` and
+    ``gsf.dal.exploration.fetch_semantic_exploration_graph`` so per-term
+    related counts and the Exploration graph's term↔term edges are always
+    computed from one definition of "related". *zone_ids* applies the same
+    all-or-nothing scoping as ``fetch_related_terms_counts``. Pass a
     pre-resolved *data_ids_by_zone* (see ``resolve_accessible_catalog_ids``)
     when the caller already resolved *zone_ids* for this request, to skip a
     repeat Neo4j round trip.
@@ -906,7 +907,7 @@ def _fetch_term_table_pairs(
     )
 
 
-def _build_term_table_maps(
+def build_term_table_maps(
     pairs: list[dict[str, Any]],
 ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     """Split ``{term_id, table_id}`` rows into term→tables and table→terms maps."""
@@ -919,83 +920,3 @@ def _build_term_table_maps(
             term_tables.setdefault(tid, set()).add(tab)
             table_terms.setdefault(tab, set()).add(tid)
     return term_tables, table_terms
-
-
-def fetch_semantic_exploration_graph(
-    zone_ids: list[str] | None = None,
-) -> dict[str, list[dict[str, Any]]]:
-    """Return the whole semantic-layer Exploration graph in one payload.
-
-    Builds ``{"nodes": [...], "links": [...]}`` server-side so the client
-    renders the semantic graph from a single request instead of fetching
-    related terms once per node (an N+1 over every term).
-
-    Each node is a Term with its resolved Zone chips, related-term count and
-    ColumnAttribute / SqlAttribute counts. Links are the undirected
-    term↔term relationships (two terms sharing at least one table) between
-    visible terms. All counts reuse the same helpers as the ``/terms`` list
-    and the per-term counts endpoints, so numbers match across pages. When
-    *zone_ids* is supplied nodes, counts and links are all zone-scoped.
-
-    *zone_ids* is resolved to accessible catalog ids exactly once (see
-    ``resolve_accessible_catalog_ids``) and threaded through every
-    sub-query below. Previously each of the four calls below re-resolved
-    the same *zone_ids* independently — and ``fetch_all_terms_and_attributes``
-    even did so twice internally — for five redundant Neo4j round trips
-    collapsed into the one made here.
-    """
-    from gsf.dal.sql_attributes import fetch_sql_attribute_counts
-
-    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
-
-    terms, _attrs = fetch_all_terms_and_attributes(
-        zone_ids=zone_ids, data_ids_by_zone=data_ids_by_zone
-    )
-    column_counts = {
-        row["term_id"]: row["count"]
-        for row in fetch_column_attribute_counts(
-            zone_ids=zone_ids, data_ids_by_zone=data_ids_by_zone
-        )
-    }
-    sql_counts = {
-        row["term_id"]: row["count"]
-        for row in fetch_sql_attribute_counts(
-            zone_ids=zone_ids, data_ids_by_zone=data_ids_by_zone
-        )
-    }
-
-    term_tables, table_terms = _build_term_table_maps(
-        _fetch_term_table_pairs(zone_ids, data_ids_by_zone=data_ids_by_zone)
-    )
-    visible_term_ids = {term["id"] for term in terms}
-    relationship_counts: dict[str, int] = {}
-    link_keys: set[tuple[str, str]] = set()
-    for term_id, tables in term_tables.items():
-        related: set[str] = set()
-        for table_id in tables:
-            related.update(table_terms.get(table_id, set()))
-        related.discard(term_id)
-        relationship_counts[term_id] = len(related)
-        if term_id not in visible_term_ids:
-            continue
-        for other_id in related:
-            if other_id in visible_term_ids:
-                link_keys.add(tuple(sorted((term_id, other_id))))
-
-    nodes = [
-        {
-            "id": term["id"],
-            "name": term["name"],
-            "description": term.get("description"),
-            "synonyms": term.get("synonyms") or [],
-            "zones": term.get("zones") or [],
-            "relationship_count": relationship_counts.get(term["id"], 0),
-            "column_attributes_count": column_counts.get(term["id"], 0),
-            "sql_attributes_count": sql_counts.get(term["id"], 0),
-        }
-        for term in terms
-    ]
-    links = [
-        {"source": source, "target": target} for source, target in sorted(link_keys)
-    ]
-    return {"nodes": nodes, "links": links}
