@@ -19,6 +19,40 @@ def _snowflake_connection(password: str = "secret") -> dict[str, object]:
     }
 
 
+def _databricks_connection(password: str = "token") -> dict[str, object]:
+    return {
+        "type": "databricks",
+        "host": "https://example.databricks.com",
+        "http_path": "/sql/1.0/warehouses/warehouse-id",
+        "password": password,
+        "database": "main",
+        "schemas": ["analytics"],
+    }
+
+
+def test_builds_databricks_connection_string() -> None:
+    connection_string = build_connection_string(
+        _databricks_connection("token/with@reserved")
+    )
+
+    assert connection_string == (
+        "databricks://token:token%2Fwith%40reserved@example.databricks.com/main"
+        "?http_path=%2Fsql%2F1.0%2Fwarehouses%2Fwarehouse-id"
+    )
+
+
+def test_databricks_token_can_be_environment_backed(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABRICKS_TOKEN", "token")
+
+    stored = prepare_connection_for_storage(_databricks_connection())
+
+    assert "password" not in stored
+    assert stored["password_env"] == "DATABRICKS_TOKEN"
+    assert stored["schemas"] == ["analytics"]
+
+
 def test_storage_externalizes_matching_injected_password(
     monkeypatch: MonkeyPatch,
 ) -> None:
