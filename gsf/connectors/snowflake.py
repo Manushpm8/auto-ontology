@@ -113,11 +113,20 @@ class SnowflakeDatabase(SQLDatabase):
             self._warehouse,
             self._database_name,
         ) = _parse_connection_string(connection_string)
-        # Optional ingestion allowlist: when set, schema introspection only
-        # returns objects in these schemas. Empty/None means "all schemas".
+        # Optional ingestion allowlist: an explicit structured-connection
+        # selection takes precedence; otherwise a URL ``schema=`` parameter
+        # scopes env-var connections such as CONNECTION_STRINGS. Without this
+        # fallback, ``schema=`` only sets Snowflake's current schema while
+        # introspection still returns every visible schema in the database.
+        url_schema = self._connect_kwargs.get("schema")
+        filter_schemas = schemas or ([str(url_schema)] if url_schema else None)
+
+        # Empty/None means "all schemas".
         # Compared case-insensitively (Snowflake upper-cases unquoted names).
         self._schema_filter: set[str] | None = (
-            {s.upper() for s in schemas if s and s.strip()} if schemas else None
+            {s.upper() for s in filter_schemas if s and s.strip()}
+            if filter_schemas
+            else None
         )
         if self._schema_filter:
             logger.info(
@@ -235,6 +244,7 @@ class SnowflakeDatabase(SQLDatabase):
                     'DROP', 'COMMIT', 'ALTER_SESSION', 'CALL'
                 )
                   AND EXECUTION_STATUS = 'SUCCESS'
+                  AND NULLIF(TRIM(QUERY_TEXT), '') IS NOT NULL
                   AND LOWER(QUERY_TEXT) NOT LIKE '%information_schema%'
                 ORDER BY END_TIME DESC
             """)
