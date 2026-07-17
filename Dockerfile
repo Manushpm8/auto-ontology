@@ -22,9 +22,11 @@
 # ---------------------------------------------------------------------------
 
 ARG PYTHON_VERSION=3.12
-ARG UV_VERSION=0.5.11
+ARG UV_VERSION=0.11.29
 ARG BASE_IMG=nvcr.io/nvidia/base/ubuntu
 ARG BASE_IMG_TAG=jammy-20250619
+
+FROM ghcr.io/astral-sh/uv:$UV_VERSION AS uv
 
 ############################
 # Stage 1: builder
@@ -49,7 +51,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
+COPY --from=uv /uv /usr/local/bin/uv
 
 WORKDIR /app
 
