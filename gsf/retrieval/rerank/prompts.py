@@ -20,17 +20,25 @@ def create_question_extraction_prompt(question: str) -> str:
    (item, brand, colors, qualifiers, numbers). If the input is already concise,
    return it unchanged.
 
-2. entities: Extract the search entities into exactly three buckets:
-   - "search_for": the core item(s) the user wants to find. Keep the words that
-     describe a single item together in one phrase. Always use the SINGULAR form
-     of the item, never plural (e.g. "pen" not "pens", "box" not "boxes").
-   - "terms": descriptive, non-numeric qualifiers such as colors, brands, and
-     materials (e.g. "red", "Panini", "waterproof").
+2. entities: Extract the search entities into exactly four buckets:
+   - "search_for": the SINGLE core item the user wants to find — exactly ONE
+     entry. Keep the words describing that one item together in a single phrase
+     and use the SINGULAR form, never plural (e.g. "pen" not "pens").
+   - "search_for_details": the remaining descriptive qualifiers of the item that
+     are likely to appear in its free-text description (everything about the item
+     that is not the core item and not a structured filter). Keep the nouns here
+     (e.g. "natural ingredient"). Do NOT repeat the core item.
+   - "terms": values that map to a structured, categorical filter such as a
+     specific brand, color, or material the user wants to filter by (e.g. "red",
+     "Panini"). Include a term ONLY if the question is actually asking to
+     filter/constrain results by it. Do NOT put free-text descriptive attributes
+     here — those belong in "search_for_details". If it is just background or
+     narrative context, do NOT include it.
    - "numeric_concepts": measurable/numeric attributes the request cares about,
      named as concepts NOT values (e.g. "price", "quantity", "weight", "rating").
      Do NOT put literal numbers here — only the concept name.
 
-Noun-only rule for "search_for" and "terms":
+Noun-only rule for "search_for", "search_for_details", and "terms":
 - Keep ONLY nouns and the adjectives/proper-nouns that qualify them.
 - DROP all verbs (e.g. "hold", "carry", "buy"), prepositions ("to", "of", "in",
   "on", "for", "with"), articles ("a", "the"), and other connective/filler words.
@@ -49,8 +57,30 @@ about the price and how many are in the pack."
 Output:
 {{
   "search_for": ["box playing cards"],
+  "search_for_details": [],
   "terms": ["red", "Panini"],
   "numeric_concepts": ["price", "quantity"]
+}}
+
+Example 2
+Input: "yesterday I bought a desktop computer, but it is too slow machine."
+Output:
+{{
+  "search_for": ["desktop computer"],
+  "search_for_details": ["slow"],
+  "terms": [],
+  "numeric_concepts": []
+}}
+
+Example 3
+Input: "I bought a grip enhancer from Grip Rx, but am looking for one with
+more natural ingredients."
+Output:
+{{
+  "search_for": ["grip enhancer"],
+  "search_for_details": ["natural ingredient"],
+  "terms": [],
+  "numeric_concepts": []
 }}
 
 Question: {question}
@@ -64,13 +94,15 @@ def create_sql_generation_prompt(
     join_paths_section: str,
     term_filters: str,
     search_for_hints: str,
+    search_for_details_hints: str,
     numeric_hints: str,
 ) -> str:
     """Prompt to build (but not execute) a read-only SQL query for the request.
 
     The query is grounded in the resolved schema context: it filters ``terms``
-    by their exact resolved values, fuzzy-matches ``search_for`` entities on
-    their mapped columns, and returns ``numeric_concepts`` columns. Joins are
+    by their exact resolved values, matches the ``search_for`` core item (all
+    words AND-ed) and the ``search_for_details`` qualifiers (OR-ed) on their
+    mapped columns, and returns ``numeric_concepts`` columns. Joins are
     restricted to the provided semantic join paths.
     """
     dialect_name = dialect or "standard SQL"
@@ -93,10 +125,13 @@ FILTERS AND COLUMNS TO USE:
 1. TERM FILTERS (authoritative — apply every one of these exactly):
 {term_filters}
 
-2. SEARCH-FOR (the item being searched — add a fuzzy match AND SELECT the column):
+2. SEARCH-FOR (the core item — match ALL of its words with AND, and SELECT the column):
 {search_for_hints}
 
-3. NUMERIC CONCEPTS (measurable attributes — include these columns in SELECT, do NOT filter):
+3. SEARCH-FOR DETAILS (extra descriptive words — match with OR between them, and SELECT the column):
+{search_for_details_hints}
+
+4. NUMERIC CONCEPTS (measurable attributes — include these columns in SELECT, do NOT filter):
 {numeric_hints}
 
 RULES:
@@ -104,11 +139,12 @@ RULES:
 - Qualify every column with its table (or schema.table) and quote identifiers as the {dialect_name} dialect requires.
 - TERM FILTERS are authoritative: apply each as a WHERE predicate using the exact value provided (e.g. col = 'value'). Where a term has no exact value, match it with LOWER(col) LIKE LOWER('%term%').
 - Combine the TERM FILTER predicates with OR between them (not AND), and wrap that group in parentheses.
-- For each SEARCH-FOR entity, match it with a case-insensitive CONTAINS, never equality: use ILIKE '%...%' where the dialect supports it, otherwise LOWER(col) LIKE LOWER('%...%'). Also include its column in the SELECT list.
-- If a SEARCH-FOR entity has more than one word, do NOT require the words to be adjacent or in order: match each word with its own ILIKE '%word%' predicate and combine them with AND, so the words may appear anywhere in the column (adjacent is allowed but not required).
+- Match SEARCH-FOR and SEARCH-FOR DETAILS with a case-insensitive CONTAINS, never equality: use ILIKE '%...%' where the dialect supports it, otherwise LOWER(col) LIKE LOWER('%...%').
+- SEARCH-FOR is the core item: split it into words and require ALL of its words, each as its own contains predicate combined with AND (words may appear anywhere in the column, order does not matter). Include its column in the SELECT list.
+- SEARCH-FOR DETAILS are extra descriptive words: split each detail into words and combine ALL of these contains predicates with OR between them, wrapped in parentheses. Include their columns in the SELECT list.
 - Include every NUMERIC CONCEPT column in the SELECT list; do not filter on them.
 - Always SELECT the identifier and the name/title of each item (e.g. its id column and its name or title column) so every returned row can be identified.
 - To connect two tables, use ONLY the join conditions from JOIN PATHS above. Do not invent join keys.
-- Combine the separate predicate groups (term-filter group, search-for predicates) with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
+- Combine the separate predicate groups (term-filter group, search-for group, search-for-details group) with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
 - Do NOT include any comments in the SQL (no -- line comments and no /* */ block comments).
 """

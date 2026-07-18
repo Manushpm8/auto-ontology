@@ -42,7 +42,7 @@ MAX_WORKERS = 5
 # brands, materials) map to concrete stored values; search_for and
 # numeric_concepts are column-only.
 _VALUE_BUCKETS = ("terms",)
-_ALL_BUCKETS = ("search_for", "terms", "numeric_concepts")
+_ALL_BUCKETS = ("search_for", "search_for_details", "terms", "numeric_concepts")
 
 
 def _quote_char(dialect: str | None) -> str:

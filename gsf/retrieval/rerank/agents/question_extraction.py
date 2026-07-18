@@ -28,18 +28,31 @@ class ExtractedEntities(BaseModel):
     search_for: list[str] = Field(
         default_factory=list,
         description=(
-            "The core item(s) the user wants to find. Nouns only: drop verbs, "
-            "prepositions, and articles (e.g. 'box to hold playing cards' -> "
-            "'box playing cards'). Keep words describing one item in one phrase. "
-            "Always use the SINGULAR form of the item, never plural."
+            "The SINGLE core item the user wants to find, as exactly ONE entry. "
+            "Nouns only: drop verbs, prepositions, and articles (e.g. 'box to "
+            "hold playing cards' -> 'box playing cards'). Keep the words for that "
+            "one item in a single phrase and use the SINGULAR form, never plural."
+        ),
+    )
+    search_for_details: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The remaining descriptive qualifiers of the item that are likely to "
+            "appear in its free-text description (everything about the item that "
+            "is not the core item and not a structured filter). Keep the nouns "
+            "here (e.g. 'natural ingredient'). Nouns/adjectives only — no verbs "
+            "or connective words. Do not repeat the core item."
         ),
     )
     terms: list[str] = Field(
         default_factory=list,
         description=(
-            "Descriptive, non-numeric qualifiers such as colors, brands, and "
-            "materials (e.g. 'red', 'Panini'). Nouns/adjectives only — no verbs "
-            "or connective words."
+            "Values that map to a structured, categorical filter such as a "
+            "specific brand, color, or material the user wants to filter by "
+            "(e.g. 'red', 'Panini'). Include a term ONLY if the question is "
+            "actually asking to filter/constrain results by it. Free-text "
+            "descriptive attributes belong in search_for_details, not here. If "
+            "it is just background or narrative context, do NOT include it."
         ),
     )
     numeric_concepts: list[str] = Field(
@@ -105,6 +118,7 @@ class QuestionExtractionAgent(BaseAgent):
             path_state["normalized_question"] = question
             path_state["entities"] = {
                 "search_for": [],
+                "search_for_details": [],
                 "terms": [],
                 "numeric_concepts": [],
             }

@@ -68,16 +68,22 @@ def _build_term_filters(mappings: list[dict]) -> str:
 
 
 def _build_search_for_hints(mappings: list[dict]) -> str:
-    """Fuzzy-match + SELECT hints for ``search_for`` entities."""
+    """Column hints for the ``search_for`` core item (words AND-ed in the SQL)."""
     lines: list[str] = []
     for m in mappings:
         if not (m.get("table") and m.get("column")):
             continue
-        col = _qualified_column(m)
-        lines.append(
-            f"- {m.get('entity')}: LOWER({col}) LIKE LOWER('%{m.get('entity')}%') "
-            f"and SELECT {col}"
-        )
+        lines.append(f"- {m.get('entity')}: column {_qualified_column(m)}")
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _build_search_for_details_hints(mappings: list[dict]) -> str:
+    """Column hints for ``search_for_details`` (words OR-ed in the SQL)."""
+    lines: list[str] = []
+    for m in mappings:
+        if not (m.get("table") and m.get("column")):
+            continue
+        lines.append(f"- {m.get('entity')}: column {_qualified_column(m)}")
     return "\n".join(lines) if lines else "(none)"
 
 
@@ -141,6 +147,9 @@ class SqlGenerationAgent(BaseAgent):
         search_for_hints = _build_search_for_hints(
             entity_mappings.get("search_for") or []
         )
+        search_for_details_hints = _build_search_for_details_hints(
+            entity_mappings.get("search_for_details") or []
+        )
         numeric_hints = _build_numeric_hints(
             entity_mappings.get("numeric_concepts") or []
         )
@@ -152,6 +161,7 @@ class SqlGenerationAgent(BaseAgent):
             join_paths_section=join_paths_section,
             term_filters=term_filters,
             search_for_hints=search_for_hints,
+            search_for_details_hints=search_for_details_hints,
             numeric_hints=numeric_hints,
         )
 
