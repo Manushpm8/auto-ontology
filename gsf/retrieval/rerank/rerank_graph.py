@@ -8,7 +8,10 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, StateGraph
 
 from gsf.retrieval.rerank.agents.column_resolution import ColumnResolutionAgent
+from gsf.retrieval.rerank.agents.format_response import FormatResponseAgent
 from gsf.retrieval.rerank.agents.question_extraction import QuestionExtractionAgent
+from gsf.retrieval.rerank.agents.rerank_sql_results import RerankSqlResultsAgent
+from gsf.retrieval.rerank.agents.route_after_execution import RouteAfterExecutionAgent
 from gsf.retrieval.rerank.agents.sql_execution import SqlExecutionAgent
 from gsf.retrieval.rerank.agents.sql_generation import SqlGenerationAgent
 from gsf.retrieval.rerank.state import RerankState
@@ -17,16 +20,26 @@ from gsf.retrieval.text_to_sql.base import agent_wrapper
 logger = logging.getLogger(__name__)
 
 
+def route_after_execution(state: RerankState) -> str:
+    """Return the post-execution routing decision set on the state."""
+    return state.get("decision", "") or "format"
+
+
 def create_graph():
     """Build the rerank graph.
 
     Flow: ``question_extraction`` -> ``column_resolution`` -> ``sql_generation``
-    -> ``sql_execution`` -> END. More nodes will be added step by step.
+    -> ``sql_execution`` -> ``route_after_execution`` which either loops back to
+    ``sql_generation`` (after relaxing filters), goes to ``rerank_sql_results``,
+    or jumps straight to ``format_response`` -> END.
     """
     question_extraction_agent = QuestionExtractionAgent()
     column_resolution_agent = ColumnResolutionAgent()
     sql_generation_agent = SqlGenerationAgent()
     sql_execution_agent = SqlExecutionAgent()
+    route_after_execution_agent = RouteAfterExecutionAgent()
+    rerank_sql_results_agent = RerankSqlResultsAgent()
+    format_response_agent = FormatResponseAgent()
 
     graph = StateGraph(RerankState)
 
@@ -46,12 +59,37 @@ def create_graph():
         "sql_execution",
         RunnableLambda(agent_wrapper(sql_execution_agent)),
     )
+    graph.add_node(
+        "route_after_execution",
+        RunnableLambda(agent_wrapper(route_after_execution_agent)),
+    )
+    graph.add_node(
+        "rerank_sql_results",
+        RunnableLambda(agent_wrapper(rerank_sql_results_agent)),
+    )
+    graph.add_node(
+        "format_response",
+        RunnableLambda(agent_wrapper(format_response_agent)),
+    )
 
     graph.set_entry_point("question_extraction")
     graph.add_edge("question_extraction", "column_resolution")
     graph.add_edge("column_resolution", "sql_generation")
     graph.add_edge("sql_generation", "sql_execution")
-    graph.add_edge("sql_execution", END)
+    graph.add_edge("sql_execution", "route_after_execution")
+
+    graph.add_conditional_edges(
+        "route_after_execution",
+        route_after_execution,
+        {
+            "retry": "sql_generation",
+            "rerank": "rerank_sql_results",
+            "format": "format_response",
+        },
+    )
+
+    graph.add_edge("rerank_sql_results", "format_response")
+    graph.add_edge("format_response", END)
 
     return graph
 

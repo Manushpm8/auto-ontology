@@ -63,6 +63,7 @@ def _extract_answer(final_state: dict) -> dict:
         "sql": path_state.get("sql", ""),
         "sql_results": path_state.get("sql_results", []),
         "sql_error": path_state.get("sql_error"),
+        "response": path_state.get("response", []),
     }
 
 
