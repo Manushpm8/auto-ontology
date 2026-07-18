@@ -58,6 +58,7 @@ def _extract_answer(final_state: dict) -> dict:
         "entity_mappings": path_state.get("entity_mappings", {}),
         "resolved_tables": path_state.get("resolved_tables", []),
         "resolved_columns": path_state.get("resolved_columns", []),
+        "column_attributes": path_state.get("column_attributes", []),
     }
 
 

@@ -19,6 +19,8 @@ from typing import Any, Dict, Optional
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 from gsf.dal.attributes import fetch_attr_column_contexts
+from gsf.dal.datasources import fetch_tables_by_ids
+from gsf.retrieval.data_access.relevant_tables import dedupe_merge_relevant_tables
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.retrieval.rerank.state import RerankState
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -65,13 +67,10 @@ def _empty_mapping(entity: str) -> Dict[str, Any]:
         "table_id": None,
         "column": None,
         "col_id": None,
-        "value": None,
     }
 
 
-def _mapping_from_ctx(
-    entity: str, ctx: Dict[str, Any], value: Optional[str]
-) -> Dict[str, Any]:
+def _mapping_from_ctx(entity: str, ctx: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "entity": entity,
         "database": ctx.get("database_name") or None,
@@ -80,8 +79,16 @@ def _mapping_from_ctx(
         "table_id": ctx.get("table_id"),
         "column": ctx.get("col_name") or None,
         "col_id": ctx.get("col_id"),
-        "value": value,
     }
+
+
+def _with_value(
+    mapping: Dict[str, Any], bucket: str, value: Optional[str]
+) -> Dict[str, Any]:
+    """Attach a ``value`` only for value-buckets (terms); others are column-only."""
+    if bucket in _VALUE_BUCKETS:
+        mapping["value"] = value
+    return mapping
 
 
 def _find_value(
@@ -127,6 +134,22 @@ def _find_value(
     return str(values[0])
 
 
+def _attr_record(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """A ColumnAttribute hit enriched with its Neo4j column/table context."""
+    return {
+        "attr_id": ctx.get("attr_id"),
+        "attr_name": ctx.get("attr_name") or None,
+        "attr_description": ctx.get("attr_description") or None,
+        "score": ctx.get("score"),
+        "database": ctx.get("database_name") or None,
+        "schema": ctx.get("schema_name") or None,
+        "table": ctx.get("table_name") or None,
+        "table_id": ctx.get("table_id"),
+        "column": ctx.get("col_name") or None,
+        "col_id": ctx.get("col_id"),
+    }
+
+
 def _resolve_entity(
     retriever: object,
     connector: Optional[SQLDatabase],
@@ -134,7 +157,10 @@ def _resolve_entity(
     bucket: str,
     entity: str,
 ) -> Dict[str, Any]:
-    """Resolve one entity to its table/column (+ value for value-buckets)."""
+    """Resolve one entity to its table/column (+ value for value-buckets).
+
+    Returns ``{"mapping": <mapping>, "column_attributes": [<attr records>]}``.
+    """
     hits = search_semantic_index(
         retriever,
         entity,
@@ -142,18 +168,33 @@ def _resolve_entity(
         per_label_k=CANDIDATE_COLS_K,
     )
     if not hits:
-        return _empty_mapping(entity)
+        return {
+            "mapping": _with_value(_empty_mapping(entity), bucket, None),
+            "column_attributes": [],
+        }
 
     ctxs = fetch_attr_column_contexts([h["id"] for h in hits if h.get("id")])
-    # Carry database_name from the VDB hit metadata onto the Neo4j context
-    # (fetch_attr_column_contexts doesn't return the database).
+    # Carry database_name (and the hit's id/score) from the VDB hit metadata onto
+    # the Neo4j context (fetch_attr_column_contexts doesn't return the database).
     candidates = []
     for h in hits:
         ctx = ctxs.get(h.get("id"))
         if ctx and ctx.get("col_name"):
-            candidates.append({**ctx, "database_name": h.get("database_name")})
+            candidates.append(
+                {
+                    **ctx,
+                    "attr_id": h.get("id"),
+                    "score": h.get("score"),
+                    "database_name": h.get("database_name"),
+                }
+            )
+
+    column_attributes = [_attr_record(c) for c in candidates]
     if not candidates:
-        return _empty_mapping(entity)
+        return {
+            "mapping": _with_value(_empty_mapping(entity), bucket, None),
+            "column_attributes": [],
+        }
 
     if bucket in _VALUE_BUCKETS and connector is not None:
         for ctx in candidates:
@@ -169,24 +210,60 @@ def _resolve_entity(
                 )
                 continue
             if value is not None:
-                return _mapping_from_ctx(entity, ctx, value)
+                return {
+                    "mapping": _with_value(
+                        _mapping_from_ctx(entity, ctx), bucket, value
+                    ),
+                    "column_attributes": column_attributes,
+                }
         # No value matched any candidate column -> map to the best column only.
-        return _mapping_from_ctx(entity, candidates[0], None)
+        return {
+            "mapping": _with_value(
+                _mapping_from_ctx(entity, candidates[0]), bucket, None
+            ),
+            "column_attributes": column_attributes,
+        }
 
-    # numeric_concepts (or no connector): column-only mapping.
-    return _mapping_from_ctx(entity, candidates[0], None)
+    # search_for / numeric_concepts: column-only mapping (no value key).
+    return {
+        "mapping": _mapping_from_ctx(entity, candidates[0]),
+        "column_attributes": column_attributes,
+    }
 
 
-def _store_results(path_state: dict, mappings: Dict[str, list]) -> None:
-    """Persist entity mappings plus deduped resolved tables/columns.
+def _dedupe_attrs(attrs: list) -> list:
+    """Deduplicate ColumnAttribute records, keeping the best (lowest) score."""
+    best: dict = {}
+    for a in attrs:
+        key = a.get("attr_id") or (a.get("table"), a.get("column"), a.get("attr_name"))
+        cur = best.get(key)
+        if cur is None or (
+            a.get("score") is not None
+            and (cur.get("score") is None or a["score"] < cur["score"])
+        ):
+            best[key] = a
+    return list(best.values())
 
-    ``resolved_columns`` / ``resolved_tables`` (each carrying database + schema)
-    are consolidated views for downstream nodes.
+
+def _store_results(
+    path_state: dict,
+    mappings: Dict[str, list],
+    column_attributes: list | None = None,
+) -> None:
+    """Persist entity mappings plus resolved columns and full tables.
+
+    ``resolved_columns`` are the specific columns entities mapped to. For each
+    resolved table we fetch the full table from Neo4j (all columns with their
+    descriptions) via :func:`fetch_tables_by_ids`, mirroring how
+    ``candidate_preparation`` gathers relevant tables. ``column_attributes`` are
+    the raw semantic-VDB hits we retrieved.
     """
     path_state["entity_mappings"] = mappings
+    path_state["column_attributes"] = _dedupe_attrs(column_attributes or [])
 
     columns: dict[tuple, dict] = {}
-    tables: dict[tuple, dict] = {}
+    table_ids: list[str] = []
+    db_by_table_id: dict[str, Any] = {}
     for bucket_maps in mappings.values():
         for m in bucket_maps:
             if not (m.get("table") and m.get("column")):
@@ -206,21 +283,20 @@ def _store_results(path_state: dict, mappings: Dict[str, list]) -> None:
                     "column": m.get("column"),
                     "col_id": m.get("col_id"),
                 }
-            tbl_key = (m.get("database"), m.get("schema"), m.get("table"))
-            if tbl_key not in tables:
-                tables[tbl_key] = {
-                    "database": m.get("database"),
-                    "schema": m.get("schema"),
-                    "table": m.get("table"),
-                    "table_id": m.get("table_id"),
-                    "columns": [],
-                }
-            cols = tables[tbl_key]["columns"]
-            if m.get("column") not in cols:
-                cols.append(m.get("column"))
+            tid = m.get("table_id")
+            if tid and tid not in db_by_table_id:
+                db_by_table_id[tid] = m.get("database")
+                table_ids.append(tid)
 
     path_state["resolved_columns"] = list(columns.values())
-    path_state["resolved_tables"] = list(tables.values())
+
+    # Fetch each resolved table with its full column list + descriptions from
+    # Neo4j (no LLM filter). fetch_tables_by_ids omits the database name, so
+    # carry it over from the entity mappings before deduping/merging.
+    resolved_tables = fetch_tables_by_ids(table_ids)
+    for t in resolved_tables:
+        t["database_name"] = db_by_table_id.get(t.get("id"))
+    path_state["resolved_tables"] = dedupe_merge_relevant_tables(resolved_tables)
 
 
 class ColumnResolutionAgent(BaseAgent):
@@ -258,6 +334,7 @@ class ColumnResolutionAgent(BaseAgent):
             _store_results(path_state, mappings)
             return result
 
+        column_attributes: list = []
         with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(tasks))) as executor:
             future_map = {
                 executor.submit(
@@ -268,14 +345,16 @@ class ColumnResolutionAgent(BaseAgent):
             for future in as_completed(future_map):
                 bucket, entity = future_map[future]
                 try:
-                    mapping = future.result()
+                    res = future.result()
+                    mapping = res["mapping"]
+                    column_attributes.extend(res["column_attributes"])
                 except Exception:
                     self.logger.warning(
                         "Resolution failed for entity %r", entity, exc_info=True
                     )
-                    mapping = _empty_mapping(entity)
+                    mapping = _with_value(_empty_mapping(entity), bucket, None)
                 mappings[bucket].append(mapping)
 
-        _store_results(path_state, mappings)
+        _store_results(path_state, mappings, column_attributes)
         self.logger.info("Entity mappings: %s", mappings)
         return result
