@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
 
@@ -26,6 +27,7 @@ class RerankPayload(TypedDict):
 class RerankState(TypedDict):
     """State object passed through the rerank LangGraph."""
 
+    llm: BaseChatModel
     initial_question: str
     messages: list[HumanMessage]
     path_state: dict

@@ -4,25 +4,116 @@
 
 """Question extraction node for the rerank flow.
 
-Placeholder implementation — returns ``"hello world"`` for now. Real extraction
-logic will be added later.
+Uses the (non-reasoning) LLM to produce a normalized question and to extract the
+search entities into three buckets (``search_for``, ``terms``,
+``numeric_concepts``).
 """
 
 from typing import Any, Dict
 
+from langchain_core.messages import SystemMessage
+from pydantic import BaseModel, ConfigDict, Field
+
+from gsf.retrieval.rerank.prompts import create_question_extraction_prompt
+from gsf.retrieval.rerank.state import RerankState, get_original_question
 from gsf.retrieval.text_to_sql.base import BaseAgent
-from gsf.retrieval.rerank.state import RerankState
+from gsf.utils.llm_invoke import invoke_with_structured_output
+
+
+class ExtractedEntities(BaseModel):
+    """Entities extracted from the question, split into three buckets."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    search_for: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The core item(s) the user wants to find, as noun phrases. Keep the "
+            "words describing a single item together in one phrase."
+        ),
+    )
+    terms: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Descriptive, non-numeric qualifiers such as colors, brands, "
+            "materials, and adjectives (e.g. 'red', 'Panini')."
+        ),
+    )
+    numeric_concepts: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Measurable/numeric attribute concepts (e.g. 'price', 'quantity'). "
+            "Concept names only — never literal numbers."
+        ),
+    )
+
+
+class QuestionExtractionModel(BaseModel):
+    """Normalized question plus extracted entities."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    normalized_question: str = Field(
+        ...,
+        description=(
+            "Concise, search-ready rewrite of the request. Preserve factual "
+            "constraints and remove narrative fluff."
+        ),
+    )
+    entities: ExtractedEntities = Field(
+        ...,
+        description="Search entities extracted from the question.",
+    )
 
 
 class QuestionExtractionAgent(BaseAgent):
-    """Extract the question to rerank against (placeholder)."""
+    """Normalize the question and extract search entities via the LLM."""
 
     def __init__(self):
         super().__init__("question_extraction")
 
+    def validate_input(self, state: RerankState) -> bool:
+        """Validate that a question is available."""
+        question = get_original_question(state)
+        if not question:
+            self.logger.warning("No question found, skipping question extraction")
+            return False
+        return True
+
     def execute(self, state: RerankState) -> Dict[str, Any]:
-        """Return a placeholder ``hello world`` response."""
+        """Extract the normalized question and entities from the question."""
+        llm = state["llm"]
         path_state = state.get("path_state", {})
-        path_state["final_response"] = "hello world"
-        self.logger.info("question_extraction: hello world")
-        return {"path_state": path_state}
+        question = get_original_question(state)
+
+        result: Dict[str, Any] = {"path_state": path_state}
+
+        messages = [SystemMessage(content=create_question_extraction_prompt(question))]
+        extraction = invoke_with_structured_output(
+            llm,
+            messages,
+            QuestionExtractionModel,
+        )
+
+        if extraction is None:
+            self.logger.warning(
+                "Question extraction returned None, using fallback values"
+            )
+            path_state["normalized_question"] = question
+            path_state["entities"] = {
+                "search_for": [],
+                "terms": [],
+                "numeric_concepts": [],
+            }
+            return result
+
+        normalized = (extraction.normalized_question or "").strip() or question
+        path_state["normalized_question"] = normalized
+        path_state["entities"] = extraction.entities.model_dump()
+
+        self.logger.info(
+            "Extracted normalized_question=%s entities=%s",
+            normalized,
+            path_state["entities"],
+        )
+        return result

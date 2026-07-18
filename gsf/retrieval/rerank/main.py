@@ -8,16 +8,24 @@ from langchain_core.messages import HumanMessage
 
 from gsf.retrieval.rerank.rerank_graph import create_graph
 from gsf.retrieval.rerank.state import RerankPayload, RerankState
+from gsf.utils.llm_invoke import get_non_reasoning_llm_client
 
 logger = logging.getLogger(__name__)
 
 graph = create_graph()
 app = graph.compile()
 
+try:
+    llm_client = get_non_reasoning_llm_client()
+except (ValueError, EnvironmentError) as e:
+    logger.error("Failed to initialize non-reasoning LLM client: %s", e)
+    llm_client = None
+
 
 def _build_state(payload: RerankPayload) -> RerankState:
     initial_path_state = dict(payload.get("path_state") or {})
     state: dict = {
+        "llm": llm_client,
         "initial_question": payload["question"],
         "messages": [HumanMessage(content=payload["question"])],
         "path_state": initial_path_state,
