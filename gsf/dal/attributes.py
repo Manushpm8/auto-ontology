@@ -155,6 +155,87 @@ def find_unlinked_fk_columns() -> list[dict[str, Any]]:
     )
 
 
+def fetch_semantic_fk_related_tables(table_ids: list[str]) -> list[dict[str, Any]]:
+    """Return tables reachable via a SEMANTIC_FK edge from the given tables.
+
+    Traverses ``Table -[CONTAINS]-> Column -[SEMANTIC_FK]-> ColumnAttribute
+    <-[HAS_ATTRIBUTE]- Column <-[CONTAINS]- Table``: i.e. a foreign-key column
+    of one of the input tables points at a ColumnAttribute owned by a column of
+    another table. The input tables themselves are excluded.
+
+    Returns one dict per related table::
+
+        {
+            "id": <related table id>,
+            "database_name": <db name or None>,
+            "join_paths": [
+                {
+                    "source_table_id", "source_table", "source_column",
+                    "source_col_id", "target_table_id", "target_table",
+                    "target_column", "target_col_id",
+                },
+                ...
+            ],
+        }
+
+    Each join path holds the two columns of the join — ``source_*`` on the input
+    (resolved) table and ``target_*`` on the related table.
+    """
+    if not table_ids:
+        return []
+    try:
+        rows = get_neo4j_conn().query_read(
+            f"""
+            UNWIND $table_ids AS tid
+            MATCH (t:{Labels.TABLE} {{id: tid}})-[:{Edges.CONTAINS}]->
+                  (src:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->
+                  (attr:{LABEL_COLUMN_ATTRIBUTE})<-[:{REL_HAS_ATTRIBUTE}]-
+                  (tgt:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-(rel:{Labels.TABLE})
+            WHERE NOT rel.id IN $table_ids
+            OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+                  (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(rel)
+            RETURN DISTINCT rel.id AS id, db.name AS database_name,
+                   t.id AS source_table_id, t.name AS source_table,
+                   src.id AS source_col_id, src.name AS source_column,
+                   tgt.id AS target_col_id, tgt.name AS target_column,
+                   rel.name AS target_table
+            """,
+            {"table_ids": table_ids},
+        )
+    except Exception:
+        logger.warning(
+            "fetch_semantic_fk_related_tables: Neo4j query failed", exc_info=True
+        )
+        return []
+
+    by_id: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        rid = r.get("id")
+        if not rid:
+            continue
+        entry = by_id.setdefault(
+            rid,
+            {
+                "id": rid,
+                "database_name": r.get("database_name"),
+                "join_paths": [],
+            },
+        )
+        entry["join_paths"].append(
+            {
+                "source_table_id": r.get("source_table_id"),
+                "source_table": r.get("source_table") or "",
+                "source_column": r.get("source_column") or "",
+                "source_col_id": r.get("source_col_id"),
+                "target_table_id": rid,
+                "target_table": r.get("target_table") or "",
+                "target_column": r.get("target_column") or "",
+                "target_col_id": r.get("target_col_id"),
+            }
+        )
+    return list(by_id.values())
+
+
 def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
     """Create a SEMANTIC_FK edge from a source Column to a target ColumnAttribute."""
     get_neo4j_conn().query_write(

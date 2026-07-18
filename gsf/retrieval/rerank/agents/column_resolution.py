@@ -18,7 +18,10 @@ from typing import Any, Dict, Optional
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
-from gsf.dal.attributes import fetch_attr_column_contexts
+from gsf.dal.attributes import (
+    fetch_attr_column_contexts,
+    fetch_semantic_fk_related_tables,
+)
 from gsf.dal.datasources import fetch_tables_by_ids
 from gsf.retrieval.data_access.relevant_tables import dedupe_merge_relevant_tables
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
@@ -297,6 +300,20 @@ def _store_results(
     for t in resolved_tables:
         t["database_name"] = db_by_table_id.get(t.get("id"))
     path_state["resolved_tables"] = dedupe_merge_relevant_tables(resolved_tables)
+
+    # Relative tables: tables linked to a resolved table's column via a
+    # SEMANTIC_FK edge. Fetch their columns the same way as resolved tables and
+    # carry the join column pair(s) that connect them to the resolved tables.
+    related = fetch_semantic_fk_related_tables(table_ids)
+    related_by_id = {r["id"]: r for r in related}
+    relative_tables = fetch_tables_by_ids(list(related_by_id))
+    for t in relative_tables:
+        rel = related_by_id.get(t.get("id"), {})
+        t["database_name"] = rel.get("database_name")
+    relative_tables = dedupe_merge_relevant_tables(relative_tables)
+    for t in relative_tables:
+        t["join_paths"] = related_by_id.get(t.get("id"), {}).get("join_paths", [])
+    path_state["relative_tables"] = relative_tables
 
 
 class ColumnResolutionAgent(BaseAgent):
