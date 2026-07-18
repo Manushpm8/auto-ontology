@@ -159,8 +159,13 @@ def _resolve_entity(
     char: str,
     bucket: str,
     entity: str,
+    exclude_table_ids: Optional[set] = None,
 ) -> Dict[str, Any]:
     """Resolve one entity to its table/column (+ value for value-buckets).
+
+    For value-buckets (terms), candidate columns in ``exclude_table_ids`` (the
+    tables the core ``search_for`` item resolved to) are dropped, so a term's
+    value is never searched in the same table as the item itself.
 
     Returns ``{"mapping": <mapping>, "column_attributes": [<attr records>]}``.
     """
@@ -191,6 +196,12 @@ def _resolve_entity(
                     "database_name": h.get("database_name"),
                 }
             )
+
+    # A term must not be resolved against the same table as the search_for item.
+    if bucket in _VALUE_BUCKETS and exclude_table_ids:
+        candidates = [
+            c for c in candidates if c.get("table_id") not in exclude_table_ids
+        ]
 
     column_attributes = [_attr_record(c) for c in candidates]
     if not candidates:
@@ -342,20 +353,49 @@ class ColumnResolutionAgent(BaseAgent):
         connector = connectors[0] if connectors else None
         char = _quote_char(getattr(connector, "dialect", None))
 
+        column_attributes: list = []
+
+        # Phase 1: resolve the core search_for item(s) first, so we know which
+        # table they live in. Terms are then forbidden from resolving their
+        # values against that same table.
+        search_for_table_ids: set = set()
+        for entity in entities.get("search_for") or []:
+            try:
+                res = _resolve_entity(retriever, connector, char, "search_for", entity)
+                mapping = res["mapping"]
+                column_attributes.extend(res["column_attributes"])
+            except Exception:
+                self.logger.warning(
+                    "Resolution failed for entity %r", entity, exc_info=True
+                )
+                mapping = _empty_mapping(entity)
+            mappings["search_for"].append(mapping)
+            if mapping.get("table_id"):
+                search_for_table_ids.add(mapping["table_id"])
+
+        # Phase 2: resolve the remaining buckets in parallel, excluding the
+        # search_for table(s) when probing term values.
         tasks = [
             (bucket, entity)
             for bucket in _ALL_BUCKETS
+            if bucket != "search_for"
             for entity in (entities.get(bucket) or [])
         ]
         if not tasks:
-            _store_results(path_state, mappings)
+            _store_results(path_state, mappings, column_attributes)
+            self.logger.info("Entity mappings: %s", mappings)
             return result
 
-        column_attributes: list = []
         with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(tasks))) as executor:
             future_map = {
                 executor.submit(
-                    _resolve_entity, retriever, connector, char, bucket, entity
+                    _resolve_entity,
+                    retriever,
+                    connector,
+                    char,
+                    bucket,
+                    entity,
+                    search_for_table_ids,
                 ): (bucket, entity)
                 for bucket, entity in tasks
             }

@@ -144,7 +144,10 @@ RULES:
 - SEARCH-FOR DETAILS are extra descriptive words: split each detail into words and combine ALL of these contains predicates with OR between them, wrapped in parentheses. Include their columns in the SELECT list.
 - Include every NUMERIC CONCEPT column in the SELECT list; do not filter on them.
 - Always SELECT the identifier and the name/title of each item (e.g. its id column and its name or title column) so every returned row can be identified.
+- Always GROUP BY the item's identifier column (include the other non-aggregated selected columns in the GROUP BY as the {dialect_name} dialect requires) so each item appears only once in the results.
 - To connect two tables, use ONLY the join conditions from JOIN PATHS above. Do not invent join keys.
+- If a JOIN PATH joins on the item's own identifier column (the item id), do NOT add that join. Also remove that joined table from the query ENTIRELY: do not reference it in FROM/JOIN and remove EVERY WHERE predicate that uses any of its columns.
+- Never reference a table anywhere in the query (SELECT, WHERE, GROUP BY) unless it is actually joined into the FROM/JOIN clause.
 - Combine the separate predicate groups (term-filter group, search-for group, search-for-details group) with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
 - Do NOT include any comments in the SQL (no -- line comments and no /* */ block comments).
 """
