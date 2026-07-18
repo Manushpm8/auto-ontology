@@ -149,6 +149,7 @@ RULES:
 - If a JOIN PATH joins on the item's own identifier column (the item id), do NOT add that join. Also remove that joined table from the query ENTIRELY: do not reference it in FROM/JOIN and remove EVERY WHERE predicate that uses any of its columns.
 - Never reference a table anywhere in the query (SELECT, WHERE, GROUP BY) unless it is actually joined into the FROM/JOIN clause.
     - Combine the separate predicate groups (term-filter group, search-for group, search-for-details group) with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
+- Always limit the query to at most 100 rows using the {dialect_name} dialect's row-limiting clause (e.g. LIMIT 100, or FETCH FIRST 100 ROWS ONLY / TOP 100 where required).
 - Do NOT include any comments in the SQL (no -- line comments and no /* */ block comments).
 """
 
@@ -187,7 +188,8 @@ RULES:
   SEARCH-FOR DETAILS listed above (including the parenthesized groups built from
   them). Remove the whole predicate/group, not just part of it.
 - Keep EVERYTHING else exactly as it is: the SELECT list, the SEARCH-FOR core
-  item match, any numeric columns, the FROM/JOIN clauses, and the GROUP BY.
+  item match, any numeric columns, the FROM/JOIN clauses, the GROUP BY, and the
+  row-limiting clause (LIMIT / FETCH FIRST / TOP).
 - After removing predicates, fix the boolean structure so the query stays valid:
   drop dangling AND/OR, remove an empty WHERE clause entirely, and keep balanced
   parentheses.

@@ -16,6 +16,10 @@ from gsf.retrieval.rerank.state import RerankState
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 
+# Safety cap on the number of result rows kept, in case the generated SQL is
+# missing its own LIMIT clause.
+_MAX_RESULTS = 100
+
 
 class SqlExecutionAgent(BaseAgent):
     """Execute the generated SQL and store its result rows on the state."""
@@ -64,8 +68,10 @@ class SqlExecutionAgent(BaseAgent):
             else "[]"
         )
         records = json.loads(payload)
+        # Safety cap: even if the generated SQL forgot its LIMIT, never carry more
+        # than the first 100 rows downstream.
+        records = records[:_MAX_RESULTS]
         path_state["sql_results"] = records
         path_state["sql_row_count"] = len(records)
         path_state["sql_error"] = None
-        self.logger.info("SQL execution returned %d row(s)", len(records))
         return result
