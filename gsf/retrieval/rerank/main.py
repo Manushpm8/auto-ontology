@@ -60,6 +60,7 @@ def _extract_answer(final_state: dict) -> dict:
         "relative_tables": path_state.get("relative_tables", []),
         "resolved_columns": path_state.get("resolved_columns", []),
         "column_attributes": path_state.get("column_attributes", []),
+        "sql": path_state.get("sql", ""),
     }
 
 
