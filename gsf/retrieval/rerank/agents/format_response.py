@@ -51,5 +51,5 @@ class FormatResponseAgent(BaseAgent):
                 identifiers.append(identifier)
 
         path_state["response"] = identifiers
-        self.logger.info("Formatted response with %d identifier(s)", len(identifiers))
+        self.logger.info("Response: %s", identifiers)
         return result
