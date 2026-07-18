@@ -38,6 +38,45 @@ _BASE_URL = os.environ.get("BASE_URL", "https://integrate.api.nvidia.com/v1")
 _MODEL_NAME = os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b")
 _API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
+# Non-reasoning model. Kept fully separate (key/base URL/model) so it can point at
+# a different endpoint than the main reasoning model (e.g. inference vs integrate API).
+_NON_REASONING_BASE_URL = os.environ.get("NON_REASONING_BASE_URL", _BASE_URL)
+_NON_REASONING_MODEL_NAME = os.environ.get("NON_REASONING_MODEL_NAME", _MODEL_NAME)
+_NON_REASONING_API_KEY = os.environ.get("NON_REASONING_NVIDIA_API_KEY", "")
+
+
+def _build_client(
+    *,
+    model: str,
+    api_key: str,
+    base_url: str,
+    temperature: float,
+    max_tokens: int,
+) -> BaseChatModel:
+    """Build a chat client for the given model/endpoint."""
+    if model.startswith("openai/"):
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+    from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
+    client = ChatNVIDIA(
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
+    return client
+
 
 def get_llm_client(
     *,
@@ -45,7 +84,7 @@ def get_llm_client(
     temperature: float = 0.0,
     max_tokens: int = 4096,
 ) -> BaseChatModel:
-    """Create an LLM client.
+    """Create an LLM client for the main reasoning model.
 
     Parameters
     ----------
@@ -55,30 +94,42 @@ def get_llm_client(
     if not _API_KEY:
         raise EnvironmentError("NVIDIA_API_KEY is not set")
 
-    resolved_model = model or _MODEL_NAME
-
-    if resolved_model.startswith("openai/"):
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            model=resolved_model,
-            api_key=_API_KEY,
-            base_url=_BASE_URL,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
-    from langchain_nvidia_ai_endpoints import ChatNVIDIA
-
-    client = ChatNVIDIA(
-        model=resolved_model,
+    return _build_client(
+        model=model or _MODEL_NAME,
         api_key=_API_KEY,
         base_url=_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
-    return client
+
+
+def get_non_reasoning_llm_client(
+    *,
+    model: str | None = None,
+    temperature: float = 0.0,
+    max_tokens: int = 4096,
+) -> BaseChatModel:
+    """Create an LLM client for the non-reasoning model.
+
+    Uses ``NON_REASONING_NVIDIA_API_KEY`` / ``NON_REASONING_BASE_URL`` /
+    ``NON_REASONING_MODEL_NAME`` so it can target a different endpoint than the
+    main reasoning model.
+
+    Parameters
+    ----------
+    model : str | None
+        Override the default ``NON_REASONING_MODEL_NAME`` env var for this client.
+    """
+    if not _NON_REASONING_API_KEY:
+        raise EnvironmentError("NON_REASONING_NVIDIA_API_KEY is not set")
+
+    return _build_client(
+        model=model or _NON_REASONING_MODEL_NAME,
+        api_key=_NON_REASONING_API_KEY,
+        base_url=_NON_REASONING_BASE_URL,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
 
 
 def invoke_text(llm: BaseChatModel, prompt: str) -> str:
