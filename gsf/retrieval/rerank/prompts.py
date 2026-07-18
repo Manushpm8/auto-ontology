@@ -144,7 +144,7 @@ RULES:
 - SEARCH-FOR DETAILS are extra descriptive words: split each detail into words and combine ALL of these contains predicates with OR between them, wrapped in parentheses. Include their columns in the SELECT list.
 - Include every NUMERIC CONCEPT column in the SELECT list; do not filter on them.
 - Always SELECT the identifier and the name/title of each item (e.g. its id column and its name or title column) so every returned row can be identified.
-- Always GROUP BY the item's identifier column (include the other non-aggregated selected columns in the GROUP BY as the {dialect_name} dialect requires) so each item appears only once in the results.
+- Always GROUP BY the item's identifier column ONLY (the id column alone). Never add any other column to the GROUP BY, even non-aggregated selected columns. Since the id is the primary key, other selected columns are functionally dependent on it, so grouping by the id alone is enough for each item to appear only once.
 - To connect two tables, use ONLY the join conditions from JOIN PATHS above. Do not invent join keys.
 - If a JOIN PATH joins on the item's own identifier column (the item id), do NOT add that join. Also remove that joined table from the query ENTIRELY: do not reference it in FROM/JOIN and remove EVERY WHERE predicate that uses any of its columns.
 - Never reference a table anywhere in the query (SELECT, WHERE, GROUP BY) unless it is actually joined into the FROM/JOIN clause.
