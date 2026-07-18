@@ -28,15 +28,17 @@ class ExtractedEntities(BaseModel):
     search_for: list[str] = Field(
         default_factory=list,
         description=(
-            "The core item(s) the user wants to find, as noun phrases. Keep the "
-            "words describing a single item together in one phrase."
+            "The core item(s) the user wants to find. Nouns only: drop verbs, "
+            "prepositions, and articles (e.g. 'box to hold playing cards' -> "
+            "'box playing cards'). Keep words describing one item in one phrase."
         ),
     )
     terms: list[str] = Field(
         default_factory=list,
         description=(
-            "Descriptive, non-numeric qualifiers such as colors, brands, "
-            "materials, and adjectives (e.g. 'red', 'Panini')."
+            "Descriptive, non-numeric qualifiers such as colors, brands, and "
+            "materials (e.g. 'red', 'Panini'). Nouns/adjectives only — no verbs "
+            "or connective words."
         ),
     )
     numeric_concepts: list[str] = Field(

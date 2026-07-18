@@ -16,6 +16,9 @@ from typing import NotRequired, TypedDict
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
+from nemo_retriever.graph.retriever import Retriever
+from nemo_retriever.tabular_data.sql_database import SQLDatabase
+
 
 class RerankPayload(TypedDict):
     """Payload for the rerank agent flow."""
@@ -28,6 +31,8 @@ class RerankState(TypedDict):
     """State object passed through the rerank LangGraph."""
 
     llm: BaseChatModel
+    semantic_retriever: NotRequired[Retriever]
+    connectors: list[SQLDatabase]
     initial_question: str
     messages: list[HumanMessage]
     path_state: dict
