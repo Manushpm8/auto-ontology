@@ -53,7 +53,7 @@ class QuestionSanitizationAgent(BaseAgent):
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         """Sanitize the user's question for retrieval-oriented downstream steps."""
-        llm = state["llm"]
+        llm = state["non_reasoning_llm"]
         path_state = state.get("path_state", {})
         original_question = get_original_question(state)
 

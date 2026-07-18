@@ -14,7 +14,7 @@ from gsf.retrieval.text_to_sql.text_to_sql_graph import create_graph
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
 from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
-from gsf.utils.llm_invoke import get_llm_client
+from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,12 @@ try:
 except ValueError as e:
     logger.error("Failed to initialize LLM client: %s", e)
     llm_client = None
+
+try:
+    non_reasoning_llm_client = get_non_reasoning_llm_client(max_tokens=2048)
+except (ValueError, EnvironmentError) as e:
+    logger.error("Failed to initialize non-reasoning LLM client: %s", e)
+    non_reasoning_llm_client = None
 
 entity_llm_client = None
 if _ENTITY_MODEL:
@@ -78,6 +84,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     state: dict = {
         "llm": llm_client,
+        "non_reasoning_llm": non_reasoning_llm_client,
         "initial_question": payload["question"],
         "connectors": connectors,
         "messages": messages,

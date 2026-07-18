@@ -54,7 +54,10 @@ def _build_client(
     max_tokens: int,
 ) -> BaseChatModel:
     """Build a chat client for the given model/endpoint."""
-    if model.startswith("openai/"):
+    # OpenAI-family models (e.g. "openai/gpt-5-nano", "azure/openai/gpt-4.1-mini")
+    # go through ChatOpenAI, which supports structured output. Everything else
+    # uses ChatNVIDIA.
+    if "openai/" in model:
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
