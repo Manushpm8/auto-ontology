@@ -64,8 +64,10 @@ def get_llm_client(
             model=resolved_model,
             api_key=_API_KEY,
             base_url=_BASE_URL,
-            temperature=temperature,
+            # temperature=temperature,
             max_tokens=max_tokens,
+            timeout=LLM_INVOKE_TIMEOUT_S,
+            max_retries=0,
         )
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA

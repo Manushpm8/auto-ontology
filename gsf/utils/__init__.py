@@ -8,10 +8,12 @@ from gsf.utils.embedding import get_embed_params
 from gsf.utils.retriever import (
     get_data_objects_retriever,
     get_semantic_objects_retriever,
+    invalidate_retrievers_cache,
 )
 
 __all__ = [
     "get_embed_params",
     "get_data_objects_retriever",
     "get_semantic_objects_retriever",
+    "invalidate_retrievers_cache",
 ]

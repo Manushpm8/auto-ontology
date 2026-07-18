@@ -36,3 +36,16 @@ def get_semantic_objects_retriever() -> Retriever:
             embed_kwargs=get_embed_kwargs(),
         )
     return _semantic_retriever
+
+
+def invalidate_retrievers_cache() -> None:
+    """Drop cached retriever singletons so the next getter rebuilds them.
+
+    Needed when the backing pgvector tables are dropped/recreated (e.g. running
+    several databases in one process): the cached retrievers hold a
+    ``PostgresVDB`` bound to the old tables, so they must be rebuilt to query the
+    freshly ingested data.
+    """
+    global _data_retriever, _semantic_retriever
+    _data_retriever = None
+    _semantic_retriever = None
