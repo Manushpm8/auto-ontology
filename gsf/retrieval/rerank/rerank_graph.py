@@ -14,6 +14,7 @@ from gsf.retrieval.rerank.agents.rerank_sql_results import RerankSqlResultsAgent
 from gsf.retrieval.rerank.agents.route_after_execution import RouteAfterExecutionAgent
 from gsf.retrieval.rerank.agents.sql_execution import SqlExecutionAgent
 from gsf.retrieval.rerank.agents.sql_generation import SqlGenerationAgent
+from gsf.retrieval.rerank.agents.sql_relaxation import SqlRelaxationAgent
 from gsf.retrieval.rerank.state import RerankState
 from gsf.retrieval.text_to_sql.base import agent_wrapper
 
@@ -29,15 +30,16 @@ def create_graph():
     """Build the rerank graph.
 
     Flow: ``question_extraction`` -> ``column_resolution`` -> ``sql_generation``
-    -> ``sql_execution`` -> ``route_after_execution`` which either loops back to
-    ``sql_generation`` (after relaxing filters), goes to ``rerank_sql_results``,
-    or jumps straight to ``format_response`` -> END.
+    -> ``sql_execution`` -> ``route_after_execution`` which either routes to
+    ``sql_relaxation`` (strip term/detail filters, then re-execute once), goes to
+    ``rerank_sql_results``, or jumps straight to ``format_response`` -> END.
     """
     question_extraction_agent = QuestionExtractionAgent()
     column_resolution_agent = ColumnResolutionAgent()
     sql_generation_agent = SqlGenerationAgent()
     sql_execution_agent = SqlExecutionAgent()
     route_after_execution_agent = RouteAfterExecutionAgent()
+    sql_relaxation_agent = SqlRelaxationAgent()
     rerank_sql_results_agent = RerankSqlResultsAgent()
     format_response_agent = FormatResponseAgent()
 
@@ -64,6 +66,10 @@ def create_graph():
         RunnableLambda(agent_wrapper(route_after_execution_agent)),
     )
     graph.add_node(
+        "sql_relaxation",
+        RunnableLambda(agent_wrapper(sql_relaxation_agent)),
+    )
+    graph.add_node(
         "rerank_sql_results",
         RunnableLambda(agent_wrapper(rerank_sql_results_agent)),
     )
@@ -82,12 +88,13 @@ def create_graph():
         "route_after_execution",
         route_after_execution,
         {
-            "retry": "sql_generation",
+            "retry": "sql_relaxation",
             "rerank": "rerank_sql_results",
             "format": "format_response",
         },
     )
 
+    graph.add_edge("sql_relaxation", "sql_execution")
     graph.add_edge("rerank_sql_results", "format_response")
     graph.add_edge("format_response", END)
 

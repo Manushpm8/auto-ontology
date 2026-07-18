@@ -148,6 +148,49 @@ RULES:
 - To connect two tables, use ONLY the join conditions from JOIN PATHS above. Do not invent join keys.
 - If a JOIN PATH joins on the item's own identifier column (the item id), do NOT add that join. Also remove that joined table from the query ENTIRELY: do not reference it in FROM/JOIN and remove EVERY WHERE predicate that uses any of its columns.
 - Never reference a table anywhere in the query (SELECT, WHERE, GROUP BY) unless it is actually joined into the FROM/JOIN clause.
-- Combine the separate predicate groups (term-filter group, search-for group, search-for-details group) with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
+    - Combine the separate predicate groups (term-filter group, search-for group, search-for-details group) with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
+- Do NOT include any comments in the SQL (no -- line comments and no /* */ block comments).
+"""
+
+
+def create_sql_relaxation_prompt(
+    dialect: str,
+    sql: str,
+    term_filters: str,
+    search_for_details_hints: str,
+) -> str:
+    """Prompt to strip the ``terms`` / ``search_for_details`` filters from a query.
+
+    The previous query returned nothing, so we relax it by removing ONLY the
+    WHERE predicates that came from the term filters and the search-for-details
+    qualifiers, while keeping the core ``search_for`` match, the SELECT list, the
+    joins, and the GROUP BY untouched.
+    """
+    dialect_name = dialect or "standard SQL"
+    return f"""You are an expert data analyst. You are given a {dialect_name} SQL \
+SELECT query that returned no rows. Relax it by REMOVING filters, then return \
+the modified query.
+
+Do NOT execute anything. Return ONLY the SQL query.
+
+CURRENT SQL:
+{sql}
+
+REMOVE the WHERE predicates that filter by these TERM FILTERS:
+{term_filters}
+
+REMOVE the WHERE predicates that filter by these SEARCH-FOR DETAILS:
+{search_for_details_hints}
+
+RULES:
+- Remove ONLY the WHERE predicates that correspond to the TERM FILTERS and
+  SEARCH-FOR DETAILS listed above (including the parenthesized groups built from
+  them). Remove the whole predicate/group, not just part of it.
+- Keep EVERYTHING else exactly as it is: the SELECT list, the SEARCH-FOR core
+  item match, any numeric columns, the FROM/JOIN clauses, and the GROUP BY.
+- After removing predicates, fix the boolean structure so the query stays valid:
+  drop dangling AND/OR, remove an empty WHERE clause entirely, and keep balanced
+  parentheses.
+- Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
 - Do NOT include any comments in the SQL (no -- line comments and no /* */ block comments).
 """

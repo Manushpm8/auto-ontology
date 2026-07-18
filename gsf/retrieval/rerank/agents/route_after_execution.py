@@ -7,13 +7,14 @@
 Decides where the graph goes next based on the execution outcome and the
 remaining filter entities:
 
-- If the query errored or returned no rows AND there are still ``terms`` or
-  ``search_for_details`` to relax → clear those buckets and re-route back to
-  ``sql_generation`` for a broader query (``decision = "retry"``).
-- If there is nothing left to relax and no rows → go straight to the final
-  ``format_response`` node (``decision = "format"``).
 - If there are result rows → send them to ``rerank_sql_results`` for relevance
   ordering (``decision = "rerank"``).
+- If the query errored or returned no rows AND there are still ``terms`` or
+  ``search_for_details`` filters to relax AND relaxation has not been attempted
+  yet → route to ``sql_relaxation`` to strip those filters and re-execute
+  (``decision = "retry"``).
+- Otherwise (nothing left to relax, or relaxation already tried) → go straight
+  to the final ``format_response`` node (``decision = "format"``).
 """
 
 from typing import Any, Dict
@@ -21,8 +22,8 @@ from typing import Any, Dict
 from gsf.retrieval.rerank.state import RerankState
 from gsf.retrieval.text_to_sql.base import BaseAgent
 
-# Buckets that are relaxed (cleared) when a query comes back empty/errored so the
-# next SQL generation pass can widen the search.
+# Buckets whose predicates are stripped by ``sql_relaxation`` when a query comes
+# back empty/errored so a broader query can be re-executed.
 _RELAXABLE_BUCKETS = ("terms", "search_for_details")
 
 
@@ -43,12 +44,13 @@ class RouteAfterExecutionAgent(BaseAgent):
         super().__init__("route_after_execution")
 
     def execute(self, state: RerankState) -> Dict[str, Any]:
-        """Compute the routing decision and relax filters when retrying."""
+        """Compute the routing decision from the execution outcome."""
         path_state = state.get("path_state", {})
         result: Dict[str, Any] = {"path_state": path_state}
 
         sql_error = path_state.get("sql_error")
         sql_results = path_state.get("sql_results") or []
+        already_relaxed = bool(path_state.get("sql_relaxed"))
 
         if sql_results:
             self.logger.info(
@@ -58,35 +60,20 @@ class RouteAfterExecutionAgent(BaseAgent):
             result["decision"] = "rerank"
             return result
 
-        # No rows (empty result or error).
-        if _has_relaxable_filters(path_state):
+        # No rows (empty result or error). Relax filters once, if any remain.
+        if not already_relaxed and _has_relaxable_filters(path_state):
             self.logger.info(
-                "Empty/errored result (error=%s); clearing %s and retrying "
-                "sql_generation",
+                "Empty/errored result (error=%s); routing to sql_relaxation to "
+                "strip %s predicates",
                 bool(sql_error),
                 ", ".join(_RELAXABLE_BUCKETS),
             )
-            self._relax_filters(path_state)
             result["decision"] = "retry"
             return result
 
         self.logger.info(
-            "Empty result with no filters left to relax; routing to format_response"
+            "Empty result (already_relaxed=%s); routing to format_response",
+            already_relaxed,
         )
         result["decision"] = "format"
         return result
-
-    def _relax_filters(self, path_state: Dict[str, Any]) -> None:
-        """Clear ``terms`` / ``search_for_details`` from mappings and entities."""
-        entity_mappings = path_state.get("entity_mappings", {}) or {}
-        entities = path_state.get("entities", {}) or {}
-        for bucket in _RELAXABLE_BUCKETS:
-            if bucket in entity_mappings:
-                entity_mappings[bucket] = []
-            if bucket in entities:
-                entities[bucket] = []
-        path_state["entity_mappings"] = entity_mappings
-        path_state["entities"] = entities
-        # Force a fresh generation/execution pass.
-        path_state["sql"] = ""
-        path_state["sql_error"] = None
