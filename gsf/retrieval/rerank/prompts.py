@@ -106,4 +106,5 @@ RULES:
 - Include every NUMERIC CONCEPT column in the SELECT list; do not filter on them.
 - To connect two tables, use ONLY the join conditions from JOIN PATHS above. Do not invent join keys.
 - Combine multiple predicates with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
+- Do NOT include any comments in the SQL (no -- line comments and no /* */ block comments).
 """
