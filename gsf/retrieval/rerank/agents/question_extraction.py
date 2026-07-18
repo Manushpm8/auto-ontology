@@ -30,7 +30,8 @@ class ExtractedEntities(BaseModel):
         description=(
             "The core item(s) the user wants to find. Nouns only: drop verbs, "
             "prepositions, and articles (e.g. 'box to hold playing cards' -> "
-            "'box playing cards'). Keep words describing one item in one phrase."
+            "'box playing cards'). Keep words describing one item in one phrase. "
+            "Always use the SINGULAR form of the item, never plural."
         ),
     )
     terms: list[str] = Field(

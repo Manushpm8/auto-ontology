@@ -22,7 +22,8 @@ def create_question_extraction_prompt(question: str) -> str:
 
 2. entities: Extract the search entities into exactly three buckets:
    - "search_for": the core item(s) the user wants to find. Keep the words that
-     describe a single item together in one phrase.
+     describe a single item together in one phrase. Always use the SINGULAR form
+     of the item, never plural (e.g. "pen" not "pens", "box" not "boxes").
    - "terms": descriptive, non-numeric qualifiers such as colors, brands, and
      materials (e.g. "red", "Panini", "waterproof").
    - "numeric_concepts": measurable/numeric attributes the request cares about,
@@ -103,7 +104,8 @@ RULES:
 - Qualify every column with its table (or schema.table) and quote identifiers as the {dialect_name} dialect requires.
 - TERM FILTERS are authoritative: apply each as a WHERE predicate using the exact value provided (e.g. col = 'value'). Where a term has no exact value, match it with LOWER(col) LIKE LOWER('%term%').
 - Combine the TERM FILTER predicates with OR between them (not AND), and wrap that group in parentheses.
-- For each SEARCH-FOR entity, add a case-insensitive fuzzy predicate LOWER(col) LIKE LOWER('%entity%') and include its column in the SELECT list.
+- For each SEARCH-FOR entity, match it with a case-insensitive CONTAINS, never equality: use ILIKE '%...%' where the dialect supports it, otherwise LOWER(col) LIKE LOWER('%...%'). Also include its column in the SELECT list.
+- If a SEARCH-FOR entity has more than one word, do NOT require the words to be adjacent or in order: match each word with its own ILIKE '%word%' predicate and combine them with AND, so the words may appear anywhere in the column (adjacent is allowed but not required).
 - Include every NUMERIC CONCEPT column in the SELECT list; do not filter on them.
 - Always SELECT the identifier and the name/title of each item (e.g. its id column and its name or title column) so every returned row can be identified.
 - To connect two tables, use ONLY the join conditions from JOIN PATHS above. Do not invent join keys.
