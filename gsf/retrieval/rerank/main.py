@@ -61,6 +61,8 @@ def _extract_answer(final_state: dict) -> dict:
         "resolved_columns": path_state.get("resolved_columns", []),
         "column_attributes": path_state.get("column_attributes", []),
         "sql": path_state.get("sql", ""),
+        "sql_results": path_state.get("sql_results", []),
+        "sql_error": path_state.get("sql_error"),
     }
 
 

@@ -102,9 +102,11 @@ RULES:
 - Use ONLY the tables and columns listed above. Never invent tables, columns, or values.
 - Qualify every column with its table (or schema.table) and quote identifiers as the {dialect_name} dialect requires.
 - TERM FILTERS are authoritative: apply each as a WHERE predicate using the exact value provided (e.g. col = 'value'). Where a term has no exact value, match it with LOWER(col) LIKE LOWER('%term%').
+- Combine the TERM FILTER predicates with OR between them (not AND), and wrap that group in parentheses.
 - For each SEARCH-FOR entity, add a case-insensitive fuzzy predicate LOWER(col) LIKE LOWER('%entity%') and include its column in the SELECT list.
 - Include every NUMERIC CONCEPT column in the SELECT list; do not filter on them.
+- Always SELECT the identifier and the name/title of each item (e.g. its id column and its name or title column) so every returned row can be identified.
 - To connect two tables, use ONLY the join conditions from JOIN PATHS above. Do not invent join keys.
-- Combine multiple predicates with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
+- Combine the separate predicate groups (term-filter group, search-for predicates) with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
 - Do NOT include any comments in the SQL (no -- line comments and no /* */ block comments).
 """

@@ -18,7 +18,7 @@ from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from gsf.retrieval.rerank.prompts import create_sql_generation_prompt
-from gsf.retrieval.rerank.state import RerankState
+from gsf.retrieval.rerank.state import RerankState, get_original_question
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import format_tables_for_prompt
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
@@ -112,12 +112,9 @@ class SqlGenerationAgent(BaseAgent):
         super().__init__("sql_generation")
 
     def validate_input(self, state: RerankState) -> bool:
-        """Validate that a normalized question is available."""
-        path_state = state.get("path_state", {})
-        if not path_state.get("normalized_question"):
-            self.logger.warning(
-                "No normalized_question in state, skipping SQL generation"
-            )
+        """Validate that a question is available."""
+        if not get_original_question(state):
+            self.logger.warning("No question in state, skipping SQL generation")
             return False
         return True
 
@@ -127,7 +124,7 @@ class SqlGenerationAgent(BaseAgent):
         result: Dict[str, Any] = {"path_state": path_state}
 
         llm = state["llm"]
-        question = path_state.get("normalized_question", "")
+        question = get_original_question(state)
         entity_mappings = path_state.get("entity_mappings", {}) or {}
         resolved_tables = path_state.get("resolved_tables", []) or []
         relative_tables = path_state.get("relative_tables", []) or []
