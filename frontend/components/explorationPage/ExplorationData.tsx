@@ -7,7 +7,8 @@
 import { useState } from 'react';
 
 import { Icon } from '@/components/icons';
-import { catalogKindForTableType, catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { getTableType } from '@/components/dataPage/get-table-type';
 import { ExplorationLayer } from '@/enums/exploration';
 import { TableType } from '@/enums/datasources';
 import { DetailLinkButton } from '@/components/DetailLinkButton';
@@ -26,7 +27,7 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 		name: table.name,
 		description: table.description ?? null,
 		layer: ExplorationLayer.Data,
-		nodeType: catalogKindForTableType(table.table_type as TableType),
+		nodeType: getTableType(table.table_type) as TableType,
 		relationshipCount: 0,
 		databaseId: table.database_id,
 		databaseName: table.database_name,

@@ -21,7 +21,7 @@ import {
 	SqlAttributesModal,
 	type DataDetailsKind,
 } from '@/components/modal';
-import { DataModels } from '@/enums/datasources';
+import { TableType } from '@/enums/datasources';
 import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationGraph } from '@/types/exploration';
 import { GraphCanvas, type HoveredNode } from './graph/GraphCanvas';
@@ -405,9 +405,9 @@ export const ExplorationView = () => {
 				) : (
 					<div className="mt-2 flex items-center gap-3">
 						{[
-							{ type: DataModels.TABLE, label: 'Tables' },
-							{ type: DataModels.VIEW, label: 'Views' },
-							{ type: DataModels.MATERIALIZED_VIEW, label: 'Materialized' },
+							{ type: TableType.BASE_TABLE, label: 'Tables' },
+							{ type: TableType.VIEW, label: 'Views' },
+							{ type: TableType.MATERIALIZED_VIEW, label: 'Materialized' },
 						].map((item) => (
 							<span
 								key={item.type}

@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { TableCatalogKind } from '@/enums/datasources';
+import type { TableType } from '@/enums/datasources';
 import type { ExplorationLayer } from '@/enums/exploration';
 import type { Term, TermZone } from '@/types/terms';
 
@@ -19,7 +19,7 @@ export type ExplorationDataNode = {
 	name: string;
 	description: string | null;
 	layer: ExplorationLayer.Data;
-	nodeType: TableCatalogKind;
+	nodeType: TableType;
 	relationshipCount: number;
 	databaseId: string;
 	databaseName: string;

@@ -5,14 +5,11 @@
 export enum DataModels {
 	DB = 'db',
 	SCHEMA = 'schema',
-	TABLE = 'table',
+	TABLE = 'base table',
 	VIEW = 'view',
 	MATERIALIZED_VIEW = 'materialized view',
 	COLUMN = 'column',
 }
-
-/** Catalog kind for table-like entities (table, view, materialized view). */
-export type TableCatalogKind = DataModels.TABLE | DataModels.VIEW | DataModels.MATERIALIZED_VIEW;
 
 /** Postgres ``table_type`` values stamped on Neo4j ``Table`` nodes. */
 export enum TableType {
