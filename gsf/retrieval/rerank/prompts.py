@@ -128,7 +128,7 @@ FILTERS AND COLUMNS TO USE:
 2. SEARCH-FOR (the core item — match ALL of its words with AND, and SELECT the column):
 {search_for_hints}
 
-3. SEARCH-FOR DETAILS (extra descriptive words — match with OR between them, and SELECT the column):
+3. SEARCH-FOR DETAILS (OPTIONAL descriptive words — do NOT filter by them; use them to RANK: the more that match, the higher the row):
 {search_for_details_hints}
 
 4. NUMERIC CONCEPTS (measurable attributes — include these columns in SELECT, do NOT filter):
@@ -141,7 +141,7 @@ RULES:
 - Combine the TERM FILTER predicates with OR between them (not AND), and wrap that group in parentheses.
 - Match SEARCH-FOR and SEARCH-FOR DETAILS with a case-insensitive CONTAINS, never equality: use ILIKE '%...%' where the dialect supports it, otherwise LOWER(col) LIKE LOWER('%...%').
 - SEARCH-FOR is the core item: split it into words and require ALL of its words, each as its own contains predicate combined with AND (words may appear anywhere in the column, order does not matter). Include its column in the SELECT list.
-- SEARCH-FOR DETAILS are extra descriptive words: split each detail into words and combine ALL of these contains predicates with OR between them, wrapped in parentheses. Include their columns in the SELECT list.
+- SEARCH-FOR DETAILS are OPTIONAL and must NEVER filter or exclude rows: do not put them in the WHERE clause. A row that matches none of the details must still be returned. Instead, use them ONLY to rank: for each detail word build MAX(CASE WHEN LOWER(col) LIKE LOWER('%word%') THEN 1 ELSE 0 END), add all of these together, and ORDER BY that sum DESC so rows matching more details come first (more matches = more relevant). Still include the detail columns in the SELECT list.
 - Include every NUMERIC CONCEPT column in the SELECT list; do not filter on them.
 - Always SELECT the identifier and the name/title of each item (e.g. its id column and its name or title column) so every returned row can be identified.
 - Always GROUP BY the item's identifier column ONLY (the id column alone). Never add any other column to the GROUP BY.
@@ -150,7 +150,7 @@ RULES:
 - NEVER, under any circumstances, join another table to the main item on the item's identifier column. If a JOIN PATH's condition references the item's id on EITHER side (e.g. products.product_id = qa.product_id, where product_id is the item id), that join is forbidden — do NOT add it. This is an absolute rule with no exceptions.
 - When such a join is forbidden, remove that other table from the query ENTIRELY: do not reference it anywhere — not in FROM/JOIN, not in the SELECT list, and not in any WHERE predicate. Never select a column such as qa.question from a table whose only link to the item is the item id.
 - Never reference a table anywhere in the query (SELECT, WHERE, GROUP BY) unless it is actually joined into the FROM/JOIN clause.
-    - Combine the separate predicate groups (term-filter group, search-for group, search-for-details group) with AND. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
+- Build the WHERE clause by combining ONLY the term-filter group and the search-for group with AND. SEARCH-FOR DETAILS never appear in WHERE — they only drive the ORDER BY ranking described above. Produce valid {dialect_name} SQL. No DDL/DML — SELECT only.
 - Always limit the query to at most 100 rows using the {dialect_name} dialect's row-limiting clause (e.g. LIMIT 100, or FETCH FIRST 100 ROWS ONLY / TOP 100 where required).
 - Do NOT include any comments in the SQL (no -- line comments and no /* */ block comments).
 """
@@ -160,14 +160,13 @@ def create_sql_relaxation_prompt(
     dialect: str,
     sql: str,
     term_filters: str,
-    search_for_details_hints: str,
 ) -> str:
-    """Prompt to strip the ``terms`` / ``search_for_details`` filters from a query.
+    """Prompt to strip the ``terms`` filters from a query that returned nothing.
 
-    The previous query returned nothing, so we relax it by removing ONLY the
-    WHERE predicates that came from the term filters and the search-for-details
-    qualifiers, while keeping the core ``search_for`` match, the SELECT list, the
-    joins, and the GROUP BY untouched.
+    The previous query returned no rows, so we relax it by removing ONLY the
+    WHERE predicates that came from the term filters, while keeping the core
+    ``search_for`` match, the SELECT list, the joins, the GROUP BY, and the
+    ORDER BY (search-for-details ranking) untouched.
     """
     dialect_name = dialect or "standard SQL"
     return f"""You are an expert data analyst. You are given a {dialect_name} SQL \
@@ -182,16 +181,14 @@ CURRENT SQL:
 REMOVE the WHERE predicates that filter by these TERM FILTERS:
 {term_filters}
 
-REMOVE the WHERE predicates that filter by these SEARCH-FOR DETAILS:
-{search_for_details_hints}
-
 RULES:
-- Remove ONLY the WHERE predicates that correspond to the TERM FILTERS and
-  SEARCH-FOR DETAILS listed above (including the parenthesized groups built from
-  them). Remove the whole predicate/group, not just part of it.
+- Remove ONLY the WHERE predicates that correspond to the TERM FILTERS listed
+  above (including the parenthesized group built from them). Remove the whole
+  predicate/group, not just part of it.
 - Keep EVERYTHING else exactly as it is: the SELECT list, the SEARCH-FOR core
-  item match, any numeric columns, the FROM/JOIN clauses, the GROUP BY, and the
-  row-limiting clause (LIMIT / FETCH FIRST / TOP).
+  item match, any numeric columns, the FROM/JOIN clauses, the GROUP BY, the
+  ORDER BY (the search-for-details ranking), and the row-limiting clause
+  (LIMIT / FETCH FIRST / TOP).
 - After removing predicates, fix the boolean structure so the query stays valid:
   drop dangling AND/OR, remove an empty WHERE clause entirely, and keep balanced
   parentheses.

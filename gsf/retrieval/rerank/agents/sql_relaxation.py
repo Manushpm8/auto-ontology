@@ -5,10 +5,11 @@
 """SQL relaxation node for the rerank flow.
 
 When a generated query comes back empty, this node uses the (non-reasoning) LLM
-to remove ONLY the ``terms`` and ``search_for_details`` predicates from the
-existing SQL — keeping the core ``search_for`` match, joins, and GROUP BY — and
-hands the broadened query straight to ``sql_execution``. It runs at most once per
-request (guarded by ``path_state['sql_relaxed']``).
+to remove ONLY the ``terms`` predicates from the existing SQL — keeping the core
+``search_for`` match, joins, GROUP BY, and the ORDER BY details ranking — and
+hands the broadened query straight to ``sql_execution``. (``search_for_details``
+are not filters; they only rank, so there is nothing to relax there.) It runs at
+most once per request (guarded by ``path_state['sql_relaxed']``).
 """
 
 from typing import Any, Dict
@@ -17,7 +18,6 @@ from langchain_core.messages import SystemMessage
 
 from gsf.retrieval.rerank.agents.sql_generation import (
     SqlGenerationModel,
-    _build_search_for_details_hints,
     _build_term_filters,
 )
 from gsf.retrieval.rerank.prompts import create_sql_relaxation_prompt
@@ -28,7 +28,7 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 
 
 class SqlRelaxationAgent(BaseAgent):
-    """Strip the ``terms`` / ``search_for_details`` filters from the current SQL."""
+    """Strip the ``terms`` filters from the current SQL."""
 
     def __init__(self):
         super().__init__("sql_relaxation")
@@ -63,15 +63,11 @@ class SqlRelaxationAgent(BaseAgent):
         dialect = getattr(connector, "dialect", None)
 
         term_filters = _build_term_filters(entity_mappings.get("terms") or [])
-        search_for_details_hints = _build_search_for_details_hints(
-            entity_mappings.get("search_for_details") or []
-        )
 
         prompt = create_sql_relaxation_prompt(
             dialect=dialect,
             sql=sql,
             term_filters=term_filters,
-            search_for_details_hints=search_for_details_hints,
         )
 
         response = invoke_with_structured_output(

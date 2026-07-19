@@ -9,9 +9,9 @@ remaining filter entities:
 
 - If there are result rows → send them to ``rerank_sql_results`` for relevance
   ordering (``decision = "rerank"``).
-- If the query errored or returned no rows AND there are still ``terms`` or
-  ``search_for_details`` filters to relax AND relaxation has not been attempted
-  yet → route to ``sql_relaxation`` to strip those filters and re-execute
+- If the query errored or returned no rows AND there are still ``terms`` filters
+  to relax AND relaxation has not been attempted yet → route to
+  ``sql_relaxation`` to strip those filters and re-execute
   (``decision = "retry"``).
 - Otherwise (nothing left to relax, or relaxation already tried) → go straight
   to the final ``format_response`` node (``decision = "format"``).
@@ -23,8 +23,9 @@ from gsf.retrieval.rerank.state import RerankState
 from gsf.retrieval.text_to_sql.base import BaseAgent
 
 # Buckets whose predicates are stripped by ``sql_relaxation`` when a query comes
-# back empty/errored so a broader query can be re-executed.
-_RELAXABLE_BUCKETS = ("terms", "search_for_details")
+# back empty/errored so a broader query can be re-executed. Only ``terms`` filter
+# (search_for_details are ranking-only, so relaxing them would not change rows).
+_RELAXABLE_BUCKETS = ("terms",)
 
 
 def _has_relaxable_filters(path_state: Dict[str, Any]) -> bool:
