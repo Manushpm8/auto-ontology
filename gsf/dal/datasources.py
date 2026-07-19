@@ -409,7 +409,8 @@ _FETCH_COL_TABLE_CONTEXTS = f"""
 UNWIND $col_ids AS col_id
 MATCH (col:{Labels.COLUMN} {{id: col_id}})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
       <-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name
+RETURN col.id AS col_id, tbl.id AS table_id, tbl.name AS table_name,
+       sch.name AS schema_name
 """
 
 
@@ -488,6 +489,7 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
         return {}
     return {
         r["col_id"]: {
+            "table_id": r.get("table_id") or "",
             "table_name": r.get("table_name") or "",
             "schema_name": r.get("schema_name") or "",
         }

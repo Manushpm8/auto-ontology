@@ -142,7 +142,9 @@ class SqlGenerationAgent(BaseAgent):
         dialect = getattr(connector, "dialect", None)
 
         tables_section = format_tables_for_prompt(resolved_tables + relative_tables)
-        join_paths_section = _build_join_paths_section(relative_tables)
+        join_paths_section = _build_join_paths_section(
+            resolved_tables + relative_tables
+        )
         term_filters = _build_term_filters(entity_mappings.get("terms") or [])
         search_for_hints = _build_search_for_hints(
             entity_mappings.get("search_for") or []

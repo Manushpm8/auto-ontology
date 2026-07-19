@@ -49,7 +49,13 @@ Noun-only rule for "search_for", "search_for_details", and "terms":
 Rules:
 - Preserve the exact casing of brand and product names.
 - Only extract what the question actually says; do not invent constraints.
+- A number that is part of a product/model name (a model number, size, or
+  version embedded in the item name) MUST stay attached to that item's phrase.
+  Never split such a number into its own entity, term, or numeric_concept.
 - Any bucket may be an empty list if nothing applies.
+- NEVER store a number as a separate search_for, search_for_details, term, or numeric_concept.
+- NEVER store / include relational/comparative words such as "similar", "same", "like",
+  "more", "less", "better", "cheaper", "closest" — in any of the four buckets. They must be dropped entirely.
 
 Example
 Input: "I'm looking for a red box to hold my Panini playing cards, and I care
@@ -68,17 +74,6 @@ Output:
 {{
   "search_for": ["desktop computer"],
   "search_for_details": ["slow"],
-  "terms": [],
-  "numeric_concepts": []
-}}
-
-Example 3
-Input: "I bought a grip enhancer from Grip Rx, but am looking for one with
-more natural ingredients."
-Output:
-{{
-  "search_for": ["grip enhancer"],
-  "search_for_details": ["natural ingredient"],
   "terms": [],
   "numeric_concepts": []
 }}

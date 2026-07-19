@@ -337,3 +337,105 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
             }
         )
     return hops
+
+
+def _hops_from_path(col_nodes: list[dict]) -> list[dict]:
+    """Pair consecutive columns on a semantic path into join hops.
+
+    Includes the owning table id of each column so callers can pull in any
+    intermediate (junction) tables the path passes through.
+    """
+    col_ids = [n["id"] for n in col_nodes if n.get("id")]
+    col_ctx = fetch_col_table_contexts(col_ids)
+    hops: list[dict] = []
+    for i in range(0, len(col_nodes) - 1, 2):
+        src = col_nodes[i]
+        tgt = col_nodes[i + 1]
+        src_ctx = col_ctx.get(src.get("id") or "", {})
+        tgt_ctx = col_ctx.get(tgt.get("id") or "", {})
+        hops.append(
+            {
+                "source_schema": src_ctx.get("schema_name", ""),
+                "source_table_id": src_ctx.get("table_id", ""),
+                "source_table": src_ctx.get("table_name", ""),
+                "source_column": src.get("name", ""),
+                "target_schema": tgt_ctx.get("schema_name", ""),
+                "target_table_id": tgt_ctx.get("table_id", ""),
+                "target_table": tgt_ctx.get("table_name", ""),
+                "target_column": tgt.get("name", ""),
+            }
+        )
+    return hops
+
+
+def find_join_path_between_tables(
+    anchor_table_id: str, dest_table_id: str
+) -> list[dict]:
+    """Find the shortest semantic join path between two Table nodes.
+
+    Anchored on Tables instead of Columns (cf. :func:`find_join_path`):
+    expansion starts at the anchor table, walks CONTAINS to its columns,
+    follows SEMANTIC_FK up to the shared ColumnAttribute and back down
+    HAS_ATTRIBUTE/CONTAINS into the next table, repeating until it reaches the
+    destination table. This supports multi-hop paths (e.g. the many-to-many
+    ``products -> product_colors -> colors``).
+
+    Unlike :func:`find_join_path`, SEMANTIC_FK is traversed **undirected** here.
+    In this model a junction/relationship table holds the FK columns and points
+    *outward* to the tables it links (e.g. ``product_colors.product_id ->
+    Product ID`` and ``product_colors.color_id -> Color Id``), so an
+    outgoing-only walk from a linked table (``products``) can never step into
+    the junction and every junction join is missed. Because the shortest path
+    to a *specific* destination table is used, this does not fabricate the
+    unrelated sibling joins the directed rule guards against.
+
+    Returns a list of hop dicts:
+        [{source_schema, source_table, source_column,
+          target_schema, target_table, target_column}, ...]
+    Returns [] when anchor == dest or no path exists.
+    """
+    if anchor_table_id == dest_table_id:
+        return []
+
+    path_query = """
+    MATCH (t_anchor:Table {id: $anchor_table_id})
+    MATCH (t_dest:Table {id: $dest_table_id})
+    CALL apoc.path.expandConfig(t_anchor, {
+        relationshipFilter: 'SEMANTIC_FK|HAS_ATTRIBUTE|CONTAINS',
+        labelFilter: '-Schema',
+        terminatorNodes: [t_dest],
+        bfs: true,
+        uniqueness: 'NODE_GLOBAL',
+        minLevel: 1,
+        maxLevel: 30,
+        limit: 1
+    }) YIELD path
+    RETURN [n IN nodes(path) | {
+        id: n.id,
+        name: n.name,
+        label: labels(n)[0]
+    }] AS path_nodes
+    """
+    try:
+        rows = get_neo4j_conn().query_read(
+            path_query,
+            {"anchor_table_id": anchor_table_id, "dest_table_id": dest_table_id},
+        )
+    except Exception:
+        logger.warning(
+            "find_join_path_between_tables: Neo4j query failed for %s -> %s",
+            anchor_table_id,
+            dest_table_id,
+            exc_info=True,
+        )
+        return []
+
+    if not rows:
+        return []
+
+    path_nodes: list[dict] = rows[0].get("path_nodes") or []
+    col_nodes = [n for n in path_nodes if n.get("label") == "Column"]
+    if len(col_nodes) < 2:
+        return []
+
+    return _hops_from_path(col_nodes)

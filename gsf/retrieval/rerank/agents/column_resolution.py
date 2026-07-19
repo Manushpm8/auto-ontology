@@ -16,6 +16,7 @@ sequence of VDB query -> Neo4j read -> single-column SQL.
 """
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Optional
 
@@ -24,6 +25,7 @@ from nemo_retriever.tabular_data.sql_database import SQLDatabase
 from gsf.dal.attributes import (
     fetch_attr_column_contexts,
     fetch_semantic_fk_related_tables,
+    find_join_path_between_tables,
 )
 from gsf.dal.datasources import fetch_tables_by_ids
 from gsf.retrieval.data_access.relevant_tables import dedupe_merge_relevant_tables
@@ -327,10 +329,49 @@ def _dedupe_attrs(attrs: list) -> list:
     return list(best.values())
 
 
+# Question-independent semantic query used to locate the central item table.
+_PRODUCT_HUB_QUERY = os.getenv("RERANK_PRODUCT_HUB_QUERY", "product_id")
+
+
+def _find_product_hub(retriever: object) -> Optional[Dict[str, Any]]:
+    """Locate the central item table by semantically searching for 'product_id'.
+
+    Independent of the user's question: the top ColumnAttribute hit for the
+    literal text ``'product_id'`` is owned by the primary items table (e.g.
+    ``products``). We use that table as the anchor for every join path so paths
+    radiate from the central item table out through the correct junction tables,
+    instead of wandering between dimension tables.
+
+    Returns ``{"table_id", "database_name"}`` or ``None``.
+    """
+    try:
+        hits = search_semantic_index(
+            retriever,
+            _PRODUCT_HUB_QUERY,
+            label_filter=[LABEL_COLUMN_ATTRIBUTE],
+            per_label_k=CANDIDATE_COLS_K,
+        )
+    except Exception:
+        logger.warning("Product hub search failed", exc_info=True)
+        return None
+    if not hits:
+        return None
+    ctxs = fetch_attr_column_contexts([h["id"] for h in hits if h.get("id")])
+    for h in hits:
+        ctx = ctxs.get(h.get("id"))
+        if ctx and ctx.get("table_id"):
+            return {
+                "table_id": ctx["table_id"],
+                "database_name": h.get("database_name"),
+            }
+    return None
+
+
 def _store_results(
     path_state: dict,
     mappings: Dict[str, list],
     column_attributes: list | None = None,
+    product_hub: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Persist entity mappings plus resolved columns and full tables.
 
@@ -338,7 +379,8 @@ def _store_results(
     resolved table we fetch the full table from Neo4j (all columns with their
     descriptions) via :func:`fetch_tables_by_ids`, mirroring how
     ``candidate_preparation`` gathers relevant tables. ``column_attributes`` are
-    the raw semantic-VDB hits we retrieved.
+    the raw semantic-VDB hits we retrieved. ``product_hub`` is the central item
+    table (see :func:`_find_product_hub`) used to anchor the join paths.
     """
     path_state["entity_mappings"] = mappings
     path_state["column_attributes"] = _dedupe_attrs(column_attributes or [])
@@ -372,13 +414,58 @@ def _store_results(
 
     path_state["resolved_columns"] = list(columns.values())
 
+    # The product hub is the central item table we join everything to and select
+    # from; include it among the resolved tables even when no entity resolved to
+    # it directly.
+    anchor_id = product_hub.get("table_id") if product_hub else None
+    if anchor_id and anchor_id not in db_by_table_id:
+        db_by_table_id[anchor_id] = product_hub.get("database_name")
+        table_ids.append(anchor_id)
+
     # Fetch each resolved table with its full column list + descriptions from
     # Neo4j (no LLM filter). fetch_tables_by_ids omits the database name, so
     # carry it over from the entity mappings before deduping/merging.
     resolved_tables = fetch_tables_by_ids(table_ids)
     for t in resolved_tables:
         t["database_name"] = db_by_table_id.get(t.get("id"))
-    path_state["resolved_tables"] = dedupe_merge_relevant_tables(resolved_tables)
+    resolved_tables = dedupe_merge_relevant_tables(resolved_tables)
+
+    # Attach the SEMANTIC_FK join paths that connect the resolved tables so
+    # sql_generation can join them. find_join_path_between_tables walks the graph
+    # and supports multi-hop paths, including many-to-many joins via a junction
+    # table (e.g. products -> product_colors -> colors). All paths are anchored
+    # at the product hub table, so we find the path from it to every other
+    # resolved (entity_mapping) table.
+    seen_hops: set = set()
+    hops: list[dict] = []
+    if anchor_id:
+        for dest in table_ids:
+            if dest == anchor_id:
+                continue
+            for hop in find_join_path_between_tables(anchor_id, dest):
+                key = (
+                    hop.get("source_table"),
+                    hop.get("source_column"),
+                    hop.get("target_table"),
+                    hop.get("target_column"),
+                )
+                if key in seen_hops:
+                    continue
+                seen_hops.add(key)
+                hops.append(hop)
+
+    hops_by_table: dict[str, list] = {}
+    for hop in hops:
+        hops_by_table.setdefault(hop.get("source_table"), []).append(hop)
+    for t in resolved_tables:
+        t["join_paths"] = hops_by_table.pop(t.get("name"), [])
+    # A hop whose source table is an intermediate hub (not itself a resolved
+    # table) still has to be emitted; park the leftovers on the first resolved
+    # table so sql_generation sees every hop.
+    if hops_by_table and resolved_tables:
+        leftovers = [h for hs in hops_by_table.values() for h in hs]
+        resolved_tables[0]["join_paths"].extend(leftovers)
+    path_state["resolved_tables"] = resolved_tables
 
     # Relative tables: tables linked to a resolved table's column via a
     # SEMANTIC_FK edge. Fetch their columns the same way as resolved tables and
@@ -392,6 +479,31 @@ def _store_results(
     relative_tables = dedupe_merge_relevant_tables(relative_tables)
     for t in relative_tables:
         t["join_paths"] = related_by_id.get(t.get("id"), {}).get("join_paths", [])
+
+    # Multi-hop join paths route through junction tables (e.g. product_colors)
+    # that are neither resolved nor relative; include their full definitions so
+    # sql_generation has the columns it needs to write the join.
+    known_ids = {t.get("id") for t in resolved_tables} | {
+        t.get("id") for t in relative_tables
+    }
+    junction_ids = [
+        tid
+        for tid in {
+            t
+            for hop in hops
+            for t in (hop.get("source_table_id"), hop.get("target_table_id"))
+        }
+        if tid and tid not in known_ids
+    ]
+    if junction_ids:
+        anchor_db = db_by_table_id.get(anchor_id)
+        junction_tables = fetch_tables_by_ids(junction_ids)
+        for t in junction_tables:
+            t["database_name"] = anchor_db
+        junction_tables = dedupe_merge_relevant_tables(junction_tables)
+        for t in junction_tables:
+            t["join_paths"] = []
+        relative_tables = relative_tables + junction_tables
     path_state["relative_tables"] = relative_tables
 
 
@@ -420,6 +532,11 @@ class ColumnResolutionAgent(BaseAgent):
         connectors = state.get("connectors") or []
         connector = connectors[0] if connectors else None
         char = _quote_char(getattr(connector, "dialect", None))
+
+        # Central item table used to anchor every join path (found via a
+        # question-independent semantic search for 'product_id').
+        product_hub = _find_product_hub(retriever)
+        self.logger.info("Product hub table: %s", product_hub)
 
         column_attributes: list = []
 
@@ -452,7 +569,7 @@ class ColumnResolutionAgent(BaseAgent):
             for entity in (entities.get(bucket) or [])
         ]
         if not tasks:
-            _store_results(path_state, mappings, column_attributes)
+            _store_results(path_state, mappings, column_attributes, product_hub)
             self.logger.info("Entity mappings: %s", mappings)
             return result
 
@@ -490,6 +607,6 @@ class ColumnResolutionAgent(BaseAgent):
                     continue
                 mappings[bucket].append(mapping)
 
-        _store_results(path_state, mappings, column_attributes)
+        _store_results(path_state, mappings, column_attributes, product_hub)
         self.logger.info("Entity mappings: %s", mappings)
         return result
