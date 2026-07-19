@@ -5,8 +5,11 @@
 """Column resolution node for the rerank flow.
 
 Maps each extracted entity to a table + column (via semantic VDB vector search
-plus Neo4j) and, for ``terms`` only, resolves the exact stored DB value with a
-small, dialect-agnostic per-column SQL query. Uses no LLM.
+plus Neo4j). For ``terms`` it also resolves the exact stored DB value, and for
+the fuzzy text buckets (``search_for`` / ``search_for_details``) it picks the
+candidate column whose data actually contains the entity words — so the item
+resolves to the table that truly holds it rather than the top embedding hit.
+All probes are small, dialect-agnostic per-column SQL queries. Uses no LLM.
 
 Entities are resolved in parallel since each is an independent, I/O-bound
 sequence of VDB query -> Neo4j read -> single-column SQL.
@@ -32,7 +35,7 @@ from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 logger = logging.getLogger(__name__)
 
 # Candidate columns fetched from the semantic VDB per entity.
-CANDIDATE_COLS_K = 3
+CANDIDATE_COLS_K = 5
 # Rows read when probing a column for the entity's stored value.
 VALUE_LIMIT = 20
 # Upper bound on concurrent entity resolutions.
@@ -42,6 +45,11 @@ MAX_WORKERS = 5
 # brands, materials) map to concrete stored values; search_for and
 # numeric_concepts are column-only.
 _VALUE_BUCKETS = ("terms",)
+# Fuzzy free-text buckets: their mapped column is chosen by probing candidate
+# columns for one whose data actually contains the entity words (per-word AND),
+# mirroring how the generated SQL filters them. numeric_concepts are NOT probed
+# (they are concept columns like price/quantity, not text matched against data).
+_TEXT_MATCH_BUCKETS = ("search_for", "search_for_details")
 _ALL_BUCKETS = ("search_for", "search_for_details", "terms", "numeric_concepts")
 
 
@@ -137,6 +145,43 @@ def _find_value(
     return str(values[0])
 
 
+def _column_has_match(
+    connector: SQLDatabase,
+    ctx: Dict[str, Any],
+    entity: str,
+    char: str,
+) -> bool:
+    """True if the column's data contains ALL of the entity's words (any order).
+
+    Runs a dialect-agnostic existence probe
+    ``SELECT 1 ... WHERE LOWER(<col>) LIKE LOWER('%w1%') AND ... LIMIT 1``,
+    one predicate per whitespace-separated word. This mirrors how the generated
+    SQL filters ``search_for`` / ``search_for_details`` (words AND-ed, order
+    irrelevant), so a column counts as a real hit whenever it could satisfy that
+    filter (e.g. "enhancer for better grip" matches "grip" + "enhancer").
+    """
+    column = ctx.get("col_name")
+    table = ctx.get("table_name")
+    if not column or not table:
+        return False
+
+    words = [w for w in entity.split() if w.strip()]
+    if not words:
+        return False
+
+    col = _quote_ident(column, char)
+    qualified = _qualified_table(ctx.get("schema_name") or "", table, char)
+    # Escape single quotes for the string literals; % / _ are left as-is so a
+    # stray wildcard just widens the (already fuzzy) contains match.
+    predicates = " AND ".join(
+        f"LOWER({col}) LIKE LOWER('%{w.replace(chr(39), chr(39) * 2)}%')" for w in words
+    )
+    sql = f"SELECT 1 FROM {qualified} WHERE {predicates} LIMIT 1"
+
+    df = connector.execute(sql)
+    return df is not None and not df.empty
+
+
 def _attr_record(ctx: Dict[str, Any]) -> Dict[str, Any]:
     """A ColumnAttribute hit enriched with its Neo4j column/table context."""
     return {
@@ -165,9 +210,11 @@ def _resolve_entity(
 
     For value-buckets (terms), candidate columns in ``exclude_table_ids`` (the
     tables the core ``search_for`` item resolved to) are dropped, so a term's
-    value is never searched in the same table as the item itself.
+    value is never searched in the same table as the item itself. A term whose
+    value is not found in any candidate column's data is dropped entirely — its
+    ``mapping`` comes back ``None`` so the caller skips it.
 
-    Returns ``{"mapping": <mapping>, "column_attributes": [<attr records>]}``.
+    Returns ``{"mapping": <mapping | None>, "column_attributes": [<attr records>]}``.
     """
     hits = search_semantic_index(
         retriever,
@@ -230,15 +277,36 @@ def _resolve_entity(
                     ),
                     "column_attributes": column_attributes,
                 }
-        # No value matched any candidate column -> map to the best column only.
-        return {
-            "mapping": _with_value(
-                _mapping_from_ctx(entity, candidates[0]), bucket, None
-            ),
-            "column_attributes": column_attributes,
-        }
+        # No value matched any candidate column -> the term does not exist in the
+        # DB, so it is not a valid filter. Drop it entirely (``mapping = None``)
+        # so no predicate is generated for it downstream.
+        return {"mapping": None, "column_attributes": column_attributes}
 
-    # search_for / numeric_concepts: column-only mapping (no value key).
+    # search_for / search_for_details: pick the first candidate column whose data
+    # actually contains the entity words, so the item resolves to the table that
+    # really holds it (e.g. products) instead of the top embedding hit (which can
+    # be a reviews/brands/colors column). Fall back to the best semantic
+    # candidate when no column's data matches (e.g. sampled/partial DBs).
+    if bucket in _TEXT_MATCH_BUCKETS and connector is not None:
+        for ctx in candidates:
+            try:
+                if _column_has_match(connector, ctx, entity, char):
+                    return {
+                        "mapping": _mapping_from_ctx(entity, ctx),
+                        "column_attributes": column_attributes,
+                    }
+            except Exception:
+                logger.warning(
+                    "Match probe failed for entity %r on %s.%s",
+                    entity,
+                    ctx.get("table_name"),
+                    ctx.get("col_name"),
+                    exc_info=True,
+                )
+                continue
+
+    # numeric_concepts (or no connector / no data match): column-only mapping
+    # using the best semantic candidate (no value key).
     return {
         "mapping": _mapping_from_ctx(entity, candidates[0]),
         "column_attributes": column_attributes,
@@ -369,6 +437,8 @@ class ColumnResolutionAgent(BaseAgent):
                     "Resolution failed for entity %r", entity, exc_info=True
                 )
                 mapping = _empty_mapping(entity)
+            if mapping is None:
+                continue
             mappings["search_for"].append(mapping)
             if mapping.get("table_id"):
                 search_for_table_ids.add(mapping["table_id"])
@@ -409,7 +479,15 @@ class ColumnResolutionAgent(BaseAgent):
                     self.logger.warning(
                         "Resolution failed for entity %r", entity, exc_info=True
                     )
-                    mapping = _with_value(_empty_mapping(entity), bucket, None)
+                    # Can't validate a term against the DB -> drop it; other
+                    # buckets keep an empty (column-only) mapping.
+                    mapping = (
+                        None
+                        if bucket in _VALUE_BUCKETS
+                        else _with_value(_empty_mapping(entity), bucket, None)
+                    )
+                if mapping is None:
+                    continue
                 mappings[bucket].append(mapping)
 
         _store_results(path_state, mappings, column_attributes)
