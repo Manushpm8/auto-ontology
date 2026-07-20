@@ -40,7 +40,9 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 	const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
 
 	const supportsSchemaSelection =
-		connectionType === ConnectionType.DATABRICKS || connectionType === ConnectionType.SNOWFLAKE;
+		connectionType === ConnectionType.DATABRICKS ||
+		connectionType === ConnectionType.SNOWFLAKE ||
+		connectionType === ConnectionType.VAST;
 
 	const steps = useMemo(
 		() => (supportsSchemaSelection ? [...BASE_STEPS, SCHEMA_STEP] : [...BASE_STEPS]),

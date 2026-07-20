@@ -44,12 +44,27 @@ export type HeavyDBConnectionParams = {
 	protocol: string;
 };
 
+export type VastConnectionParams = {
+	type: ConnectionType.VAST;
+	/** Full VAST endpoint URL (http://host:port) or bare host[:port]. */
+	endpoint: string;
+	access_key: string;
+	secret_key: string;
+	/** VAST bucket; also the connection identity. */
+	database: string;
+	/** Optional end-user identity for impersonation. */
+	end_user?: string;
+	/** Optional ingestion allowlist: only these schemas are ingested. Empty/absent = all. */
+	schemas?: string[];
+};
+
 /** Structured connection form fields, discriminated by `type`. */
 export type ConnectionParams =
 	| DatabricksConnectionParams
 	| PostgresConnectionParams
 	| SnowflakeConnectionParams
-	| HeavyDBConnectionParams;
+	| HeavyDBConnectionParams
+	| VastConnectionParams;
 
 /** A stored connection returned by the API. */
 export type Connection = {

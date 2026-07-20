@@ -8,6 +8,7 @@ export enum ConnectionType {
 	POSTGRESQL = 'postgresql',
 	SNOWFLAKE = 'snowflake',
 	HEAVYDB = 'heavydb',
+	VAST = 'vast',
 }
 
 export const connectionDisplayName: Record<ConnectionType, string> = {
@@ -15,6 +16,7 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.POSTGRESQL]: 'PostgreSQL',
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
+	[ConnectionType.VAST]: 'VAST Data',
 };
 
 export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
@@ -29,7 +31,11 @@ export type ConnectionFieldKey =
 	| 'user'
 	| 'password'
 	| 'database'
-	| 'protocol';
+	| 'protocol'
+	| 'endpoint'
+	| 'access_key'
+	| 'secret_key'
+	| 'end_user';
 
 export type ConnectionField = {
 	key: ConnectionFieldKey;
@@ -77,5 +83,16 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'heavyai' },
 		{ key: 'protocol', label: 'Protocol', placeholder: 'binary', optional: true },
+	],
+	[ConnectionType.VAST]: [
+		{
+			key: 'endpoint',
+			label: 'Endpoint',
+			placeholder: 'http://172.200.207.101',
+		},
+		{ key: 'access_key', label: 'Access key' },
+		{ key: 'secret_key', label: 'Secret key', secret: true },
+		{ key: 'database', label: 'Bucket', placeholder: 'gsf-db-bucket' },
+		{ key: 'end_user', label: 'End user (impersonation)', optional: true },
 	],
 };

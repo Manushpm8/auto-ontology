@@ -11,6 +11,7 @@ from gsf.connectors.heavydb import HeavyDBDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
 from gsf.connectors.snowflake import SnowflakeDatabase
+from gsf.connectors.vast import VastDatabase
 
 __all__ = [
     "SQLDatabase",
@@ -19,6 +20,7 @@ __all__ = [
     "HeavyDBDatabase",
     "PostgresDatabase",
     "SnowflakeDatabase",
+    "VastDatabase",
     "get_connectors",
     "invalidate_connectors_cache",
 ]

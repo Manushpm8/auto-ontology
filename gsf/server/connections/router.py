@@ -35,7 +35,7 @@ def _serialize_connection(connection: dict[str, Any]) -> PublicConnection:
     public_connection = {
         key: value
         for key, value in connection.items()
-        if key not in {"password", "password_env"}
+        if key not in {"password", "password_env", "secret_key"}
     }
     return {
         "database_name": str(connection.get("database") or ""),

@@ -18,6 +18,7 @@ from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.connectors.snowflake import SnowflakeDatabase
+from gsf.connectors.vast import VastDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "duckdb": DuckDBDatabase,
     "snowflake": SnowflakeDatabase,
     "heavydb": HeavyDBDatabase,
+    "vast": VastDatabase,
 }
 
 _connectors: list[SQLDatabase] | None = None
@@ -84,7 +86,11 @@ def create_connector(
                 f"Connection string: {connection_string}"
             )
 
-        if schemas and connector_class in (DatabricksDatabase, SnowflakeDatabase):
+        if schemas and connector_class in (
+            DatabricksDatabase,
+            SnowflakeDatabase,
+            VastDatabase,
+        ):
             return connector_class(connection_string, schemas=schemas)
         return connector_class(connection_string)
 

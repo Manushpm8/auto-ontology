@@ -12,7 +12,7 @@ so this module converts the structured form into the URL the connectors expect.
 from __future__ import annotations
 
 from typing import Any, Mapping
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 DEFAULT_POSTGRES_PORT = "5432"
 DEFAULT_HEAVYDB_PORT = "6274"
@@ -80,6 +80,28 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         return (
             f"heavydb://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
             f"?protocol={_enc(protocol)}"
+        )
+
+    if conn_type == "vast":
+        endpoint = _require(connection, "endpoint")
+        access_key = _require(connection, "access_key")
+        secret_key = _require(connection, "secret_key")
+        bucket = _require(connection, "database")
+        # Accept a full URL (``http://host:port``) or a bare ``host[:port]``;
+        # normalise into a netloc plus a ``secure`` flag the connector rebuilds
+        # the endpoint from.
+        parsed = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+        if not parsed.hostname:
+            raise ValueError(f"Invalid VAST endpoint: {endpoint!r}")
+        secure = parsed.scheme == "https"
+        netloc = parsed.hostname + (f":{parsed.port}" if parsed.port else "")
+        params = [f"secure={'1' if secure else '0'}"]
+        end_user = str(connection.get("end_user") or "").strip()
+        if end_user:
+            params.append(f"end_user={_enc(end_user)}")
+        return (
+            f"vast://{_enc(access_key)}:{_enc(secret_key)}@{netloc}/{_enc(bucket)}"
+            f"?{'&'.join(params)}"
         )
 
     raise ValueError(f"Unsupported connection type: {conn_type!r}")
