@@ -13,8 +13,6 @@ import { ConfirmModal, ModalCreateNewItem } from '@/components/modal';
 import { SearchInput } from '@/components/SearchInput';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
-import { zonesApi } from '@/api/zones';
-import { useSession } from '@/auth/auth-client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
 import { Label } from '@/components/Label';
@@ -159,10 +157,6 @@ export const TermsView = () => {
 	const searchParams = useSearchParams();
 	const focusId = searchParams.get('focus');
 	const sqlAttrId = searchParams.get('sqlAttr');
-
-	const { data: session } = useSession();
-	const sessionUserId = session?.user?.id ?? null;
-	const sessionRole = session?.user?.role ?? null;
 
 	const [terms, setTerms] = useState<Term[]>([]);
 	const [sqlAttrs, setSqlAttrs] = useState<SqlAttribute[]>([]);
@@ -589,11 +583,7 @@ export const TermsView = () => {
 
 	const getSqlAttributeSinglePage = useCallback(
 		async (attrId: string): Promise<SinglePageFormat> => {
-			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, userZonesRes] = await Promise.all([
-				sqlAttributesApi.get(attrId),
-				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
-			]);
+			const res = await sqlAttributesApi.get(attrId);
 			if (res.error || !res.data) {
 				return {
 					sections: [],
@@ -601,12 +591,6 @@ export const TermsView = () => {
 				};
 			}
 			const attr = res.data;
-
-			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
-			const userZoneIds: string[] | null =
-				userZonesRes !== null && !userZonesRes.error
-					? (userZonesRes.data ?? []).map((z) => z.id)
-					: null;
 
 			return {
 				header: {
@@ -643,128 +627,115 @@ export const TermsView = () => {
 							color: z.color,
 							enabled: z.enabled,
 						})),
-						userZoneIds,
 					},
 				],
 			};
 		},
-		[sessionUserId, sessionRole],
+		[],
 	);
 
-	const getSinglePage = useCallback(
-		async (termId: string): Promise<SinglePageFormat> => {
-			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, attrsRes, sqlAttrsRes, relatedRes, userZonesRes] = await Promise.all([
-				termsApi.get(termId),
-				termsApi.getColumnAttributes(termId),
-				termsApi.getSqlAttributes(termId),
-				termsApi.getRelatedTerms(termId),
-				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
-			]);
-			if (res.error || !res.data) {
-				return {
-					sections: [],
-					header: { header: { title: 'Term not found', withBorder: true } },
-				};
-			}
-			const term = res.data;
-			const termAttrs = attrsRes?.data ?? [];
-			const termSqlAttrs = sqlAttrsRes?.data ?? [];
-			const relatedTerms = relatedRes?.data ?? [];
-
-			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
-			const userZoneIds: string[] | null =
-				userZonesRes !== null && !userZonesRes.error
-					? (userZonesRes.data ?? []).map((z) => z.id)
-					: null;
-
+	const getSinglePage = useCallback(async (termId: string): Promise<SinglePageFormat> => {
+		const [res, attrsRes, sqlAttrsRes, relatedRes] = await Promise.all([
+			termsApi.get(termId),
+			termsApi.getColumnAttributes(termId),
+			termsApi.getSqlAttributes(termId),
+			termsApi.getRelatedTerms(termId),
+		]);
+		if (res.error || !res.data) {
 			return {
-				header: {
-					header: {
-						title: term.name,
-						withBorder: true,
-						showContentHeader: true,
-						titleEditable: true,
-					},
-				},
-				sections: [
-					{
-						type: ComposerSectionKind.TEXT_CARD,
-						id: 'description',
-						title: 'Description',
-						body: term.description ?? '',
-						editable: true,
-					},
-					{
-						type: ComposerSectionKind.TAG_LIST,
-						id: 'synonyms',
-						title: 'Synonyms',
-						values: term.synonyms ?? [],
-					},
-					{
-						type: ComposerSectionKind.ENTITY_CHIPS,
-						id: 'entities',
-						title: 'Entities',
-						entities: (term.tables ?? []).map((table) => ({
-							id: table.id,
-							name: table.name,
-							focusId: [table.db_id, table.schema_id, table.id].join('|'),
-						})),
-					},
-					{
-						type: ComposerSectionKind.ZONES_CHIPS,
-						id: 'zones',
-						title: 'Zones',
-						zones: term.zones.map((z) => ({
-							id: z.id,
-							name: z.name,
-							color: z.color,
-							enabled: z.enabled,
-						})),
-						userZoneIds,
-					},
-					{
-						type: ComposerSectionKind.RELATED_TERMS_CHIPS,
-						id: 'related_terms',
-						title: 'Related Terms',
-						terms: relatedTerms.map((t) => ({
-							id: t.id,
-							name: t.name,
-							description: t.description,
-						})),
-					},
-					{
-						type: ComposerSectionKind.DATA_TABLE,
-						id: 'column_attributes',
-						title: 'Column Attributes',
-						columns: [
-							{ key: 'name', label: 'Attribute Name' },
-							{ key: 'description', label: 'Description', truncate: true },
-							{ key: 'sample_values', label: 'Sample Values', kind: 'tags' },
-						],
-						rows: termAttrs.map((attr) => ({
-							name: attr.name,
-							description: attr.description ?? '',
-							sample_values: attr.sample_values ?? [],
-						})),
-					},
-					{
-						type: ComposerSectionKind.DATA_TABLE,
-						id: 'sql_attributes',
-						title: 'SQL Attributes',
-						rowIdKey: 'id',
-						columns: [{ key: 'name', label: 'Attribute Name' }],
-						rows: termSqlAttrs.map((attr) => ({
-							id: attr.id,
-							name: attr.name,
-						})),
-						emptyMessage: 'SQL attribute does not exist',
-					},
-				],
+				sections: [],
+				header: { header: { title: 'Term not found', withBorder: true } },
 			};
-		},
-		[sessionUserId, sessionRole],
-	);
+		}
+		const term = res.data;
+		const termAttrs = attrsRes?.data ?? [];
+		const termSqlAttrs = sqlAttrsRes?.data ?? [];
+		const relatedTerms = relatedRes?.data ?? [];
+
+		return {
+			header: {
+				header: {
+					title: term.name,
+					withBorder: true,
+					showContentHeader: true,
+					titleEditable: true,
+				},
+			},
+			sections: [
+				{
+					type: ComposerSectionKind.TEXT_CARD,
+					id: 'description',
+					title: 'Description',
+					body: term.description ?? '',
+					editable: true,
+				},
+				{
+					type: ComposerSectionKind.TAG_LIST,
+					id: 'synonyms',
+					title: 'Synonyms',
+					values: term.synonyms ?? [],
+				},
+				{
+					type: ComposerSectionKind.ENTITY_CHIPS,
+					id: 'entities',
+					title: 'Entities',
+					entities: (term.tables ?? []).map((table) => ({
+						id: table.id,
+						name: table.name,
+						focusId: [table.db_id, table.schema_id, table.id].join('|'),
+					})),
+				},
+				{
+					type: ComposerSectionKind.ZONES_CHIPS,
+					id: 'zones',
+					title: 'Zones',
+					zones: term.zones.map((z) => ({
+						id: z.id,
+						name: z.name,
+						color: z.color,
+						enabled: z.enabled,
+					})),
+				},
+				{
+					type: ComposerSectionKind.RELATED_TERMS_CHIPS,
+					id: 'related_terms',
+					title: 'Related Terms',
+					terms: relatedTerms.map((t) => ({
+						id: t.id,
+						name: t.name,
+						description: t.description,
+					})),
+				},
+				{
+					type: ComposerSectionKind.DATA_TABLE,
+					id: 'column_attributes',
+					title: 'Column Attributes',
+					columns: [
+						{ key: 'name', label: 'Attribute Name' },
+						{ key: 'description', label: 'Description', truncate: true },
+						{ key: 'sample_values', label: 'Sample Values', kind: 'tags' },
+					],
+					rows: termAttrs.map((attr) => ({
+						name: attr.name,
+						description: attr.description ?? '',
+						sample_values: attr.sample_values ?? [],
+					})),
+				},
+				{
+					type: ComposerSectionKind.DATA_TABLE,
+					id: 'sql_attributes',
+					title: 'SQL Attributes',
+					rowIdKey: 'id',
+					columns: [{ key: 'name', label: 'Attribute Name' }],
+					rows: termSqlAttrs.map((attr) => ({
+						id: attr.id,
+						name: attr.name,
+					})),
+					emptyMessage: 'SQL attribute does not exist',
+				},
+			],
+		};
+	}, []);
 
 	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 	const focusedSqlAttr =

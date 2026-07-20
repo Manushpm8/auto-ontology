@@ -2,56 +2,34 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Server-side helper that resolves the zone IDs accessible to the current user.
-//
-// Admins have unrestricted access to all data — returns null (no filter).
-// Viewers receive only the zones they have been explicitly granted access to;
-// returns the list of zone IDs that should be forwarded to data endpoints so
-// the Python backend can scope results without doing a per-request user lookup.
-//
-// This follows the same pattern as illumex's NestJS BFF: the BFF resolves zone
-// IDs from user membership once per request and forwards them as a filter param,
-// keeping data endpoints free of user-identity concerns.
+/**
+ * Zone membership is no longer an authorization boundary. Both roles receive
+ * the unfiltered catalog scope.
+ */
+export function resolveZoneIds(userId: string, role: string | null): string[] | null {
+	void userId;
+	void role;
+	return null;
+}
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
 type ZoneRow = { id: string; enabled: boolean };
 type ZonesResponse = { data: ZoneRow[] };
 
-async function fetchEnabledZoneIds(userId: string): Promise<string[]> {
-	try {
-		const url = `${PYTHON_API_URL}/api/zones?uid=${encodeURIComponent(userId)}`;
-		const res = await fetch(url, { headers: { Accept: 'application/json' } });
-		if (!res.ok) {
-			throw new Error(`Failed to resolve accessible zones: ${res.status}`);
-		}
-		const json = (await res.json()) as ZonesResponse;
-		return (json.data ?? []).filter((z) => z.enabled).map((z) => z.id);
-	} catch (error) {
-		throw new Error('Failed to resolve accessible zones', { cause: error });
+const fetchEnabledZoneIds = async (userId: string): Promise<string[]> => {
+	const url = `${PYTHON_API_URL}/api/zones?uid=${encodeURIComponent(userId)}`;
+	const response = await fetch(url, { headers: { Accept: 'application/json' } });
+	if (!response.ok) {
+		throw new Error(`Failed to resolve zones for the agent: ${response.status}`);
 	}
-}
+	const payload = (await response.json()) as ZonesResponse;
+	return (payload.data ?? []).filter((zone) => zone.enabled).map((zone) => zone.id);
+};
 
 /**
- * Return the zone IDs the given user can access, or `null` for admins (no filter).
- *
- * Calls the internal Python `/api/zones?uid=<userId>` endpoint which already
- * implements the admin-sees-all / viewer-sees-granted logic.
- */
-export async function resolveZoneIds(
-	userId: string,
-	role: string | null,
-): Promise<string[] | null> {
-	if (role === 'admin') return null;
-	return fetchEnabledZoneIds(userId);
-}
-
-/**
- * Return the enabled zones available to the user for text-to-SQL.
- *
- * Unlike the catalog APIs, the agent always needs an explicit zone boundary:
- * admins receive every enabled zone and viewers receive only their grants.
- * Disabled zones are deliberately omitted for both roles.
+ * Text-to-SQL is explicitly scoped to every enabled Neo4j zone for both
+ * admins and viewers.
  */
 export async function resolveAgentZoneIds(userId: string): Promise<string[]> {
 	return fetchEnabledZoneIds(userId);
