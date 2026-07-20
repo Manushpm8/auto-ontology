@@ -14,6 +14,7 @@ from gsf.retrieval.text_to_sql.text_to_sql_graph import create_graph
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
 from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
+from gsf.retrieval.data_access.zone_access import resolve_zone_access_scope
 from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,11 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         )
 
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
-    domain_rules = fetch_custom_analyses() + list(acronyms or [])
+    zone_access_scope = resolve_zone_access_scope(payload["zone_ids"])
+    domain_rules = fetch_custom_analyses(
+        payload["zone_ids"],
+        data_ids_by_zone=zone_access_scope.data_ids_by_zone,
+    ) + list(acronyms or [])
 
     initial_path_state = dict(payload.get("path_state") or {})
 
@@ -87,6 +92,8 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     state: dict = {
         "llm": llm_client,
         "initial_question": payload["question"],
+        "zone_ids": payload["zone_ids"],
+        "zone_access_scope": zone_access_scope,
         "connectors": connectors,
         "messages": messages,
         "path_state": initial_path_state,
@@ -125,6 +132,20 @@ def stream_agent_response(
     t0 = time.perf_counter()
 
     logger.info("Text-to-SQL agent started for question: %s", payload["question"])
+
+    if payload["zone_ids"] == []:
+        yield {
+            "type": "result",
+            "answer": {
+                "response": (
+                    "You don't have access to any data. "
+                    "Please contact an administrator."
+                ),
+                "sql_code": "",
+                "result": None,
+            },
+        }
+        return
 
     state = _build_state(payload)
     final_state = dict(state)

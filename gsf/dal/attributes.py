@@ -200,7 +200,11 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
+def find_join_path(
+    anchor_col_id: str,
+    dest_col_id: str,
+    allowed_table_ids: set[str] | None = None,
+) -> list[dict]:
     """Find the shortest semantic join path between two Column nodes.
 
     SEMANTIC_FK is directional (Column -> ColumnAttribute) and is followed
@@ -236,6 +240,13 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         maxLevel: 30,
         limit: 1
     }) YIELD path
+    WITH path, [n IN nodes(path) WHERE n:Column | n] AS path_columns
+    WHERE $allowed_table_ids IS NULL OR ALL(
+        col IN path_columns WHERE EXISTS {
+            MATCH (tbl:Table)-[:CONTAINS]->(col)
+            WHERE tbl.id IN $allowed_table_ids
+        }
+    )
     RETURN [n IN nodes(path) | {
         id: n.id,
         name: n.name,
@@ -245,7 +256,13 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     try:
         rows = get_neo4j_conn().query_read(
             path_query,
-            {"anchor_col_id": anchor_col_id, "dest_col_id": dest_col_id},
+            {
+                "anchor_col_id": anchor_col_id,
+                "dest_col_id": dest_col_id,
+                "allowed_table_ids": (
+                    list(allowed_table_ids) if allowed_table_ids is not None else None
+                ),
+            },
         )
     except Exception:
         logger.warning(

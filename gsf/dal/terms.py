@@ -673,10 +673,14 @@ def fetch_column_attribute_counts(
 
 def fetch_column_attributes(
     zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return ColumnAttribute nodes, optionally restricted to *zone_ids*."""
     table_filter, params = resolve_table_filter(
-        zone_ids, "attr.table_id", extra_params={"source": SEMANTIC_SOURCE}
+        zone_ids,
+        "attr.table_id",
+        extra_params={"source": SEMANTIC_SOURCE},
+        data_ids_by_zone=data_ids_by_zone,
     )
 
     return get_neo4j_conn().query_read(

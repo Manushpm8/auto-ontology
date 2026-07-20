@@ -55,6 +55,7 @@ class CustomAnalysisSqlError(SqlParseError):
 
 def list_custom_analyses(
     zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return ``CustomAnalysis`` nodes joined with their ``Sql`` node.
 
@@ -69,7 +70,7 @@ def list_custom_analyses(
     """
     params: dict[str, Any] = {}
     if zone_ids is not None:
-        data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
+        data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
         params["table_ids"] = list(data_ids_by_zone["table_ids"])
         zone_filter = (
             f"WHERE NOT EXISTS {{"
@@ -148,17 +149,17 @@ def detach_existing_sql_edges(analysis_id: str) -> None:
     )
 
 
-def fetch_custom_analyses() -> list[dict[str, str]]:
-    """Fetch all CustomAnalysis nodes from Neo4j and return as domain rules.
+def fetch_custom_analyses(
+    zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+) -> list[dict[str, str]]:
+    """Fetch zone-authorized CustomAnalysis nodes as domain rules.
 
     Each analysis becomes ``{"name": <name>, "description": <sql>}``.
+    ``None`` is the unrestricted admin scope; an empty list returns no rules.
     """
-    query = (
-        f"MATCH (n:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL}) "
-        "RETURN n.name AS name, n.description AS description, sql.sql_full_query AS sql_code"
-    )
     try:
-        results = get_neo4j_conn().query_read(query=query, parameters={})
+        results = list_custom_analyses(zone_ids, data_ids_by_zone=data_ids_by_zone)
     except Exception as e:
         logger.warning("Failed to fetch custom analyses from Neo4j: %s", e)
         return []
@@ -167,7 +168,7 @@ def fetch_custom_analyses() -> list[dict[str, str]]:
     for row in results or []:
         name = row.get("name", "")
         description = row.get("description", "")
-        sql_code = row.get("sql_code", "")
+        sql_code = row.get("sql", "")
         if not name:
             continue
         parts = []

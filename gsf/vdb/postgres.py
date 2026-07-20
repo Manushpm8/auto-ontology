@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 _DATABASE_METADATA_COLUMN = "database_name"
 _LABEL_METADATA_COLUMN = "label"
+# ``id`` is reserved by PGVectorStore for its row primary key. Keep the
+# semantic graph ID in a separately promoted column so it is filterable.
+_NODE_ID_METADATA_COLUMN = "node_id"
 
 
 class _UnusableEmbeddings(Embeddings):
@@ -164,6 +167,38 @@ class PostgresVDB(VDB):
                 )
             conn.commit()
 
+    def _ensure_node_id_column(self) -> None:
+        """Promote graph IDs for existing collections and backfill them once."""
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                table = sql.Identifier(self.schema_name, self.collection_name)
+                index = sql.Identifier(
+                    f"{self.collection_name}_{_NODE_ID_METADATA_COLUMN}_idx"
+                )
+                cur.execute(
+                    sql.SQL(
+                        "ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} VARCHAR(100)"
+                    ).format(table, sql.Identifier(_NODE_ID_METADATA_COLUMN))
+                )
+                cur.execute(
+                    sql.SQL(
+                        "UPDATE {} SET {} = langchain_metadata ->> 'id' "
+                        "WHERE {} IS NULL"
+                    ).format(
+                        table,
+                        sql.Identifier(_NODE_ID_METADATA_COLUMN),
+                        sql.Identifier(_NODE_ID_METADATA_COLUMN),
+                    )
+                )
+                cur.execute(
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} ({})").format(
+                        index,
+                        table,
+                        sql.Identifier(_NODE_ID_METADATA_COLUMN),
+                    )
+                )
+            conn.commit()
+
     def _get_store(self) -> Optional[PGVectorStore]:
         """Return the vector store, creating the table on first write.
 
@@ -183,15 +218,21 @@ class PostgresVDB(VDB):
                 metadata_columns=[
                     Column(_DATABASE_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                     Column(_LABEL_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
+                    Column(_NODE_ID_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                 ],
             )
+        self._ensure_node_id_column()
 
         self._store = PGVectorStore.create_sync(
             engine=engine,
             embedding_service=self.embeddings,
             table_name=self.collection_name,
             schema_name=self.schema_name,
-            metadata_columns=[_DATABASE_METADATA_COLUMN, _LABEL_METADATA_COLUMN],
+            metadata_columns=[
+                _DATABASE_METADATA_COLUMN,
+                _LABEL_METADATA_COLUMN,
+                _NODE_ID_METADATA_COLUMN,
+            ],
         )
         return self._store
 
@@ -229,6 +270,8 @@ class PostgresVDB(VDB):
                 "document_type": record.get("document_type"),
                 **{k: v for k, v in metadata.items() if k != "embedding"},
             }
+            if doc_metadata.get("id") is not None:
+                doc_metadata[_NODE_ID_METADATA_COLUMN] = str(doc_metadata["id"])
             documents.append(Document(page_content=text, metadata=doc_metadata))
             embeddings.append([float(v) for v in embedding])
 
@@ -293,13 +336,9 @@ class PostgresVDB(VDB):
     def delete_by_id(self, node_id: str) -> int:
         """Delete every row whose metadata ``id`` matches ``node_id``.
 
-        ``id`` lives in the JSONB ``langchain_metadata`` column (it is not
-        a promoted real column — only ``database_name`` and ``label`` are),
-        so the match goes through ``langchain_metadata ->> 'id'`` rather
-        than the typed-filter path used by :meth:`delete_by_database`.
-        Going through ``PGVectorStore.delete(filter=...)`` would be a
-        no-op for this case because the dict-format filter only resolves
-        declared metadata columns.
+        Semantic IDs are promoted as the ``node_id`` metadata column. The
+        JSONB fallback keeps deletion correct if an older row was inserted
+        before the automatic backfill migration.
 
         Returns the number of rows deleted (``0`` when the collection
         table doesn't exist yet or nothing matched).
@@ -320,12 +359,13 @@ class PostgresVDB(VDB):
                     sql.SQL(
                         """
                         DELETE FROM {table}
-                        WHERE langchain_metadata ->> 'id' = %s
+                        WHERE node_id = %s
+                           OR langchain_metadata ->> 'id' = %s
                         """
                     ).format(
                         table=sql.Identifier(self.schema_name, self.collection_name)
                     ),
-                    (node_id,),
+                    (node_id, node_id),
                 )
                 deleted = cur.rowcount
 

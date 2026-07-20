@@ -15,10 +15,10 @@
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
-type ZoneRow = { id: string };
+type ZoneRow = { id: string; enabled: boolean };
 type ZonesResponse = { data: ZoneRow[] };
 
-async function fetchUserZoneIds(userId: string): Promise<string[]> {
+async function fetchEnabledZoneIds(userId: string): Promise<string[]> {
 	try {
 		const url = `${PYTHON_API_URL}/api/zones?uid=${encodeURIComponent(userId)}`;
 		const res = await fetch(url, { headers: { Accept: 'application/json' } });
@@ -26,7 +26,7 @@ async function fetchUserZoneIds(userId: string): Promise<string[]> {
 			throw new Error(`Failed to resolve accessible zones: ${res.status}`);
 		}
 		const json = (await res.json()) as ZonesResponse;
-		return (json.data ?? []).map((z) => z.id);
+		return (json.data ?? []).filter((z) => z.enabled).map((z) => z.id);
 	} catch (error) {
 		throw new Error('Failed to resolve accessible zones', { cause: error });
 	}
@@ -43,5 +43,16 @@ export async function resolveZoneIds(
 	role: string | null,
 ): Promise<string[] | null> {
 	if (role === 'admin') return null;
-	return fetchUserZoneIds(userId);
+	return fetchEnabledZoneIds(userId);
+}
+
+/**
+ * Return the enabled zones available to the user for text-to-SQL.
+ *
+ * Unlike the catalog APIs, the agent always needs an explicit zone boundary:
+ * admins receive every enabled zone and viewers receive only their grants.
+ * Disabled zones are deliberately omitted for both roles.
+ */
+export async function resolveAgentZoneIds(userId: string): Promise<string[]> {
+	return fetchEnabledZoneIds(userId);
 }

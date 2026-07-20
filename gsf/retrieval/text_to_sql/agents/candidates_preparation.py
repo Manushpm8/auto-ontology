@@ -44,6 +44,9 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
     get_relevant_tables_from_candidates,
 )
+from gsf.retrieval.data_access.zone_access import (
+    filter_hits_by_allowed_ids,
+)
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
@@ -136,9 +139,20 @@ class CandidatePreparationAgent(BaseAgent):
             connectors = state.get("connectors") or []
             if len(connectors) == 1:
                 target_db = getattr(connectors[0], "database_name", None)
-        custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
-        column_attributes = list(path_state.get("retrieved_column_attributes") or [])
-        sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
+        scope = state["zone_access_scope"]
+        allowed_table_ids = scope.table_ids
+        custom_analyses = filter_hits_by_allowed_ids(
+            list(path_state.get("retrieved_custom_analyses") or []),
+            scope.custom_analysis_ids,
+        )
+        column_attributes = filter_hits_by_allowed_ids(
+            list(path_state.get("retrieved_column_attributes") or []),
+            scope.column_attribute_ids,
+        )
+        sql_attributes_raw = filter_hits_by_allowed_ids(
+            list(path_state.get("retrieved_sql_attributes") or []),
+            scope.sql_attribute_ids,
+        )
         candidates = custom_analyses + column_attributes + sql_attributes_raw
 
         # --- 1. Custom analyses ---
@@ -194,7 +208,10 @@ class CandidatePreparationAgent(BaseAgent):
                 with ThreadPoolExecutor(max_workers=len(dest_items) or 1) as pool:
                     futures = {
                         pool.submit(
-                            find_join_path, anchor_ctx["col_id"], dctx["col_id"]
+                            find_join_path,
+                            anchor_ctx["col_id"],
+                            dctx["col_id"],
+                            allowed_table_ids,
                         ): (did, dctx)
                         for did, dctx in dest_items
                     }
@@ -224,6 +241,12 @@ class CandidatePreparationAgent(BaseAgent):
 
         # --- 4. Retrieve relevant tables ---
         relevant_tables = get_relevant_tables_from_candidates(candidates)
+        if allowed_table_ids is not None:
+            relevant_tables = [
+                table
+                for table in relevant_tables
+                if str(table.get("id") or "") in allowed_table_ids
+            ]
 
         if attr_contexts:
             ca_table_ids = list(
@@ -234,6 +257,12 @@ class CandidatePreparationAgent(BaseAgent):
                 )
             )
             ca_tables = fetch_tables_by_ids(ca_table_ids)
+            if allowed_table_ids is not None:
+                ca_tables = [
+                    table
+                    for table in ca_tables
+                    if str(table.get("id") or "") in allowed_table_ids
+                ]
             existing_ids = {t.get("id") for t in relevant_tables}
             for tbl in ca_tables:
                 if tbl.get("id") not in existing_ids:
@@ -254,6 +283,7 @@ class CandidatePreparationAgent(BaseAgent):
                 query,
                 k=k_per_query,
                 database_name=target_db,
+                allowed_table_ids=allowed_table_ids,
             )
 
         with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
@@ -289,6 +319,12 @@ class CandidatePreparationAgent(BaseAgent):
         if custom_analyses:
             ca_ids = [str(ca["id"]) for ca in custom_analyses if ca.get("id")]
             ca_linked_tables = fetch_tables_from_custom_analyses(ca_ids)
+            if allowed_table_ids is not None:
+                ca_linked_tables = [
+                    table
+                    for table in ca_linked_tables
+                    if str(table.get("id") or "") in allowed_table_ids
+                ]
             existing_ids = {t.get("id") for t in relevant_tables}
             added = 0
             for tbl in ca_linked_tables:
@@ -317,6 +353,12 @@ class CandidatePreparationAgent(BaseAgent):
             )
 
             sa_linked_tables = fetch_tables_from_sql_attributes(sa_ids)
+            if allowed_table_ids is not None:
+                sa_linked_tables = [
+                    table
+                    for table in sa_linked_tables
+                    if str(table.get("id") or "") in allowed_table_ids
+                ]
             existing_ids = {t.get("id") for t in relevant_tables}
             added = 0
             for tbl in sa_linked_tables:

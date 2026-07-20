@@ -43,9 +43,21 @@ def get_schemas_by_ids(relevant_schemas_ids: list | None = None) -> dict:
 
     Fetches raw column/table rows via :func:`gsf.dal.datasources.fetch_schemas_by_ids`
     then builds the in-memory :class:`Schema` map consumed by the SQL parser.
+
+    Deliberately has no zone-restricted counterpart: callers that need a
+    zone boundary (e.g. SQL validation) must parse against the full catalog
+    and check the *resolved* table ids against the allowed set afterwards —
+    see the comment in ``SQLValidationAgent._sql_parse_validation`` for why
+    feeding the parser a pre-filtered schema is unsafe.
     """
+    return _build_schemas(fetch_schemas_by_ids(relevant_schemas_ids))
+
+
+def _build_schemas(data_array: list[dict]) -> dict:
+    """Build parser schemas from pre-filtered Neo4j table/column rows."""
     before_get_all = time.time()
-    data_array = fetch_schemas_by_ids(relevant_schemas_ids)
+    if not data_array:
+        return {}
     logger.info(f"time took to get all data from graph: {time.time() - before_get_all}")
     data_df = pd.DataFrame(data_array)
     dbs = list(data_df["database_name"].unique())

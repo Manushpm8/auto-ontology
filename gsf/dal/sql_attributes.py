@@ -105,6 +105,7 @@ def _query_sql_attributes(
     attr_id: str | None = None,
     term_id: str | None = None,
     zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
     order_by: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run the shared SqlAttribute ↔ Term ↔ Sql traversal behind every read below.
@@ -122,7 +123,11 @@ def _query_sql_attributes(
         extra_params["id"] = attr_id
     if term_id is not None:
         extra_params["term_id"] = term_id
-    attr_filter, params = _sql_attr_zone_filter(zone_ids, extra_params=extra_params)
+    attr_filter, params = _sql_attr_zone_filter(
+        zone_ids,
+        extra_params=extra_params,
+        data_ids_by_zone=data_ids_by_zone,
+    )
 
     if term_id is not None:
         anchor = f"""
@@ -244,9 +249,14 @@ def get_full_sql_attribute_by_id(
 
 def fetch_sql_attributes(
     zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return SqlAttribute nodes, optionally restricted to zone-visible terms."""
-    return _query_sql_attributes(zone_ids=zone_ids, order_by="term.name, attr.name")
+    return _query_sql_attributes(
+        zone_ids=zone_ids,
+        data_ids_by_zone=data_ids_by_zone,
+        order_by="term.name, attr.name",
+    )
 
 
 def fetch_sql_attributes_by_term_id(

@@ -207,7 +207,7 @@ class SQLReconstructionAgent(BaseAgent):
                     data_retriever,
                     query_text,
                     k=3,
-                    database_name=database_name,
+                    allowed_table_ids=state["zone_access_scope"].table_ids,
                 )
                 combined.extend(hits)
             except Exception:
@@ -233,6 +233,13 @@ class SQLReconstructionAgent(BaseAgent):
             return []
 
         enriched = fetch_tables_by_ids(new_ids)
+        allowed_table_ids = state["zone_access_scope"].table_ids
+        if allowed_table_ids is not None:
+            enriched = [
+                table
+                for table in enriched
+                if str(table.get("id") or "") in allowed_table_ids
+            ]
         self.logger.info(
             "Discovery found %d new table(s): %s",
             len(enriched),

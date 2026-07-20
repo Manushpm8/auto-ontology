@@ -36,11 +36,6 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
-
-
-class ChatRequestWithEvidence(BaseModel):
-    """Payload for chat requests that include an evidence hint."""
-
-    question: str = Field(..., min_length=1)
-    database: str = Field(..., min_length=1)
-    evidence: str = Field(default="")
+    # Resolved by the authenticated frontend BFF. ``None`` is the unrestricted
+    # admin scope; ``[]`` intentionally denies catalog access.
+    zone_ids: list[str] | None

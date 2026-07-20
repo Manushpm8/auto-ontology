@@ -20,6 +20,8 @@ from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from nemo_retriever.graph.retriever import Retriever
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
+from gsf.retrieval.data_access.zone_access import ZoneAccessScope
+
 
 class AgentPayload(TypedDict):
     """Payload for the ingest/legacy retrieval flow (single retriever)."""
@@ -36,6 +38,9 @@ class TextToSQLPayload(TypedDict):
     """Payload for the text-to-SQL agent flow (data + semantic retrievers)."""
 
     question: str
+    # ``None`` denotes an admin scope (all data); an empty list denotes a
+    # viewer with no accessible zones and therefore no catalog access.
+    zone_ids: list[str] | None
     data_retriever: Retriever
     semantic_retriever: NotRequired[Retriever]
     path_state: NotRequired[dict]
@@ -51,6 +56,8 @@ class AgentState(TypedDict):
     llm: ChatNVIDIA
     entity_llm: NotRequired[BaseChatModel]
     initial_question: str
+    zone_ids: list[str] | None
+    zone_access_scope: ZoneAccessScope
     messages: list[HumanMessage]
     decision: str
     connectors: list[SQLDatabase]

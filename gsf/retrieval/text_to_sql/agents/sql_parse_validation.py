@@ -23,9 +23,7 @@ Design Decisions:
 import logging
 from typing import Dict, Any
 
-import sqlglot
-from sqlglot import expressions as exp
-
+from sqlglot import exp, parse_one
 from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState
@@ -34,6 +32,7 @@ from gsf.retrieval.data_access.graph_schemas import (
     fetch_all_schema_ids,
     get_schemas_by_ids,
 )
+from gsf.dal.datasources import fetch_table_names_by_ids
 
 logger = logging.getLogger(__name__)
 
@@ -179,11 +178,33 @@ class SQLValidationAgent(BaseAgent):
         response = path_state.get("sql_generation_result")
         connectors = state.get("connectors") or []
         dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
-        schemas_ids = fetch_all_schema_ids()
-        schemas = get_schemas_by_ids(schemas_ids)
+        allowed_table_ids = state["zone_access_scope"].table_ids
+        allowed_table_names = (
+            fetch_table_names_by_ids(allowed_table_ids)
+            if allowed_table_ids is not None
+            else None
+        )
+        # Parse against the FULL catalog, never a zone-restricted subset.
+        #
+        # The sqlglot-based extractor silently *skips* any table reference it
+        # can't resolve in the schemas it's given (see
+        # nemo_retriever...ingestion.services.queries.parse_query_slim) —
+        # it doesn't fail the parse. If we fed it only the authorized tables,
+        # an out-of-zone table referenced by the generated SQL would simply
+        # vanish from `query_obj.get_tables_ids()` instead of showing up as
+        # unauthorized, so the check below would never catch it — while the
+        # raw SQL text (still containing that table) goes on to execute
+        # verbatim against the real database in SQLExecutionAgent. Parsing
+        # against the full catalog ensures every referenced table resolves
+        # to a real id, so the allowed_table_ids diff below is meaningful.
+        schemas = get_schemas_by_ids(fetch_all_schema_ids())
 
         validation_result = self._sql_parse_validation(
-            schemas, response.sql_code, dialects
+            schemas,
+            response.sql_code,
+            dialects,
+            state["zone_access_scope"].table_ids,
+            allowed_table_names,
         )
 
         if validation_result.get("error"):
@@ -237,15 +258,77 @@ class SQLValidationAgent(BaseAgent):
         }
 
     @staticmethod
-    def _sql_parse_validation(schemas, sql: str, dialects: list[str]) -> dict:
+    def _sql_parse_validation(
+        schemas,
+        sql: str,
+        dialects: list[str],
+        allowed_table_ids: set[str] | None,
+        allowed_table_names: set[tuple[str, str]] | None,
+    ) -> dict:
         result: dict = {}
         try:
-            parse_query_single(
+            query_obj = parse_query_single(
                 sql=sql,
                 schemas=schemas,
                 dialects=dialects,
             )
+            if query_obj is None:
+                if allowed_table_names is not None and _sql_tables_are_allowed(
+                    sql, dialects, allowed_table_names
+                ):
+                    result["sql_columns"] = []
+                    result["success"] = True
+                    return result
+                result["error"] = (
+                    "Generated SQL does not reference an accessible catalog table."
+                )
+                result["another_try"] = 1
+                return result
+            sql_columns = list(query_obj.get_column_ids() or [])
+            if allowed_table_ids is not None:
+                used_table_ids = set(query_obj.get_tables_ids() or [])
+                unauthorized_table_ids = used_table_ids - allowed_table_ids
+                if unauthorized_table_ids:
+                    result["error"] = (
+                        "Generated SQL references tables outside the user's authorized zones."
+                    )
+                    result["another_try"] = 1
+                    return result
+            result["sql_columns"] = sql_columns
             result["success"] = True
         except Exception as error:
             result.update({"error": str(error), "another_try": 1})
         return result
+
+
+def _sql_tables_are_allowed(
+    sql: str,
+    dialects: list[str],
+    allowed_table_names: set[tuple[str, str]],
+) -> bool:
+    """Validate table references when the NeMo parser can't resolve ``COUNT(*)``."""
+    try:
+        expression = parse_one(sql, read=dialects[0] if dialects else None)
+    except Exception:
+        return False
+
+    cte_names = {
+        cte.alias_or_name.lower()
+        for cte in expression.find_all(exp.CTE)
+        if cte.alias_or_name
+    }
+    table_refs = list(expression.find_all(exp.Table))
+    if not table_refs:
+        return False
+
+    for table in table_refs:
+        table_name = (table.name or "").lower()
+        if table_name in cte_names:
+            continue
+        schema_name = (table.db or "").lower()
+        if schema_name:
+            if (schema_name, table_name) not in allowed_table_names:
+                return False
+        elif not any(name == table_name for _, name in allowed_table_names):
+            return False
+    return True

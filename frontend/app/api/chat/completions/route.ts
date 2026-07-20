@@ -11,6 +11,7 @@
 
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
+import { resolveAgentZoneIds } from '@/auth/resolve-zones';
 import { getPrisma } from '@/lib/prisma';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
@@ -77,6 +78,11 @@ const readFinalAnswer = async (
 
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const body = await req.text();
+	const zoneIds = await resolveAgentZoneIds(user.id);
+	const agentPayload = JSON.stringify({
+		question: extractQuestion(body),
+		zone_ids: zoneIds,
+	});
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',
@@ -84,7 +90,7 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 			'Content-Type': 'application/json',
 			Accept: 'text/event-stream',
 		},
-		body,
+		body: agentPayload,
 		// Disable Node's transparent decompression so we can pipe bytes 1:1.
 		// @ts-expect-error — `duplex` is required by Node's fetch when
 		// streaming bodies; not yet in DOM lib types.

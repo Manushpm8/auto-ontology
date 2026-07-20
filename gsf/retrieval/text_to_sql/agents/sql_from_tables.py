@@ -106,7 +106,7 @@ class SQLFromTablesAgent(BaseAgent):
             relevant_tables = get_relevant_tables(
                 state["data_retriever"],
                 question,
-                database_name=path_state.get("target_db"),
+                allowed_table_ids=state["zone_access_scope"].table_ids,
             )
         similar_questions = []
 

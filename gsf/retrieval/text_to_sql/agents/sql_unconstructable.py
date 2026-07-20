@@ -11,6 +11,8 @@ This agent generates a response when SQL cannot be constructed from available da
 import logging
 from typing import Dict, Any
 
+from langchain_core.messages import AIMessage
+
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState
 
@@ -65,4 +67,10 @@ class SQLUnconstructableAgent(BaseAgent):
             f"Generated unconstructable SQL response: {response_text[:50]}..."
         )
 
-        return {"messages": response}
+        return {
+            "messages": state["messages"] + [AIMessage(content=response_text)],
+            "path_state": {
+                **path_state,
+                "final_response": response,
+            },
+        }

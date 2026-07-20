@@ -12,7 +12,7 @@ OS via process kill — same constraint as before.
 What's new vs. spawn-per-request: we keep **one** subprocess alive
 between requests. It imports ``nemo_retriever`` and builds the
 retriever/connector singletons once, then loops on an input queue:
-``("ask", question)`` → stream agent events on the output queue → idle
+        ``("ask", payload)`` → stream agent events on the output queue → idle
 again. The cold-start cost is paid at server boot and at each cancel
 (when we kill+respawn), not per request.
 
@@ -118,7 +118,7 @@ def _worker_loop(
 
         try:
             agent_payload = {
-                "question": payload,
+                **payload,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
                 "connectors": connectors,
@@ -146,7 +146,7 @@ class PrewarmedWorker:
     Lifecycle:
 
         worker = PrewarmedWorker()  # spawns subprocess; returns immediately
-        worker.submit(question)     # enqueue question
+        worker.submit(payload)      # enqueue a chat request payload
         for event in worker.events():  # iterate until DONE / proc death
             ...
         # Optionally reuse: worker is now idle, can take another submit().
@@ -167,8 +167,8 @@ class PrewarmedWorker:
     def is_alive(self) -> bool:
         return self._proc.is_alive()
 
-    def submit(self, question: str) -> None:
-        self._in_q.put((_MSG_ASK, question))
+    def submit(self, payload: dict[str, Any]) -> None:
+        self._in_q.put((_MSG_ASK, payload))
 
     def events(self) -> Generator[dict[str, Any] | None, None, None]:
         """Yield agent events for the current question.

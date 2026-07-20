@@ -200,6 +200,26 @@ def fetch_schemas_by_ids(
     return result[0]["data"] if result else []
 
 
+def fetch_table_names_by_ids(table_ids: set[str]) -> set[tuple[str, str]]:
+    """Return ``{(schema_name, table_name)}`` for authorized Table IDs."""
+    if not table_ids:
+        return set()
+    rows = get_neo4j_conn().query_read(
+        f"""
+        UNWIND $table_ids AS table_id
+        MATCH (schema:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (table:{Labels.TABLE} {{id: table_id}})
+        RETURN DISTINCT schema.name AS schema_name, table.name AS table_name
+        """,
+        {"table_ids": list(table_ids)},
+    )
+    return {
+        (str(row["schema_name"]).lower(), str(row["table_name"]).lower())
+        for row in rows
+        if row.get("schema_name") and row.get("table_name")
+    }
+
+
 # ---------------------------------------------------------------------------
 # Table
 # ---------------------------------------------------------------------------
@@ -217,24 +237,18 @@ RETURN t.id AS id,
 ORDER BY query_count DESC
 """
 
-_FETCH_TABLE_BY_ID = f"""
-MATCH (t:{Labels.TABLE} {{id: $table_id}})
-MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
-RETURN t.id AS id,
+# Shared row shape behind fetch_table_by_name — kept as its own fragment so a
+# future second consumer of this shape doesn't have to hand-copy the RETURN.
+_TABLE_ROW_RETURN = """RETURN t.id AS id,
        t.name AS name,
        s.name AS schema_name,
        t.description AS description,
-       t.pk as pk
-"""
+       t.pk as pk"""
 
 _FETCH_TABLE_BY_NAME = f"""
 MATCH (t:{Labels.TABLE} {{name: $name}})
 MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
-RETURN t.id AS id,
-       t.name AS name,
-       s.name AS schema_name,
-       t.description AS description,
-       t.pk as pk
+{_TABLE_ROW_RETURN}
 LIMIT 1
 """
 
@@ -368,12 +382,6 @@ def fetch_sorted_tables() -> list[dict[str, Any]]:
         }
         for r in rows
     ]
-
-
-def fetch_table_by_id(table_id: str) -> dict[str, Any] | None:
-    """Return a single Table row by id, or None if not found."""
-    rows = get_neo4j_conn().query_read(_FETCH_TABLE_BY_ID, {"table_id": table_id})
-    return rows[0] if rows else None
 
 
 def fetch_table_by_name(name: str) -> dict[str, Any] | None:

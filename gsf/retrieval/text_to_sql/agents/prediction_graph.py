@@ -52,6 +52,7 @@ def _pql_tables(pql: str) -> set[str]:
 def _enrich_relevant_tables(
     relevant_tables: list[dict[str, Any]],
     examples: list[dict[str, str]],
+    allowed_table_ids: set[str] | None,
 ) -> list[dict[str, Any]]:
     """Add any table referenced by a retrieved PQL example but missing from
     ``relevant_tables``, resolved from the catalog by name.
@@ -72,6 +73,12 @@ def _enrich_relevant_tables(
             continue
         row = fetch_table_by_name(name)
         if not row or not row.get("name"):
+            continue
+        if (
+            allowed_table_ids is not None
+            and str(row.get("id") or "") not in allowed_table_ids
+        ):
+            logger.info("kumo: skipped out-of-zone table from PQL example: %s", name)
             continue
         enriched.append(
             {
@@ -94,6 +101,32 @@ def _enrich_relevant_tables(
     return enriched
 
 
+def _filter_examples_for_allowed_tables(
+    examples: list[dict[str, str]],
+    allowed_table_ids: set[str] | None,
+) -> list[dict[str, str]]:
+    """Keep only PQL examples that reference exclusively authorized tables."""
+    if allowed_table_ids is None:
+        return examples
+    allowed_examples: list[dict[str, str]] = []
+    for example in examples:
+        table_names = _pql_tables(example.get("query") or "")
+        if not table_names:
+            continue
+        table_ids = {
+            str(row.get("id") or "")
+            for name in table_names
+            if (row := fetch_table_by_name(name)) is not None
+        }
+        if (
+            table_ids
+            and table_ids <= allowed_table_ids
+            and len(table_ids) == len(table_names)
+        ):
+            allowed_examples.append(example)
+    return allowed_examples
+
+
 class PredictionGraphAgent(BaseAgent):
     """Build the KumoRFM graph/model for the relevant tables (prediction phase 1)."""
 
@@ -107,13 +140,23 @@ class PredictionGraphAgent(BaseAgent):
         # and use the catalog-derived join paths as the graph's table relationships.
         relevant_tables = path_state.get("relevant_tables") or []
         join_paths = path_state.get("attribute_join_paths") or []
+        allowed_table_ids = state["zone_access_scope"].table_ids
+        if allowed_table_ids is not None:
+            relevant_tables = [
+                table
+                for table in relevant_tables
+                if str(table.get("id") or "") in allowed_table_ids
+            ]
         # Few-shot PQL examples retrieved from the verified PqlAnalysis corpus.
         examples = fetch_pql_examples(
             state.get("semantic_retriever"), get_original_question(state)
         )
+        examples = _filter_examples_for_allowed_tables(examples, allowed_table_ids)
         # Enrich the table set with any table the examples reference before the
         # graph is built, so the LLM can never cite a table absent from the graph.
-        relevant_tables = _enrich_relevant_tables(relevant_tables, examples)
+        relevant_tables = _enrich_relevant_tables(
+            relevant_tables, examples, allowed_table_ids
+        )
 
         try:
             context = build_prediction_context(

@@ -27,6 +27,7 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
 
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
+from gsf.retrieval.data_access.zone_access import filter_hits_by_allowed_ids
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import (
@@ -53,19 +54,24 @@ def _search_by_label(
     entity: str,
     label: str,
     k: int,
-    database_name: str | None = None,
+    allowed_ids: set[str] | None,
 ) -> list[dict]:
-    """Return up to *k* VDB hits for *label*."""
+    """Return up to *k* authorized VDB hits for *label*.
+
+    The VDB applies the ID allow-list before top-k ranking; the local filter
+    remains defense-in-depth for older or alternate VDB implementations.
+    """
     try:
-        return list(
+        hits = list(
             search_semantic_index(
                 retriever,
                 entity,
                 label_filter=[label],
                 per_label_k=k,
-                database_name=database_name,
+                allowed_ids=allowed_ids,
             )
         )
+        return filter_hits_by_allowed_ids(hits, allowed_ids)[:k]
     except Exception:
         logger.warning("%s search failed for entity %r", label, entity, exc_info=True)
         return []
@@ -333,7 +339,7 @@ class CandidateRetrievalAgent(BaseAgent):
         entities: list[str] = path_state.get("entities") or []
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
-        target_db = path_state.get("target_db")
+        scope = state["zone_access_scope"]
 
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
@@ -350,7 +356,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         question,
                         Labels.CUSTOM_ANALYSIS,
                         3,
-                        target_db,
+                        scope.custom_analysis_ids,
                     ),
                 ),
                 (
@@ -360,7 +366,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         question,
                         LABEL_SQL_ATTRIBUTE,
                         3,
-                        target_db,
+                        scope.sql_attribute_ids,
                     ),
                 ),
                 *[
@@ -371,7 +377,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             entity,
                             LABEL_COLUMN_ATTRIBUTE,
                             2,
-                            target_db,
+                            scope.column_attribute_ids,
                         ),
                     )
                     for entity in clean_entities
@@ -392,6 +398,16 @@ class CandidateRetrievalAgent(BaseAgent):
                         all_sql_attr_hits = result
                     else:
                         all_col_attr_hits.extend(result)
+
+        all_col_attr_hits = filter_hits_by_allowed_ids(
+            all_col_attr_hits, scope.column_attribute_ids
+        )
+        all_custom_hits = filter_hits_by_allowed_ids(
+            all_custom_hits, scope.custom_analysis_ids
+        )
+        all_sql_attr_hits = filter_hits_by_allowed_ids(
+            all_sql_attr_hits, scope.sql_attribute_ids
+        )
 
         all_custom_hits, all_sql_attr_hits = _llm_filter_both(
             llm, question, all_custom_hits, all_sql_attr_hits

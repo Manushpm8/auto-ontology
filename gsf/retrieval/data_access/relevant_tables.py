@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from gsf.retrieval.data_access.semantic_search import (
+    PER_LABEL_LIMIT,
     search_semantic_index,
 )
 
@@ -206,17 +207,18 @@ def get_relevant_tables(
     initial_question,
     k: int | None = None,
     database_name: str | None = None,
-    schema_name: str | None = None,
+    allowed_table_ids: set[str] | None = None,
 ) -> list[dict]:
-    """Semantic search over the same vector index as candidate retrieval, label ``table`` only."""
+    """Search table embeddings, optionally limited to authorized table IDs."""
+    search_k = k if k is not None else PER_LABEL_LIMIT
     try:
         raw_rows = search_semantic_index(
             retriever,
             initial_question,
             label_filter=[Labels.TABLE],
-            per_label_k=k,
+            per_label_k=search_k,
             database_name=database_name,
-            schema_name=schema_name,
+            allowed_ids=allowed_table_ids,
         )
     except Exception:
         logger.exception("get_relevant_tables: vector search failed")
@@ -232,6 +234,8 @@ def get_relevant_tables(
         lab = row.get("label") or Labels.TABLE
         if name is None and tid is None:
             continue
+        if allowed_table_ids is not None and str(tid or "") not in allowed_table_ids:
+            continue
         entry = _normalize_table_to_relevant_shape(
             {
                 "name": name,
@@ -245,4 +249,4 @@ def get_relevant_tables(
         )
         relevant_tables_list.append(entry)
 
-    return relevant_tables_list
+    return relevant_tables_list[:k] if k is not None else relevant_tables_list
