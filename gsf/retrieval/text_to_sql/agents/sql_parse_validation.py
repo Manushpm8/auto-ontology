@@ -86,7 +86,7 @@ def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
 
     read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
     try:
-        parsed = sqlglot.parse_one(sql, read=read)
+        parsed = parse_one(sql, read=read)
     except Exception:
         # Unparseable here → let the normal parse validator handle it.
         return ""

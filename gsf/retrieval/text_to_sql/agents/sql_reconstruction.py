@@ -199,7 +199,6 @@ class SQLReconstructionAgent(BaseAgent):
 
         existing_ids = {str(t.get("id", "")) for t in existing_tables if t.get("id")}
 
-        database_name = (state.get("path_state") or {}).get("target_db")
         combined: list[dict] = []
         for query_text in search_queries:
             try:
