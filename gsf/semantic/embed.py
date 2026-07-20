@@ -190,6 +190,7 @@ def embed_all_semantic_nodes(
                     "description": term.get("description") or "",
                     "synonyms": term.get("synonyms") or [],
                     "id": term.get("id"),
+                    "schema_names": term.get("schema_names") or [],
                 },
                 attrs_by_term.get(term_name, []),
             )
@@ -256,6 +257,9 @@ def _build_rows(
         }
         if term.get("id"):
             fields["id"] = term["id"]
+        schema_names = [s for s in (term.get("schema_names") or []) if s]
+        if schema_names:
+            fields["schema_names"] = schema_names
         rows.append(
             {
                 "text": text,
@@ -285,7 +289,7 @@ def _build_rows(
             if a.get("id")
             else f"semantic:attr:{owner}:{a.get('source_column')}"
         )
-        fields = {
+        fields: dict[str, Any] = {
             "label": "ColumnAttribute",
             "name": attr_name,
             "term_name": owner,
@@ -293,6 +297,8 @@ def _build_rows(
             "database_name": database_name,
             "source_path": path,
         }
+        if a.get("schema_name"):
+            fields["schema_name"] = a["schema_name"]
         if a.get("id"):
             fields["id"] = a["id"]
         rows.append(
