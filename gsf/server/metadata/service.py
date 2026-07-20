@@ -2,11 +2,11 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Orchestration for ``get_data_for_text`` — the text → PQL / pre-PQL data flow.
+"""Orchestration for ``text-to-data`` / ``text-to-pql`` — the text → data / PQL flows.
 
 Reuses the front of the text-to-SQL prediction pipeline in-process: it runs the
 graph up to ``prepare_candidates`` to gather the data objects (relevant tables,
-join paths, columns), then — for PQL output — reuses the ``prepare_prediction_graph``
+join paths, columns), then — for ``text_to_pql`` — reuses the ``prepare_prediction_graph``
 node to build the KumoRFM context and generates the PQL WITHOUT running inference.
 
 The pipeline shares retriever/connector state and is not safe to run in parallel
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Literal
+from typing import Any
 
 from gsf.dal.datasources import fetch_columns_for_table
 from gsf.retrieval.kumo import PredictionContext
@@ -89,67 +89,72 @@ def _relevant_table_columns(
     return out
 
 
-def get_data_for_text(question: str, output_type: Literal["json", "pql"]) -> dict:
-    """Run the prediction flow for ``question`` and return PQL or the pre-PQL data.
+def _prepare(question: str) -> dict:
+    """Run the shared front of the prediction flow (up to ``prepare_candidates``).
 
-    * ``output_type == "pql"`` → the PQL generated for the text (generation only, no
-      KumoRFM prediction).
-    * ``output_type == "json"`` → the data objects gathered before PQL creation:
-      the relevant tables, their catalog join paths, and each table's column list.
+    Returns the accumulated ``AgentState``; ``state["path_state"]`` holds the
+    pre-PQL data objects (``relevant_tables``, ``attribute_join_paths``).
+    """
+    if llm_client is None:
+        raise PredictionFlowError("LLM client is not configured.")
+    payload = _build_payload(question)
+    return run_until_node(payload, _STOP_NODE)
+
+
+def text_to_data(question: str) -> dict:
+    """Return the data objects gathered before PQL creation for ``question``:
+    the relevant tables, their catalog join paths, and each table's column list.
 
     Raises :class:`PredictionFlowError` when the flow cannot produce a result.
     """
     with _run_lock:
-        return _run(question, output_type)
-
-
-def _run(question: str, output_type: Literal["json", "pql"]) -> dict:
-    if llm_client is None:
-        raise PredictionFlowError("LLM client is not configured.")
-
-    payload = _build_payload(question)
-    state = run_until_node(payload, _STOP_NODE)
-    path_state = state.get("path_state", {})
-    relevant_tables = path_state.get("relevant_tables") or []
-    join_paths = path_state.get("attribute_join_paths") or []
-
-    if output_type == "json":
+        state = _prepare(question)
+        path_state = state.get("path_state", {})
+        relevant_tables = path_state.get("relevant_tables") or []
         return {
-            "output_type": "json",
             "question": question,
             "relevant_tables": relevant_tables,
-            "join_paths": join_paths,
+            "join_paths": path_state.get("attribute_join_paths") or [],
             "columns": _relevant_table_columns(relevant_tables),
         }
 
-    # output_type == "pql": reuse the prepare_prediction_graph node to build the
-    # KumoRFM context (few-shot retrieval, table enrichment, graph/model), then
-    # generate the PQL without running a prediction.
-    prep = PredictionGraphAgent().execute(state)
-    if prep.get("decision") != "predict_ready":
-        final = (prep.get("path_state") or {}).get("final_response") or {}
-        raise PredictionFlowError(
-            final.get("response") or "Could not prepare a prediction graph."
+
+def text_to_pql(question: str) -> dict:
+    """Return the PQL generated for ``question`` (generation only, no prediction).
+
+    Reuses the ``prepare_prediction_graph`` node to build the KumoRFM context
+    (few-shot retrieval, table enrichment, graph/model), then generates the PQL
+    without running a KumoRFM prediction.
+
+    Raises :class:`PredictionFlowError` when the flow cannot produce a result.
+    """
+    with _run_lock:
+        state = _prepare(question)
+
+        prep = PredictionGraphAgent().execute(state)
+        if prep.get("decision") != "predict_ready":
+            final = (prep.get("path_state") or {}).get("final_response") or {}
+            raise PredictionFlowError(
+                final.get("response") or "Could not prepare a prediction graph."
+            )
+
+        context: PredictionContext = prep["path_state"]["prediction_context"]
+        result = generate_pql_only(
+            question,
+            llm=state["llm"],
+            kumo_model=context.kumo_model,
+            connector=context.connector,
+            graph_ddl=context.graph_ddl,
+            graph_edges=context.graph_edges,
+            graph_col_stypes=context.graph_col_stypes,
+            examples=context.examples,
         )
+        if not result.success:
+            raise PredictionFlowError(result.error or "PQL could not be generated.")
 
-    context: PredictionContext = prep["path_state"]["prediction_context"]
-    result = generate_pql_only(
-        question,
-        llm=state["llm"],
-        kumo_model=context.kumo_model,
-        connector=context.connector,
-        graph_ddl=context.graph_ddl,
-        graph_edges=context.graph_edges,
-        graph_col_stypes=context.graph_col_stypes,
-        examples=context.examples,
-    )
-    if not result.success:
-        raise PredictionFlowError(result.error or "PQL could not be generated.")
-
-    return {
-        "output_type": "pql",
-        "question": question,
-        "pql": result.pql,
-        "entity_sql": result.entity_sql,
-        "attempts": result.attempts,
-    }
+        return {
+            "question": question,
+            "pql": result.pql,
+            "entity_sql": result.entity_sql,
+            "attempts": result.attempts,
+        }

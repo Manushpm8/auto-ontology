@@ -2,11 +2,9 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""API route for turning free-text into PQL (or the pre-PQL data objects)."""
+"""API routes for turning free-text into data objects or PQL."""
 
 from __future__ import annotations
-
-from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -16,25 +14,34 @@ from gsf.server.metadata import service as dal
 router = APIRouter()
 
 
-class DataForTextRequest(BaseModel):
-    """Payload for ``POST /data-for-text``."""
+class TextRequest(BaseModel):
+    """Payload for the text-to-data / text-to-pql routes."""
 
     question: str = Field(..., min_length=1)
-    # "pql" → return the PQL created for the text; "json" → return the data objects
-    # gathered before the PQL is created (relevant tables, join paths, columns).
-    output_type: Literal["json", "pql"] = "pql"
 
 
-@router.post("/data-for-text")
-def get_data_for_text(body: DataForTextRequest) -> dict:
-    """Run the prediction flow for a question.
+@router.post("/text-to-data")
+def text_to_data(body: TextRequest) -> dict:
+    """Return the data objects gathered before PQL creation for a question:
+    the relevant tables, their catalog join paths, and each table's columns.
 
-    Returns the PQL generated for the text (``output_type="pql"``), or the data
-    objects created before PQL generation (``output_type="json"``). Returns 422
-    when the flow cannot produce a result for the question.
+    Returns 422 when the flow cannot produce a result for the question.
     """
     try:
-        result = dal.get_data_for_text(body.question, body.output_type)
+        result = dal.text_to_data(body.question)
+    except dal.PredictionFlowError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": result}
+
+
+@router.post("/text-to-pql")
+def text_to_pql(body: TextRequest) -> dict:
+    """Return the PQL generated for a question (generation only, no prediction).
+
+    Returns 422 when the flow cannot produce a result for the question.
+    """
+    try:
+        result = dal.text_to_pql(body.question)
     except dal.PredictionFlowError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": result}
