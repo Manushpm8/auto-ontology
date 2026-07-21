@@ -45,7 +45,30 @@ def list_terms(
     terms, _attrs = terms_dal.fetch_all_terms_and_attributes(
         zone_ids=zone_ids, search=q
     )
-    return {"data": terms, "count": len(terms)}
+    sql_attributes = sql_attr_dal.fetch_sql_attributes(zone_ids=zone_ids)
+    column_attribute_counts = terms_dal.fetch_column_attribute_counts(zone_ids=zone_ids)
+    sql_attribute_counts = sql_attr_dal.fetch_sql_attribute_counts(zone_ids=zone_ids)
+    related_counts = terms_dal.fetch_related_terms_counts(zone_ids=zone_ids)
+    return {
+        "data": terms,
+        "count": len(terms),
+        "sql_attributes": {
+            "data": sql_attributes,
+            "count": len(sql_attributes),
+        },
+        "column_attribute_counts": {
+            "data": column_attribute_counts,
+            "count": len(column_attribute_counts),
+        },
+        "sql_attribute_counts": {
+            "data": sql_attribute_counts,
+            "count": len(sql_attribute_counts),
+        },
+        "related_counts": {
+            "data": related_counts,
+            "count": len(related_counts),
+        },
+    }
 
 
 @router.get("/terms/get-all")
@@ -61,51 +84,6 @@ def get_all_terms(
     zones.
     """
     return term_service.get_all_terms_with_attributes(zone_ids=zone_ids)
-
-
-@router.get("/terms/column-attributes")
-def list_term_column_attributes(
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """Return ColumnAttribute nodes (zone-scoped when zone_ids provided)."""
-    attrs = terms_dal.fetch_column_attributes(zone_ids=zone_ids)
-    return {"data": attrs, "count": len(attrs)}
-
-
-@router.get("/terms/column-attributes/counts")
-def list_term_column_attribute_counts(
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """Return per-term ColumnAttribute counts, zone-scoped when zone_ids are provided."""
-    counts = terms_dal.fetch_column_attribute_counts(zone_ids=zone_ids)
-    return {"data": counts, "count": len(counts)}
-
-
-@router.get("/terms/sql-attributes")
-def list_term_sql_attributes(
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """Return SqlAttribute nodes (zone-scoped when zone_ids provided)."""
-    attrs = sql_attr_dal.fetch_sql_attributes(zone_ids=zone_ids)
-    return {"data": attrs, "count": len(attrs)}
-
-
-@router.get("/terms/sql-attributes/counts")
-def list_term_sql_attribute_counts(
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """Return per-term SqlAttribute counts, zone-scoped when zone_ids are provided."""
-    counts = sql_attr_dal.fetch_sql_attribute_counts(zone_ids=zone_ids)
-    return {"data": counts, "count": len(counts)}
-
-
-@router.get("/terms/related-counts")
-def list_related_terms_counts(
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """Return per-term related-term counts, zone-scoped when zone_ids are provided."""
-    counts = terms_dal.fetch_related_terms_counts(zone_ids=zone_ids)
-    return {"data": counts, "count": len(counts)}
 
 
 @router.get("/terms/{term_id}/column-attributes")
@@ -134,24 +112,6 @@ def list_term_sql_attributes_by_id(
     """
     attrs = sql_attr_dal.fetch_sql_attributes_by_term_id(term_id, zone_ids=zone_ids)
     return {"data": attrs, "count": len(attrs)}
-
-
-@router.get("/terms/{term_id}/related-terms")
-def list_related_terms(
-    term_id: str,
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """Return Term nodes related to the given term via co-located tables.
-
-    A related term shares at least one table with *term_id*, reached
-    through any of REPRESENTS, ColumnAttribute PROPERTY_OF, or SEMANTIC_FK
-    join paths — see ``fetch_related_terms`` for the full breakdown.
-
-    Zone-scoped when zone_ids are provided, so related terms outside the
-    caller's zones are never surfaced as clickable chips.
-    """
-    related = terms_dal.fetch_related_terms(term_id, zone_ids=zone_ids)
-    return {"data": related, "count": len(related)}
 
 
 @router.patch("/terms/{term_id}")
@@ -202,7 +162,7 @@ def get_term(
     term_id: str,
     zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
-    """Return a single Term node by id, including its resolved zones.
+    """Return a single Term node by id, including zones and related terms.
 
     Zone-scoped when zone_ids are provided: a term that also represents an
     out-of-zone table is treated as not found, so a viewer can't bypass the
@@ -211,4 +171,5 @@ def get_term(
     term = terms_dal.get_full_term_by_id(term_id, zone_ids=zone_ids)
     if term is None:
         raise HTTPException(status_code=404, detail="Term not found")
+    term["related_terms"] = terms_dal.fetch_related_terms(term_id, zone_ids=zone_ids)
     return {"data": term}

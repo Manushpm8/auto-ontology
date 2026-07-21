@@ -27,6 +27,7 @@ export type TermTable = {
 export type TermDetail = Term & {
 	table_count: number;
 	tables: TermTable[];
+	related_terms: RelatedTerm[];
 };
 
 export type ColumnAttribute = {

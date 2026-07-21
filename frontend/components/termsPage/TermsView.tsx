@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
@@ -173,7 +173,6 @@ export const TermsView = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [searchQuery, setSearchQuery] = useState('');
 	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
-	const loadedAuxRef = useRef(false);
 	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
 	const [sqlAttrsEpoch, setSqlAttrsEpoch] = useState(0);
 	const [sqlAttrName, setSqlAttrName] = useState('');
@@ -214,23 +213,9 @@ export const TermsView = () => {
 
 		(async () => {
 			setLoading(true);
-			// SQL attributes/counts/related counts don't depend on the term
-			// search — only fetch them once, up front, and just re-fetch `terms`
-			// as the (debounced) search query changes.
-			const loadAux = !loadedAuxRef.current;
-			const [termsRes, sqlAttrsRes, columnAttrCountsRes, sqlAttrCountsRes, relatedCountsRes] =
-				await Promise.all([
-					termsApi.list(debouncedSearchQuery ? { q: debouncedSearchQuery } : undefined),
-					// Only SQL attributes need the full list here (to resolve the
-					// focused SQL attribute's title/body) — Column Attribute counts
-					// come from the lightweight counts endpoint, matching how
-					// Exploration renders the same numbers without downloading
-					// every attribute up front.
-					loadAux ? termsApi.listSqlAttributes() : Promise.resolve(null),
-					loadAux ? termsApi.listColumnAttributeCounts() : Promise.resolve(null),
-					loadAux ? termsApi.listSqlAttributeCounts() : Promise.resolve(null),
-					loadAux ? termsApi.listRelatedCounts() : Promise.resolve(null),
-				]);
+			const termsRes = await termsApi.list(
+				debouncedSearchQuery ? { q: debouncedSearchQuery } : undefined,
+			);
 			if (cancelled) return;
 
 			if (termsRes.error) {
@@ -239,37 +224,26 @@ export const TermsView = () => {
 			} else {
 				setError(null);
 				setTerms(termsRes.data ?? []);
-			}
-
-			if (sqlAttrsRes != null && !sqlAttrsRes.error) {
-				setSqlAttrs(sqlAttrsRes.data ?? []);
-			}
-
-			if (columnAttrCountsRes != null && !columnAttrCountsRes.error) {
+				setSqlAttrs(termsRes.sql_attributes.data ?? []);
 				const map = new Map<string, number>();
-				for (const { term_id, count } of columnAttrCountsRes.data ?? []) {
+				for (const { term_id, count } of termsRes.column_attribute_counts.data ?? []) {
 					map.set(term_id, count);
 				}
 				setColumnAttrCountsMap(map);
-			}
 
-			if (sqlAttrCountsRes != null && !sqlAttrCountsRes.error) {
-				const map = new Map<string, number>();
-				for (const { term_id, count } of sqlAttrCountsRes.data ?? []) {
-					map.set(term_id, count);
+				const sqlAttributeCountsMap = new Map<string, number>();
+				for (const { term_id, count } of termsRes.sql_attribute_counts.data ?? []) {
+					sqlAttributeCountsMap.set(term_id, count);
 				}
-				setSqlAttrCountsMap(map);
-			}
+				setSqlAttrCountsMap(sqlAttributeCountsMap);
 
-			if (relatedCountsRes != null && !relatedCountsRes.error) {
-				const map = new Map<string, number>();
-				for (const { term_id, count } of relatedCountsRes.data ?? []) {
-					map.set(term_id, count);
+				const relatedCountsMap = new Map<string, number>();
+				for (const { term_id, count } of termsRes.related_counts.data ?? []) {
+					relatedCountsMap.set(term_id, count);
 				}
-				setRelatedCountsMap(map);
+				setRelatedCountsMap(relatedCountsMap);
 			}
 
-			loadedAuxRef.current = true;
 			setLoading(false);
 		})();
 
@@ -654,11 +628,10 @@ export const TermsView = () => {
 	const getSinglePage = useCallback(
 		async (termId: string): Promise<SinglePageFormat> => {
 			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, attrsRes, sqlAttrsRes, relatedRes, userZonesRes] = await Promise.all([
+			const [res, attrsRes, sqlAttrsRes, userZonesRes] = await Promise.all([
 				termsApi.get(termId),
 				termsApi.getColumnAttributes(termId),
 				termsApi.getSqlAttributes(termId),
-				termsApi.getRelatedTerms(termId),
 				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
 			]);
 			if (res.error || !res.data) {
@@ -670,7 +643,7 @@ export const TermsView = () => {
 			const term = res.data;
 			const termAttrs = attrsRes?.data ?? [];
 			const termSqlAttrs = sqlAttrsRes?.data ?? [];
-			const relatedTerms = relatedRes?.data ?? [];
+			const relatedTerms = term.related_terms ?? [];
 
 			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
 			const userZoneIds: string[] | null =
