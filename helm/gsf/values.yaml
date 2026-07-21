@@ -47,6 +47,13 @@ kumoRfmApiKey: ""
 kumoRfmApiUrl: "https://kumorfm.ai/api"
 embedEndpoint: "https://integrate.api.nvidia.com/v1"
 embedModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
+# VAST in-table vector search: the embedding model that produced the stored
+# vector columns (fixed_size_list<float>[N]). Leave empty to disable the feature.
+vastEmbedEndpoint: ""
+vastEmbedModel: ""
+vastEmbedApiKey: ""
+vastEmbedDimensions: ""
+vastEmbedInputType: ""
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
 # HashiCorp Vault (AppRole) credentials for pulling secrets at runtime.

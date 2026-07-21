@@ -49,8 +49,53 @@ from gsf.retrieval.text_to_sql.evidence_hints import (
     extract_evidence,
 )
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
+from gsf.connectors.vast_embedding import vector_type_dimensions
 
 logger = logging.getLogger(__name__)
+
+# Placeholder the LLM is told to emit for a vector search; SQLExecutionAgent
+# replaces it with the embedded main-entity vector literal before running.
+QUERY_VECTOR_PLACEHOLDER = ":query_vector"
+
+
+def _detect_vector_column(tables: list[dict]) -> dict | None:
+    """Return the first embedding column among *tables*, or ``None``.
+
+    Looks for an Arrow ``fixed_size_list<item: float ...>[N]`` column (a VAST
+    vector column). The returned dict carries the column name and its
+    dimensionality so the SQL prompt can steer a server-side cosine search.
+    """
+    for table in tables or []:
+        columns = table.get("columns")
+        if not isinstance(columns, list):
+            continue
+        for col in columns:
+            if not isinstance(col, dict):
+                continue
+            dimensions = vector_type_dimensions(col.get("data_type"))
+            if dimensions:
+                return {
+                    "column": col.get("name", ""),
+                    "table": table.get("name", ""),
+                    "dimensions": dimensions,
+                }
+    return None
+
+
+def _vector_search_hint(vector_search: dict) -> str:
+    """Prompt block steering the LLM to a placeholder-based cosine search."""
+    return (
+        "\nVECTOR SEARCH:\n"
+        f"Table '{vector_search['table']}' has an embedding column "
+        f"'{vector_search['column']}' (a {vector_search['dimensions']}-dim float "
+        "vector). If the question asks to find or rank rows by semantic "
+        "similarity to a concept, ORDER BY "
+        f"array_cosine_distance({vector_search['column']}, "
+        f"{QUERY_VECTOR_PLACEHOLDER}) ASC (closest first) and apply LIMIT. Write "
+        f"the token '{QUERY_VECTOR_PLACEHOLDER}' literally — it is replaced with "
+        "the embedded search vector before execution. Never write raw vector "
+        "numbers. Ignore this if the question is not a similarity search.\n"
+    )
 
 
 def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
@@ -303,6 +348,17 @@ class SQLFromCandidatesAgent(BaseAgent):
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
 
+        # Detect an embedding column so the prompt can steer a server-side cosine
+        # search; the actual query vector is bound at execution time.
+        vector_search = _detect_vector_column(relevant_tables)
+        if vector_search:
+            self.logger.info(
+                "Vector search available on %s.%s (%d dims)",
+                vector_search["table"],
+                vector_search["column"],
+                vector_search["dimensions"],
+            )
+
         self.logger.info(
             "Semantic context: anchor=%s, join_paths=%d, custom_analyses=%d, "
             "sql_attributes=%d, fallback_tables=%d",
@@ -351,6 +407,8 @@ class SQLFromCandidatesAgent(BaseAgent):
                 evidence_hints = build_evidence_hints_block(original_question)
                 if evidence_hints:
                     observation_block += f"\n{evidence_hints}\n"
+            if vector_search:
+                observation_block += _vector_search_hint(vector_search)
 
             # Build custom analyses section for user prompt
             ca_section = ""
@@ -537,6 +595,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                     "sql_generation_result": response,  # Keep as object (Pydantic model)
                     "relevant_tables": relevant_tables if has_sql else [],
                     "custom_analyses_used": custom_analyses_used,
+                    "vector_search": vector_search,
                 },
                 "decision": "constructable",
             }

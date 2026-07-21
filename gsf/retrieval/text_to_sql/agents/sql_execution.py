@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
-from gsf.retrieval.text_to_sql.state import AgentState
+from gsf.retrieval.text_to_sql.state import AgentState, get_question_for_processing
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 logger = logging.getLogger(__name__)
@@ -27,11 +27,63 @@ class QueryResponse:
         self.error = error
 
 
+#: Token the SQL-construction prompt tells the LLM to emit for a vector search.
+QUERY_VECTOR_PLACEHOLDER = ":query_vector"
+
+
 def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
     """Strip invalid schema qualifiers for dialects that don't use them."""
     if (dialect or "").lower() == "sqlite":
         return re.sub(r"\bPUBLIC\.", "", sql, flags=re.IGNORECASE)
     return sql
+
+
+def _bind_query_vector(
+    sql: str, path_state: dict, query_text: str = ""
+) -> tuple[str, Optional[str]]:
+    """Replace the ``:query_vector`` placeholder with the embedded search text.
+
+    Embeds *query_text* (the user's search question) with the VAST embedding
+    model and substitutes the ``[..]::VECTOR(FLOAT, N)`` literal. The full
+    question is used rather than the first extracted entity because entity
+    extraction often surfaces schema words first (e.g. "URLs"/"titles" for
+    "List URLs whose titles relate to Mountains"), which embed to the wrong
+    concept; it falls back to ``entities[0]`` only when no question is given.
+
+    Returns ``(sql, error)``; on any failure ``error`` is set and the SQL is
+    returned unchanged so the caller can surface a clear message rather than
+    executing an unbound placeholder.
+    """
+    if not sql or QUERY_VECTOR_PLACEHOLDER not in sql:
+        return sql, None
+
+    text = (query_text or "").strip()
+    if not text:
+        entities = path_state.get("entities") or []
+        text = (entities[0] if entities else "").strip()
+    if not text:
+        return sql, "vector search requested but no query text was available"
+
+    try:
+        from gsf.connectors.vast_embedding import (
+            VastEmbeddingParams,
+            embed_query,
+            vector_sql_literal,
+        )
+
+        params = VastEmbeddingParams.from_env()
+        vector = embed_query(text, params)
+        literal = vector_sql_literal(vector, params.dimensions)
+    except Exception as exc:  # config missing, endpoint error, dim mismatch
+        return sql, f"failed to embed search text {text!r}: {exc}"
+
+    logger.info(
+        "Bound %s from search text %r (%d dims)",
+        QUERY_VECTOR_PLACEHOLDER,
+        text,
+        params.dimensions,
+    )
+    return sql.replace(QUERY_VECTOR_PLACEHOLDER, literal), None
 
 
 def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
@@ -96,6 +148,17 @@ class SQLExecutionAgent(BaseAgent):
         connectors = state.get("connectors") or []
         relevant_tables = path_state.get("relevant_tables", [])
         connector = resolve_connector_from_tables(relevant_tables, connectors)
+
+        # Bind the query vector for a semantic search (no-op without the
+        # placeholder). Embed the search question, not the first entity. Surface
+        # a bind failure as invalid_sql so the reason is clear instead of
+        # executing an unbound placeholder.
+        question = get_question_for_processing(state)
+        sql_code, bind_error = _bind_query_vector(sql_code, path_state, question)
+        if bind_error:
+            self.logger.warning("Query-vector bind failed: %s", bind_error)
+            path_state["error"] = bind_error
+            return {"decision": "invalid_sql", "path_state": path_state}
 
         response_from_db = _run_sql(sql_code, connector)
 
