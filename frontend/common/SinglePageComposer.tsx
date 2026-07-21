@@ -22,17 +22,17 @@ import {
 	type ComposerSection,
 	type ComposerZonesSection,
 } from '@/types/composer-section';
-import { Icon, IconName } from '@/components/icons';
-import { TagInput } from '@/components/TagInput';
-import { Table } from '@/components/Table';
-import { TruncatedText } from '@/components/TruncatedText';
-import { SqlBlock } from '@/components/SqlBlock';
+import { Icon, IconName } from '@/common/icons';
+import { TagInput } from '@/common/TagInput';
+import { Table } from '@/common/Table';
+import { TruncatedText } from '@/common/TruncatedText';
+import { SqlBlock } from '@/common/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import type { TermZone } from '@/types/terms';
-import { Toast } from '@/components/Toast';
-import { Label } from '@/components/Label';
+import { Toast } from '@/common/Toast';
+import { Label } from '@/common/Label';
 
 export type ComposerEditValue = string | string[];
 

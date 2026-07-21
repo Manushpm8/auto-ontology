@@ -8,19 +8,19 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
-import { Icon, IconName } from '@/components/icons';
-import { ConfirmModal, ModalCreateNewItem } from '@/components/modal';
-import { SearchInput } from '@/components/SearchInput';
+import { Icon, IconName } from '@/common/icons';
+import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
+import { SearchInput } from '@/common/SearchInput';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { zonesApi } from '@/api/zones';
 import { useSession } from '@/auth/auth-client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
-import { Label } from '@/components/Label';
+import { Label } from '@/common/Label';
 import { ComposerSectionKind } from '@/enums/datasources';
-import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
-import { SqlEditor } from '@/components/SqlBlock';
+import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
+import { SqlEditor } from '@/common/SqlBlock';
 import type { SqlAttribute, Term } from '@/types/terms';
 
 type TermCardProps = {
