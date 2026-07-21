@@ -97,7 +97,7 @@ def _describe_column_batch(
         return {}
 
     # The prompt annotates each column as "<name> (<dtype>)". When a column name
-    # # contains spaces or parentheses (e.g. BIRD's "Academic Year",
+    # contains spaces or parentheses (e.g. BIRD's "Academic Year",
     # "Charter School (Y/N)"), the model sometimes echoes the annotation back as
     # the column_name (e.g. "Academic Year (TEXT)"). Resolve each returned name
     # to the requested physical name: exact match first, then the longest

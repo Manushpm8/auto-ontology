@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Data Access Layer — Neo4j queries for Zone nodes."""
+"""Neo4j data access for Zone nodes."""
 
 from __future__ import annotations
 

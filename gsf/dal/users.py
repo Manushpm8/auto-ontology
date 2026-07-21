@@ -139,11 +139,36 @@ def get_accessible_catalog_ids_for_zones(
     }
 
 
+def resolve_accessible_catalog_ids(
+    zone_ids: list[str] | None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+) -> dict[str, set[str]] | None:
+    """Resolve *zone_ids* to accessible catalog ids, reusing *data_ids_by_zone* if given.
+
+    ``get_accessible_catalog_ids_for_zones`` costs several Neo4j round trips.
+    Callers that need the resolved ids in more than one place for the same
+    request (e.g. the Exploration graph builders, which combine node,
+    zone-map and edge queries) should resolve it once via this helper and
+    thread the result through every downstream call as *data_ids_by_zone*,
+    instead of letting each one re-resolve the same *zone_ids* independently.
+
+    Returns ``None`` when *zone_ids* is ``None`` (no zone scoping — admin /
+    internal callers). Returns *data_ids_by_zone* unchanged when already
+    supplied.
+    """
+    if zone_ids is None:
+        return None
+    if data_ids_by_zone is not None:
+        return data_ids_by_zone
+    return get_accessible_catalog_ids_for_zones(zone_ids)
+
+
 def resolve_table_filter(
     zone_ids: list[str] | None,
     column_ref: str,
     *,
     extra_params: dict[str, Any] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build a Cypher ``WHERE`` clause restricting *column_ref* to accessible tables.
 
@@ -151,7 +176,9 @@ def resolve_table_filter(
     ``"attr.table_id"``.  When *zone_ids* is ``None`` no filter is applied
     (admin / internal callers who see the full unfiltered catalog).
     *extra_params* are merged into the returned params dict unchanged (e.g.
-    query parameters unrelated to zone scoping).
+    query parameters unrelated to zone scoping). Pass a pre-resolved
+    *data_ids_by_zone* (see ``resolve_accessible_catalog_ids``) to avoid a
+    repeat Neo4j round trip when the caller already has it for this request.
 
     Returns ``(where_clause, params)`` where *where_clause* is either an
     empty string or a full ``WHERE <column_ref> IN $table_ids`` clause ready
@@ -160,8 +187,8 @@ def resolve_table_filter(
     params = dict(extra_params or {})
     if zone_ids is None:
         return "", params
-    table_ids = list(get_accessible_catalog_ids_for_zones(zone_ids)["table_ids"])
-    params["table_ids"] = table_ids
+    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
+    params["table_ids"] = list(resolved["table_ids"])
     return f"WHERE {column_ref} IN $table_ids", params
 
 
