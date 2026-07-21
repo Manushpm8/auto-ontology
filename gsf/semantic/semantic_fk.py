@@ -30,7 +30,10 @@ from gsf.dal.attributes import (
     find_unlinked_fk_columns,
     merge_semantic_fk,
 )
-from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
+from gsf.utils.llm_invoke import (
+    get_non_reasoning_llm_client,
+    invoke_with_structured_output,
+)
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
 
@@ -267,7 +270,7 @@ def _llm_pick_hit(
     )
 
     result = invoke_with_structured_output(
-        get_llm_client(max_tokens=4096),
+        get_non_reasoning_llm_client(max_tokens=4096),
         [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_text)],
         FkHitSelection,
     )
