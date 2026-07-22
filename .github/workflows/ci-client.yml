@@ -65,10 +65,13 @@ jobs:
   build_image:
     name: Build frontend image
     runs-on: ubuntu-latest
-    # `defaults.run.working-directory: frontend` above applies to `run:` steps;
-    # `uses:` actions (e.g. build-push-action `context`) resolve from the repo
-    # root, so the context stays ./frontend.
-    #
+    # Override the workflow-level `working-directory: frontend`: this job's first
+    # `run:` step (Free disk space) executes before checkout, when `frontend/`
+    # does not exist yet. `uses:` actions ignore this anyway, so the
+    # build-push-action `context: ./frontend` still resolves from the repo root.
+    defaults:
+      run:
+        working-directory: .
     # The `secrets` context is not allowed in `if:` expressions, so surface the
     # NGC key as an env var and gate the nvcr.io login on that instead.
     env:
