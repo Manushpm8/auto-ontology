@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Retrieve Train Q→SQL few-shots from the semantic VDB for text-to-SQL ICL."""
+"""Retrieve Train Q→SQL few-shots from the ``train_qa`` VDB for text-to-SQL ICL."""
 
 from __future__ import annotations
 
@@ -26,29 +26,33 @@ _ENABLED = os.environ.get("BIRD_FEW_SHOT", "1").strip().lower() not in {
 
 
 def fetch_similar_questions(
-    semantic_retriever: Any,
     question: str,
     k: int = _MAX_EXAMPLES,
+    *,
+    retriever: Any | None = None,
 ) -> list[tuple[str, str]]:
     """Return up to *k* ``(question, sql)`` demos most similar to *question*.
 
-    Searches the shared ``train`` / ``FewShotQA`` corpus using a masked
-    form of *question*. Returns ``[]`` when disabled, missing, or on error.
+    Searches the ``train_qa`` / ``FewShotQA`` corpus using a masked form of
+    *question*. Returns ``[]`` when disabled, missing, or on error.
     """
-    if not _ENABLED or semantic_retriever is None or not (question or "").strip():
+    if not _ENABLED or not (question or "").strip():
         return []
 
     try:
+        from gsf.utils.retriever import get_train_qa_retriever
+
+        train_qa_retriever = retriever or get_train_qa_retriever()
         masked = mask_question(question)
         rows = search_semantic_index(
-            semantic_retriever,
+            train_qa_retriever,
             masked or question,
             label_filter=[LABEL_FEW_SHOT_QA],
             per_label_k={LABEL_FEW_SHOT_QA: k},
             database_name=FEW_SHOT_DATABASE_NAME,
         )
     except Exception:
-        logger.warning("fetch_similar_questions: semantic search failed", exc_info=True)
+        logger.warning("fetch_similar_questions: train_qa search failed", exc_info=True)
         return []
 
     examples: list[tuple[str, str]] = []

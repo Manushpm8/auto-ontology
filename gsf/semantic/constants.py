@@ -12,9 +12,9 @@ LABEL_TEXT_ATTRIBUTE = "TextAttribute"
 LABEL_ANALYSIS = "Analysis"
 
 # Cross-database Train few-shot Q→SQL demos for text-to-SQL ICL.
-# Stored in the semantic VDB under a shared database_name (not a Dev DB).
+# Stored in the dedicated ``train_qa`` pgvector collection (not semantic_layer).
 LABEL_FEW_SHOT_QA = "FewShotQA"
-FEW_SHOT_DATABASE_NAME = "train"
+FEW_SHOT_DATABASE_NAME = "train_qa"
 
 # PQL (predictive) custom analyses — the KumoRFM-prediction twin of CustomAnalysis.
 # Stored under their own label so they never mix into the SQL text-to-SQL retrieval;

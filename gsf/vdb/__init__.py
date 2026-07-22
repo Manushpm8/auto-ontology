@@ -2,13 +2,14 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""VDB initialization — data layer and semantic layer collections."""
+"""VDB initialization — data, semantic, and Train Q→SQL collections."""
 
 from gsf.infra.postgres import get_postgres_connection_string
 from gsf.vdb.postgres import PostgresVDB
 
 DATA_VDB_COLLECTION: str = "data_objects_layer"
 SEMANTIC_VDB_COLLECTION: str = "semantic_layer"
+TRAIN_QA_VDB_COLLECTION: str = "train_qa"
 VDB_SCHEMA: str = "vdb"
 
 
@@ -47,5 +48,16 @@ def get_semantic_vdb(
     return get_vdb(
         database_name=database_name,
         collection_name=SEMANTIC_VDB_COLLECTION,
+        reset=reset,
+    )
+
+
+def get_train_qa_vdb(
+    *, database_name: str | None = None, reset: bool = False
+) -> PostgresVDB:
+    """Build a PostgresVDB for Train Q→SQL few-shot examples."""
+    return get_vdb(
+        database_name=database_name,
+        collection_name=TRAIN_QA_VDB_COLLECTION,
         reset=reset,
     )

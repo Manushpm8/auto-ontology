@@ -9,10 +9,11 @@ from __future__ import annotations
 from nemo_retriever.graph.retriever import Retriever
 
 from gsf.utils.embedding import get_embed_kwargs
-from gsf.vdb import get_data_vdb, get_semantic_vdb
+from gsf.vdb import get_data_vdb, get_semantic_vdb, get_train_qa_vdb
 
 _data_retriever: Retriever | None = None
 _semantic_retriever: Retriever | None = None
+_train_qa_retriever: Retriever | None = None
 
 
 def get_data_objects_retriever() -> Retriever:
@@ -36,3 +37,14 @@ def get_semantic_objects_retriever() -> Retriever:
             embed_kwargs=get_embed_kwargs(),
         )
     return _semantic_retriever
+
+
+def get_train_qa_retriever() -> Retriever:
+    """Singleton retriever for the Train Q→SQL few-shot collection."""
+    global _train_qa_retriever
+    if _train_qa_retriever is None:
+        _train_qa_retriever = Retriever(
+            vdb_kwargs={"vdb": get_train_qa_vdb()},
+            embed_kwargs=get_embed_kwargs(),
+        )
+    return _train_qa_retriever

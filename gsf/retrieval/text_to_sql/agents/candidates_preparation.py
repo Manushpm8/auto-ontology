@@ -347,10 +347,7 @@ class CandidatePreparationAgent(BaseAgent):
         )
 
         # --- 6. Cross-database Train few-shot Q→SQL demos ---
-        retrieved_questions = fetch_similar_questions(
-            state.get("semantic_retriever"),
-            question,
-        )
+        retrieved_questions = fetch_similar_questions(question)
         # Preserve examples supplied by callers / conversation retrieval, then
         # append Train demos without introducing duplicate Q→SQL pairs.
         similar_questions = []
