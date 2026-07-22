@@ -60,7 +60,7 @@ async def lifespan(_app: FastAPI):
 
 def main() -> None:
     logger.info("Starting GSF API server — app version %s", get_app_version())
-    
+
     app = FastAPI(title="GSF API", lifespan=lifespan)
 
     app.add_middleware(
