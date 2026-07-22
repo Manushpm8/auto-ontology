@@ -54,12 +54,12 @@ def _ensure_init() -> None:
     with _init_lock:
         if _initialized:
             return
-        url = os.environ.get("KUMO_RFM_API_URL")
-        if not url:
-            raise RuntimeError("KUMO_RFM_API_URL is not set")
-        api_key = os.environ.get("KUMO_RFM_API_KEY") or None
+        api_key = os.environ.get("KUMO_RFM_API_KEY")
+        if not api_key:
+            raise RuntimeError("KUMO_RFM_API_KEY is not set")
+        url = os.environ.get("KUMO_RFM_API_URL") or None
 
-        import kumorfm.rfm as rfm
+        import kumoai.rfm as rfm
 
         before = time.perf_counter()
         rfm.init(url=url, api_key=api_key)
@@ -350,7 +350,7 @@ def build_prediction_context(
     logger.info("kumo: build_prediction_context start (initializing KumoRFM)")
     _ensure_init()
 
-    import kumorfm.rfm as rfm
+    import kumoai.rfm as rfm
 
     from gsf.retrieval.kumo.kumo_model import KumoModel, build_graph_context
 
