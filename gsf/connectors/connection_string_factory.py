@@ -61,6 +61,8 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         metadata_file = str(connection.get("metadata_file") or "").strip()
         if metadata_file:
             url += f"&metadata_file={_enc(metadata_file)}"
+        if connection.get("spider2_eval"):
+            url += "&spider2_eval=1"
         return url
 
     if conn_type == "databricks":

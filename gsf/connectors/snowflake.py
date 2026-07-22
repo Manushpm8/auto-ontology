@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
@@ -111,11 +112,12 @@ def load_metadata_allowlist(metadata_path: Path) -> MetadataAllowlist:
 
 def _parse_connection_string(
     connection_string: str,
-) -> tuple[dict[str, Any], str, str, str, str | None]:
+) -> tuple[dict[str, Any], str, str, str, str | None, bool]:
     """Parse a Snowflake URL into connector kwargs, warehouse, and names.
 
     Returns
-    ``(connect_kwargs, warehouse, physical_database, database_name, metadata_file)``.
+    ``(connect_kwargs, warehouse, physical_database, database_name,
+    metadata_file, spider2_eval)``.
 
     Multi-database loading matches SQLite: put one URL per Snowflake database in
     ``CONNECTION_STRINGS`` (different ``?database=``). ``database_name`` defaults
@@ -185,7 +187,20 @@ def _parse_connection_string(
 
     logical_name = metadata_database_from_query(query) or database
     metadata_file = query_param(query, "metadata_file")
-    return connect_kwargs, warehouse, database, logical_name, metadata_file
+    spider2_eval = (query_param(query, "spider2_eval") or "").casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    return (
+        connect_kwargs,
+        warehouse,
+        database,
+        logical_name,
+        metadata_file,
+        spider2_eval,
+    )
 
 
 class SnowflakeDatabase(SQLDatabase):
@@ -217,7 +232,10 @@ class SnowflakeDatabase(SQLDatabase):
             self._physical_database,
             self._database_name,
             metadata_file,
+            self._spider2_eval,
         ) = _parse_connection_string(connection_string)
+        self._connection: Any | None = None
+        self._connection_lock = threading.RLock()
         # Optional ingestion allowlist: an explicit structured-connection
         # selection takes precedence; otherwise a URL ``schema=`` parameter
         # scopes env-var connections such as CONNECTION_STRINGS. Without this
@@ -308,15 +326,25 @@ class SnowflakeDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        with snowflake.connector.connect(**self._connect_kwargs) as conn:
+    def _get_connection(self) -> Any:
+        """Return this connector's reusable, database-pinned Snowflake session."""
+        if self._connection is None:
+            conn = snowflake.connector.connect(**self._connect_kwargs)
             with conn.cursor() as cur:
-                # Pin warehouse + database per query so multi-DB CONNECTION_STRINGS
-                # entries cannot leak session state across connectors.
                 cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")
                 cur.execute(
                     f"USE DATABASE {_quoted_identifier(self._physical_database)}"
                 )
+            self._connection = conn
+        return self._connection
+
+    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+        # Snowflake cursors/connections are not safe for concurrent mutation.
+        # Serializing access lets schema introspection reuse one authenticated
+        # session instead of reconnecting for each metadata query.
+        with self._connection_lock:
+            conn = self._get_connection()
+            with conn.cursor() as cur:
                 if parameters:
                     cur.execute(sql, parameters)
                 else:
@@ -396,6 +424,12 @@ class SnowflakeDatabase(SQLDatabase):
 
     def get_queries(self, hours: int = 24) -> pd.DataFrame:
         """Return recent queries from ``INFORMATION_SCHEMA.QUERY_HISTORY``."""
+        if self._spider2_eval:
+            logger.info(
+                "Skipping Snowflake query history for Spider2 eval database %s",
+                self._database_name,
+            )
+            return pd.DataFrame(columns=["end_time", "query_text"])
         try:
             df = self.execute(f"""
                 SELECT
@@ -523,10 +557,11 @@ class SnowflakeDatabase(SQLDatabase):
 
     def ping(self) -> None:
         """Verify credentials, the warehouse, and that schemas are visible."""
-        with snowflake.connector.connect(**self._connect_kwargs) as conn:
-            conn.execute_string(
-                f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}; SHOW SCHEMAS"
-            )
+        self.execute("SELECT 1")
 
     def close(self) -> None:
-        """No persistent connection to close (connections are per-query)."""
+        """Close the reusable Snowflake session, if one was opened."""
+        with self._connection_lock:
+            if self._connection is not None:
+                self._connection.close()
+                self._connection = None

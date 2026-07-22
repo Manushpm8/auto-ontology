@@ -237,3 +237,78 @@ def test_query_history_excludes_blank_query_text(monkeypatch: MonkeyPatch) -> No
     database.get_queries()
 
     assert "NULLIF(TRIM(QUERY_TEXT), '') IS NOT NULL" in captured_sql
+
+
+def test_spider2_eval_skips_query_history(monkeypatch: MonkeyPatch) -> None:
+    database = SnowflakeDatabase(_connection_string("spider2_eval=1"))
+
+    def unexpected_execute(sql: str) -> pd.DataFrame:
+        raise AssertionError(f"query history should be skipped, got: {sql}")
+
+    monkeypatch.setattr(database, "execute", unexpected_execute)
+
+    result = database.get_queries()
+
+    assert database._spider2_eval is True
+    assert result.empty
+    assert result.columns.tolist() == ["end_time", "query_text"]
+
+
+def test_non_spider2_database_does_not_skip_query_history() -> None:
+    database = SnowflakeDatabase(_connection_string())
+
+    assert database._spider2_eval is False
+
+
+def test_execute_reuses_one_snowflake_connection(monkeypatch: MonkeyPatch) -> None:
+    statements: list[str] = []
+
+    class FakeCursor:
+        description = [("VALUE",)]
+
+        def __enter__(self) -> "FakeCursor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, sql: str, parameters: object = None) -> None:
+            statements.append(sql)
+
+        def fetchall(self) -> list[tuple[int]]:
+            return [(1,)]
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def cursor(self) -> FakeCursor:
+            return FakeCursor()
+
+        def close(self) -> None:
+            self.closed = True
+
+    connections: list[FakeConnection] = []
+
+    def connect(**kwargs: object) -> FakeConnection:
+        connection = FakeConnection()
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr("gsf.connectors.snowflake.snowflake.connector.connect", connect)
+    database = SnowflakeDatabase(_connection_string())
+
+    first = database.execute("SELECT 1")
+    second = database.execute("SELECT 2")
+    database.close()
+
+    assert first.iloc[0, 0] == 1
+    assert second.iloc[0, 0] == 1
+    assert len(connections) == 1
+    assert statements == [
+        'USE WAREHOUSE "warehouse"',
+        'USE DATABASE "db"',
+        "SELECT 1",
+        "SELECT 2",
+    ]
+    assert connections[0].closed is True
