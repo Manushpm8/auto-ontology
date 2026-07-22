@@ -20,7 +20,7 @@ from gsf.dal.datasources import TABLE_COUNTS_SUBQUERY
 from gsf.dal.sql_attributes import fetch_sql_attribute_counts
 from gsf.dal.terms import (
     build_term_table_maps,
-    fetch_all_terms_and_attributes,
+    fetch_all_terms,
     fetch_column_attribute_counts,
     fetch_term_table_pairs,
 )
@@ -392,16 +392,14 @@ def fetch_semantic_exploration_graph(
     *zone_ids* is resolved to accessible catalog ids exactly once (see
     ``resolve_accessible_catalog_ids``) and threaded through every
     sub-query below. Previously each of the four calls below re-resolved
-    the same *zone_ids* independently — and ``fetch_all_terms_and_attributes``
-    even did so twice internally — for five redundant Neo4j round trips
-    collapsed into the one made here.
+    the same *zone_ids* independently — and ``fetch_all_terms`` even did so
+    twice internally — for five redundant Neo4j round trips collapsed into
+    the one made here.
     """
     limit = max(1, min(limit, MAX_EXPLORATION_GRAPH_NODES))
     data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
 
-    terms, _attrs = fetch_all_terms_and_attributes(
-        zone_ids=zone_ids, data_ids_by_zone=data_ids_by_zone
-    )
+    terms = fetch_all_terms(zone_ids=zone_ids, data_ids_by_zone=data_ids_by_zone)
     column_counts = {
         row["term_id"]: row["count"]
         for row in fetch_column_attribute_counts(

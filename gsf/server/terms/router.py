@@ -48,9 +48,7 @@ def list_terms(
     and the Exploration graph can render Zone chips from this single
     response without a separate per-page zones request.
     """
-    terms, _attrs = terms_dal.fetch_all_terms_and_attributes(
-        zone_ids=zone_ids, search=q
-    )
+    terms = terms_dal.fetch_all_terms(zone_ids=zone_ids, search=q)
     # These three are per-term breakdowns (``[{term_id, count}, ...]``), used
     # by the Terms list to render per-card badges without an N+1 fetch. They
     # are plain lists (not a ``{data, count}`` envelope) — an outer ``count``
