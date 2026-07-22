@@ -19,7 +19,11 @@ import pandas as pd
 import snowflake.connector
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
-from gsf.connectors.url_utils import metadata_database_from_query, parse_query, query_param
+from gsf.connectors.url_utils import (
+    metadata_database_from_query,
+    parse_query,
+    query_param,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +299,9 @@ class SnowflakeDatabase(SQLDatabase):
         if self._metadata_tables is None or df.empty or "table_name" not in df.columns:
             return df
 
-        filtered = df[df["table_name"].astype(str).str.upper().isin(self._metadata_tables)]
+        filtered = df[
+            df["table_name"].astype(str).str.upper().isin(self._metadata_tables)
+        ]
         if (
             not filter_columns
             or self._metadata_columns is None
