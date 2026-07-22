@@ -51,45 +51,24 @@ def list_terms(
     terms, _attrs = terms_dal.fetch_all_terms_and_attributes(
         zone_ids=zone_ids, search=q
     )
-    sql_attributes = sql_attr_dal.fetch_sql_attributes(zone_ids=zone_ids)
+    # These three are per-term breakdowns (``[{term_id, count}, ...]``), used
+    # by the Terms list to render per-card badges without an N+1 fetch. They
+    # are plain lists (not a ``{data, count}`` envelope) — an outer ``count``
+    # here would mean "terms with a nonzero count", not a useful total, and
+    # the frontend never reads it. The underlying ColumnAttribute/SqlAttribute
+    # nodes themselves are fetched separately, only for the focused Term, via
+    # ``/terms/{term_id}/column-attributes`` and ``/terms/{term_id}/sql-attributes``
+    # below — this endpoint stays counts-only so the Terms list doesn't pull
+    # every attribute node in the graph on every load.
     column_attribute_counts = terms_dal.fetch_column_attribute_counts(zone_ids=zone_ids)
     sql_attribute_counts = sql_attr_dal.fetch_sql_attribute_counts(zone_ids=zone_ids)
     related_counts = terms_dal.fetch_related_terms_counts(zone_ids=zone_ids)
     return {
-        "data": terms,
-        "count": len(terms),
-        "sql_attributes": {
-            "data": sql_attributes,
-            "count": len(sql_attributes),
-        },
-        "column_attribute_counts": {
-            "data": column_attribute_counts,
-            "count": len(column_attribute_counts),
-        },
-        "sql_attribute_counts": {
-            "data": sql_attribute_counts,
-            "count": len(sql_attribute_counts),
-        },
-        "related_counts": {
-            "data": related_counts,
-            "count": len(related_counts),
-        },
+        "terms": terms,
+        "column_attribute_counts": column_attribute_counts,
+        "sql_attribute_counts": sql_attribute_counts,
+        "related_counts": related_counts,
     }
-
-
-@router.get("/terms/get-all")
-def get_all_terms(
-    zone_ids: list[str] | None = Query(default=None),
-) -> list[dict]:
-    """Return every term available to the user as a list of ``{name, attributes}``.
-
-    Each term carries a merged ``attributes`` list of its ColumnAttributes and
-    SqlAttributes, each projected to ``{name, description}``. Zone-scoped like
-    ``/terms``: ``None`` (param absent) → all terms (admin), ``[]`` → viewer with
-    no zone access → empty, ``[id, ...]`` → only terms reachable through those
-    zones.
-    """
-    return term_service.get_all_terms_with_attributes(zone_ids=zone_ids)
 
 
 @router.get("/terms/{term_id}/column-attributes")

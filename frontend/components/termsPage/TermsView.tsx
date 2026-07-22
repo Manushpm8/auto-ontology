@@ -232,22 +232,21 @@ export const TermsView = () => {
 				setTerms([]);
 			} else {
 				setError(null);
-				setTerms(termsRes.data ?? []);
-				setSqlAttrs(termsRes.sql_attributes.data ?? []);
+				setTerms(termsRes.terms ?? []);
 				const map = new Map<string, number>();
-				for (const { term_id, count } of termsRes.column_attribute_counts.data ?? []) {
+				for (const { term_id, count } of termsRes.column_attribute_counts ?? []) {
 					map.set(term_id, count);
 				}
 				setColumnAttrCountsMap(map);
 
 				const sqlAttributeCountsMap = new Map<string, number>();
-				for (const { term_id, count } of termsRes.sql_attribute_counts.data ?? []) {
+				for (const { term_id, count } of termsRes.sql_attribute_counts ?? []) {
 					sqlAttributeCountsMap.set(term_id, count);
 				}
 				setSqlAttrCountsMap(sqlAttributeCountsMap);
 
 				const relatedCountsMap = new Map<string, number>();
-				for (const { term_id, count } of termsRes.related_counts.data ?? []) {
+				for (const { term_id, count } of termsRes.related_counts ?? []) {
 					relatedCountsMap.set(term_id, count);
 				}
 				setRelatedCountsMap(relatedCountsMap);
@@ -744,6 +743,16 @@ export const TermsView = () => {
 			}
 			const attr = res.data;
 
+			// Upsert into the sqlAttrs cache so the breadcrumb title (derived
+			// from that state) is correct even on a direct deep-link, when
+			// this is the first sql-attribute fetch of the session (the Terms
+			// list no longer preloads every SqlAttribute node).
+			setSqlAttrs((prev) => {
+				const exists = prev.some((a) => a.id === attr.id);
+				if (!exists) return [...prev, attr];
+				return prev.map((a) => (a.id === attr.id ? attr : a));
+			});
+
 			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
 			const userZoneIds: string[] | null =
 				userZonesRes !== null && !userZonesRes.error
@@ -812,6 +821,13 @@ export const TermsView = () => {
 			const termAttrs = attrsRes?.data ?? [];
 			const termSqlAttrs = sqlAttrsRes?.data ?? [];
 			const relatedTerms = term.related_terms ?? [];
+			// Populate the sqlAttrs/columnAttrs caches from this term's own
+			// attributes (fetched per-term above) rather than a global list —
+			// the Terms list endpoint only returns counts, not the attribute
+			// nodes themselves, to avoid pulling every attribute in the graph
+			// on every page load. This keeps breadcrumb titles working once
+			// the user has opened this term's detail page.
+			setSqlAttrs(termSqlAttrs);
 			setColumnAttrs(termAttrs);
 
 			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs

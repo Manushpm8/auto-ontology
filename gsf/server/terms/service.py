@@ -20,35 +20,6 @@ from gsf.utils.embedding import embed_docs_into_vdb
 logger = logging.getLogger(__name__)
 
 
-def get_all_terms_with_attributes(
-    zone_ids: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Return every term available to the user as ``{name, attributes}``.
-
-    Terms and their attributes are zone-scoped via *zone_ids* (``None`` → admin /
-    no filter, ``[]`` → viewer with no access → empty). Each term's ``attributes``
-    list merges its ColumnAttributes and SqlAttributes, each projected to just
-    ``{name, description}``. Attributes are bucketed onto terms by ``term_name``
-    (the term's natural key), which both attribute kinds carry.
-    """
-    terms, column_attrs = terms_dal.fetch_all_terms_and_attributes(zone_ids=zone_ids)
-    sql_attrs = sql_attr_dal.fetch_sql_attributes(zone_ids=zone_ids)
-
-    attrs_by_term: dict[str, list[dict[str, Any]]] = {}
-    for attr in (*column_attrs, *sql_attrs):
-        attrs_by_term.setdefault(attr.get("term_name"), []).append(
-            {"name": attr.get("name"), "description": attr.get("description")}
-        )
-
-    return [
-        {
-            "name": term.get("name"),
-            "attributes": attrs_by_term.get(term.get("name"), []),
-        }
-        for term in terms
-    ]
-
-
 def update_column_attribute(
     term_id: str,
     attr_id: str,

@@ -37,16 +37,11 @@ type ColumnAttributeUpdatePayload = {
 	sample_values?: string[];
 };
 
-type RelatedCountsResult = { data: RelatedTermCount[]; count: number };
-type AttributeCountsResult = { data: TermCount[]; count: number };
-
 type ListResult = {
-	data: Term[];
-	count: number;
-	sql_attributes: SqlAttributeListResult;
-	column_attribute_counts: AttributeCountsResult;
-	sql_attribute_counts: AttributeCountsResult;
-	related_counts: RelatedCountsResult;
+	terms: Term[];
+	column_attribute_counts: TermCount[];
+	sql_attribute_counts: TermCount[];
+	related_counts: RelatedTermCount[];
 };
 type ListResponse = ResponseWithError<ListResult>;
 
