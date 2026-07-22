@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
+from gsf.connectors.bigquery import BigQueryDatabase
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.databricks import DatabricksDatabase
 from gsf.connectors.duckdb import DuckDBDatabase
@@ -30,6 +31,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "snowflake": SnowflakeDatabase,
     "heavydb": HeavyDBDatabase,
     "sqlite": SQLiteDatabase,
+    "bigquery": BigQueryDatabase,
 }
 
 _connectors: list[SQLDatabase] | None = None
@@ -105,8 +107,10 @@ def get_connectors() -> list[SQLDatabase]:
     ``relevant_tables[*].database_name`` (see
     ``nemo_retriever.tabular_data.retrieval.text_to_sql.connector_routing``).
     Each connector's ``database_name`` must therefore be unique across the
-    returned list — use ``metadata_database`` on Snowflake URLs (or distinct
-    physical databases) when wiring multiple connections.
+    returned list — the same multi-database pattern as SQLite (one connection
+    string per database). Use distinct ``?database=`` (Snowflake), distinct
+    logical hosts / ``?datasets=`` (BigQuery), or ``metadata_database`` when
+    two URLs would otherwise share a name.
     """
     global _connectors
     if _connectors is None:
