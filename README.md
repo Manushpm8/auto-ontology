@@ -133,6 +133,97 @@ GSF resolves the source databases it connects to from two sources:
    `--set connectionStrings=<CONNECTION-STRINGS>` flag). This is a fallback: it
    is used only when there are no UI-added connections.
 
+## Standalone Semantic Model Files
+
+GSF can import and export its graph-native semantic layer as standalone YAML.
+The physical datasource must be ingested before import so terms, columns, and
+SQL references can resolve to existing catalog nodes.
+
+```yaml
+version: "1.0"
+model:
+  name: sales
+  database: analytics
+terms:
+  - name: orders
+    source:
+      database: analytics
+      schema: public
+      table: orders
+    column_attributes:
+      - name: order_id
+        source_column: order_id
+    sql_attributes:
+      - name: revenue
+        kind: metric
+        expressions:
+          - dialect: ANSI_SQL
+            expression: SUM(orders.amount)
+        sql: SELECT SUM(orders.amount) FROM analytics.public.orders AS orders
+        table_refs: [orders]
+semantic_foreign_keys: []
+```
+
+Import a GSF model file:
+
+```bash
+uv run python -m gsf.semantic import \
+  --database-name analytics \
+  --input sales.gsf.yaml
+```
+
+Import validates all catalog references and SQL before writing, then
+applies all Neo4j changes in one transaction. By default, a previous import of
+the same model is replaced and the semantic vector index is refreshed. Use
+`--no-replace` or `--skip-embeddings` to change those behaviors.
+
+Neo4j persistence and vector embedding are separate storage operations. If the
+post-commit embedding refresh fails, the graph remains imported and the
+command reports that embeddings must be retried.
+
+Export a model:
+
+```bash
+uv run python -m gsf.semantic export \
+  --database-name analytics \
+  --model-name sales \
+  --output sales.gsf.yaml
+```
+
+Omit `--model-name` when the database has zero or one model; if it has multiple
+models, choose one explicitly. With no model envelope, GSF exports all semantic
+terms for the database. Omit `--output` to write YAML to stdout.
+
+Apache Ossie conversion is intentionally external to GSF. Use the offline
+`apache-ossie-gsf` converter to translate between this file format and Apache
+Ossie YAML.
+
+Current limitations:
+
+- Only GSF model-file version `1.0` is accepted.
+- One semantic model is stored per YAML document.
+- Imported model names are global across the GSF graph, including databases.
+- Term sources must identify physical tables.
+- GSF `SqlAttribute` names are global, so conflicting computed field or metric
+  names fail validation.
+- Existing compiled Terms are not overwritten; import fails if a term name is
+  already owned outside the same model.
+- Every SQL attribute must declare `kind: attribute`, `kind: field`, or
+  `kind: metric`, plus full SQL and its referenced terms. `field` and `metric`
+  preserve Apache Ossie classification when converted.
+- A Term represented by multiple physical tables cannot be serialized as one
+  native term.
+
+When an expression provides several dialect variants, import selects the
+variant matching the active GSF connector and preserves the full dialect list
+for export.
+
+The original compilation invocation remains supported:
+
+```bash
+uv run python -m gsf.semantic --database-name analytics
+```
+
 ## Authentication
 
 GSF Supports SSO for authentication.

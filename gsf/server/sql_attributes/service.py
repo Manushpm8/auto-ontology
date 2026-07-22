@@ -62,6 +62,7 @@ __all__ = [
     "create_sql_attribute",
     "update_sql_attribute",
     "delete_sql_attribute",
+    "refresh_sql_attribute_embeddings",
     "suggest_sql_attribute_description",
 ]
 
@@ -134,7 +135,7 @@ def _embed_sql_attribute(
     vdb: "VDB",
     attr_id: str,
     database_name: str | None = None,
-) -> None:
+) -> bool:
     """Fetch docs from Neo4j, embed them, and upsert into *vdb*."""
     docs = fetch_sql_attribute_docs(attr_id)
     if not docs:
@@ -142,8 +143,9 @@ def _embed_sql_attribute(
             "No SqlAttribute rows found for attr_id=%r; skipping VDB upsert.",
             attr_id,
         )
-        return
+        return False
     embed_docs_into_vdb(docs, embed_params, vdb, database_name)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +202,29 @@ def _reembed_sql_attribute(attr_id: str, database_name: str | None) -> None:
         attr_id=attr_id,
         database_name=database_name,
     )
+
+
+def refresh_sql_attribute_embeddings(
+    attr_ids: list[str],
+    *,
+    database_name: str,
+) -> int:
+    """Refresh semantic VDB rows for a batch of existing SqlAttributes."""
+    if not attr_ids:
+        return 0
+    vdb = get_semantic_vdb(database_name=database_name)
+    embed_params = get_embed_params()
+    count = 0
+    for attr_id in attr_ids:
+        vdb.delete_by_id(attr_id)
+        if _embed_sql_attribute(
+            embed_params=embed_params,
+            vdb=vdb,
+            attr_id=attr_id,
+            database_name=database_name,
+        ):
+            count += 1
+    return count
 
 
 # ---------------------------------------------------------------------------

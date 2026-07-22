@@ -986,6 +986,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyheavydb" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "snowflake-connector-python" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1014,6 +1015,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyheavydb", specifier = ">=8.0.1.post1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "snowflake-connector-python", specifier = ">=4.6.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
 ]
