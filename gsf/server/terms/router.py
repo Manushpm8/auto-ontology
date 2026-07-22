@@ -24,6 +24,12 @@ class TermUpdate(BaseModel):
     description: str | None = None
 
 
+class ColumnAttributeUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+    sample_values: list[str] | None = None
+
+
 @router.get("/terms")
 def list_terms(
     zone_ids: list[str] | None = Query(default=None),
@@ -95,9 +101,60 @@ def list_term_column_attributes_by_id(
 
     Zone-scoped when zone_ids are provided, so a viewer can't see attributes
     of out-of-zone tables just because they belong to a term they can see.
+
+    Each attribute includes ``primary_column`` and ``referenced_columns``
+    (catalog path ids + names) for navigation from the detail page.
     """
     attrs = terms_dal.fetch_column_attributes_by_term_id(term_id, zone_ids=zone_ids)
     return {"data": attrs, "count": len(attrs)}
+
+
+@router.patch("/terms/{term_id}/column-attributes/{attr_id}")
+def update_column_attribute(
+    term_id: str,
+    attr_id: str,
+    body: ColumnAttributeUpdate,
+) -> dict:
+    """Update ColumnAttribute name/description/sample_values and refresh embeddings.
+
+    ``sample_values`` are persisted on the owning Column and also refresh that
+    Column's data-VDB embedding (same behaviour as catalog column edit).
+    """
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise HTTPException(
+            status_code=422, detail="No ColumnAttribute fields to update"
+        )
+
+    name = patch.get("name")
+    if isinstance(name, str):
+        name = name.strip()
+    if "name" in patch and not name:
+        raise HTTPException(
+            status_code=422, detail="Column attribute name cannot be blank"
+        )
+
+    try:
+        row = term_service.update_column_attribute(
+            term_id,
+            attr_id,
+            name=name if isinstance(name, str) else None,
+            description=patch.get("description"),
+            sample_values=patch.get("sample_values"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail="ColumnAttribute not found")
+
+    return {
+        "data": {
+            "id": row["id"],
+            "name": row["name"],
+            "description": row.get("description"),
+            "sample_values": row.get("sample_values"),
+        }
+    }
 
 
 @router.get("/terms/{term_id}/sql-attributes")

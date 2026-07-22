@@ -21,7 +21,7 @@ import { Label } from '@/common/Label';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
-import type { SqlAttribute, Term } from '@/types/terms';
+import type { ColumnAttribute, SqlAttribute, Term } from '@/types/terms';
 
 type TermCardProps = {
 	term: Term;
@@ -159,6 +159,7 @@ export const TermsView = () => {
 	const searchParams = useSearchParams();
 	const focusId = searchParams.get('focus');
 	const sqlAttrId = searchParams.get('sqlAttr');
+	const colAttrId = searchParams.get('colAttr');
 
 	const { data: session } = useSession();
 	const sessionUserId = session?.user?.id ?? null;
@@ -166,6 +167,7 @@ export const TermsView = () => {
 
 	const [terms, setTerms] = useState<Term[]>([]);
 	const [sqlAttrs, setSqlAttrs] = useState<SqlAttribute[]>([]);
+	const [columnAttrs, setColumnAttrs] = useState<ColumnAttribute[]>([]);
 	const [columnAttrCountsMap, setColumnAttrCountsMap] = useState<Map<string, number>>(new Map());
 	const [sqlAttrCountsMap, setSqlAttrCountsMap] = useState<Map<string, number>>(new Map());
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
@@ -175,6 +177,7 @@ export const TermsView = () => {
 	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
 	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
 	const [sqlAttrsEpoch, setSqlAttrsEpoch] = useState(0);
+	const [columnAttrsEpoch, setColumnAttrsEpoch] = useState(0);
 	const [sqlAttrName, setSqlAttrName] = useState('');
 	const [sqlAttrDescription, setSqlAttrDescription] = useState('');
 	const [sqlAttrSql, setSqlAttrSql] = useState('');
@@ -189,15 +192,21 @@ export const TermsView = () => {
 	const [termEditing, setTermEditing] = useState(false);
 	const [sqlAttrEditing, setSqlAttrEditing] = useState(false);
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
+	const [columnAttrEditing, setColumnAttrEditing] = useState(false);
+	const [columnAttrEditError, setColumnAttrEditError] = useState<string | null>(null);
 
 	const [prevFocusId, setPrevFocusId] = useState(focusId);
 	const [prevSqlAttrId, setPrevSqlAttrId] = useState(sqlAttrId);
-	if (focusId !== prevFocusId || sqlAttrId !== prevSqlAttrId) {
+	const [prevColAttrId, setPrevColAttrId] = useState(colAttrId);
+	if (focusId !== prevFocusId || sqlAttrId !== prevSqlAttrId || colAttrId !== prevColAttrId) {
 		setPrevFocusId(focusId);
 		setPrevSqlAttrId(sqlAttrId);
+		setPrevColAttrId(colAttrId);
 		setTermEditing(false);
 		setSqlAttrEditing(false);
 		setSqlAttrEditError(null);
+		setColumnAttrEditing(false);
+		setColumnAttrEditError(null);
 	}
 	const [sqlEditModalOpen, setSqlEditModalOpen] = useState(false);
 	const [sqlEditValue, setSqlEditValue] = useState('');
@@ -432,6 +441,62 @@ export const TermsView = () => {
 		return { error: false };
 	};
 
+	const handleColumnAttrEditSave = async (payload: Record<string, ComposerEditValue>) => {
+		if (focusedColAttr == null || focusId == null) {
+			return { error: true, message: 'Column attribute not found' };
+		}
+		setColumnAttrEditError(null);
+		const description =
+			typeof payload.description === 'string'
+				? payload.description
+				: (focusedColAttr.description ?? '');
+		const name =
+			typeof payload.name === 'string' ? payload.name.trim() : focusedColAttr.name.trim();
+		if (!name) {
+			return { error: true, message: 'Column attribute name cannot be blank' };
+		}
+		const sampleValues = Array.isArray(payload.sample_values)
+			? payload.sample_values.map((value) => String(value))
+			: (focusedColAttr.sample_values ?? []);
+		const previousSampleValues = focusedColAttr.sample_values ?? [];
+
+		const patch: { name?: string; description?: string; sample_values?: string[] } = {};
+		if (name !== focusedColAttr.name.trim()) {
+			patch.name = name;
+		}
+		if (description !== (focusedColAttr.description ?? '')) {
+			patch.description = description;
+		}
+		const sampleValuesChanged =
+			sampleValues.length !== previousSampleValues.length ||
+			sampleValues.some((value, index) => value !== previousSampleValues[index]);
+		if (sampleValuesChanged) {
+			patch.sample_values = sampleValues;
+		}
+		if (Object.keys(patch).length === 0) {
+			return { error: false };
+		}
+
+		const res = await termsApi.updateColumnAttribute(focusId, focusedColAttr.id, patch);
+		if (res.error) {
+			return { error: true, message: res.message ?? 'Failed to update column attribute' };
+		}
+		setColumnAttrs((prev) =>
+			prev.map((attr) =>
+				attr.id === focusedColAttr.id
+					? {
+							...attr,
+							name: res.data.name,
+							description: res.data.description,
+							sample_values: res.data.sample_values ?? sampleValues,
+						}
+					: attr,
+			),
+		);
+		setColumnAttrsEpoch((prev) => prev + 1);
+		return { error: false };
+	};
+
 	const handleTermEditSave = async (payload: Record<string, ComposerEditValue>) => {
 		if (focusedTerm == null || focusId == null) {
 			return { error: true, message: 'Term not found' };
@@ -551,14 +616,117 @@ export const TermsView = () => {
 		setSqlAttrEditing(false);
 	};
 
-	const handleSqlAttrClick = useCallback(
+	const handleDataTableRowClick = useCallback(
 		(sectionId: string, rowId: string) => {
-			if (sectionId !== 'sql_attributes' || focusId == null) return;
-			router.push(
-				`/terms?focus=${encodeURIComponent(focusId)}&sqlAttr=${encodeURIComponent(rowId)}`,
-			);
+			if (focusId == null) return;
+			if (sectionId === 'sql_attributes') {
+				router.push(
+					`/terms?focus=${encodeURIComponent(focusId)}&sqlAttr=${encodeURIComponent(rowId)}`,
+				);
+			} else if (sectionId === 'column_attributes') {
+				router.push(
+					`/terms?focus=${encodeURIComponent(focusId)}&colAttr=${encodeURIComponent(rowId)}`,
+				);
+			}
 		},
 		[focusId, router],
+	);
+
+	const getColumnAttributeSinglePage = useCallback(
+		async (attrId: string): Promise<SinglePageFormat> => {
+			if (focusId == null) {
+				return {
+					sections: [],
+					header: { header: { title: 'Column Attribute not found', withBorder: true } },
+				};
+			}
+			// TODO: viewer zone-scoping handled in a separate PR — for now the
+			// client treats a viewer the same as an admin here (no zone fetch,
+			// userZoneIds = null → all zones accessible).
+			const res = await termsApi.getColumnAttributes(focusId);
+			const attrs = res.error ? [] : (res.data ?? []);
+			const attr = attrs.find((a) => a.id === attrId);
+			if (attr == null) {
+				return {
+					sections: [],
+					header: { header: { title: 'Column Attribute not found', withBorder: true } },
+				};
+			}
+			setColumnAttrs(attrs);
+
+			const primaryColumn = attr.primary_column ?? null;
+			const referencedColumns = attr.referenced_columns ?? [];
+			const userZoneIds: string[] | null = null;
+
+			return {
+				header: {
+					header: {
+						title: attr.name,
+						withBorder: true,
+						showContentHeader: true,
+						titleEditable: true,
+					},
+				},
+				sections: [
+					{
+						type: ComposerSectionKind.TEXT_CARD,
+						id: 'description',
+						title: 'Description',
+						body: attr.description ?? '',
+						editable: true,
+					},
+					{
+						type: ComposerSectionKind.TAG_LIST,
+						id: 'sample_values',
+						title: 'Sample Values',
+						values: Array.isArray(attr.sample_values) ? attr.sample_values : [],
+						editable: true,
+					},
+					{
+						type: ComposerSectionKind.ZONES_CHIPS,
+						id: 'zones',
+						title: 'Zones',
+						zones: (attr.zones ?? []).map((zone) => ({
+							id: zone.id,
+							name: zone.name,
+							color: zone.color,
+							enabled: zone.enabled,
+						})),
+						userZoneIds,
+					},
+					{
+						type: ComposerSectionKind.ENTITY_CHIPS,
+						id: 'primary_column',
+						title: 'Primary Column',
+						entities: primaryColumn
+							? [
+									{
+										id: primaryColumn.id,
+										name: `${primaryColumn.table_name}.${primaryColumn.column_name}`,
+										focusId: [
+											primaryColumn.db_id,
+											primaryColumn.schema_id,
+											primaryColumn.table_id,
+											primaryColumn.id,
+										].join('|'),
+									},
+								]
+							: [],
+					},
+					{
+						type: ComposerSectionKind.ENTITY_CHIPS,
+						id: 'referenced_columns',
+						title: 'Referenced Columns',
+						entities: referencedColumns.map((col) => ({
+							id: col.id,
+							name: `${col.table_name}.${col.column_name}`,
+							focusId: [col.db_id, col.schema_id, col.table_id, col.id].join('|'),
+						})),
+					},
+				],
+			};
+		},
+		[focusId],
 	);
 
 	const getSqlAttributeSinglePage = useCallback(
@@ -644,6 +812,7 @@ export const TermsView = () => {
 			const termAttrs = attrsRes?.data ?? [];
 			const termSqlAttrs = sqlAttrsRes?.data ?? [];
 			const relatedTerms = term.related_terms ?? [];
+			setColumnAttrs(termAttrs);
 
 			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
 			const userZoneIds: string[] | null =
@@ -710,12 +879,14 @@ export const TermsView = () => {
 						type: ComposerSectionKind.DATA_TABLE,
 						id: 'column_attributes',
 						title: 'Column Attributes',
+						rowIdKey: 'id',
 						columns: [
 							{ key: 'name', label: 'Attribute Name' },
 							{ key: 'description', label: 'Description', truncate: true },
 							{ key: 'sample_values', label: 'Sample Values', kind: 'tags' },
 						],
 						rows: termAttrs.map((attr) => ({
+							id: attr.id,
 							name: attr.name,
 							description: attr.description ?? '',
 							sample_values: attr.sample_values ?? [],
@@ -742,6 +913,8 @@ export const TermsView = () => {
 	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 	const focusedSqlAttr =
 		sqlAttrId != null ? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ?? null) : null;
+	const focusedColAttr =
+		colAttrId != null ? (columnAttrs.find((attr) => attr.id === colAttrId) ?? null) : null;
 
 	if (focusId != null && sqlAttrId != null) {
 		const termTitle = focusedTerm?.name ?? focusId;
@@ -889,6 +1062,78 @@ export const TermsView = () => {
 		);
 	}
 
+	if (focusId != null && colAttrId != null) {
+		const termTitle = focusedTerm?.name ?? focusId;
+		const colAttrTitle = focusedColAttr?.name ?? colAttrId;
+		return (
+			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
+				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+					<button
+						type="button"
+						onClick={handleBack}
+						className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+						aria-label="Back to terms list"
+					>
+						<Icon name={IconName.Terms} className="h-4 w-4" />
+						Terms
+					</button>
+					<span className="text-zinc-300 dark:text-zinc-600">/</span>
+					<button
+						type="button"
+						onClick={handleBackToTerm}
+						className="cursor-pointer rounded-lg px-1.5 py-1 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+					>
+						{termTitle}
+					</button>
+					<span className="text-zinc-300 dark:text-zinc-600">/</span>
+					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+						{colAttrTitle}
+					</span>
+					<div className="ml-auto flex shrink-0 items-center gap-1">
+						{columnAttrEditing ? null : (
+							<button
+								type="button"
+								onClick={() => {
+									setColumnAttrEditError(null);
+									setColumnAttrEditing(true);
+								}}
+								aria-label={`Edit ${colAttrTitle}`}
+								title="Edit"
+								className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+							>
+								<Icon name={IconName.Pencil} className="h-4 w-4" />
+							</button>
+						)}
+					</div>
+				</header>
+				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+					<SinglePageView
+						key={colAttrId}
+						dataId={colAttrId}
+						title={colAttrTitle}
+						getSinglePage={getColumnAttributeSinglePage}
+						treeDataEpoch={columnAttrsEpoch}
+						isEditing={columnAttrEditing}
+						onPatchEdits={handleColumnAttrEditSave}
+						onSave={() => {
+							setColumnAttrEditing(false);
+							setColumnAttrEditError(null);
+						}}
+						onCancel={() => {
+							setColumnAttrEditing(false);
+							setColumnAttrEditError(null);
+						}}
+					/>
+				</main>
+				{columnAttrEditError != null && (
+					<div className="border-t border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+						{columnAttrEditError}
+					</div>
+				)}
+			</div>
+		);
+	}
+
 	if (focusId != null) {
 		const termTitle = focusedTerm?.name ?? focusId;
 		return (
@@ -951,7 +1196,7 @@ export const TermsView = () => {
 						onCancel={() => {
 							setTermEditing(false);
 						}}
-						onDataTableRowClick={handleSqlAttrClick}
+						onDataTableRowClick={handleDataTableRowClick}
 					/>
 				</main>
 				<ModalCreateNewItem

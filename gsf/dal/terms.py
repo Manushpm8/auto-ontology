@@ -9,12 +9,14 @@ ColumnAttribute and SemanticFK operations live in gsf/dal/attributes.py.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.attributes import fetch_column_attribute_columns_map
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
@@ -46,6 +48,22 @@ _COLUMN_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.datatype      AS datatype,
                attr.table_id      AS table_id,
                col.sample_values  AS sample_values"""
+
+
+def _with_parsed_sample_values(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deserialize the JSON-encoded ``sample_values`` string on each row.
+
+    ``col.sample_values`` is persisted as a JSON string (see
+    ``store_column_sample_values``); callers expect an actual list.
+    """
+    for row in rows:
+        raw = row.get("sample_values")
+        if isinstance(raw, str):
+            try:
+                row["sample_values"] = json.loads(raw)
+            except (TypeError, ValueError):
+                row["sample_values"] = None
+    return rows
 
 
 def semantic_layer_calculated() -> bool:
@@ -671,6 +689,25 @@ def fetch_column_attribute_counts(
     )
 
 
+def _fetch_attr_zones_by_table(
+    rows: list[dict[str, Any]],
+    zone_ids: list[str] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return ``{table_id: [zone, ...]}`` for the owning tables of *rows*.
+
+    A ColumnAttribute is owned by exactly one table (``attr.table_id``), so its
+    zones are its table's zones. This reuses ``fetch_table_zones_map`` rather
+    than duplicating the table→zone resolution. Imported locally because
+    ``gsf.dal.exploration`` imports from this module (avoids a circular import).
+    """
+    from gsf.dal.exploration import fetch_table_zones_map
+
+    table_ids = list({row["table_id"] for row in rows if row.get("table_id")})
+    if not table_ids:
+        return {}
+    return fetch_table_zones_map(zone_ids=zone_ids, table_ids=table_ids)
+
+
 def fetch_column_attributes(
     zone_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
@@ -679,7 +716,7 @@ def fetch_column_attributes(
         zone_ids, "attr.table_id", extra_params={"source": SEMANTIC_SOURCE}
     )
 
-    return get_neo4j_conn().query_read(
+    rows = get_neo4j_conn().query_read(
         f"""
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
         {table_filter}
@@ -689,6 +726,11 @@ def fetch_column_attributes(
         """,
         params,
     )
+    zones_by_table = _fetch_attr_zones_by_table(rows, zone_ids)
+    return [
+        {**row, "zones": zones_by_table.get(row["table_id"], [])}
+        for row in _with_parsed_sample_values(rows)
+    ]
 
 
 def fetch_column_attributes_by_term_id(
@@ -701,13 +743,17 @@ def fetch_column_attributes_by_term_id(
     attributes owned by tables reachable through those zones are returned —
     a ColumnAttribute is owned by exactly one table, so a plain membership
     filter is sufficient here (no all-or-nothing check needed).
+
+    Each attribute includes ``primary_column`` (HAS_ATTRIBUTE owner) and
+    ``referenced_columns`` (SEMANTIC_FK sources) with catalog path ids for
+    navigation.
     """
     table_filter, params = resolve_table_filter(
         zone_ids,
         "attr.table_id",
         extra_params={"term_id": term_id, "source": SEMANTIC_SOURCE},
     )
-    return get_neo4j_conn().query_read(
+    rows = get_neo4j_conn().query_read(
         f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{term_name: term.name, source: $source}})
@@ -718,6 +764,18 @@ def fetch_column_attributes_by_term_id(
         """,
         params,
     )
+    attr_ids = [row["id"] for row in rows]
+    zones_by_table = _fetch_attr_zones_by_table(rows, zone_ids)
+    columns_by_attr = fetch_column_attribute_columns_map(attr_ids)
+    empty_columns = {"primary_column": None, "referenced_columns": []}
+    return [
+        {
+            **row,
+            "zones": zones_by_table.get(row["table_id"], []),
+            **columns_by_attr.get(row["id"], empty_columns),
+        }
+        for row in _with_parsed_sample_values(rows)
+    ]
 
 
 def find_column_attribute_by_column_id(column_id: str) -> str | None:

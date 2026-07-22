@@ -30,6 +30,15 @@ export type TermDetail = Term & {
 	related_terms: RelatedTerm[];
 };
 
+export type AttributeColumnRef = {
+	id: string;
+	column_name: string;
+	table_id: string;
+	table_name: string;
+	schema_id: string;
+	db_id: string;
+};
+
 export type ColumnAttribute = {
 	id: string;
 	name: string;
@@ -40,6 +49,11 @@ export type ColumnAttribute = {
 	table_id: string;
 	/** Profiled sample values from the owning Column, when available. */
 	sample_values: string[] | null;
+	zones: TermZone[];
+	/** The Column that owns this attribute via `HAS_ATTRIBUTE`, if any. */
+	primary_column: AttributeColumnRef | null;
+	/** Columns elsewhere that point at this attribute via `SEMANTIC_FK`. */
+	referenced_columns: AttributeColumnRef[];
 };
 
 export type SqlAttribute = {

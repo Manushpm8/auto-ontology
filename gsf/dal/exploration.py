@@ -210,6 +210,7 @@ def fetch_table_exploration_details(
 def fetch_table_zones_map(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
+    table_ids: list[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Return ``{table_id: [zone, ...]}`` for every visible Table.
 
@@ -230,16 +231,25 @@ def fetch_table_zones_map(
     (admin / internal callers). Pass a pre-resolved *data_ids_by_zone*
     (see ``resolve_accessible_catalog_ids``) when the caller already
     resolved *zone_ids* for this request, to skip a repeat Neo4j round trip.
+    Pass *table_ids* to further restrict the scan to a known set of tables
+    (e.g. the owning tables of a batch of ColumnAttributes); it is
+    intersected with the zone-accessible tables so it never widens access.
     """
     data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
     params: dict[str, Any] = {}
-    table_filter = ""
+    filter_ids: set[str] | None = None
     if data_ids_by_zone is not None:
-        table_ids = list(data_ids_by_zone["table_ids"])
-        if not table_ids:
+        filter_ids = set(data_ids_by_zone["table_ids"])
+    if table_ids is not None:
+        filter_ids = (
+            set(table_ids) if filter_ids is None else filter_ids & set(table_ids)
+        )
+    table_filter = ""
+    if filter_ids is not None:
+        if not filter_ids:
             return {}
         table_filter = "WHERE t.id IN $table_ids"
-        params["table_ids"] = table_ids
+        params["table_ids"] = list(filter_ids)
 
     # A viewer never sees a disabled zone's chip, even if its id ended up in
     # zone_ids (e.g. access granted before the zone was disabled) — admins

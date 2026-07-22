@@ -21,9 +21,21 @@ type SqlAttributeListResponse = ResponseWithError<SqlAttributeListResult>;
 
 type SingleResult = { data: TermDetail };
 type SingleResponse = ResponseWithError<SingleResult>;
-type UpdateResult = { data: { id: string; name: string; description: string | null } };
+type UpdateResult = {
+	data: {
+		id: string;
+		name: string;
+		description: string | null;
+		sample_values?: string[] | null;
+	};
+};
 type UpdateResponse = ResponseWithError<UpdateResult>;
 type TermUpdatePayload = { name?: string; description?: string | null };
+type ColumnAttributeUpdatePayload = {
+	name?: string;
+	description?: string | null;
+	sample_values?: string[];
+};
 
 type RelatedCountsResult = { data: RelatedTermCount[]; count: number };
 type AttributeCountsResult = { data: TermCount[]; count: number };
@@ -51,6 +63,15 @@ export const termsApi = {
 		requests.patch<UpdateResult>(`terms/${encodeURIComponent(id)}`, payload),
 	getColumnAttributes: (id: string): Promise<AttributeListResponse> =>
 		requests.get<AttributeListResult>(`terms/${id}/column-attributes`),
+	updateColumnAttribute: (
+		termId: string,
+		attrId: string,
+		payload: ColumnAttributeUpdatePayload,
+	): Promise<UpdateResponse> =>
+		requests.patch<UpdateResult>(
+			`terms/${encodeURIComponent(termId)}/column-attributes/${encodeURIComponent(attrId)}`,
+			payload,
+		),
 	getSqlAttributes: (id: string): Promise<SqlAttributeListResponse> =>
 		requests.get<SqlAttributeListResult>(`terms/${id}/sql-attributes`),
 };

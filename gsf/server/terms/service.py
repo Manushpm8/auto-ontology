@@ -9,9 +9,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from gsf.dal import attributes as attributes_dal
 from gsf.dal import sql_attributes as sql_attr_dal
 from gsf.dal import terms as terms_dal
 from gsf.semantic.embed import build_semantic_embedder
+from gsf.server.datasources import service as datasources_service
 from gsf.utils import get_embed_params
 from gsf.utils.embedding import embed_docs_into_vdb
 
@@ -45,6 +47,83 @@ def get_all_terms_with_attributes(
         }
         for term in terms
     ]
+
+
+def _parse_sample_values(raw: Any) -> list[str] | None:
+    """Normalize Column.sample_values (JSON string or list) to a string list."""
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        return [str(value) for value in raw]
+    if isinstance(raw, str):
+        import json
+
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        if isinstance(parsed, list):
+            return [str(value) for value in parsed]
+    return None
+
+
+def update_column_attribute(
+    term_id: str,
+    attr_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    sample_values: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Update ColumnAttribute metadata and refresh related VDB rows.
+
+    ``sample_values`` live on the owning Column. When provided, this updates
+    that Column (same path as catalog column edit), re-embeds the Column in
+    the data VDB, then re-embeds this ColumnAttribute in the semantic VDB.
+    """
+    row = attributes_dal.update_column_attribute(
+        attr_id,
+        term_id,
+        name=name,
+        description=description,
+    )
+    if row is None:
+        return None
+
+    if sample_values is not None:
+        column_id = row.get("column_id")
+        if not column_id:
+            raise ValueError(
+                "ColumnAttribute has no owning Column; sample values cannot be updated"
+            )
+        # Reuses catalog Column patch: writes Column.sample_values and
+        # refreshes the Column row in the data VDB. It also best-effort
+        # refreshes semantic ColumnAttribute rows; we still re-embed this
+        # attribute below so Term synonyms stay in the semantic text.
+        datasources_service.update_node_properties(
+            column_id,
+            {"sample_values": sample_values},
+        )
+        row["sample_values"] = sample_values
+    else:
+        row["sample_values"] = _parse_sample_values(row.get("sample_values"))
+
+    embedder = build_semantic_embedder(row.get("database_name") or "", reset=False)
+    if embedder is not None:
+        embedder.vdb.delete_by_id(attr_id)
+        attr = {
+            "id": row["id"],
+            "name": row["name"],
+            "description": row.get("description"),
+            "term_name": row.get("term_name"),
+            "source_column": row.get("source_column"),
+            "sample_values": row.get("sample_values"),
+        }
+        # Pass Term synonyms only — omit Term name so we re-embed just this attr row.
+        term_ctx = {"synonyms": row.get("term_synonyms") or []}
+        embedder.embed_term(term_ctx, [attr])
+
+    return row
 
 
 def refresh_term_embeddings(term_id: str, *, refresh_dependent_attrs: bool) -> None:
