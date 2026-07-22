@@ -40,7 +40,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: GSF app
+          - name: GSF Server
             context: .
             file: Dockerfile
             build-args: ''
