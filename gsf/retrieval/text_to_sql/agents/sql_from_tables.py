@@ -108,7 +108,10 @@ class SQLFromTablesAgent(BaseAgent):
                 question,
                 database_name=path_state.get("target_db"),
             )
-        similar_questions = []
+        similar_questions = path_state.get("similar_questions", [])
+        similar_questions_txt = "\n".join(
+            f"question: {x[0]}\nanswer: {x[1]}" for x in similar_questions
+        )
 
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
@@ -139,7 +142,7 @@ class SQLFromTablesAgent(BaseAgent):
                 relevant_tables, target_db=path_state.get("target_db")
             ),
             join_paths="",
-            qa_from_conversations=similar_questions,
+            qa_from_conversations=similar_questions_txt,
             custom_analyses="",
         )
 

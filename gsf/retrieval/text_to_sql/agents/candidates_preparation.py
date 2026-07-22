@@ -45,6 +45,7 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables_from_candidates,
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.few_shot import fetch_similar_questions
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
@@ -345,6 +346,27 @@ class CandidatePreparationAgent(BaseAgent):
             [_qualified_name(t) for t in relevant_tables],
         )
 
+        # --- 6. Cross-database Train few-shot Q→SQL demos ---
+        retrieved_questions = fetch_similar_questions(
+            state.get("semantic_retriever"),
+            question,
+        )
+        # Preserve examples supplied by callers / conversation retrieval, then
+        # append Train demos without introducing duplicate Q→SQL pairs.
+        similar_questions = []
+        seen_examples: set[tuple[str, str]] = set()
+        for example in [
+            *(path_state.get("similar_questions") or []),
+            *retrieved_questions,
+        ]:
+            if not isinstance(example, (list, tuple)) or len(example) < 2:
+                continue
+            pair = (str(example[0]).strip(), str(example[1]).strip())
+            if not pair[0] or not pair[1] or pair in seen_examples:
+                continue
+            seen_examples.add(pair)
+            similar_questions.append(pair)
+
         return {
             "path_state": {
                 **path_state,
@@ -352,6 +374,7 @@ class CandidatePreparationAgent(BaseAgent):
                 "relevant_queries": [
                     r["sql"] for r in relevant_queries if r.get("sql")
                 ],
+                "similar_questions": similar_questions,
                 "custom_analyses": custom_analyses,
                 "custom_analyses_str": custom_analyses_str,
                 "sql_attributes": sql_attributes,

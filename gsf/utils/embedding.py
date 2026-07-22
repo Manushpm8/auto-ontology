@@ -94,6 +94,11 @@ def embed_docs_into_vdb(
             "source_path": path,
             "database_name": database_name,
         }
+        extras = {
+            key: item[key]
+            for key in ("question", "sql", "evidence", "db_id", "masked_question")
+            if item.get(key) is not None
+        }
         rows.append(
             {
                 "text": (item.get("text") or "").strip(),
@@ -102,7 +107,8 @@ def embed_docs_into_vdb(
                 "page_number": -1,
                 "metadata": {
                     **tabular_fields,
-                    "content_metadata": dict(tabular_fields),
+                    **extras,
+                    "content_metadata": {**tabular_fields, **extras},
                 },
             }
         )
