@@ -37,7 +37,10 @@ from gsf.server.sql_attributes.service import (
     SqlAttributeSqlError,
     create_sql_attribute,
 )
-from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
+from gsf.utils.llm_invoke import (
+    get_non_reasoning_llm_client,
+    invoke_with_structured_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -455,7 +458,7 @@ def _judge_with_llm(
         for i, (expr, score) in enumerate(expressions)
     )
 
-    llm = get_llm_client(temperature=0.0)
+    llm = get_non_reasoning_llm_client(temperature=0.0)
     messages = [
         SystemMessage(
             content=(

@@ -8,7 +8,9 @@ from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.models import FkAndPkResult
 
 
-@patch("gsf.semantic.fk_suggester.get_llm_client", return_value=MagicMock())
+@patch(
+    "gsf.semantic.fk_suggester.get_non_reasoning_llm_client", return_value=MagicMock()
+)
 @patch(
     "gsf.semantic.fk_suggester.invoke_with_structured_output",
     return_value=FkAndPkResult(fk_suggestions=[], pk_column_names=[]),
@@ -43,7 +45,9 @@ def test_non_unique_uuid_columns_suggested(
     assert "vendor_code" not in suggested
 
 
-@patch("gsf.semantic.fk_suggester.get_llm_client", return_value=MagicMock())
+@patch(
+    "gsf.semantic.fk_suggester.get_non_reasoning_llm_client", return_value=MagicMock()
+)
 @patch(
     "gsf.semantic.fk_suggester.invoke_with_structured_output",
     return_value=FkAndPkResult(fk_suggestions=[], pk_column_names=[]),
