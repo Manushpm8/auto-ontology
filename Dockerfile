@@ -26,12 +26,12 @@ ARG UV_VERSION=0.11.29
 ARG BASE_IMG=nvcr.io/nvidia/base/ubuntu
 ARG BASE_IMG_TAG=jammy-20250619
 
-FROM ghcr.io/astral-sh/uv:$UV_VERSION AS uv
-
 ############################
 # Stage 1: builder
 ############################
 FROM $BASE_IMG:$BASE_IMG_TAG AS builder
+
+ARG UV_VERSION
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -50,8 +50,11 @@ RUN apt-get update \
         libpq-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-COPY --from=uv /uv /usr/local/bin/uv
+# Install uv without introducing a non-NVIDIA build stage.
+RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" \
+        -o /tmp/install-uv.sh \
+ && env UV_UNMANAGED_INSTALL=/usr/local/bin sh /tmp/install-uv.sh \
+ && rm /tmp/install-uv.sh
 
 WORKDIR /app
 
