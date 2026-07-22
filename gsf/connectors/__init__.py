@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
-from gsf.connectors.bigquery import BigQueryDatabase
 from gsf.connectors.databricks import DatabricksDatabase
 from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase
@@ -16,7 +15,6 @@ from gsf.connectors.sqlite import SQLiteDatabase
 
 __all__ = [
     "SQLDatabase",
-    "BigQueryDatabase",
     "DatabricksDatabase",
     "DuckDBDatabase",
     "HeavyDBDatabase",
