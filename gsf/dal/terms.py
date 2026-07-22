@@ -9,7 +9,6 @@ ColumnAttribute and SemanticFK operations live in gsf/dal/attributes.py.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -33,6 +32,7 @@ from gsf.server.zones.constants import (
     REL_ZONE_OF,
     ZONE_LABEL_PATTERN,
 )
+from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +51,9 @@ _COLUMN_ATTRIBUTE_FIELDS = """attr.id            AS id,
 
 
 def _with_parsed_sample_values(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Deserialize the JSON-encoded ``sample_values`` string on each row.
-
-    ``col.sample_values`` is persisted as a JSON string (see
-    ``store_column_sample_values``); callers expect an actual list.
-    """
+    """Normalize ``sample_values`` on each row via ``parse_sample_values``."""
     for row in rows:
-        raw = row.get("sample_values")
-        if isinstance(raw, str):
-            try:
-                row["sample_values"] = json.loads(raw)
-            except (TypeError, ValueError):
-                row["sample_values"] = None
+        row["sample_values"] = parse_sample_values(row.get("sample_values"))
     return rows
 
 

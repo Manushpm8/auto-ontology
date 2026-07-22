@@ -14,7 +14,7 @@ from gsf.dal import sql_attributes as sql_attr_dal
 from gsf.dal import terms as terms_dal
 from gsf.semantic.embed import build_semantic_embedder
 from gsf.server.datasources import service as datasources_service
-from gsf.utils import get_embed_params
+from gsf.utils import get_embed_params, parse_sample_values
 from gsf.utils.embedding import embed_docs_into_vdb
 
 logger = logging.getLogger(__name__)
@@ -47,24 +47,6 @@ def get_all_terms_with_attributes(
         }
         for term in terms
     ]
-
-
-def _parse_sample_values(raw: Any) -> list[str] | None:
-    """Normalize Column.sample_values (JSON string or list) to a string list."""
-    if raw is None:
-        return None
-    if isinstance(raw, list):
-        return [str(value) for value in raw]
-    if isinstance(raw, str):
-        import json
-
-        try:
-            parsed = json.loads(raw)
-        except (TypeError, ValueError):
-            return None
-        if isinstance(parsed, list):
-            return [str(value) for value in parsed]
-    return None
 
 
 def update_column_attribute(
@@ -106,7 +88,7 @@ def update_column_attribute(
         )
         row["sample_values"] = sample_values
     else:
-        row["sample_values"] = _parse_sample_values(row.get("sample_values"))
+        row["sample_values"] = parse_sample_values(row.get("sample_values"))
 
     embedder = build_semantic_embedder(row.get("database_name") or "", reset=False)
     if embedder is not None:

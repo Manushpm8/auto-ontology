@@ -35,6 +35,7 @@ from gsf.semantic.constants import (
     REL_REPRESENTS,
     REL_SEMANTIC_FK,
 )
+from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -522,12 +523,7 @@ def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
         return None
     table = rows[0]
     for column in table.get("columns") or []:
-        raw = column.get("sample_values")
-        if isinstance(raw, str):
-            try:
-                column["sample_values"] = json.loads(raw)
-            except (TypeError, ValueError):
-                column["sample_values"] = None
+        column["sample_values"] = parse_sample_values(column.get("sample_values"))
     return table
 
 
