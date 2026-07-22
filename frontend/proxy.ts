@@ -19,7 +19,6 @@ const isPublicPath = (pathname: string): boolean =>
  * Example: GET /api/schemas?db_id=abc  →  GET /api/schemas/abc
  */
 function rewriteApiIdParam(request: NextRequest): NextResponse {
-	console.log("Test");
 	const url = request.nextUrl.clone();
 
 	for (const [key, value] of url.searchParams.entries()) {
