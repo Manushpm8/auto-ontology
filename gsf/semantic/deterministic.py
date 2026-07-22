@@ -215,7 +215,9 @@ def column_attribute_specs(
     specs = [
         _build_column_attribute_spec(
             col,
-            _add_samples_suffix(col["description"], _get_column_samples(col, profiling)),
+            _add_samples_suffix(
+                col["description"], _get_column_samples(col, profiling)
+            ),
         )
         for col in cols_with_description
     ]
