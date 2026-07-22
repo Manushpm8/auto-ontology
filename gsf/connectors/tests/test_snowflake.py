@@ -120,7 +120,9 @@ def test_metadata_database_overrides_logical_name() -> None:
 
 
 def test_resolve_metadata_path_prefers_logical_database_name(tmp_path: Path) -> None:
-    metadata = _write_metadata(tmp_path / "spider2" / "adventureworks" / "metadata.json")
+    metadata = _write_metadata(
+        tmp_path / "spider2" / "adventureworks" / "metadata.json"
+    )
 
     resolved = resolve_metadata_path(
         database_name="spider2/adventureworks",
@@ -132,7 +134,9 @@ def test_resolve_metadata_path_prefers_logical_database_name(tmp_path: Path) -> 
 
 
 def test_resolve_metadata_path_falls_back_to_spider2_slug(tmp_path: Path) -> None:
-    metadata = _write_metadata(tmp_path / "spider2" / "adventureworks" / "metadata.json")
+    metadata = _write_metadata(
+        tmp_path / "spider2" / "adventureworks" / "metadata.json"
+    )
 
     resolved = resolve_metadata_path(
         database_name="ADVENTUREWORKS",
