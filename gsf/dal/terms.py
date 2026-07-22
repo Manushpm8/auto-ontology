@@ -483,7 +483,10 @@ def fetch_table_schema_map(database_name: str) -> dict[str, str]:
     }
 
 
-def fetch_terms_with_sqls(source: str) -> list[dict[str, Any]]:
+def fetch_terms_with_sqls(
+    source: str,
+    database_name: str | None = None,
+) -> list[dict[str, Any]]:
     """Return every Term with the SQL queries from its connected tables.
 
     Each row contains:
@@ -492,11 +495,24 @@ def fetch_terms_with_sqls(source: str) -> list[dict[str, Any]]:
               properties (including count_monthly_YYYY_MM counters).
 
     Only terms that have at least one associated Sql query are returned.
+    When *database_name* is given, only terms whose tables belong to that
+    database are returned — required when compiling one DB at a time so
+    SqlAttribute validation uses a matching catalog.
     """
+    db_scope = ""
+    params: dict[str, Any] = {"source": source}
+    if database_name is not None:
+        db_scope = f"""
+        MATCH (db:{Labels.DB} {{name: $db_name}})-[:{Edges.CONTAINS}]->
+              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
+        """
+        params["db_name"] = database_name
+
     return get_neo4j_conn().query_read(
         f"""
         MATCH (term:{LABEL_TERM} {{source: $source}})
         MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
+        {db_scope}
         MATCH (sql:{Labels.SQL})-[:{Edges.SQL}]->(t)
         WITH term,
              collect({{sql_text: sql.sql_full_query,
@@ -507,7 +523,7 @@ def fetch_terms_with_sqls(source: str) -> list[dict[str, Any]]:
                term.description AS term_description,
                sqls
         """,
-        {"source": source},
+        params,
     )
 
 

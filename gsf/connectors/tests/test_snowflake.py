@@ -1,7 +1,14 @@
+import json
+from pathlib import Path
+
 import pandas as pd
 from pytest import MonkeyPatch
 
-from gsf.connectors.snowflake import SnowflakeDatabase
+from gsf.connectors.snowflake import (
+    SnowflakeDatabase,
+    load_metadata_allowlist,
+    resolve_metadata_path,
+)
 
 
 def _connection_string(query: str = "") -> str:
@@ -16,6 +23,43 @@ def _tables() -> pd.DataFrame:
             "table_name": ["GPUS", "JOBS", "CUSTOMERS"],
         }
     )
+
+
+def _write_metadata(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "PRODUCT": {
+                    "description": None,
+                    "columns": [
+                        {
+                            "name": "productid",
+                            "description": None,
+                            "value_examples": ["1"],
+                        },
+                        {
+                            "name": "name",
+                            "description": "product name",
+                            "value_examples": None,
+                        },
+                    ],
+                },
+                "CURRENCYRATE": {
+                    "description": None,
+                    "columns": [
+                        {
+                            "name": "currencyrateid",
+                            "description": None,
+                            "value_examples": [],
+                        },
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_url_schema_filters_introspection() -> None:
@@ -43,6 +87,140 @@ def test_missing_schema_keeps_all_visible_schemas() -> None:
     filtered = database._filter_by_schema(_tables())
 
     assert filtered.equals(_tables())
+
+
+def test_database_name_defaults_to_physical_database() -> None:
+    database = SnowflakeDatabase(_connection_string())
+
+    assert database.database_name == "db"
+    assert database._physical_database == "db"
+
+
+def test_distinct_databases_yield_distinct_names() -> None:
+    first = SnowflakeDatabase(
+        "snowflake://user:password@account?warehouse=warehouse&database=PATENTS"
+    )
+    second = SnowflakeDatabase(
+        "snowflake://user:password@account?warehouse=warehouse&database=GITHUB_REPOS"
+    )
+
+    assert first.database_name == "PATENTS"
+    assert second.database_name == "GITHUB_REPOS"
+    assert first.database_name != second.database_name
+
+
+def test_metadata_database_overrides_logical_name() -> None:
+    database = SnowflakeDatabase(
+        _connection_string("metadata_database=spider2%2Fpatents")
+    )
+
+    assert database.database_name == "spider2/patents"
+    assert database._physical_database == "db"
+    assert database._connect_kwargs["database"] == "db"
+
+
+def test_resolve_metadata_path_prefers_logical_database_name(tmp_path: Path) -> None:
+    metadata = _write_metadata(tmp_path / "spider2" / "adventureworks" / "metadata.json")
+
+    resolved = resolve_metadata_path(
+        database_name="spider2/adventureworks",
+        physical_database="ADVENTUREWORKS",
+        datasets_root=tmp_path,
+    )
+
+    assert resolved == metadata
+
+
+def test_resolve_metadata_path_falls_back_to_spider2_slug(tmp_path: Path) -> None:
+    metadata = _write_metadata(tmp_path / "spider2" / "adventureworks" / "metadata.json")
+
+    resolved = resolve_metadata_path(
+        database_name="ADVENTUREWORKS",
+        physical_database="ADVENTUREWORKS",
+        datasets_root=tmp_path,
+    )
+
+    assert resolved == metadata
+
+
+def test_load_metadata_allowlist_is_case_normalized(tmp_path: Path) -> None:
+    path = _write_metadata(tmp_path / "metadata.json")
+
+    tables, columns = load_metadata_allowlist(path)
+
+    assert tables == {"PRODUCT", "CURRENCYRATE"}
+    assert columns["PRODUCT"] == {"PRODUCTID", "NAME"}
+    assert columns["CURRENCYRATE"] == {"CURRENCYRATEID"}
+
+
+def test_metadata_filters_tables_and_columns(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    metadata = _write_metadata(tmp_path / "spider2" / "db" / "metadata.json")
+    monkeypatch.setenv("DATASETS_DIR", str(tmp_path))
+    database = SnowflakeDatabase(_connection_string())
+
+    assert database._metadata_path == metadata
+    assert database._metadata_tables == {"PRODUCT", "CURRENCYRATE"}
+
+    tables = pd.DataFrame(
+        {
+            "table_schema": ["PUBLIC", "PUBLIC", "PUBLIC"],
+            "table_name": ["PRODUCT", "CURRENCYRATE", "EXTRA"],
+            "table_type": ["BASE TABLE", "BASE TABLE", "BASE TABLE"],
+        }
+    )
+    columns = pd.DataFrame(
+        {
+            "table_schema": ["PUBLIC", "PUBLIC", "PUBLIC", "PUBLIC"],
+            "table_name": ["PRODUCT", "PRODUCT", "PRODUCT", "CURRENCYRATE"],
+            "column_name": ["PRODUCTID", "NAME", "IGNORED", "CURRENCYRATEID"],
+        }
+    )
+
+    assert database._filter_by_metadata(tables)["table_name"].tolist() == [
+        "PRODUCT",
+        "CURRENCYRATE",
+    ]
+    assert database._filter_by_metadata(columns, filter_columns=True)[
+        "column_name"
+    ].tolist() == ["PRODUCTID", "NAME", "CURRENCYRATEID"]
+
+
+def test_metadata_file_query_param(tmp_path: Path) -> None:
+    metadata = _write_metadata(tmp_path / "custom.json")
+    database = SnowflakeDatabase(
+        _connection_string(f"metadata_file={metadata.as_posix()}")
+    )
+
+    assert database._metadata_path == metadata
+    assert database._metadata_tables == {"PRODUCT", "CURRENCYRATE"}
+
+
+def test_get_tables_pushes_metadata_filter_into_sql(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _write_metadata(tmp_path / "spider2" / "db" / "metadata.json")
+    monkeypatch.setenv("DATASETS_DIR", str(tmp_path))
+    database = SnowflakeDatabase(_connection_string())
+    captured: list[str] = []
+
+    def execute(sql: str) -> pd.DataFrame:
+        captured.append(sql)
+        return pd.DataFrame(
+            {
+                "table_schema": ["PUBLIC"],
+                "table_name": ["PRODUCT"],
+                "table_type": ["BASE TABLE"],
+            }
+        )
+
+    monkeypatch.setattr(database, "execute", execute)
+
+    frame = database.get_tables()
+
+    assert frame["table_name"].tolist() == ["PRODUCT"]
+    assert "UPPER(TABLE_NAME) IN ('CURRENCYRATE', 'PRODUCT')" in captured[0]
 
 
 def test_query_history_excludes_blank_query_text(monkeypatch: MonkeyPatch) -> None:

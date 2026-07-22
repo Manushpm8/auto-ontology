@@ -51,10 +51,65 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         user = _require(connection, "user")
         password = _require(connection, "password")
         database = _require(connection, "database")
-        return (
+        url = (
             f"snowflake://{_enc(user)}:{_enc(password)}@{account}"
             f"?warehouse={_enc(warehouse)}&database={_enc(database)}"
         )
+        metadata_database = str(connection.get("metadata_database") or "").strip()
+        if metadata_database:
+            url += f"&metadata_database={_enc(metadata_database)}"
+        metadata_file = str(connection.get("metadata_file") or "").strip()
+        if metadata_file:
+            url += f"&metadata_file={_enc(metadata_file)}"
+        return url
+
+    if conn_type == "bigquery":
+        # Logical form (SQLite-like): name + datasets=project.dataset[,...]
+        # Physical shorthand: project + dataset path when name is omitted.
+        name = str(connection.get("name") or connection.get("database") or "").strip()
+        datasets = connection.get("datasets")
+        if isinstance(datasets, str):
+            dataset_list = [d.strip() for d in datasets.split(",") if d.strip()]
+        elif isinstance(datasets, list):
+            dataset_list = [str(d).strip() for d in datasets if str(d).strip()]
+        else:
+            dataset_list = []
+
+        project = str(connection.get("project") or "").strip()
+        dataset = str(connection.get("dataset") or "").strip()
+        if not dataset_list and project and dataset:
+            dataset_list = [f"{project}.{dataset}"]
+        if not dataset_list:
+            raise ValueError(
+                "BigQuery connection requires 'datasets' "
+                "(or 'project' + 'dataset')"
+            )
+
+        if name:
+            url = f"bigquery://{_enc(name)}"
+            params = [f"datasets={_enc(','.join(dataset_list))}"]
+        else:
+            first_project, first_dataset = dataset_list[0].split(".", 1)
+            url = f"bigquery://{_enc(first_project)}/{_enc(first_dataset)}"
+            params = []
+            if len(dataset_list) > 1:
+                params.append(f"datasets={_enc(','.join(dataset_list))}")
+
+        billing_project = str(connection.get("billing_project") or "").strip()
+        if billing_project:
+            params.append(f"billing_project={_enc(billing_project)}")
+        credentials = str(connection.get("credentials") or "").strip()
+        if credentials:
+            params.append(f"credentials={_enc(credentials)}")
+        location = str(connection.get("location") or "").strip()
+        if location:
+            params.append(f"location={_enc(location)}")
+        metadata_database = str(connection.get("metadata_database") or "").strip()
+        if metadata_database:
+            params.append(f"metadata_database={_enc(metadata_database)}")
+        if params:
+            url += "?" + "&".join(params)
+        return url
 
     if conn_type == "databricks":
         host = _require(connection, "host").rstrip("/")

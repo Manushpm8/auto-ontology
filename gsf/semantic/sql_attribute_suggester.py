@@ -32,6 +32,7 @@ from gsf.dal.sql_attributes import SQL_ATTR_SOURCE_SQL
 from gsf.dal.terms import fetch_table_schema_map, fetch_terms_with_sqls
 from gsf.semantic.constants import SEMANTIC_SOURCE
 from gsf.server.sql_attributes.service import (
+    SqlAttributeExpressionConflict,
     SqlAttributeNameConflict,
     SqlAttributeSqlError,
     create_sql_attribute,
@@ -557,7 +558,7 @@ def suggest_sql_attributes(database_name: str) -> int:
     Returns the total number of new SqlAttribute nodes written.
     """
     logger.info("Collecting SQL expressions per term…")
-    term_rows = fetch_terms_with_sqls(SEMANTIC_SOURCE)
+    term_rows = fetch_terms_with_sqls(SEMANTIC_SOURCE, database_name=database_name)
 
     if not term_rows:
         logger.info(
@@ -565,7 +566,11 @@ def suggest_sql_attributes(database_name: str) -> int:
         )
         return 0
 
-    logger.info("Found %d term(s) with SQL queries.", len(term_rows))
+    logger.info(
+        "Found %d term(s) with SQL queries in database %r.",
+        len(term_rows),
+        database_name,
+    )
 
     schema_map: dict[str, str] = {}
     try:
@@ -674,6 +679,12 @@ def suggest_sql_attributes(database_name: str) -> int:
                 attr_id: str = row_result["id"]
             except SqlAttributeNameConflict:
                 logger.debug("SqlAttribute %r already exists — skipping.", s.name)
+                continue
+            except SqlAttributeExpressionConflict:
+                logger.debug(
+                    "SqlAttribute expression for %r already exists — skipping.",
+                    s.name,
+                )
                 continue
             except SqlAttributeSqlError as exc:
                 logger.warning(
