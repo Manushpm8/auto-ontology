@@ -59,7 +59,8 @@ RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" \
 WORKDIR /app
 
 # Copy lock + project metadata first to maximise layer caching.
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock .python-version ./
+COPY vendor/ vendor/
 
 # Resolve and install the dependency closure into /opt/venv.
 RUN --mount=type=cache,target=/root/.cache/uv \

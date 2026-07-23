@@ -54,7 +54,7 @@ class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
     llm: ChatNVIDIA
-    entity_llm: NotRequired[BaseChatModel]
+    non_reasoning_llm: NotRequired[BaseChatModel]
     initial_question: str
     zone_ids: list[str] | None
     zone_access_scope: ZoneAccessScope
