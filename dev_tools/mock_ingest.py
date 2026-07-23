@@ -20,7 +20,6 @@ Or via the "Debug Mock Ingest" launch config in .vscode/launch.json.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
 import pandas as pd
@@ -36,6 +35,7 @@ from nemo_retriever.tabular_data.sql_database import SQLDatabase
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
+from gsf.utils.model_config import resolve
 from gsf.vdb import get_data_vdb
 
 logger = logging.getLogger("dev_tools.mock_ingest")
@@ -43,16 +43,14 @@ logger = logging.getLogger("dev_tools.mock_ingest")
 MOCK_DATABASE_NAME = "mock_shop"
 MOCK_SCHEMA = "public"
 
-_NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
-_EMBED_ENDPOINT = os.environ.get(
-    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
-)
-_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2")
+_NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
+_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
+_EMBED_MODEL = resolve("EMBED", "MODEL")
 
 if not _NVIDIA_API_KEY:
     raise EnvironmentError(
-        "NVIDIA_API_KEY is not set. Export it before running, e.g.:\n\n"
-        "    export NVIDIA_API_KEY='nvapi-...'\n"
+        "EMBED_API_KEY is not set. Export it before running, e.g.:\n\n"
+        "    export EMBED_API_KEY='nvapi-...'\n"
     )
 
 

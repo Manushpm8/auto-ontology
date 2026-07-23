@@ -16,6 +16,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
+from gsf.utils.model_config import resolve
+
 logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
@@ -51,16 +53,18 @@ class _TimeoutSession(_requests.Session):
 
 T = TypeVar("T", bound=BaseModel)
 
-_BASE_URL = os.environ.get("BASE_URL", "https://integrate.api.nvidia.com/v1")
-_MODEL_NAME = os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b")
-_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+# Main (reasoning) model triplet. Each field falls back to DEFAULT_MODELS_<field>
+# (and the API key additionally to the legacy NVIDIA_API_KEY) when unset.
+_BASE_URL = resolve("REASONING", "ENDPOINT")
+_MODEL_NAME = resolve("REASONING", "MODEL")
+_API_KEY = resolve("REASONING", "API_KEY")
 
-# Non-reasoning model. Kept fully separate (key/base URL/model) so it can point at
-# a different endpoint than the main reasoning model (e.g. inference vs integrate
-# API). Each falls back to the main reasoning value when unset.
-_NON_REASONING_BASE_URL = os.environ.get("NON_REASONING_BASE_URL", _BASE_URL)
-_NON_REASONING_MODEL_NAME = os.environ.get("NON_REASONING_MODEL_NAME", _MODEL_NAME)
-_NON_REASONING_API_KEY = os.environ.get("NON_REASONING_NVIDIA_API_KEY", "")
+# Non-reasoning model. Kept fully separate (key/endpoint/model) so it can point at
+# a different endpoint than the main model (e.g. inference vs integrate API). Each
+# field falls back to DEFAULT_MODELS_<field> when unset.
+_NON_REASONING_BASE_URL = resolve("NON_REASONING", "ENDPOINT")
+_NON_REASONING_MODEL_NAME = resolve("NON_REASONING", "MODEL")
+_NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 
 
 def _build_client(
@@ -117,10 +121,10 @@ def get_llm_client(
     Parameters
     ----------
     model : str | None
-        Override the default ``MODEL_NAME`` env var for this client.
+        Override the default ``REASONING_MODEL`` env var for this client.
     """
     if not _API_KEY:
-        raise EnvironmentError("NVIDIA_API_KEY is not set")
+        raise EnvironmentError("REASONING_API_KEY is not set")
 
     return _build_client(
         model=model or _MODEL_NAME,
@@ -139,17 +143,17 @@ def get_non_reasoning_llm_client(
 ) -> BaseChatModel:
     """Create an LLM client for the non-reasoning model.
 
-    Uses ``NON_REASONING_NVIDIA_API_KEY`` / ``NON_REASONING_BASE_URL`` /
-    ``NON_REASONING_MODEL_NAME`` so it can target a different endpoint than the
-    main reasoning model.
+    Uses ``NON_REASONING_API_KEY`` / ``NON_REASONING_ENDPOINT`` /
+    ``NON_REASONING_MODEL`` so it can target a different endpoint than the
+    main agent model.
 
     Parameters
     ----------
     model : str | None
-        Override the default ``NON_REASONING_MODEL_NAME`` env var for this client.
+        Override the default ``NON_REASONING_MODEL`` env var for this client.
     """
     if not _NON_REASONING_API_KEY:
-        raise EnvironmentError("NON_REASONING_NVIDIA_API_KEY is not set")
+        raise EnvironmentError("NON_REASONING_API_KEY is not set")
 
     return _build_client(
         model=model or _NON_REASONING_MODEL_NAME,
