@@ -15,7 +15,6 @@ import type { ColorOption } from '@/common/ColorPicker';
 import { Icon, IconName } from '@/common/icons';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { ZonesDataTree } from '@/components/settings/ZonesDataTree';
-import { UsersPicker } from '@/common/UsersPicker';
 import { mergeSchemasIntoDatabase, mergeTablesIntoSchema } from '@/lib/data/datasource-tree-merge';
 import type { Zone, ZoneCreated, ZoneUpdateInput } from '@/types/zones';
 import { useSession } from '@/auth/auth-client';
