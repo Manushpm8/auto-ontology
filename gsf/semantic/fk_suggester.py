@@ -9,7 +9,10 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from gsf.semantic.deterministic import fk_source_columns
-from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
+from gsf.utils.llm_invoke import (
+    get_non_reasoning_llm_client,
+    invoke_with_structured_output,
+)
 from gsf.semantic.models import FkAndPkResult, PotentialFkResult, PotentialFkSuggestion
 
 logger = logging.getLogger(__name__)
@@ -125,7 +128,7 @@ def suggest_potential_foreign_keys(
     )
 
     result = invoke_with_structured_output(
-        get_llm_client(temperature=0.0),
+        get_non_reasoning_llm_client(temperature=0.0),
         [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
         FkAndPkResult,
     )

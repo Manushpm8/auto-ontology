@@ -13,7 +13,10 @@ from gsf.semantic.models import (
     SqlAttributeExtractionResult,
     SqlAttributeProposal,
 )
-from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
+from gsf.utils.llm_invoke import (
+    get_non_reasoning_llm_client,
+    invoke_with_structured_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +222,7 @@ def extract_sql_attributes(
     )
 
     result = invoke_with_structured_output(
-        get_llm_client(temperature=0.0, max_tokens=4096),
+        get_non_reasoning_llm_client(temperature=0.0, max_tokens=4096),
         [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
         SqlAttributeExtractionResult,
     )
