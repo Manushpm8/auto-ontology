@@ -27,7 +27,7 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
 
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
-from gsf.utils.llm_invoke import invoke_with_structured_output
+from gsf.utils.llm_invoke import get_non_reasoning_llm_client, invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import (
     CandidateFilterModel,
@@ -331,7 +331,7 @@ class CandidateRetrievalAgent(BaseAgent):
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
         entities: list[str] = path_state.get("entities") or []
-        llm = state["llm"]
+        llm = get_non_reasoning_llm_client()  # was: state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
 

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.prompts import create_question_sanitization_prompt
 from gsf.retrieval.text_to_sql.state import AgentState, get_original_question
-from gsf.utils.llm_invoke import invoke_with_structured_output
+from gsf.utils.llm_invoke import get_non_reasoning_llm_client, invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class QuestionSanitizationAgent(BaseAgent):
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         """Sanitize the user's question for retrieval-oriented downstream steps."""
-        llm = state["llm"]
+        llm = get_non_reasoning_llm_client()  # was: state["llm"]
         path_state = state.get("path_state", {})
         original_question = get_original_question(state)
 

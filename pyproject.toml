@@ -19,7 +19,8 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "snowflake-connector-python>=4.6.0",
     "uvicorn[standard]>=0.32.0",
-    "nvidia-sdfm[kumorfm]>=0.1.0",
+    "nvidia-sdfm[kumorfm]>=0.1.0; sys_platform != 'linux' or platform_machine != 'aarch64'",
+    "nvidia-sdfm>=0.1.0; sys_platform == 'linux' and platform_machine == 'aarch64'",
     "databricks-sql-connector>=4.3.0",
 ]
 
