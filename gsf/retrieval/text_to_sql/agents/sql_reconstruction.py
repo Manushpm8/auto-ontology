@@ -158,6 +158,9 @@ class SQLReconstructionAgent(BaseAgent):
         """Ask the LLM to classify the error and suggest search queries."""
         llm = state["llm"]
 
+        if ext_err := state["path_state"].get("error"):
+            error_context = f"External feedback: {ext_err}\n\n{error_context}"
+
         table_summary = (
             ", ".join(t.get("name", "?") for t in existing_tables) or "(none)"
         )

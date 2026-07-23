@@ -212,6 +212,10 @@ def wrap_node_with_logging(node_name: str, fn):
     return wrapped
 
 
+def _entry_router_fn(state):
+    return state["path_state"].get("_resume_from", "sanitize_question")
+
+
 def create_graph():
 
     # KumoRFM prediction is wired in only when configured — decided once here at
@@ -300,7 +304,16 @@ def create_graph():
     graph = StateGraph(AgentState)
 
     # -----------------    ENTRY POINT   ------------------
-    graph.set_entry_point("sanitize_question")
+    graph.add_node("_entry_router", lambda state: state)
+    graph.set_entry_point("_entry_router")
+    graph.add_conditional_edges(
+        "_entry_router",
+        _entry_router_fn,
+        {
+            "sanitize_question": "sanitize_question",
+            "reconstruct_sql": "reconstruct_sql",
+        },
+    )
 
     # Add only nodes instantiated above.
     graph.add_node("sanitize_question", sanitize_question_node)

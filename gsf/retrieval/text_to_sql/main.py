@@ -165,6 +165,40 @@ def get_agent_response(payload: TextToSQLPayload) -> dict:
     return {"response": "SQL can't be constructed.", "sql_code": "", "result": None}
 
 
+def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
+    """Like get_agent_response but also returns path_state in the result under key 'path_state'."""
+    state = _build_state(payload)
+    final_state = dict(state)
+
+    try:
+        for step in app.stream(state, config={"recursion_limit": 45}):
+            for node_name, node_output in step.items():
+                if node_output:
+                    if "path_state" in node_output:
+                        if "path_state" not in final_state:
+                            final_state["path_state"] = {}
+                        final_state["path_state"].update(node_output["path_state"])
+                    for key, value in node_output.items():
+                        if key != "path_state":
+                            final_state[key] = value
+    except Exception as exc:
+        logger.exception("Error during agent stream in get_agent_response_with_state")
+        return {"response": f"Agent failed: {exc}", "sql_code": "", "path_state": {}}
+
+    # merge path_state: start with initial, overlay final accumulated
+    merged_path_state = dict(state.get("path_state") or {})
+    if "path_state" in final_state:
+        merged_path_state.update(final_state["path_state"])
+
+    answer = _extract_answer(final_state)
+    if isinstance(answer, dict):
+        result = dict(answer)
+    else:
+        result = {"response": str(answer)}
+    result["path_state"] = merged_path_state
+    return result
+
+
 def run_until_node(payload: TextToSQLPayload, stop_after: str) -> dict:
     """Run the graph and return the accumulated state once ``stop_after`` produces output.
 
@@ -196,6 +230,7 @@ def run_until_node(payload: TextToSQLPayload, stop_after: str) -> dict:
 
 __all__ = [
     "get_agent_response",
+    "get_agent_response_with_state",
     "stream_agent_response",
     "run_until_node",
     "app",

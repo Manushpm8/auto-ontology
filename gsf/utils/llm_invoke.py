@@ -19,7 +19,7 @@ from pydantic import BaseModel, ValidationError
 logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
-LLM_INVOKE_TIMEOUT_S = 50
+LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
 
 # Bound total concurrent LLM requests across all worker threads so the pipeline's
 # nested parallelism (tables × terms) doesn't saturate the hosted endpoint's
