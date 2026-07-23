@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from gsf.dal.zones import list_zones
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import build_semantic_embedder
 from gsf.semantic.semantic_fk import resolve_semantic_fks
@@ -11,6 +12,19 @@ from gsf.semantic.semantic_fk import resolve_semantic_fks
 from gsf.semantic.pipeline import compile_semantic_layer
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_enabled_zone_ids() -> list[str] | None:
+    """Resolve the Term-creation zone scope: ``None`` with zero enabled zones.
+
+    Mirrors the rule applied to the text-to-SQL agent and catalog access
+    (``frontend/auth/resolve-zones.ts``): with no zone configured there is no
+    boundary to enforce, so compilation covers every table. With at least one
+    enabled zone, compilation is restricted to tables reachable through the
+    configured zones — a Term is never created from data outside every zone.
+    """
+    enabled_zone_ids = [zone["id"] for zone in list_zones() if zone["enabled"]]
+    return enabled_zone_ids or None
 
 
 def run_semantic_compilation(
@@ -26,10 +40,13 @@ def run_semantic_compilation(
 
     embedder = build_semantic_embedder(database_name, reset=False)
 
+    zone_ids = _resolve_enabled_zone_ids()
+
     logger.info("=" * 60)
     logger.info(
-        "Semantic compilation — full Neo4j graph (database=%r)",
+        "Semantic compilation — full Neo4j graph (database=%r, zones=%s)",
         database_name,
+        zone_ids or "none configured — all tables",
     )
     logger.info("=" * 60)
 
@@ -37,6 +54,7 @@ def run_semantic_compilation(
         database_name,
         domain_summary=summary,
         embedder=embedder,
+        zone_ids=zone_ids,
     )
 
     logger.info("=" * 60)

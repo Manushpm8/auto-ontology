@@ -21,6 +21,7 @@ def compile_semantic_layer(
     *,
     domain_summary: DomainSummary | None = None,
     embedder: SemanticEmbedder | None = None,
+    zone_ids: list[str] | None = None,
 ) -> int:
     """Run full taxonomy compilation over every table in Neo4j.
 
@@ -28,9 +29,15 @@ def compile_semantic_layer(
     extraction run concurrently). The commit phase (VDB dedup check, Neo4j
     writes, VDB embedding) is serialized via ``_term_commit_lock`` in
     ``visit_enter`` to prevent duplicate Terms.
+
+    *zone_ids* is forwarded to ``fetch_all_tables_without_term`` — pass the
+    ids of every currently enabled zone to compile Terms only from tables
+    reachable through them, or ``None`` (the default) when zero zones are
+    configured, to compile from every term-less table. See
+    ``run_semantic_compilation`` for how the caller resolves this.
     """
     summary = domain_summary or load_domain_summary(database_name)
-    tables = fetch_all_tables_without_term(database_name)
+    tables = fetch_all_tables_without_term(database_name, zone_ids=zone_ids)
 
     def _process(table: dict, index: int) -> ProcessTableResult | None:
         table_name = table["name"]

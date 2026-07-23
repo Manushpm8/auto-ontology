@@ -422,6 +422,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
 
 def fetch_all_tables_without_term(
     database_name: str | None = None,
+    zone_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return Table nodes that have not yet been assigned a Term.
 
@@ -430,31 +431,48 @@ def fetch_all_tables_without_term(
     graph (e.g. the BIRD benchmark), so scoping keeps each compile pass — and
     the ``database_name`` its embeddings are tagged with — isolated to a single
     database. When omitted, every term-less table in the graph is returned.
+
+    *zone_ids*, when provided, additionally restricts results to tables
+    reachable through those zones — mirroring the same "no zones configured
+    → all data, at least one zone configured → only that data" rule the
+    text-to-SQL agent and the ``/terms`` list apply (see
+    ``resolve_accessible_catalog_ids``). Pass ``None`` (the default, and what
+    callers should pass when zero zones exist) to compile every term-less
+    table, unscoped — today's behaviour.
     """
     from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges
 
+    params: dict[str, Any] = {}
+    zone_clause = ""
+    if zone_ids is not None:
+        table_ids = list(resolve_accessible_catalog_ids(zone_ids)["table_ids"])
+        zone_clause = "AND t.id IN $table_ids"
+        params["table_ids"] = table_ids
+
     if database_name is not None:
+        params["database_name"] = database_name
         return get_neo4j_conn().query_read(
             f"""
             MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
                   (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
-            WHERE NOT (t)-[:{REL_REPRESENTS}]->()
+            WHERE NOT (t)-[:{REL_REPRESENTS}]->() {zone_clause}
             RETURN t.id AS id, t.name AS name, t.description AS description,
                    sch.name AS schema_name
             ORDER BY t.name
             """,
-            {"database_name": database_name},
+            params,
         )
 
     return get_neo4j_conn().query_read(
         f"""
         MATCH (t:{Labels.TABLE})
-        WHERE NOT (t)-[:{REL_REPRESENTS}]->()
+        WHERE NOT (t)-[:{REL_REPRESENTS}]->() {zone_clause}
         MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
         RETURN t.id AS id, t.name AS name, t.description AS description,
                sch.name AS schema_name
         ORDER BY t.name
-        """
+        """,
+        params,
     )
 
 
