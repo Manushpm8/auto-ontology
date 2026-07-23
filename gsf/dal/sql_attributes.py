@@ -251,7 +251,13 @@ def fetch_sql_attributes(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return SqlAttribute nodes, optionally restricted to zone-visible terms."""
+    """Return SqlAttribute nodes, optionally restricted to zone-visible terms.
+
+    Used by ``gsf.retrieval.data_access.zone_access`` to build the
+    text-to-SQL agent's authorized SqlAttribute id allow-set — not called
+    by the ``/terms`` API surface, which fetches attributes per-term via
+    ``fetch_sql_attributes_by_term_id`` instead.
+    """
     return _query_sql_attributes(
         zone_ids=zone_ids,
         data_ids_by_zone=data_ids_by_zone,
