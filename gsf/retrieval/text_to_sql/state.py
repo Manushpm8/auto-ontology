@@ -42,6 +42,7 @@ class TextToSQLPayload(TypedDict):
     connectors: NotRequired[list[SQLDatabase]]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
+    target_db: NotRequired[str]
 
 
 class AgentState(TypedDict):
@@ -49,7 +50,6 @@ class AgentState(TypedDict):
 
     llm: ChatNVIDIA
     non_reasoning_llm: NotRequired[BaseChatModel]
-    entity_llm: NotRequired[BaseChatModel]
     initial_question: str
     messages: list[HumanMessage]
     decision: str

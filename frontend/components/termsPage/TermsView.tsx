@@ -4,29 +4,27 @@
 
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
-import { Icon, IconName } from '@/components/icons';
-import { ConfirmModal } from '@/components/ConfirmModal';
-import { SearchInput } from '@/components/SearchInput';
+import { Icon, IconName } from '@/common/icons';
+import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
+import { SearchInput } from '@/common/SearchInput';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
-import { zonesApi } from '@/api/zones';
-import { useSession } from '@/auth/auth-client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import type { ComposerEditValue } from '@/common/SinglePageComposer';
+import { type ComposerEditValue } from '@/common/SinglePageComposer';
+import { Label } from '@/common/Label';
 import { ComposerSectionKind } from '@/enums/datasources';
-import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
-import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
-import { SqlEditor } from '@/components/SqlBlock';
+import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
+import { SqlEditor } from '@/common/SqlBlock';
 import type { ColumnAttribute, SqlAttribute, Term } from '@/types/terms';
 
 type TermCardProps = {
 	term: Term;
-	attributes: ColumnAttribute[];
-	sqlAttributes: SqlAttribute[];
+	columnAttributeCount: number;
+	sqlAttributeCount: number;
 	relatedCount: number;
 	onClick: (term: Term) => void;
 };
@@ -36,7 +34,13 @@ type SqlAttributeDeleteTarget = {
 	name: string;
 };
 
-const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: TermCardProps) => (
+const TermCard = ({
+	term,
+	columnAttributeCount,
+	sqlAttributeCount,
+	relatedCount,
+	onClick,
+}: TermCardProps) => (
 	<li
 		role="button"
 		tabIndex={0}
@@ -66,8 +70,8 @@ const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: Te
 			</p>
 		)}
 
-		{/* Three-column section */}
-		<div className="mt-4 grid grid-cols-3 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
+		{/* Four-column section */}
+		<div className="mt-4 grid grid-cols-4 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
 			{/* Column Attributes */}
 			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
@@ -79,7 +83,7 @@ const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: Te
 					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
 						<span>Column Attributes</span>
 						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
-							{attributes.length}
+							{columnAttributeCount}
 						</span>
 					</span>
 				</div>
@@ -96,14 +100,14 @@ const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: Te
 					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
 						<span>SQL Attributes</span>
 						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
-							{sqlAttributes.length}
+							{sqlAttributeCount}
 						</span>
 					</span>
 				</div>
 			</div>
 
 			{/* Related Terms */}
-			<div>
+			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
 					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
 						Related Terms
@@ -114,6 +118,29 @@ const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: Te
 					<span className="font-medium text-zinc-900 dark:text-zinc-100">
 						{relatedCount}
 					</span>
+				</div>
+			</div>
+
+			{/* Zones */}
+			<div>
+				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
+					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+						Zones
+					</span>
+				</div>
+				<div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
+					{term.zones.length > 0 ? (
+						term.zones.map((zone) => (
+							<Label
+								key={zone.id}
+								label={zone.name}
+								color={zone.color}
+								muted={!zone.enabled}
+							/>
+						))
+					) : (
+						<span className="text-sm text-zinc-500 dark:text-zinc-400">-</span>
+					)}
 				</div>
 			</div>
 		</div>
@@ -130,22 +157,21 @@ export const TermsView = () => {
 	const searchParams = useSearchParams();
 	const focusId = searchParams.get('focus');
 	const sqlAttrId = searchParams.get('sqlAttr');
-
-	const { data: session } = useSession();
-	const sessionUserId = session?.user?.id ?? null;
-	const sessionRole = session?.user?.role ?? null;
+	const colAttrId = searchParams.get('colAttr');
 
 	const [terms, setTerms] = useState<Term[]>([]);
-	const [attrs, setAttrs] = useState<ColumnAttribute[]>([]);
 	const [sqlAttrs, setSqlAttrs] = useState<SqlAttribute[]>([]);
+	const [columnAttrs, setColumnAttrs] = useState<ColumnAttribute[]>([]);
+	const [columnAttrCountsMap, setColumnAttrCountsMap] = useState<Map<string, number>>(new Map());
+	const [sqlAttrCountsMap, setSqlAttrCountsMap] = useState<Map<string, number>>(new Map());
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [searchQuery, setSearchQuery] = useState('');
 	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
-	const loadedAuxRef = useRef(false);
 	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
 	const [sqlAttrsEpoch, setSqlAttrsEpoch] = useState(0);
+	const [columnAttrsEpoch, setColumnAttrsEpoch] = useState(0);
 	const [sqlAttrName, setSqlAttrName] = useState('');
 	const [sqlAttrDescription, setSqlAttrDescription] = useState('');
 	const [sqlAttrSql, setSqlAttrSql] = useState('');
@@ -160,15 +186,21 @@ export const TermsView = () => {
 	const [termEditing, setTermEditing] = useState(false);
 	const [sqlAttrEditing, setSqlAttrEditing] = useState(false);
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
+	const [columnAttrEditing, setColumnAttrEditing] = useState(false);
+	const [columnAttrEditError, setColumnAttrEditError] = useState<string | null>(null);
 
 	const [prevFocusId, setPrevFocusId] = useState(focusId);
 	const [prevSqlAttrId, setPrevSqlAttrId] = useState(sqlAttrId);
-	if (focusId !== prevFocusId || sqlAttrId !== prevSqlAttrId) {
+	const [prevColAttrId, setPrevColAttrId] = useState(colAttrId);
+	if (focusId !== prevFocusId || sqlAttrId !== prevSqlAttrId || colAttrId !== prevColAttrId) {
 		setPrevFocusId(focusId);
 		setPrevSqlAttrId(sqlAttrId);
+		setPrevColAttrId(colAttrId);
 		setTermEditing(false);
 		setSqlAttrEditing(false);
 		setSqlAttrEditError(null);
+		setColumnAttrEditing(false);
+		setColumnAttrEditError(null);
 	}
 	const [sqlEditModalOpen, setSqlEditModalOpen] = useState(false);
 	const [sqlEditValue, setSqlEditValue] = useState('');
@@ -184,16 +216,9 @@ export const TermsView = () => {
 
 		(async () => {
 			setLoading(true);
-			// Attributes/SQL attributes/related counts don't depend on the term
-			// search — only fetch them once, up front, and just re-fetch `terms`
-			// as the (debounced) search query changes.
-			const loadAux = !loadedAuxRef.current;
-			const [termsRes, attrsRes, sqlAttrsRes, countsRes] = await Promise.all([
-				termsApi.list(debouncedSearchQuery ? { q: debouncedSearchQuery } : undefined),
-				loadAux ? termsApi.listColumnAttributes() : Promise.resolve(null),
-				loadAux ? termsApi.listSqlAttributes() : Promise.resolve(null),
-				loadAux ? termsApi.listRelatedCounts() : Promise.resolve(null),
-			]);
+			const termsRes = await termsApi.list(
+				debouncedSearchQuery ? { q: debouncedSearchQuery } : undefined,
+			);
 			if (cancelled) return;
 
 			if (termsRes.error) {
@@ -201,26 +226,26 @@ export const TermsView = () => {
 				setTerms([]);
 			} else {
 				setError(null);
-				setTerms(termsRes.data ?? []);
-			}
-
-			if (attrsRes != null && !attrsRes.error) {
-				setAttrs(attrsRes.data ?? []);
-			}
-
-			if (sqlAttrsRes != null && !sqlAttrsRes.error) {
-				setSqlAttrs(sqlAttrsRes.data ?? []);
-			}
-
-			if (countsRes != null && !countsRes.error) {
+				setTerms(termsRes.terms ?? []);
 				const map = new Map<string, number>();
-				for (const { term_id, count } of countsRes.data ?? []) {
+				for (const { term_id, count } of termsRes.column_attribute_counts ?? []) {
 					map.set(term_id, count);
 				}
-				setRelatedCountsMap(map);
+				setColumnAttrCountsMap(map);
+
+				const sqlAttributeCountsMap = new Map<string, number>();
+				for (const { term_id, count } of termsRes.sql_attribute_counts ?? []) {
+					sqlAttributeCountsMap.set(term_id, count);
+				}
+				setSqlAttrCountsMap(sqlAttributeCountsMap);
+
+				const relatedCountsMap = new Map<string, number>();
+				for (const { term_id, count } of termsRes.related_counts ?? []) {
+					relatedCountsMap.set(term_id, count);
+				}
+				setRelatedCountsMap(relatedCountsMap);
 			}
 
-			loadedAuxRef.current = true;
 			setLoading(false);
 		})();
 
@@ -228,26 +253,6 @@ export const TermsView = () => {
 			cancelled = true;
 		};
 	}, [debouncedSearchQuery]);
-
-	const attrsByTerm = useMemo(() => {
-		const map = new Map<string, ColumnAttribute[]>();
-		for (const attr of attrs) {
-			const list = map.get(attr.term_name) ?? [];
-			list.push(attr);
-			map.set(attr.term_name, list);
-		}
-		return map;
-	}, [attrs]);
-
-	const sqlAttrsByTerm = useMemo(() => {
-		const map = new Map<string, SqlAttribute[]>();
-		for (const attr of sqlAttrs) {
-			const list = map.get(attr.term_name) ?? [];
-			list.push(attr);
-			map.set(attr.term_name, list);
-		}
-		return map;
-	}, [sqlAttrs]);
 
 	const handleCardClick = useCallback(
 		(term: Term) => {
@@ -429,6 +434,62 @@ export const TermsView = () => {
 		return { error: false };
 	};
 
+	const handleColumnAttrEditSave = async (payload: Record<string, ComposerEditValue>) => {
+		if (focusedColAttr == null || focusId == null) {
+			return { error: true, message: 'Column attribute not found' };
+		}
+		setColumnAttrEditError(null);
+		const description =
+			typeof payload.description === 'string'
+				? payload.description
+				: (focusedColAttr.description ?? '');
+		const name =
+			typeof payload.name === 'string' ? payload.name.trim() : focusedColAttr.name.trim();
+		if (!name) {
+			return { error: true, message: 'Column attribute name cannot be blank' };
+		}
+		const sampleValues = Array.isArray(payload.sample_values)
+			? payload.sample_values.map((value) => String(value))
+			: (focusedColAttr.sample_values ?? []);
+		const previousSampleValues = focusedColAttr.sample_values ?? [];
+
+		const patch: { name?: string; description?: string; sample_values?: string[] } = {};
+		if (name !== focusedColAttr.name.trim()) {
+			patch.name = name;
+		}
+		if (description !== (focusedColAttr.description ?? '')) {
+			patch.description = description;
+		}
+		const sampleValuesChanged =
+			sampleValues.length !== previousSampleValues.length ||
+			sampleValues.some((value, index) => value !== previousSampleValues[index]);
+		if (sampleValuesChanged) {
+			patch.sample_values = sampleValues;
+		}
+		if (Object.keys(patch).length === 0) {
+			return { error: false };
+		}
+
+		const res = await termsApi.updateColumnAttribute(focusId, focusedColAttr.id, patch);
+		if (res.error) {
+			return { error: true, message: res.message ?? 'Failed to update column attribute' };
+		}
+		setColumnAttrs((prev) =>
+			prev.map((attr) =>
+				attr.id === focusedColAttr.id
+					? {
+							...attr,
+							name: res.data.name,
+							description: res.data.description,
+							sample_values: res.data.sample_values ?? sampleValues,
+						}
+					: attr,
+			),
+		);
+		setColumnAttrsEpoch((prev) => prev + 1);
+		return { error: false };
+	};
+
 	const handleTermEditSave = async (payload: Record<string, ComposerEditValue>) => {
 		if (focusedTerm == null || focusId == null) {
 			return { error: true, message: 'Term not found' };
@@ -548,23 +609,122 @@ export const TermsView = () => {
 		setSqlAttrEditing(false);
 	};
 
-	const handleSqlAttrClick = useCallback(
+	const handleDataTableRowClick = useCallback(
 		(sectionId: string, rowId: string) => {
-			if (sectionId !== 'sql_attributes' || focusId == null) return;
-			router.push(
-				`/terms?focus=${encodeURIComponent(focusId)}&sqlAttr=${encodeURIComponent(rowId)}`,
-			);
+			if (focusId == null) return;
+			if (sectionId === 'sql_attributes') {
+				router.push(
+					`/terms?focus=${encodeURIComponent(focusId)}&sqlAttr=${encodeURIComponent(rowId)}`,
+				);
+			} else if (sectionId === 'column_attributes') {
+				router.push(
+					`/terms?focus=${encodeURIComponent(focusId)}&colAttr=${encodeURIComponent(rowId)}`,
+				);
+			}
 		},
 		[focusId, router],
 	);
 
+	const getColumnAttributeSinglePage = useCallback(
+		async (attrId: string): Promise<SinglePageFormat> => {
+			if (focusId == null) {
+				return {
+					sections: [],
+					header: { header: { title: 'Column Attribute not found', withBorder: true } },
+				};
+			}
+			// TODO: viewer zone-scoping handled in a separate PR — for now the
+			// client treats a viewer the same as an admin here (no zone fetch,
+			// userZoneIds = null → all zones accessible).
+			const res = await termsApi.getColumnAttributes(focusId);
+			const attrs = res.error ? [] : (res.data ?? []);
+			const attr = attrs.find((a) => a.id === attrId);
+			if (attr == null) {
+				return {
+					sections: [],
+					header: { header: { title: 'Column Attribute not found', withBorder: true } },
+				};
+			}
+			setColumnAttrs(attrs);
+
+			const primaryColumn = attr.primary_column ?? null;
+			const referencedColumns = attr.referenced_columns ?? [];
+			const userZoneIds: string[] | null = null;
+
+			return {
+				header: {
+					header: {
+						title: attr.name,
+						withBorder: true,
+						showContentHeader: true,
+						titleEditable: true,
+					},
+				},
+				sections: [
+					{
+						type: ComposerSectionKind.TEXT_CARD,
+						id: 'description',
+						title: 'Description',
+						body: attr.description ?? '',
+						editable: true,
+					},
+					{
+						type: ComposerSectionKind.TAG_LIST,
+						id: 'sample_values',
+						title: 'Sample Values',
+						values: Array.isArray(attr.sample_values) ? attr.sample_values : [],
+						editable: true,
+					},
+					{
+						type: ComposerSectionKind.ZONES_CHIPS,
+						id: 'zones',
+						title: 'Zones',
+						zones: (attr.zones ?? []).map((zone) => ({
+							id: zone.id,
+							name: zone.name,
+							color: zone.color,
+							enabled: zone.enabled,
+						})),
+						userZoneIds,
+					},
+					{
+						type: ComposerSectionKind.ENTITY_CHIPS,
+						id: 'primary_column',
+						title: 'Primary Column',
+						entities: primaryColumn
+							? [
+									{
+										id: primaryColumn.id,
+										name: `${primaryColumn.table_name}.${primaryColumn.column_name}`,
+										focusId: [
+											primaryColumn.db_id,
+											primaryColumn.schema_id,
+											primaryColumn.table_id,
+											primaryColumn.id,
+										].join('|'),
+									},
+								]
+							: [],
+					},
+					{
+						type: ComposerSectionKind.ENTITY_CHIPS,
+						id: 'referenced_columns',
+						title: 'Referenced Columns',
+						entities: referencedColumns.map((col) => ({
+							id: col.id,
+							name: `${col.table_name}.${col.column_name}`,
+							focusId: [col.db_id, col.schema_id, col.table_id, col.id].join('|'),
+						})),
+					},
+				],
+			};
+		},
+		[focusId],
+	);
+
 	const getSqlAttributeSinglePage = useCallback(
 		async (attrId: string): Promise<SinglePageFormat> => {
-			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, userZonesRes] = await Promise.all([
-				sqlAttributesApi.get(attrId),
-				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
-			]);
+			const res = await sqlAttributesApi.get(attrId);
 			if (res.error || !res.data) {
 				return {
 					sections: [],
@@ -573,11 +733,15 @@ export const TermsView = () => {
 			}
 			const attr = res.data;
 
-			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
-			const userZoneIds: string[] | null =
-				userZonesRes !== null && !userZonesRes.error
-					? (userZonesRes.data ?? []).map((z) => z.id)
-					: null;
+			// Upsert into the sqlAttrs cache so the breadcrumb title (derived
+			// from that state) is correct even on a direct deep-link, when
+			// this is the first sql-attribute fetch of the session (the Terms
+			// list no longer preloads every SqlAttribute node).
+			setSqlAttrs((prev) => {
+				const exists = prev.some((a) => a.id === attr.id);
+				if (!exists) return [...prev, attr];
+				return prev.map((a) => (a.id === attr.id ? attr : a));
+			});
 
 			return {
 				header: {
@@ -612,133 +776,132 @@ export const TermsView = () => {
 							id: z.id,
 							name: z.name,
 							color: z.color,
+							enabled: z.enabled,
 						})),
-						userZoneIds,
 					},
 				],
 			};
 		},
-		[sessionUserId, sessionRole],
+		[],
 	);
 
-	const getSinglePage = useCallback(
-		async (termId: string): Promise<SinglePageFormat> => {
-			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, attrsRes, sqlAttrsRes, relatedRes, userZonesRes] = await Promise.all([
-				termsApi.get(termId),
-				termsApi.getColumnAttributes(termId),
-				termsApi.getSqlAttributes(termId),
-				termsApi.getRelatedTerms(termId),
-				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
-			]);
-			if (res.error || !res.data) {
-				return {
-					sections: [],
-					header: { header: { title: 'Term not found', withBorder: true } },
-				};
-			}
-			const term = res.data;
-			const termAttrs = attrsRes?.data ?? [];
-			const termSqlAttrs = sqlAttrsRes?.data ?? [];
-			const relatedTerms = relatedRes?.data ?? [];
-
-			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
-			const userZoneIds: string[] | null =
-				userZonesRes !== null && !userZonesRes.error
-					? (userZonesRes.data ?? []).map((z) => z.id)
-					: null;
-
+	const getSinglePage = useCallback(async (termId: string): Promise<SinglePageFormat> => {
+		const [res, attrsRes, sqlAttrsRes] = await Promise.all([
+			termsApi.get(termId),
+			termsApi.getColumnAttributes(termId),
+			termsApi.getSqlAttributes(termId),
+		]);
+		if (res.error || !res.data) {
 			return {
-				header: {
-					header: {
-						title: term.name,
-						withBorder: true,
-						showContentHeader: true,
-						titleEditable: true,
-					},
-				},
-				sections: [
-					{
-						type: ComposerSectionKind.TEXT_CARD,
-						id: 'description',
-						title: 'Description',
-						body: term.description ?? '',
-						editable: true,
-					},
-					{
-						type: ComposerSectionKind.TAG_LIST,
-						id: 'synonyms',
-						title: 'Synonyms',
-						values: term.synonyms ?? [],
-					},
-					{
-						type: ComposerSectionKind.ENTITY_CHIPS,
-						id: 'entities',
-						title: 'Entities',
-						entities: (term.tables ?? []).map((table) => ({
-							id: table.id,
-							name: table.name,
-							focusId: [table.db_id, table.schema_id, table.id].join('|'),
-						})),
-					},
-					{
-						type: ComposerSectionKind.ZONES_CHIPS,
-						id: 'zones',
-						title: 'Zones',
-						zones: term.zones.map((z) => ({
-							id: z.id,
-							name: z.name,
-							color: z.color,
-						})),
-						userZoneIds,
-					},
-					{
-						type: ComposerSectionKind.RELATED_TERMS_CHIPS,
-						id: 'related_terms',
-						title: 'Related Terms',
-						terms: relatedTerms.map((t) => ({
-							id: t.id,
-							name: t.name,
-							description: t.description,
-						})),
-					},
-					{
-						type: ComposerSectionKind.DATA_TABLE,
-						id: 'column_attributes',
-						title: 'Column Attributes',
-						columns: [{ key: 'name', label: 'Attribute Name' }],
-						rows: termAttrs.map((attr) => ({
-							name: attr.name,
-						})),
-					},
-					{
-						type: ComposerSectionKind.DATA_TABLE,
-						id: 'sql_attributes',
-						title: 'SQL Attributes',
-						rowIdKey: 'id',
-						columns: [{ key: 'name', label: 'Attribute Name' }],
-						rows: termSqlAttrs.map((attr) => ({
-							id: attr.id,
-							name: attr.name,
-						})),
-						emptyMessage: 'SQL attribute does not exist',
-					},
-				],
+				sections: [],
+				header: { header: { title: 'Term not found', withBorder: true } },
 			};
-		},
-		[sessionUserId, sessionRole],
-	);
+		}
+		const term = res.data;
+		const termAttrs = attrsRes?.data ?? [];
+		const termSqlAttrs = sqlAttrsRes?.data ?? [];
+		const relatedTerms = term.related_terms ?? [];
+		// Populate the sqlAttrs/columnAttrs caches from this term's own
+		// attributes (fetched per-term above) rather than a global list —
+		// the Terms list endpoint only returns counts, not the attribute
+		// nodes themselves, to avoid pulling every attribute in the graph
+		// on every page load. This keeps breadcrumb titles working once
+		// the user has opened this term's detail page.
+		setSqlAttrs(termSqlAttrs);
+		setColumnAttrs(termAttrs);
+
+		return {
+			header: {
+				header: {
+					title: term.name,
+					withBorder: true,
+					showContentHeader: true,
+					titleEditable: true,
+				},
+			},
+			sections: [
+				{
+					type: ComposerSectionKind.TEXT_CARD,
+					id: 'description',
+					title: 'Description',
+					body: term.description ?? '',
+					editable: true,
+				},
+				{
+					type: ComposerSectionKind.TAG_LIST,
+					id: 'synonyms',
+					title: 'Synonyms',
+					values: term.synonyms ?? [],
+				},
+				{
+					type: ComposerSectionKind.ENTITY_CHIPS,
+					id: 'entities',
+					title: 'Entities',
+					entities: (term.tables ?? []).map((table) => ({
+						id: table.id,
+						name: table.name,
+						focusId: [table.db_id, table.schema_id, table.id].join('|'),
+					})),
+				},
+				{
+					type: ComposerSectionKind.ZONES_CHIPS,
+					id: 'zones',
+					title: 'Zones',
+					zones: term.zones.map((z) => ({
+						id: z.id,
+						name: z.name,
+						color: z.color,
+						enabled: z.enabled,
+					})),
+				},
+				{
+					type: ComposerSectionKind.RELATED_TERMS_CHIPS,
+					id: 'related_terms',
+					title: 'Related Terms',
+					terms: relatedTerms.map((t) => ({
+						id: t.id,
+						name: t.name,
+						description: t.description,
+					})),
+				},
+				{
+					type: ComposerSectionKind.DATA_TABLE,
+					id: 'column_attributes',
+					title: 'Column Attributes',
+					rowIdKey: 'id',
+					columns: [
+						{ key: 'name', label: 'Attribute Name' },
+						{ key: 'description', label: 'Description', truncate: true },
+						{ key: 'sample_values', label: 'Sample Values', kind: 'tags' },
+					],
+					rows: termAttrs.map((attr) => ({
+						id: attr.id,
+						name: attr.name,
+						description: attr.description ?? '',
+						sample_values: attr.sample_values ?? [],
+					})),
+				},
+				{
+					type: ComposerSectionKind.DATA_TABLE,
+					id: 'sql_attributes',
+					title: 'SQL Attributes',
+					rowIdKey: 'id',
+					columns: [{ key: 'name', label: 'Attribute Name' }],
+					rows: termSqlAttrs.map((attr) => ({
+						id: attr.id,
+						name: attr.name,
+					})),
+					emptyMessage: 'SQL attribute does not exist',
+				},
+			],
+		};
+	}, []);
 
 	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 	const focusedSqlAttr =
-		sqlAttrId != null
-			? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ??
-				(focusedTerm != null
-					? (sqlAttrsByTerm
-							.get(focusedTerm.name)
-							?.find((attr) => attr.id === sqlAttrId) ?? null)
-					: null))
-			: null;
+		sqlAttrId != null ? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ?? null) : null;
+	const focusedColAttr =
+		colAttrId != null ? (columnAttrs.find((attr) => attr.id === colAttrId) ?? null) : null;
 
 	if (focusId != null && sqlAttrId != null) {
 		const termTitle = focusedTerm?.name ?? focusId;
@@ -886,6 +1049,78 @@ export const TermsView = () => {
 		);
 	}
 
+	if (focusId != null && colAttrId != null) {
+		const termTitle = focusedTerm?.name ?? focusId;
+		const colAttrTitle = focusedColAttr?.name ?? colAttrId;
+		return (
+			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
+				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+					<button
+						type="button"
+						onClick={handleBack}
+						className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+						aria-label="Back to terms list"
+					>
+						<Icon name={IconName.Terms} className="h-4 w-4" />
+						Terms
+					</button>
+					<span className="text-zinc-300 dark:text-zinc-600">/</span>
+					<button
+						type="button"
+						onClick={handleBackToTerm}
+						className="cursor-pointer rounded-lg px-1.5 py-1 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+					>
+						{termTitle}
+					</button>
+					<span className="text-zinc-300 dark:text-zinc-600">/</span>
+					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+						{colAttrTitle}
+					</span>
+					<div className="ml-auto flex shrink-0 items-center gap-1">
+						{columnAttrEditing ? null : (
+							<button
+								type="button"
+								onClick={() => {
+									setColumnAttrEditError(null);
+									setColumnAttrEditing(true);
+								}}
+								aria-label={`Edit ${colAttrTitle}`}
+								title="Edit"
+								className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+							>
+								<Icon name={IconName.Pencil} className="h-4 w-4" />
+							</button>
+						)}
+					</div>
+				</header>
+				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+					<SinglePageView
+						key={colAttrId}
+						dataId={colAttrId}
+						title={colAttrTitle}
+						getSinglePage={getColumnAttributeSinglePage}
+						treeDataEpoch={columnAttrsEpoch}
+						isEditing={columnAttrEditing}
+						onPatchEdits={handleColumnAttrEditSave}
+						onSave={() => {
+							setColumnAttrEditing(false);
+							setColumnAttrEditError(null);
+						}}
+						onCancel={() => {
+							setColumnAttrEditing(false);
+							setColumnAttrEditError(null);
+						}}
+					/>
+				</main>
+				{columnAttrEditError != null && (
+					<div className="border-t border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+						{columnAttrEditError}
+					</div>
+				)}
+			</div>
+		);
+	}
+
 	if (focusId != null) {
 		const termTitle = focusedTerm?.name ?? focusId;
 		return (
@@ -948,7 +1183,7 @@ export const TermsView = () => {
 						onCancel={() => {
 							setTermEditing(false);
 						}}
-						onDataTableRowClick={handleSqlAttrClick}
+						onDataTableRowClick={handleDataTableRowClick}
 					/>
 				</main>
 				<ModalCreateNewItem
@@ -1062,8 +1297,8 @@ export const TermsView = () => {
 							<TermCard
 								key={term.id}
 								term={term}
-								attributes={attrsByTerm.get(term.name) ?? []}
-								sqlAttributes={sqlAttrsByTerm.get(term.name) ?? []}
+								columnAttributeCount={columnAttrCountsMap.get(term.id) ?? 0}
+								sqlAttributeCount={sqlAttrCountsMap.get(term.id) ?? 0}
 								relatedCount={relatedCountsMap.get(term.id) ?? 0}
 								onClick={handleCardClick}
 							/>

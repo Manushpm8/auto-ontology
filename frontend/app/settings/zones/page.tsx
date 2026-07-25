@@ -8,31 +8,27 @@ import { useCallback, useEffect, useState } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Database } from '@/types/datasources';
 import { zonesApi } from '@/api/zones';
-import { usersApi } from '@/api/users';
 import { datasources } from '@/api/datasources';
-import { ModalWithSteps } from '@/components/ModalWithSteps';
-import { ConfirmModal } from '@/components/ConfirmModal';
-import { ColorPicker } from '@/components/ColorPicker';
-import type { ColorOption } from '@/components/ColorPicker';
-import { Icon, IconName } from '@/components/icons';
-import { PopoverMenu } from '@/components/PopoverMenu';
+import { ModalWithSteps, ConfirmModal } from '@/common/modal';
+import { ColorPicker } from '@/common/ColorPicker';
+import type { ColorOption } from '@/common/ColorPicker';
+import { Icon, IconName } from '@/common/icons';
+import { PopoverMenu } from '@/common/PopoverMenu';
 import { ZonesDataTree } from '@/components/settings/ZonesDataTree';
-import { UsersPicker } from '@/components/UsersPicker';
 import { mergeSchemasIntoDatabase, mergeTablesIntoSchema } from '@/lib/data/datasource-tree-merge';
 import type { Zone, ZoneCreated, ZoneUpdateInput } from '@/types/zones';
-import type { User } from '@/types/auth';
 import { useSession } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
 
 const ZONE_COLORS: readonly ColorOption[] = [
-	{ value: '#76b900', label: 'Lime', swatchClassName: 'bg-[#76b900]' },
 	{ value: '#0ea5e9', label: 'Sky', swatchClassName: 'bg-sky-500' },
 	{ value: '#8b5cf6', label: 'Violet', swatchClassName: 'bg-violet-500' },
 	{ value: '#ec4899', label: 'Pink', swatchClassName: 'bg-pink-500' },
 	{ value: '#f97316', label: 'Orange', swatchClassName: 'bg-orange-500' },
 	{ value: '#14b8a6', label: 'Teal', swatchClassName: 'bg-teal-500' },
+	{ value: '#eab308', label: 'Amber', swatchClassName: 'bg-yellow-500' },
 ];
-const DEFAULT_ZONE_COLOR = '#76b900';
+const DEFAULT_ZONE_COLOR = '#0ea5e9';
 
 const normalizeDescription = (value: string): string | null => {
 	const trimmed = value.trim();
@@ -279,12 +275,6 @@ export default function ZonesSettingsPage() {
 	const [togglingZoneId, setTogglingZoneId] = useState<string | null>(null);
 	const [toggleError, setToggleError] = useState<string | null>(null);
 
-	// Users picker state
-	const [allUsers, setAllUsers] = useState<User[]>([]);
-	const [usersLoading, setUsersLoading] = useState(false);
-	const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
-	const [initialEditUserIds, setInitialEditUserIds] = useState<Set<string>>(new Set());
-
 	const normalizedName = name.trim();
 	const normalizedDescription = normalizeDescription(description);
 	const nameExists = zones.some((zone) => {
@@ -304,8 +294,7 @@ export default function ZonesSettingsPage() {
 		(normalizedName !== initialEditName ||
 			normalizedDescription !== initialEditDescription ||
 			color !== (initialEditColor ?? DEFAULT_ZONE_COLOR) ||
-			!setsAreEqual(normalizedSelectedItems, normalizedInitialEditSelectedItems) ||
-			!setsAreEqual(selectedUserIds, initialEditUserIds));
+			!setsAreEqual(normalizedSelectedItems, normalizedInitialEditSelectedItems));
 
 	const loadZones = useCallback(async () => {
 		if (!currentUserId) return;
@@ -341,23 +330,6 @@ export default function ZonesSettingsPage() {
 		};
 	}, [currentUserId]);
 
-	// Load all users once on mount for the picker
-	useEffect(() => {
-		let cancelled = false;
-		const load = async () => {
-			setUsersLoading(true);
-			const { users } = await usersApi.list();
-			if (cancelled) return;
-			// Only show viewer users in picker — admins get access automatically
-			setAllUsers(users.filter((u) => u.role !== 'admin'));
-			setUsersLoading(false);
-		};
-		void load();
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
 	const openCreateModal = () => {
 		setModalMode('create');
 		setEditingZoneId(null);
@@ -374,8 +346,6 @@ export default function ZonesSettingsPage() {
 		setInitialEditDescription(null);
 		setInitialEditColor(null);
 		setInitialEditSelectedItems(new Set());
-		setSelectedUserIds(new Set());
-		setInitialEditUserIds(new Set());
 		setSubmitError(null);
 		setModalOpen(true);
 	};
@@ -396,18 +366,8 @@ export default function ZonesSettingsPage() {
 		setInitialEditDescription(normalizeDescription(zone.description ?? ''));
 		setInitialEditColor(zone.color ?? DEFAULT_ZONE_COLOR);
 		setInitialEditSelectedItems(new Set());
-		setSelectedUserIds(new Set());
-		setInitialEditUserIds(new Set());
 		setSubmitError(null);
 		setModalOpen(true);
-
-		// Load current zone users asynchronously
-		const accessResponse = await zonesApi.listAccess(zone.id, currentUserId);
-		if (!accessResponse.error) {
-			const ids = new Set((accessResponse.data ?? []).map((u) => u.id));
-			setSelectedUserIds(ids);
-			setInitialEditUserIds(new Set(ids));
-		}
 	};
 
 	const closeZoneModal = () => {
@@ -520,16 +480,6 @@ export default function ZonesSettingsPage() {
 		setTreeExpandSelectedOnlyKey((prev) => prev + 1);
 	};
 
-	const syncZoneAccess = async (zoneId: string) => {
-		const toGrant = [...selectedUserIds].filter((id) => !initialEditUserIds.has(id));
-		const toRevoke = [...initialEditUserIds].filter((id) => !selectedUserIds.has(id));
-
-		await Promise.all([
-			...toGrant.map((uid) => zonesApi.grantAccess(zoneId, uid, currentUserId)),
-			...toRevoke.map((uid) => zonesApi.revokeAccess(zoneId, uid, currentUserId)),
-		]);
-	};
-
 	const handleSubmit = async () => {
 		if (!canSubmit || activeStep !== 1) return;
 		setSubmitting(true);
@@ -556,13 +506,6 @@ export default function ZonesSettingsPage() {
 
 			const created: ZoneCreated | undefined = response.data;
 			if (created != null) {
-				// Grant access to selected viewer users
-				await Promise.all(
-					[...selectedUserIds].map((uid) =>
-						zonesApi.grantAccess(created.id, uid, currentUserId),
-					),
-				);
-
 				const { id, name: n, label, description: d, color: c, enabled: en } = created;
 				setZones((prev) => {
 					const next = [
@@ -599,12 +542,7 @@ export default function ZonesSettingsPage() {
 		}
 
 		const hasFieldChanges = Object.keys(patch).length > 0;
-		const hasUserChanges = !setsAreEqual(selectedUserIds, initialEditUserIds);
-
-		const [response] = await Promise.all([
-			hasFieldChanges ? zonesApi.update(editingZoneId, patch) : Promise.resolve(null),
-			hasUserChanges ? syncZoneAccess(editingZoneId) : Promise.resolve(),
-		]);
+		const response = hasFieldChanges ? await zonesApi.update(editingZoneId, patch) : null;
 
 		setSubmitting(false);
 
@@ -830,7 +768,7 @@ export default function ZonesSettingsPage() {
 								colors={ZONE_COLORS}
 								value={color}
 								onChange={setColor}
-								fallbackSwatchClassName="bg-[#76b900]"
+								fallbackSwatchClassName="bg-sky-500"
 							/>
 						</div>
 						<div>
@@ -845,12 +783,6 @@ export default function ZonesSettingsPage() {
 								className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 							/>
 						</div>
-						<UsersPicker
-							allUsers={allUsers}
-							selectedIds={selectedUserIds}
-							onChange={setSelectedUserIds}
-							loading={usersLoading}
-						/>
 					</>
 				) : (
 					<div className="space-y-3">

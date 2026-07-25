@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-import os
 import time
 from datetime import datetime
 from typing import Generator
@@ -18,8 +17,6 @@ from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
 
 logger = logging.getLogger(__name__)
 
-_ENTITY_MODEL = os.environ.get("ENTITY_EXTRACTION_MODEL")
-
 try:
     llm_client = get_llm_client()
 except ValueError as e:
@@ -28,17 +25,10 @@ except ValueError as e:
 
 try:
     non_reasoning_llm_client = get_non_reasoning_llm_client(max_tokens=2048)
+    logger.info("Entity extraction will use the non-reasoning model")
 except (ValueError, EnvironmentError) as e:
-    logger.error("Failed to initialize non-reasoning LLM client: %s", e)
+    logger.warning("Failed to init non-reasoning LLM: %s", e)
     non_reasoning_llm_client = None
-
-entity_llm_client = None
-if _ENTITY_MODEL:
-    try:
-        entity_llm_client = get_llm_client(model=_ENTITY_MODEL, max_tokens=2048)
-        logger.info("Entity extraction will use model: %s", _ENTITY_MODEL)
-    except ValueError as e:
-        logger.warning("Failed to init entity LLM (%s): %s", _ENTITY_MODEL, e)
 
 
 graph = create_graph()
@@ -73,6 +63,14 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     initial_path_state = dict(payload.get("path_state") or {})
 
+    target_db = payload.get("target_db")
+    if target_db:
+        initial_path_state["target_db"] = target_db
+    elif len(connectors) == 1:
+        connector_db = getattr(connectors[0], "database_name", None)
+        if connector_db:
+            initial_path_state["target_db"] = connector_db
+
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
         custom_prompts=custom_prompts_text,
@@ -84,7 +82,6 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     state: dict = {
         "llm": llm_client,
-        "non_reasoning_llm": non_reasoning_llm_client,
         "initial_question": payload["question"],
         "connectors": connectors,
         "messages": messages,
@@ -94,8 +91,8 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "decision": "",
         "domain_rules": domain_rules,
     }
-    if entity_llm_client is not None:
-        state["entity_llm"] = entity_llm_client
+    if non_reasoning_llm_client is not None:
+        state["non_reasoning_llm"] = non_reasoning_llm_client
     return state
 
 
@@ -164,9 +161,39 @@ def get_agent_response(payload: TextToSQLPayload) -> dict:
     return {"response": "SQL can't be constructed.", "sql_code": "", "result": None}
 
 
+def run_until_node(payload: TextToSQLPayload, stop_after: str) -> dict:
+    """Run the graph and return the accumulated state once ``stop_after`` produces output.
+
+    Streams the compiled graph exactly like :func:`stream_agent_response` — building
+    the state with :func:`_build_state` and merging each node's ``path_state`` — but
+    stops as soon as the ``stop_after`` node has run, before the next node executes.
+    This lets callers reuse the front of the pipeline (e.g. up to ``prepare_candidates``,
+    to read ``relevant_tables``/``attribute_join_paths``) without paying for the rest of
+    the flow. The returned dict is the full ``AgentState`` (top-level keys such as
+    ``llm``/``connectors``/``semantic_retriever`` plus the merged ``path_state``).
+    """
+    state = _build_state(payload)
+    final_state = dict(state)
+
+    for step in app.stream(state, config={"recursion_limit": 45}):
+        for node_name, node_output in step.items():
+            if node_output:
+                if "path_state" in node_output:
+                    final_state.setdefault("path_state", {})
+                    final_state["path_state"].update(node_output["path_state"])
+                for key, value in node_output.items():
+                    if key != "path_state":
+                        final_state[key] = value
+            if node_name == stop_after:
+                return final_state
+
+    return final_state
+
+
 __all__ = [
     "get_agent_response",
     "stream_agent_response",
+    "run_until_node",
     "app",
     "graph",
     "llm_client",

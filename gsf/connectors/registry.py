@@ -18,6 +18,7 @@ from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.connectors.snowflake import SnowflakeDatabase
+from gsf.connectors.sqlite import SQLiteDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "duckdb": DuckDBDatabase,
     "snowflake": SnowflakeDatabase,
     "heavydb": HeavyDBDatabase,
+    "sqlite": SQLiteDatabase,
 }
 
 _connectors: list[SQLDatabase] | None = None

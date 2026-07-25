@@ -2,17 +2,19 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+export type TermZone = {
+	id: string;
+	name: string;
+	color: string | null;
+	enabled: boolean;
+};
+
 export type Term = {
 	id: string;
 	name: string;
 	description: string | null;
 	synonyms: string[];
-};
-
-export type TermZone = {
-	id: string;
-	name: string;
-	color: string | null;
+	zones: TermZone[];
 };
 
 export type TermTable = {
@@ -25,7 +27,16 @@ export type TermTable = {
 export type TermDetail = Term & {
 	table_count: number;
 	tables: TermTable[];
-	zones: TermZone[];
+	related_terms: RelatedTerm[];
+};
+
+export type AttributeColumnRef = {
+	id: string;
+	column_name: string;
+	table_id: string;
+	table_name: string;
+	schema_id: string;
+	db_id: string;
 };
 
 export type ColumnAttribute = {
@@ -36,6 +47,13 @@ export type ColumnAttribute = {
 	source_column: string;
 	datatype: string | null;
 	table_id: string;
+	/** Profiled sample values from the owning Column, when available. */
+	sample_values: string[] | null;
+	zones: TermZone[];
+	/** The Column that owns this attribute via `HAS_ATTRIBUTE`, if any. */
+	primary_column: AttributeColumnRef | null;
+	/** Columns elsewhere that point at this attribute via `SEMANTIC_FK`. */
+	referenced_columns: AttributeColumnRef[];
 };
 
 export type SqlAttribute = {
@@ -56,7 +74,9 @@ export type RelatedTerm = {
 	description: string | null;
 };
 
-export type RelatedTermCount = {
+export type TermCount = {
 	term_id: string;
 	count: number;
 };
+
+export type RelatedTermCount = TermCount;

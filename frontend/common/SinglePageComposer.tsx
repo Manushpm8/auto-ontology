@@ -4,15 +4,7 @@
 
 'use client';
 
-import {
-	forwardRef,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-	useCallback,
-	type ReactNode,
-} from 'react';
+import { forwardRef, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
@@ -22,28 +14,45 @@ import {
 	type ComposerSection,
 	type ComposerZonesSection,
 } from '@/types/composer-section';
-import { Icon, IconName } from '@/components/icons';
-import { TagInput } from '@/components/TagInput';
-import { Table } from '@/components/Table';
-import { SqlBlock } from '@/components/SqlBlock';
+import { Icon, IconName } from '@/common/icons';
+import { TagInput } from '@/common/TagInput';
+import { Table } from '@/common/Table';
+import { TruncatedText } from '@/common/TruncatedText';
+import { SqlBlock } from '@/common/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
-import { Toast } from '@/components/Toast';
+import type { TermZone } from '@/types/terms';
+import { Toast } from '@/common/Toast';
+import { Label } from '@/common/Label';
 
 export type ComposerEditValue = string | string[];
 
-function zoneChipStyle(color: string): React.CSSProperties {
-	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };
-}
+export const LabelList = ({ values }: { values: string[] }) => {
+	const nonEmptyValues = values.filter((v) => v.trim() !== '');
+	if (nonEmptyValues.length === 0) return <span>—</span>;
+	return (
+		<ul className="flex flex-wrap gap-1">
+			{nonEmptyValues.map((v, i) => (
+				<li key={`${v}-${i}`}>
+					<Label label={v} maxWidthClass="max-w-[16rem]" />
+				</li>
+			))}
+		</ul>
+	);
+};
 
-const ZoneChip = ({ name, color }: { name: string; color: string | null }) => (
-	<span
-		className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-		style={color ? zoneChipStyle(color) : undefined}
-	>
-		{name}
-	</span>
+export const ZonesRow = ({ zones }: { zones: TermZone[] }) => (
+	<div className="mt-2 flex flex-wrap items-center gap-1.5">
+		<span className="text-xs text-zinc-400">Zones:</span>
+		{zones.length > 0 ? (
+			zones.map((zone) => (
+				<Label key={zone.id} label={zone.name} color={zone.color} muted={!zone.enabled} />
+			))
+		) : (
+			<span className="text-xs text-zinc-500 dark:text-zinc-400">-</span>
+		)}
+	</div>
 );
 
 export type SinglePageComposerProps = {
@@ -281,38 +290,31 @@ const ReadOnlyTagList = ({
 	title: string;
 	values: string[];
 	sectionId: string;
-}) => (
-	<div
-		id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
-		className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
-	>
-		<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
-		{values.length === 0 ? (
-			<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
-		) : (
-			<ul className="mt-3 flex flex-wrap gap-1.5">
-				{values.map((v, i) => (
-					<li
-						key={`${v}-${i}`}
-						className="inline-flex max-w-full items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
-					>
-						<span className="max-w-[24rem] truncate" title={v}>
-							{v}
-						</span>
-					</li>
-				))}
-			</ul>
-		)}
-	</div>
-);
+}) => {
+	const nonEmptyValues = values.filter((v) => v.trim() !== '');
+	return (
+		<div
+			id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
+			className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+		>
+			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
+			{nonEmptyValues.length === 0 ? (
+				<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+			) : (
+				<ul className="mt-3 flex flex-wrap gap-1.5">
+					{nonEmptyValues.map((v, i) => (
+						<li key={`${v}-${i}`}>
+							<Label label={v} maxWidthClass="max-w-[24rem]" />
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+};
 
 const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
-	const displayedZones = useMemo(() => {
-		if (Array.isArray(section.userZoneIds)) {
-			return section.zones.filter((z) => (section.userZoneIds as string[]).includes(z.id));
-		}
-		return section.zones;
-	}, [section.zones, section.userZoneIds]);
+	const displayedZones = section.zones;
 
 	return (
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
@@ -325,7 +327,7 @@ const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
 				<ul className="mt-3 flex flex-wrap gap-2">
 					{displayedZones.map((zone) => (
 						<li key={zone.id}>
-							<ZoneChip name={zone.name} color={zone.color} />
+							<Label label={zone.name} color={zone.color} muted={!zone.enabled} />
 						</li>
 					))}
 				</ul>
@@ -408,20 +410,31 @@ function renderComposerSection(
 						columns={section.columns.map((col) => ({
 							key: col.key,
 							header: col.label,
-							cell: (row: Record<string, string>) => row[col.key] || '—',
+							cell: (row: Record<string, string | string[]>) => {
+								const value = row[col.key];
+								if (col.kind === 'tags') {
+									return <LabelList values={Array.isArray(value) ? value : []} />;
+								}
+								const text = typeof value === 'string' ? value : '';
+								if (!text) return '—';
+								return col.truncate ? (
+									<TruncatedText text={text} maxWidthClass={col.maxWidthClass} />
+								) : (
+									text
+								);
+							},
 						}))}
 						rows={section.rows}
-						rowKey={(row, index) =>
-							isClickable && section.rowIdKey
-								? (row[section.rowIdKey] ?? String(index))
-								: String(index)
-						}
+						rowKey={(row, index) => {
+							const rowId = section.rowIdKey ? row[section.rowIdKey] : undefined;
+							return isClickable && typeof rowId === 'string' ? rowId : String(index);
+						}}
 						onRowClick={
 							isClickable && section.rowIdKey
 								? (row) => {
 										const rowId = row[section.rowIdKey as string];
 										if (rowId) {
-											onDataTableRowClick(section.id, rowId);
+											onDataTableRowClick(section.id, rowId as string);
 										}
 									}
 								: undefined
@@ -457,23 +470,13 @@ function renderComposerSection(
 						<ul className="mt-3 flex flex-wrap gap-2">
 							{section.terms.map((term) => (
 								<li key={term.id}>
-									{onTermClick ? (
-										<button
-											type="button"
-											title={term.description ?? undefined}
-											onClick={() => onTermClick(term.id)}
-											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
-										>
-											{term.name}
-										</button>
-									) : (
-										<span
-											title={term.description ?? undefined}
-											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-										>
-											{term.name}
-										</span>
-									)}
+									<Label
+										label={term.name}
+										title={term.description ?? undefined}
+										onClick={
+											onTermClick ? () => onTermClick(term.id) : undefined
+										}
+									/>
 								</li>
 							))}
 						</ul>
@@ -492,23 +495,15 @@ function renderComposerSection(
 						<ul className="mt-3 flex flex-wrap gap-2">
 							{section.entities.map((entity) => (
 								<li key={entity.id}>
-									{onEntityClick ? (
-										<button
-											type="button"
-											title={entity.name}
-											onClick={() => onEntityClick(entity.focusId)}
-											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
-										>
-											{entity.name}
-										</button>
-									) : (
-										<span
-											title={entity.name}
-											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-										>
-											{entity.name}
-										</span>
-									)}
+									<Label
+										label={entity.name}
+										title={entity.name}
+										onClick={
+											onEntityClick
+												? () => onEntityClick(entity.focusId)
+												: undefined
+										}
+									/>
 								</li>
 							))}
 						</ul>

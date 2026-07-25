@@ -14,6 +14,7 @@ from gsf.dal.datasources import (
     store_column_uniqueness,
 )
 from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
+from gsf.semantic.constants import SQL_ATTR_SOURCE_TABLE
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder
@@ -39,6 +40,14 @@ _PROFILING_TOP_N = 5
 _MAX_SAMPLE_VALUE_LEN = 30
 # Declared data-type substrings whose sample values are not persisted.
 _EXCLUDED_SAMPLE_TYPES = ("date", "time", "timestamp", "datetime", "uuid")
+# A text column with at most this many distinct values is treated as
+# categorical: we capture its full distinct value set (via a DISTINCT probe)
+# instead of only the most-common values from the first-N-row sample. This
+# ensures rare-but-meaningful enum values (e.g. 'Banned', 'Restricted') land in
+# the embedded description even when the dominant value fills the row prefix.
+_LOW_CARDINALITY_MAX = 25
+# Declared data-type substrings treated as free/categorical text.
+_TEXT_SAMPLE_TYPES = ("char", "text", "string", "clob", "enum")
 
 # Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
 # the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
@@ -85,7 +94,7 @@ def _extract_sql_attributes_for_table(
                 expression=proposal.expression,
                 term_id=term_id,
                 connector=database_name,
-                source="table",
+                source=SQL_ATTR_SOURCE_TABLE,
             )
             created_names.append(row["name"])
             logger.info("  Created SqlAttribute %r", proposal.name)
@@ -119,6 +128,45 @@ def _is_excluded_sample_type(data_type: str | None) -> bool:
         return False
     lowered = data_type.lower()
     return any(token in lowered for token in _EXCLUDED_SAMPLE_TYPES)
+
+
+def _is_text_sample_type(data_type: str | None) -> bool:
+    """Whether a column's declared type is free/categorical text."""
+    if not data_type:
+        return False
+    lowered = data_type.lower()
+    return any(token in lowered for token in _TEXT_SAMPLE_TYPES)
+
+
+def _distinct_values_if_low_cardinality(
+    connector: "SQLDatabase",
+    qualified: str,
+    col_name: str,
+    cap: int,
+) -> list[str] | None:
+    """Return the full distinct value set for a low-cardinality column.
+
+    Runs ``SELECT DISTINCT <col> ... LIMIT cap + 1``. Returns the distinct
+    values (as strings) when the column has at most *cap* distinct non-null
+    values; returns ``None`` for high-cardinality columns (more than *cap*
+    distinct values) or on any error, so the caller falls back to the
+    most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
+    huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
+    """
+    quoted = '"' + col_name.replace('"', '""') + '"'
+    try:
+        df = connector.execute(
+            f"SELECT DISTINCT {quoted} FROM {qualified} "
+            f"WHERE {quoted} IS NOT NULL LIMIT {cap + 1}"
+        )
+    except Exception:
+        return None
+    if df is None or df.empty:
+        return None
+    values = [str(v) for v in df.iloc[:, 0].tolist()]
+    if len(values) > cap:
+        return None
+    return values
 
 
 def calculate_columns_profiling(
@@ -184,12 +232,30 @@ def calculate_columns_profiling(
             )
             continue
 
-        uniqueness[col_name] = is_unique
-        profiling[col_name] = {"sample_values": top5, "is_unique": is_unique}
+        declared_type = type_by_column.get(col_name)
 
-        if _is_excluded_sample_type(type_by_column.get(col_name)):
+        # For categorical text columns, prefer the full distinct value set over
+        # the most-common values from the first-N-row sample. Rare enum values
+        # (e.g. 'Banned') otherwise never make it into the embedded description
+        # when a dominant value fills the sampled row prefix.
+        col_values = top5
+        if not is_unique and _is_text_sample_type(declared_type):
+            distinct_vals = _distinct_values_if_low_cardinality(
+                connector, qualified, col_name, _LOW_CARDINALITY_MAX
+            )
+            if distinct_vals is not None:
+                merged = list(top5)
+                for value in distinct_vals:
+                    if value not in merged:
+                        merged.append(value)
+                col_values = merged
+
+        uniqueness[col_name] = is_unique
+        profiling[col_name] = {"sample_values": col_values, "is_unique": is_unique}
+
+        if _is_excluded_sample_type(declared_type):
             continue
-        filtered = [v for v in top5 if len(v) <= _MAX_SAMPLE_VALUE_LEN]
+        filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
         if filtered:
             sample_values[col_name] = filtered
 

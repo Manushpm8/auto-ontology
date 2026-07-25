@@ -38,6 +38,10 @@ from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
+from gsf.retrieval.text_to_sql.evidence_hints import (
+    build_evidence_hints_block,
+    extract_evidence,
+)
 from gsf.retrieval.text_to_sql.prompts import format_dual_question_block
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
@@ -195,10 +199,16 @@ class SQLReconstructionAgent(BaseAgent):
 
         existing_ids = {str(t.get("id", "")) for t in existing_tables if t.get("id")}
 
+        database_name = (state.get("path_state") or {}).get("target_db")
         combined: list[dict] = []
         for query_text in search_queries:
             try:
-                hits = get_relevant_tables(data_retriever, query_text, k=3)
+                hits = get_relevant_tables(
+                    data_retriever,
+                    query_text,
+                    k=3,
+                    database_name=database_name,
+                )
                 combined.extend(hits)
             except Exception:
                 self.logger.warning(
@@ -313,7 +323,7 @@ class SQLReconstructionAgent(BaseAgent):
         if relevant_tables:
             tables_section = (
                 "\nAvailable tables and columns (use ONLY these):\n\n"
-                f"{format_tables_for_prompt(relevant_tables)}\n\n"
+                f"{format_tables_for_prompt(relevant_tables, target_db=path_state.get('target_db'))}\n\n"
             )
 
         history_section = ""
@@ -330,6 +340,12 @@ class SQLReconstructionAgent(BaseAgent):
                 + "\n\n"
             )
 
+        evidence_section = ""
+        if extract_evidence(original_question):
+            evidence_hints = build_evidence_hints_block(original_question)
+            if evidence_hints:
+                evidence_section = f"{evidence_hints}\n\n"
+
         error_prompt = (
             "The following SQL contains an ERROR:\n\n"
             f"```sql\n{sql_code}\n```\n\n"
@@ -340,6 +356,7 @@ class SQLReconstructionAgent(BaseAgent):
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"
+            f"{evidence_section}"
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"
             "Follow the rules defined in the previous messages for "

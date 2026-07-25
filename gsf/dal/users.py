@@ -2,35 +2,21 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j data access for User nodes.
+"""Neo4j helpers for applying a zone scope to catalog queries.
 
-Only **viewers** are represented in the graph as a ``:User`` node.  Admins
-need no node at all: they already see every zone and every unzoned catalog
-item — that is decided purely from PostgreSQL (see
-``gsf.server.users.postgres_dal``) at query time, with no graph relationship
-involved.  A viewer's node is what ``PARTICIPANT_OF`` edges (explicit zone
-grants) attach to.
-
-The ``id`` field is the PostgreSQL user id and acts as the natural key.
-Promoting a viewer to admin deletes their ``:User`` node (and any zone
-grants with it); demoting an admin back to viewer creates a fresh node with
-no zone access, which must be re-granted explicitly.
+Users are not represented in Neo4j.  Zone membership is not used to
+authorize catalog access: every authenticated role has the same unrestricted
+catalog scope.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
-
-logger = logging.getLogger(__name__)
-
-# Label carried by every viewer node. Admins have no node in the graph.
-LABEL_USER = "User"
 
 
 def get_accessible_catalog_ids_for_zones(
@@ -139,11 +125,36 @@ def get_accessible_catalog_ids_for_zones(
     }
 
 
+def resolve_accessible_catalog_ids(
+    zone_ids: list[str] | None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+) -> dict[str, set[str]] | None:
+    """Resolve *zone_ids* to accessible catalog ids, reusing *data_ids_by_zone* if given.
+
+    ``get_accessible_catalog_ids_for_zones`` costs several Neo4j round trips.
+    Callers that need the resolved ids in more than one place for the same
+    request (e.g. the Exploration graph builders, which combine node,
+    zone-map and edge queries) should resolve it once via this helper and
+    thread the result through every downstream call as *data_ids_by_zone*,
+    instead of letting each one re-resolve the same *zone_ids* independently.
+
+    Returns ``None`` when *zone_ids* is ``None`` (no zone scoping — admin /
+    internal callers). Returns *data_ids_by_zone* unchanged when already
+    supplied.
+    """
+    if zone_ids is None:
+        return None
+    if data_ids_by_zone is not None:
+        return data_ids_by_zone
+    return get_accessible_catalog_ids_for_zones(zone_ids)
+
+
 def resolve_table_filter(
     zone_ids: list[str] | None,
     column_ref: str,
     *,
     extra_params: dict[str, Any] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build a Cypher ``WHERE`` clause restricting *column_ref* to accessible tables.
 
@@ -151,7 +162,9 @@ def resolve_table_filter(
     ``"attr.table_id"``.  When *zone_ids* is ``None`` no filter is applied
     (admin / internal callers who see the full unfiltered catalog).
     *extra_params* are merged into the returned params dict unchanged (e.g.
-    query parameters unrelated to zone scoping).
+    query parameters unrelated to zone scoping). Pass a pre-resolved
+    *data_ids_by_zone* (see ``resolve_accessible_catalog_ids``) to avoid a
+    repeat Neo4j round trip when the caller already has it for this request.
 
     Returns ``(where_clause, params)`` where *where_clause* is either an
     empty string or a full ``WHERE <column_ref> IN $table_ids`` clause ready
@@ -160,84 +173,6 @@ def resolve_table_filter(
     params = dict(extra_params or {})
     if zone_ids is None:
         return "", params
-    table_ids = list(get_accessible_catalog_ids_for_zones(zone_ids)["table_ids"])
-    params["table_ids"] = table_ids
+    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
+    params["table_ids"] = list(resolved["table_ids"])
     return f"WHERE {column_ref} IN $table_ids", params
-
-
-def get_user(user_id: str) -> dict[str, Any] | None:
-    """Return a viewer's User node by its id, or *None* if it does not exist.
-
-    Always ``None`` for admins — they have no graph node.
-    """
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (u:{LABEL_USER} {{id: $user_id}})
-        RETURN u.id    AS id,
-               u.email AS email,
-               u.name  AS name
-        LIMIT 1
-        """,
-        {"user_id": user_id},
-    )
-    return dict(rows[0]) if rows else None
-
-
-def list_users() -> list[dict[str, Any]]:
-    """Return all viewer User nodes ordered by email. Admins are never listed here."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (u:{LABEL_USER})
-        RETURN u.id    AS id,
-               u.email AS email,
-               u.name  AS name
-        ORDER BY u.email
-        """
-    )
-    return [dict(r) for r in rows]
-
-
-def upsert_user(
-    *,
-    user_id: str,
-    email: str,
-    name: str,
-    role: str,
-) -> dict[str, Any]:
-    """Sync *user_id* into the graph according to its PostgreSQL *role*.
-
-    *role* only decides which branch runs here — it is never stored on the
-    node.  Viewers get (or keep) a ``:User`` node with up-to-date ``email``/
-    ``name`` properties.  Admins get no node at all — if one exists (e.g.
-    from before the user was promoted), it is deleted along with any zone
-    grants, since an admin's access is derived entirely from PostgreSQL and
-    needs no graph state.
-
-    Returns the resulting properties (synthesized for admins, since there is
-    no node to read them back from).
-    """
-    conn = get_neo4j_conn()
-
-    if role == "admin":
-        conn.query_write(
-            f"""
-            MATCH (u:{LABEL_USER} {{id: $user_id}})
-            DETACH DELETE u
-            """,
-            {"user_id": user_id},
-        )
-        return {"id": user_id, "email": email, "name": name}
-
-    rows = conn.query_write(
-        f"""
-        MERGE (u:{LABEL_USER} {{id: $user_id}})
-        SET u.email = $email,
-            u.name  = $name
-        RETURN u.id    AS id,
-               u.email AS email,
-               u.name  AS name
-        """,
-        {"user_id": user_id, "email": email, "name": name},
-    )
-    assert rows
-    return dict(rows[0])

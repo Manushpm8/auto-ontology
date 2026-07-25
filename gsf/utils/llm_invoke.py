@@ -6,18 +6,37 @@
 
 import logging
 import os
+import random
+import threading
 import time
 from typing import Type, TypeVar
 
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
+
+from gsf.utils.model_config import resolve
 
 logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
 LLM_INVOKE_TIMEOUT_S = 50
+
+# Bound total concurrent LLM requests across all worker threads so the pipeline's
+# nested parallelism (tables × terms) doesn't saturate the hosted endpoint's
+# per-worker request cap (which surfaces as HTTP 503 ResourceExhausted).
+LLM_MAX_INFLIGHT = int(os.environ.get("LLM_MAX_INFLIGHT", "6"))
+_INFLIGHT = threading.BoundedSemaphore(LLM_MAX_INFLIGHT)
+
+# Substrings that indicate a transient, retryable server condition.
+_RETRYABLE_TOKENS = (
+    "429",
+    "Too Many Requests",
+    "503",
+    "ResourceExhausted",
+    "Service Unavailable",
+)
 
 
 class _TimeoutSession(_requests.Session):
@@ -34,15 +53,18 @@ class _TimeoutSession(_requests.Session):
 
 T = TypeVar("T", bound=BaseModel)
 
-_BASE_URL = os.environ.get("BASE_URL", "https://integrate.api.nvidia.com/v1")
-_MODEL_NAME = os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b")
-_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+# Main (reasoning) model triplet. Each field falls back to DEFAULT_MODELS_<field>
+# (and the API key additionally to the legacy NVIDIA_API_KEY) when unset.
+_BASE_URL = resolve("REASONING", "ENDPOINT")
+_MODEL_NAME = resolve("REASONING", "MODEL")
+_API_KEY = resolve("REASONING", "API_KEY")
 
-# Non-reasoning model. Kept fully separate (key/base URL/model) so it can point at
-# a different endpoint than the main reasoning model (e.g. inference vs integrate API).
-_NON_REASONING_BASE_URL = os.environ.get("NON_REASONING_BASE_URL", _BASE_URL)
-_NON_REASONING_MODEL_NAME = os.environ.get("NON_REASONING_MODEL_NAME", _MODEL_NAME)
-_NON_REASONING_API_KEY = os.environ.get("NON_REASONING_NVIDIA_API_KEY", "")
+# Non-reasoning model. Kept fully separate (key/endpoint/model) so it can point at
+# a different endpoint than the main model (e.g. inference vs integrate API). Each
+# field falls back to DEFAULT_MODELS_<field> when unset.
+_NON_REASONING_BASE_URL = resolve("NON_REASONING", "ENDPOINT")
+_NON_REASONING_MODEL_NAME = resolve("NON_REASONING", "MODEL")
+_NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 
 
 def _build_client(
@@ -53,19 +75,26 @@ def _build_client(
     temperature: float,
     max_tokens: int,
 ) -> BaseChatModel:
-    """Build a chat client for the given model/endpoint."""
-    # OpenAI-family models (e.g. "openai/gpt-5-nano", "azure/openai/gpt-4.1-mini")
-    # go through ChatOpenAI, which supports structured output. Everything else
-    # uses ChatNVIDIA.
-    if "openai/" in model:
+    """Build a chat client for the given model/endpoint.
+
+    OpenAI-family models (``openai/``, ``azure/``, ``aws/`` prefixes) go through
+    ``ChatOpenAI``, which supports structured output. Everything else uses
+    ``ChatNVIDIA``.
+    """
+    if model.startswith(("openai/", "azure/", "aws/")):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
             model=model,
             api_key=api_key,
             base_url=base_url,
-            temperature=temperature,
+            # temperature omitted: gpt-5.x/o-series reject any explicit value and
+            # only allow the server default (1). Unset => langchain sends no
+            # temperature field, so the provider default applies.
+            # temperature=temperature,
             max_tokens=max_tokens,
+            timeout=LLM_INVOKE_TIMEOUT_S,
+            max_retries=0,
         )
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
@@ -85,17 +114,17 @@ def get_llm_client(
     *,
     model: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
 ) -> BaseChatModel:
     """Create an LLM client for the main reasoning model.
 
     Parameters
     ----------
     model : str | None
-        Override the default ``MODEL_NAME`` env var for this client.
+        Override the default ``REASONING_MODEL`` env var for this client.
     """
     if not _API_KEY:
-        raise EnvironmentError("NVIDIA_API_KEY is not set")
+        raise EnvironmentError("REASONING_API_KEY is not set")
 
     return _build_client(
         model=model or _MODEL_NAME,
@@ -110,21 +139,21 @@ def get_non_reasoning_llm_client(
     *,
     model: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
 ) -> BaseChatModel:
     """Create an LLM client for the non-reasoning model.
 
-    Uses ``NON_REASONING_NVIDIA_API_KEY`` / ``NON_REASONING_BASE_URL`` /
-    ``NON_REASONING_MODEL_NAME`` so it can target a different endpoint than the
-    main reasoning model.
+    Uses ``NON_REASONING_API_KEY`` / ``NON_REASONING_ENDPOINT`` /
+    ``NON_REASONING_MODEL`` so it can target a different endpoint than the
+    main agent model.
 
     Parameters
     ----------
     model : str | None
-        Override the default ``NON_REASONING_MODEL_NAME`` env var for this client.
+        Override the default ``NON_REASONING_MODEL`` env var for this client.
     """
     if not _NON_REASONING_API_KEY:
-        raise EnvironmentError("NON_REASONING_NVIDIA_API_KEY is not set")
+        raise EnvironmentError("NON_REASONING_API_KEY is not set")
 
     return _build_client(
         model=model or _NON_REASONING_MODEL_NAME,
@@ -135,13 +164,47 @@ def get_non_reasoning_llm_client(
     )
 
 
+def _ensure_non_system_message(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Guarantee at least one non-system message.
+
+    Anthropic/Bedrock (via the OpenAI-compatible gateway) reject requests that
+    contain only system messages with "bedrock requires at least one non-system
+    message". Many agents build a single ``SystemMessage`` prompt, so when no
+    user/assistant message is present we promote the last system message to a
+    ``HumanMessage`` (its content is the actual instruction). No-op when a
+    non-system message already exists.
+    """
+    if not messages or any(not isinstance(m, SystemMessage) for m in messages):
+        return messages
+    converted = list(messages)
+    converted[-1] = HumanMessage(content=converted[-1].content)
+    return converted
+
+
+def _structured_output_kwargs(llm: BaseChatModel) -> dict:
+    """Pick the ``with_structured_output`` method for *llm*.
+
+    Anthropic/Claude models served through the OpenAI-compatible gateway (e.g.
+    ``aws/anthropic/bedrock-claude-opus-4-8``) reject the default json_schema /
+    ``response_format`` path ("output_config.format: Extra inputs are not
+    permitted"), but they support tool calling — so force ``function_calling``
+    for them. Everything else keeps langchain's default (json_schema for
+    OpenAI), which is preferred where supported.
+    """
+    model = str(getattr(llm, "model_name", "") or getattr(llm, "model", "") or "")
+    lowered = model.lower()
+    if "anthropic" in lowered or "claude" in lowered:
+        return {"method": "function_calling"}
+    return {}
+
+
 def invoke_text(llm: BaseChatModel, prompt: str) -> str:
     """Invoke the LLM with a single system-message *prompt* and return its text.
 
     Free-text counterpart to :func:`invoke_with_structured_output`, for callers
     that parse the raw response themselves (e.g. the text-to-PQL pipeline).
     """
-    response = llm.invoke([SystemMessage(content=prompt)])
+    response = llm.invoke([HumanMessage(content=prompt)])
     content = getattr(response, "content", response)
     return content if isinstance(content, str) else str(content)
 
@@ -152,13 +215,15 @@ def safe_invoke_with_structured_output(
     schema: Type[T],
 ) -> T:
     """LLM structured call with retry."""
-    current_messages = messages.copy()
+    current_messages = _ensure_non_system_message(messages.copy())
     schema_name = getattr(schema, "__name__", str(schema))
+    structured_kwargs = _structured_output_kwargs(llm)
 
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
-            model_llm = llm.with_structured_output(schema)
-            result = model_llm.invoke(current_messages)
+            model_llm = llm.with_structured_output(schema, **structured_kwargs)
+            with _INFLIGHT:
+                result = model_llm.invoke(current_messages)
         except _requests.exceptions.ReadTimeout:
             logger.error(
                 "LLM invoke timed out after %ds on attempt %d/%d for %s",
@@ -168,6 +233,8 @@ def safe_invoke_with_structured_output(
                 schema_name,
             )
             if attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                time.sleep(wait)
                 continue
             raise
         except ValidationError as e:
@@ -189,11 +256,12 @@ def safe_invoke_with_structured_output(
                 )
                 raise
         except Exception as e:
-            is_rate_limit = "429" in str(e) or "Too Many Requests" in str(e)
-            if is_rate_limit and attempt < RETRY_MAX_ATTEMPTS - 1:
-                wait = 2 ** (attempt + 1)
+            is_retryable = any(tok in str(e) for tok in _RETRYABLE_TOKENS)
+            if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 logger.warning(
-                    "Rate-limited on attempt %d/%d for %s — retrying in %ds",
+                    "Retryable LLM error (endpoint saturated/rate-limited) on attempt "
+                    "%d/%d for %s — retrying in %.1fs",
                     attempt + 1,
                     RETRY_MAX_ATTEMPTS,
                     schema_name,

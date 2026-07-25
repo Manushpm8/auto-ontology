@@ -104,6 +104,11 @@ class CandidatePreparationAgent(BaseAgent):
         has_custom = bool(path_state.get("retrieved_custom_analyses"))
         has_sql_attrs = bool(path_state.get("retrieved_sql_attributes"))
         if not has_col_attrs and not has_custom and not has_sql_attrs:
+            connectors = state.get("connectors") or []
+            if path_state.get("target_db") or (
+                len(connectors) == 1 and getattr(connectors[0], "database_name", None)
+            ):
+                return True
             self.logger.warning(
                 "No candidates for preparation: expected retrieved_column_attributes, "
                 "retrieved_custom_analyses, or retrieved_sql_attributes in path_state"
@@ -126,6 +131,11 @@ class CandidatePreparationAgent(BaseAgent):
         """
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
+        target_db = path_state.get("target_db")
+        if not target_db:
+            connectors = state.get("connectors") or []
+            if len(connectors) == 1:
+                target_db = getattr(connectors[0], "database_name", None)
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
@@ -239,7 +249,12 @@ class CandidatePreparationAgent(BaseAgent):
         k_per_query = max(1, 5 // len(search_queries))
 
         def _fetch_tables_for_query(query: str) -> list[dict]:
-            return get_relevant_tables(state["data_retriever"], query, k=k_per_query)
+            return get_relevant_tables(
+                state["data_retriever"],
+                query,
+                k=k_per_query,
+                database_name=target_db,
+            )
 
         with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
             futures = {
