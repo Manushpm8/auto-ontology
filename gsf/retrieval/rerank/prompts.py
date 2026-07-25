@@ -8,10 +8,10 @@
 def create_question_extraction_prompt(question: str) -> str:
     """Prompt to normalize a question and extract its search entities.
 
-    Produces a concise ``normalized_question`` plus entities split into three
-    buckets: ``search_for`` (the item being searched for), ``terms``
-    (descriptive/qualifier words), and ``numeric_concepts`` (measurable
-    attributes).
+    Produces a concise ``normalized_question`` plus entities split into five
+    buckets: the target item (``search_for`` / ``search_for_details``), an
+    optional prior item used as context (``reference_entity`` /
+    ``reference_entity_details``), and how they relate (``relation``).
     """
     return f"""You analyze a shopping/search request. Do TWO things:
 
@@ -20,25 +20,40 @@ def create_question_extraction_prompt(question: str) -> str:
    (item, brand, colors, qualifiers, numbers). If the input is already concise,
    return it unchanged.
 
-2. entities: Extract the search entities into exactly four buckets:
-   - "search_for": the SINGLE core item the user wants to find — exactly ONE
+2. entities: Extract the search entities into exactly five buckets:
+   - "search_for": the SINGLE core item the user wants to find NOW — exactly ONE
      entry. Keep the words describing that one item together in a single phrase
      and use the SINGULAR form, never plural (e.g. "pen" not "pens").
-   - "search_for_details": the remaining descriptive qualifiers of the item that
-     are likely to appear in its free-text description (everything about the item
-     that is not the core item and not a structured filter). Keep the nouns here
-     (e.g. "natural ingredient"). Do NOT repeat the core item.
-   - "terms": values that map to a structured, categorical filter such as a
-     specific brand, color, or material the user wants to filter by (e.g. "red",
-     "Panini"). Include a term ONLY if the question is actually asking to
-     filter/constrain results by it. Do NOT put free-text descriptive attributes
-     here — those belong in "search_for_details". If it is just background or
-     narrative context, do NOT include it.
-   - "numeric_concepts": measurable/numeric attributes the request cares about,
-     named as concepts NOT values (e.g. "price", "quantity", "weight", "rating").
-     Do NOT put literal numbers here — only the concept name.
+   - "search_for_details": descriptive qualifiers of the item the user wants to
+     find (everything about that target item that is not the core search_for
+     phrase). Keep nouns and adjectives here (e.g. "natural ingredient", "x5").
+     Do NOT repeat the core search_for item.
+   - "reference_entity": the SINGLE existing item the user already owns, bought,
+     or is referencing as context — exactly ONE entry when present. Use an empty
+     list when the question has no prior-item context (a plain search with no
+     "I bought X", "I have X", "for my X", etc.).
+   - "reference_entity_details": brand, model, color, size, or other identifying
+     qualifiers of the reference item that help locate it in the database. Do NOT
+     repeat the core reference_entity phrase.
+   - "relation": how search_for relates to reference_entity — exactly ONE short
+     phrase when a reference exists (e.g. "similar to", "compatible with",
+     "accessory for", "upgrade for", "replacement for"). Empty when there is no
+     reference_entity.
 
-Noun-only rule for "search_for", "search_for_details", and "terms":
+Target vs reference vs relation:
+- The TARGET is what the user wants to get now (search_for).
+- The REFERENCE is an item they already have that provides context (reference_entity).
+- The RELATION is the link between them (relation) — put comparative/relational
+  words HERE, not in any other bucket.
+- Example: "I bought a Forest Byke derailleur hanger 65 and need an adapter for it"
+  -> search_for: ["adapter"], reference_entity: ["derailleur hanger 65"],
+     relation: ["compatible with"].
+- Example: "I'm looking for a red box to hold my Panini playing cards"
+  -> search_for: ["box playing cards"], search_for_details: ["red"], no reference,
+     no relation.
+
+Noun-only rule for search_for, search_for_details, reference_entity, and
+reference_entity_details (NOT relation):
 - Keep ONLY nouns and the adjectives/proper-nouns that qualify them.
 - DROP all verbs (e.g. "hold", "carry", "buy"), prepositions ("to", "of", "in",
   "on", "for", "with"), articles ("a", "the"), and other connective/filler words.
@@ -51,31 +66,47 @@ Rules:
 - Only extract what the question actually says; do not invent constraints.
 - A number that is part of a product/model name (a model number, size, or
   version embedded in the item name) MUST stay attached to that item's phrase.
-  Never split such a number into its own entity, term, or numeric_concept.
+  Never split such a number into its own bucket entry.
 - Any bucket may be an empty list if nothing applies.
-- NEVER store a number as a separate search_for, search_for_details, term, or numeric_concept.
-- NEVER store / include relational/comparative words such as "similar", "same", "like",
-  "more", "less", "better", "cheaper", "closest" — in any of the four buckets. They must be dropped entirely.
+- NEVER store a number as a separate bucket entry.
+- Relational/comparative words such as "similar", "same", "like", "compatible",
+  "for", "with", "replacement", "upgrade" belong ONLY in "relation". Do NOT put
+  them in search_for, search_for_details, reference_entity, or
+  reference_entity_details.
+- If reference_entity is empty, relation MUST be empty.
 
-Example
-Input: "I'm looking for a red box to hold my Panini playing cards, and I care
-about the price and how many are in the pack."
+Example 1 — follow-up with a reference item
+Input: "I just bought a Forest Byke Company Derailleur Hanger 65, please recommend
+me something similar from x5."
+Output:
+{{
+  "search_for": ["derailleur hanger"],
+  "search_for_details": ["x5"],
+  "reference_entity": ["Forest Byke Company Derailleur Hanger 65"],
+  "reference_entity_details": [],
+  "relation": ["similar to"]
+}}
+
+Example 2 — plain search, no reference
+Input: "I'm looking for a red box to hold my Panini playing cards."
 Output:
 {{
   "search_for": ["box playing cards"],
-  "search_for_details": [],
-  "terms": ["red", "Panini"],
-  "numeric_concepts": ["price", "quantity"]
+  "search_for_details": ["red", "Panini"],
+  "reference_entity": [],
+  "reference_entity_details": [],
+  "relation": []
 }}
 
-Example 2
-Input: "yesterday I bought a desktop computer, but it is too slow machine."
+Example 3 — bought item with a need for an accessory
+Input: "I bought a desktop computer yesterday but it is too slow, I need more RAM."
 Output:
 {{
-  "search_for": ["desktop computer"],
-  "search_for_details": ["slow"],
-  "terms": [],
-  "numeric_concepts": []
+  "search_for": ["RAM"],
+  "search_for_details": [],
+  "reference_entity": ["desktop computer"],
+  "reference_entity_details": ["slow"],
+  "relation": ["upgrade for"]
 }}
 
 Question: {question}

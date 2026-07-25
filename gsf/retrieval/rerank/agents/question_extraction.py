@@ -4,9 +4,11 @@
 
 """Question extraction node for the rerank flow.
 
-Uses the (non-reasoning) LLM to produce a normalized question and to extract the
-search entities into three buckets (``search_for``, ``terms``,
-``numeric_concepts``).
+Uses the (non-reasoning) LLM to produce a normalized question and to extract
+search entities into five buckets: the item the user wants now
+(``search_for`` / ``search_for_details``), an existing item used as context
+(``reference_entity`` / ``reference_entity_details``), and how those two
+relate (``relation``).
 """
 
 from typing import Any, Dict
@@ -21,45 +23,52 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 
 
 class ExtractedEntities(BaseModel):
-    """Entities extracted from the question, split into three buckets."""
+    """Entities extracted from the question, split into five buckets."""
 
     model_config = ConfigDict(extra="forbid")
 
     search_for: list[str] = Field(
         default_factory=list,
         description=(
-            "The SINGLE core item the user wants to find, as exactly ONE entry. "
-            "Nouns only: drop verbs, prepositions, and articles (e.g. 'box to "
-            "hold playing cards' -> 'box playing cards'). Keep the words for that "
-            "one item in a single phrase and use the SINGULAR form, never plural."
+            "The SINGLE core item the user wants to find now, as exactly ONE "
+            "entry. Nouns only: drop verbs, prepositions, and articles (e.g. "
+            "'box to hold playing cards' -> 'box playing cards'). Keep the "
+            "words for that one item in a single phrase and use the SINGULAR "
+            "form, never plural."
         ),
     )
     search_for_details: list[str] = Field(
         default_factory=list,
         description=(
-            "The remaining descriptive qualifiers of the item that are likely to "
-            "appear in its free-text description (everything about the item that "
-            "is not the core item and not a structured filter). Keep the nouns "
-            "here (e.g. 'natural ingredient'). Nouns/adjectives only — no verbs "
-            "or connective words. Do not repeat the core item."
+            "Descriptive qualifiers of the item the user wants to find (everything "
+            "about that target item that is not the core item phrase). Keep nouns "
+            "and adjectives here (e.g. 'natural ingredient'). Do not repeat "
+            "the core search_for item."
         ),
     )
-    terms: list[str] = Field(
+    reference_entity: list[str] = Field(
         default_factory=list,
         description=(
-            "Values that map to a structured, categorical filter such as a "
-            "specific brand, color, or material the user wants to filter by "
-            "(e.g. 'red', 'Panini'). Include a term ONLY if the question is "
-            "actually asking to filter/constrain results by it. Free-text "
-            "descriptive attributes belong in search_for_details, not here. If "
-            "it is just background or narrative context, do NOT include it."
+            "The SINGLE existing item the user already owns, bought, or is "
+            "referencing as context — exactly ONE entry when present. Empty when "
+            "the question has no prior-item context. Nouns only; singular form."
         ),
     )
-    numeric_concepts: list[str] = Field(
+    reference_entity_details: list[str] = Field(
         default_factory=list,
         description=(
-            "Measurable/numeric attribute concepts (e.g. 'price', 'quantity'). "
-            "Concept names only — never literal numbers."
+            "Brand, model, color, size, or other identifying qualifiers of the "
+            "reference item that help locate it in the database. Do not repeat "
+            "the core reference_entity phrase."
+        ),
+    )
+    relation: list[str] = Field(
+        default_factory=list,
+        description=(
+            "How search_for relates to reference_entity — exactly ONE short "
+            "phrase when a reference exists (e.g. 'similar to', 'compatible with', "
+            "'accessory for', 'upgrade for', 'replacement for'). Empty when "
+            "there is no reference_entity."
         ),
     )
 
@@ -119,8 +128,9 @@ class QuestionExtractionAgent(BaseAgent):
             path_state["entities"] = {
                 "search_for": [],
                 "search_for_details": [],
-                "terms": [],
-                "numeric_concepts": [],
+                "reference_entity": [],
+                "reference_entity_details": [],
+                "relation": [],
             }
             return result
 
