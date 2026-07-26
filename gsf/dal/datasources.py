@@ -25,7 +25,7 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.cypher_fragments import column_description_expr
+from gsf.dal.cypher_fragments import column_description_expr, table_description_expr
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 
 from gsf.semantic.constants import (
@@ -347,7 +347,8 @@ def fetch_tables_for_schema(
                t.name AS name,
                t.table_type AS table_type,
                db.name AS database_name,
-               s.name AS schema_name, t.description AS description,
+               s.name AS schema_name,
+               {table_description_expr("t")} AS description,
                columns_count,
                sql_count,
                size(unique_term_ids) AS terms_count
