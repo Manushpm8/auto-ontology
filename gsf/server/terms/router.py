@@ -135,7 +135,11 @@ def update_column_attribute(
             "description": row.get("description"),
             "sample_values": row.get("sample_values"),
             "certified": row.get("certified", False),
-        }
+        },
+        # The owning Term's aggregate badge depends on this attribute's flag,
+        # so hand back the recomputed value rather than making the client
+        # re-derive it (see terms_dal.get_term_certification).
+        "term_certification": terms_dal.get_term_certification(term_id),
     }
 
 
@@ -202,6 +206,7 @@ def update_term(term_id: str, body: TermUpdate) -> dict:
             "description": row.get("description"),
             "name_certified": row.get("name_certified", False),
             "description_certified": row.get("description_certified", False),
+            "certification": terms_dal.get_term_certification(term_id),
         }
     }
 

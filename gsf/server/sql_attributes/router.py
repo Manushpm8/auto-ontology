@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from gsf.dal import terms as terms_dal
 from gsf.server.sql_attributes import service as dal
 
 router = APIRouter()
@@ -195,7 +196,16 @@ def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
             status_code=404,
             detail=f"SqlAttribute {attr_id!r} not found",
         )
-    return {"data": row}
+    term_id = row.get("term_id")
+    return {
+        "data": row,
+        # The owning Term's aggregate badge depends on this attribute's flag,
+        # so hand back the recomputed value rather than making the client
+        # re-derive it (see terms_dal.get_term_certification).
+        "term_certification": (
+            terms_dal.get_term_certification(term_id) if term_id else None
+        ),
+    }
 
 
 @router.delete("/sql-attributes/{attr_id}")
