@@ -5,7 +5,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
 import type { Database } from '@/types/datasources';
 import { zonesApi } from '@/api/zones';
 import { datasources } from '@/api/datasources';
@@ -13,6 +12,7 @@ import { ModalWithSteps, ConfirmModal } from '@/common/modal';
 import { ColorPicker } from '@/common/ColorPicker';
 import type { ColorOption } from '@/common/ColorPicker';
 import { Icon, IconName } from '@/common/icons';
+import { SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { ZonesDataTree } from '@/components/settings/ZonesDataTree';
 import { mergeSchemasIntoDatabase, mergeTablesIntoSchema } from '@/lib/data/datasource-tree-merge';
@@ -656,13 +656,13 @@ export default function ZonesSettingsPage() {
 
 				{loading ? (
 					<div
-						className="flex min-h-[12rem] flex-col items-center justify-center gap-4 rounded-lg border border-zinc-200/90 bg-white/90 px-4 py-8 dark:border-zinc-700/90 dark:bg-zinc-950/50"
+						className="grid grid-cols-1 gap-4 lg:grid-cols-2"
 						role="status"
+						aria-label="Loading zones"
 					>
-						<Spinner aria-label="Loading" />
-						<p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-							Loading zones...
-						</p>
+						{Array.from({ length: 4 }).map((_, index) => (
+							<SkeletonCard key={index} rows={3} />
+						))}
 					</div>
 				) : zones.length > 0 ? (
 					<div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -791,10 +791,11 @@ export default function ZonesSettingsPage() {
 						</p>
 						{treeLoading ? (
 							<div
-								className="flex min-h-[220px] items-center justify-center"
+								className="min-h-[220px] py-4"
 								role="status"
+								aria-label="Loading data tree"
 							>
-								<Spinner aria-label="Loading data tree" />
+								<SkeletonRows rows={7} />
 							</div>
 						) : (
 							<ZonesDataTree

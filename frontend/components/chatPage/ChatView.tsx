@@ -5,6 +5,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Spinner } from '@nvidia/foundations-react-core';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useChat } from '@/lib/useChat';
 import type { Conversation } from '@/types/chat';
@@ -33,7 +34,7 @@ export const ChatView = () => {
 	const [sidebarLoading, setSidebarLoading] = useState(true);
 	const [messageListLoading, setMessageListLoading] = useState<boolean>(focusId != null);
 	// null = still checking; false = semantic layer missing (block the chat area).
-	const [semanticReady, setSemanticReady] = useState<boolean>(false);
+	const [semanticReady, setSemanticReady] = useState<boolean | null>(null);
 	const loadedFocusRef = useRef<string | null>(null);
 
 	const { messages, setMessages, steps, isLoading, sendMessage, clearConversation } = useChat();
@@ -95,12 +96,14 @@ export const ChatView = () => {
 
 	useEffect(() => {
 		let active = true;
-		semanticCompilationApi.getStatus().then((res) => {
-			debugger;
-			if (active) {
-				setSemanticReady(res.calculated);
-			}
-		});
+		semanticCompilationApi
+			.getStatus()
+			.then((res) => {
+				if (active) setSemanticReady(res.calculated);
+			})
+			.catch(() => {
+				if (active) setSemanticReady(false);
+			});
 		return () => {
 			active = false;
 		};
@@ -237,7 +240,11 @@ export const ChatView = () => {
 			/>
 
 			<main className="flex min-w-0 flex-1 flex-col">
-				{!semanticReady ? (
+				{semanticReady == null ? (
+					<div className="flex flex-1 items-center justify-center">
+						<Spinner aria-label="Checking semantic layer" className="h-10 w-10" />
+					</div>
+				) : !semanticReady ? (
 					<SemanticNotReady />
 				) : (
 					<>
