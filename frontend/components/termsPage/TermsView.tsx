@@ -23,6 +23,7 @@ import { CertificationStatus } from '@/enums/certification';
 import { attributeStatus } from '@/lib/certification';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
+import { Toast } from '@/common/Toast';
 import type { ColumnAttribute, SqlAttribute, Term } from '@/types/terms';
 
 type TermCardProps = {
@@ -177,12 +178,6 @@ const FIELD_INPUT_CLASSNAME =
 	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
 
 const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
-
-const ErrorBanner = ({ message }: { message: string }) => (
-	<div className="border-t border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-		{message}
-	</div>
-);
 
 export const TermsView = () => {
 	const router = useRouter();
@@ -1169,8 +1164,15 @@ export const TermsView = () => {
 						onCertificationChange={handleSqlAttrCertificationChange}
 					/>
 				</main>
-				{sqlAttrEditError != null && <ErrorBanner message={sqlAttrEditError} />}
-				{certError != null && <ErrorBanner message={certError} />}
+				<Toast
+					open={sqlAttrEditError != null || certError != null}
+					message={sqlAttrEditError ?? certError ?? ''}
+					variant="error"
+					onClose={() => {
+						setSqlAttrEditError(null);
+						setCertError(null);
+					}}
+				/>
 				<ConfirmModal
 					open={deletingSqlAttr !== null}
 					onCancel={handleDeleteSqlAttrClose}
@@ -1287,8 +1289,15 @@ export const TermsView = () => {
 						onCertificationChange={handleColumnAttrCertificationChange}
 					/>
 				</main>
-				{columnAttrEditError != null && <ErrorBanner message={columnAttrEditError} />}
-				{certError != null && <ErrorBanner message={certError} />}
+				<Toast
+					open={columnAttrEditError != null || certError != null}
+					message={columnAttrEditError ?? certError ?? ''}
+					variant="error"
+					onClose={() => {
+						setColumnAttrEditError(null);
+						setCertError(null);
+					}}
+				/>
 			</div>
 		);
 	}
@@ -1361,7 +1370,12 @@ export const TermsView = () => {
 						onDataTableCertificationChange={handleTermTableCertificationChange}
 					/>
 				</main>
-				{certError != null && <ErrorBanner message={certError} />}
+				<Toast
+					open={certError != null}
+					message={certError ?? ''}
+					variant="error"
+					onClose={() => setCertError(null)}
+				/>
 				<ModalCreateNewItem
 					open={createSqlAttrModalOpen}
 					onClose={handleCreateSqlAttrClose}
