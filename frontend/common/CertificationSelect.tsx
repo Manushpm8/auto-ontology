@@ -47,7 +47,7 @@ export const CertificationSelect = ({
 
 	return (
 		<PopoverMenu
-			className="relative"
+			className="inline-flex"
 			items={items}
 			trigger={({ toggle }) => (
 				<button
