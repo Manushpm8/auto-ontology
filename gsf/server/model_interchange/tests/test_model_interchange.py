@@ -25,6 +25,12 @@ from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_TABLE,
 )
 from gsf.server.model_interchange import service
+from gsf.server.model_interchange.embed import (
+    ImportEmbedBuffer,
+    build_column_data_row,
+    build_table_data_row,
+    flush_import_embeddings,
+)
 from gsf.server.model_interchange.schemas import ExportRequest, GsfModelDocument
 
 
@@ -173,7 +179,9 @@ def test_export_yaml_round_trips_through_safe_load() -> None:
     )
 
 
-@patch("gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[])
+@patch(
+    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+)
 @patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
 @patch("gsf.server.model_interchange.service.dal.validate_database_ids")
 def test_export_model_filters_by_database_id(
@@ -191,7 +199,9 @@ def test_export_model_filters_by_database_id(
     assert payload["data_layer"]["databases"][0]["id"] == "db-2"
 
 
-@patch("gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[])
+@patch(
+    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+)
 @patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
 @patch("gsf.server.model_interchange.service.dal.validate_database_ids")
 def test_export_model_all_databases_uses_empty_filter(
@@ -217,11 +227,32 @@ def test_validate_database_ids_raises_for_unknown(mock_conn: MagicMock) -> None:
     assert exc.value.database_ids == ["missing"]
 
 
+@patch("gsf.server.model_interchange.service.flush_import_embeddings")
 @patch("gsf.server.model_interchange.service.dal.apply_import_model")
-@patch("gsf.vdb.get_semantic_vdb")
-def test_import_model_does_not_touch_vdb(
-    mock_get_vdb: MagicMock,
+def test_import_model_flushes_embeddings_when_embed_true(
     mock_apply: MagicMock,
+    mock_flush: MagicMock,
+) -> None:
+    mock_apply.return_value = {"terms": 1}
+    mock_flush.return_value = {"skipped": False, "data_rows": 2, "semantic_rows": 3}
+    document = assemble_export_document(
+        _export_rows(),
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+    yaml_text = yaml.safe_dump(document.model_dump(mode="python"))
+
+    summary = service.import_model(yaml_text, replace=True, embed=True)
+
+    mock_flush.assert_called_once()
+    assert summary["embeddings"]["semantic_rows"] == 3
+
+
+@patch("gsf.server.model_interchange.service.flush_import_embeddings")
+@patch("gsf.server.model_interchange.service.dal.apply_import_model")
+def test_import_model_skips_flush_when_embed_false(
+    mock_apply: MagicMock,
+    mock_flush: MagicMock,
 ) -> None:
     mock_apply.return_value = {"terms": 1}
     document = assemble_export_document(
@@ -231,11 +262,47 @@ def test_import_model_does_not_touch_vdb(
     )
     yaml_text = yaml.safe_dump(document.model_dump(mode="python"))
 
-    summary = service.import_model(yaml_text, replace=True)
+    service.import_model(yaml_text, replace=True, embed=False)
 
-    mock_get_vdb.assert_not_called()
+    mock_flush.assert_not_called()
     mock_apply.assert_called_once()
-    assert summary["terms"] == 1
+    assert mock_apply.call_args.kwargs["embed_buffer"] is None
+
+
+@patch("gsf.server.model_interchange.embed.resolve", return_value="")
+def test_flush_import_embeddings_skips_without_api_key(
+    _mock_resolve: MagicMock,
+) -> None:
+    buffer = ImportEmbedBuffer(data_rows=[{"text": "x"}])
+    result = flush_import_embeddings(buffer)
+    assert result["skipped"] is True
+    assert result["data_rows"] == 0
+
+
+def test_build_catalog_embed_rows_match_tabular_shape() -> None:
+    column_row = build_column_data_row(
+        live_id="col-live",
+        column_name="id",
+        column_description="pk",
+        data_type="INTEGER",
+        sample_values=["1", "2"],
+        table_name="orders",
+        schema_name="main",
+        database_name="retail",
+    )
+    table_row = build_table_data_row(
+        live_id="tbl-live",
+        table_name="orders",
+        table_description="Orders",
+        schema_name="main",
+        database_name="retail",
+        columns=[{"column_name": "id", "data_type": "INTEGER", "description": "pk"}],
+    )
+    assert column_row["metadata"]["label"] == "Column"
+    assert column_row["metadata"]["id"] == "col-live"
+    assert "column_name: id" in column_row["text"]
+    assert table_row["metadata"]["label"] == "Table"
+    assert "columns:" in table_row["text"]
 
 
 @patch("gsf.dal.model_interchange.get_schemas")
@@ -309,7 +376,7 @@ def test_apply_import_model_creates_when_catalog_missing(
         sql_column_resolver=lambda _sql, _db: [],
     )
 
-    summary = apply_import_model(document, replace=True)
+    summary = apply_import_model(document, replace=True, embed_buffer=None)
 
     mock_catalog.assert_called_once()
     assert summary["database_ids"] == ["live-db"]

@@ -41,8 +41,9 @@ async def import_model(
     request: Request,
     file: UploadFile | None = File(default=None),
     replace: bool = Query(default=True),
+    embed: bool = Query(default=True),
 ) -> dict:
-    """Import a GSF model YAML file or raw YAML body without refreshing VDB."""
+    """Import a GSF model YAML file or raw YAML body."""
     if file is not None:
         raw = await file.read()
     else:
@@ -60,7 +61,7 @@ async def import_model(
         raise HTTPException(status_code=422, detail="YAML must be UTF-8") from exc
 
     try:
-        summary = service.import_model(yaml_text, replace=replace)
+        summary = service.import_model(yaml_text, replace=replace, embed=embed)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     except ModelImportValidationError as exc:

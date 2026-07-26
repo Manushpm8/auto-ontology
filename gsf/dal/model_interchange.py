@@ -35,6 +35,16 @@ from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_SQL,
     SQL_ATTR_SOURCE_TABLE,
 )
+from gsf.server.model_interchange.embed import (
+    ColumnCatalogMeta,
+    ImportEmbedBuffer,
+    build_column_attribute_semantic_rows,
+    build_column_data_row,
+    build_custom_analysis_semantic_row,
+    build_sql_attribute_semantic_row,
+    build_table_data_row,
+    build_term_semantic_rows,
+)
 from gsf.server.model_interchange.schemas import (
     GsfModelDocument,
     ModelColumn,
@@ -453,16 +463,25 @@ def resolve_sql_column_ids(sql: str, database_name: str | None) -> list[str]:
     return [str(col_id) for col_id in column_ids if col_id]
 
 
-def apply_import_model(document: GsfModelDocument, *, replace: bool) -> dict[str, Any]:
-    """Apply a validated model document to Neo4j without touching the VDB.
+def apply_import_model(
+    document: GsfModelDocument,
+    *,
+    replace: bool,
+    embed_buffer: ImportEmbedBuffer | None = None,
+) -> dict[str, Any]:
+    """Apply a validated model document to Neo4j.
 
     Entities are matched by ``imported_id`` (the YAML ``id``). When a node
     already carries that ``imported_id`` (or its live ``id`` equals the YAML
     id), it is skipped. Otherwise a new node is created with a fresh ``id``
     and ``imported_id`` set to the YAML id. Catalog nodes are created when
     missing, so import works against an empty Neo4j.
+
+    When *embed_buffer* is supplied, pre-embed rows for newly created nodes
+    are appended for a later :func:`flush_import_embeddings` call.
     """
     id_map: dict[str, str] = {}
+    column_meta: dict[str, ColumnCatalogMeta] = {}
     created: dict[str, int] = {
         "databases": 0,
         "schemas": 0,
@@ -475,20 +494,48 @@ def apply_import_model(document: GsfModelDocument, *, replace: bool) -> dict[str
     }
     skipped: dict[str, int] = {key: 0 for key in created}
 
-    live_db_ids = _import_catalog(document, id_map, created, skipped)
+    live_db_ids = _import_catalog(
+        document,
+        id_map,
+        created,
+        skipped,
+        embed_buffer,
+        column_meta,
+    )
 
     if replace:
         _delete_scoped_semantics_not_in_payload(document, live_db_ids)
 
     _import_foreign_keys(document, id_map)
     _import_joins(document, id_map)
-    _import_terms(document, id_map, created, skipped)
-    _import_column_attributes(document, id_map, created, skipped)
+    _import_terms(document, id_map, created, skipped, embed_buffer)
+    _import_column_attributes(
+        document,
+        id_map,
+        created,
+        skipped,
+        embed_buffer,
+        column_meta,
+    )
     _import_semantic_fks(document, id_map)
-    _import_sql_attributes(document, id_map, created, skipped)
-    _import_custom_analyses(document, id_map, created, skipped)
+    term_names = {term.id: term.name for term in document.semantic_layer.terms}
+    _import_sql_attributes(
+        document,
+        id_map,
+        created,
+        skipped,
+        embed_buffer,
+        term_names,
+    )
+    _import_custom_analyses(
+        document,
+        id_map,
+        created,
+        skipped,
+        embed_buffer,
+    )
 
-    return {
+    summary: dict[str, Any] = {
         "database_ids": live_db_ids,
         "created": created,
         "skipped": skipped,
@@ -504,6 +551,12 @@ def apply_import_model(document: GsfModelDocument, *, replace: bool) -> dict[str
         ),
         "custom_analyses": len(document.semantic_layer.custom_analyses),
     }
+    if embed_buffer is not None:
+        summary["pending_embed"] = {
+            "data_rows": len(embed_buffer.data_rows),
+            "semantic_rows": len(embed_buffer.semantic_rows),
+        }
+    return summary
 
 
 def _resolve_entity(
@@ -568,6 +621,8 @@ def _import_catalog(
     id_map: dict[str, str],
     created: dict[str, int],
     skipped: dict[str, int],
+    embed_buffer: ImportEmbedBuffer | None,
+    column_meta: dict[str, ColumnCatalogMeta],
 ) -> list[str]:
     live_db_ids: list[str] = []
     for db in document.data_layer.databases:
@@ -595,6 +650,7 @@ def _import_catalog(
             skipped["databases"] += 1
 
         for schema in db.schemas:
+            schema_db_name = schema.database_name or db_name
             live_schema_id, sch_created = _resolve_entity(
                 Labels.SCHEMA,
                 schema.id,
@@ -639,11 +695,21 @@ def _import_catalog(
                     {"schema_id": live_schema_id, "table_id": live_table_id},
                 )
 
+                table_column_embed_specs: list[dict[str, Any]] = []
                 for ordinal, column in enumerate(table.columns, start=1):
                     sample_values = (
                         json.dumps(column.sample_values)
                         if column.sample_values
                         else None
+                    )
+                    column_meta[column.id] = ColumnCatalogMeta(
+                        name=column.name,
+                        description=column.description,
+                        data_type=column.type,
+                        sample_values=column.sample_values,
+                        table_yaml_id=table.id,
+                        schema_name=schema.name,
+                        database_name=schema_db_name,
                     )
                     live_col_id, col_created = _resolve_entity(
                         Labels.COLUMN,
@@ -661,6 +727,19 @@ def _import_catalog(
                     id_map[column.id] = live_col_id
                     if col_created:
                         created["columns"] += 1
+                        if embed_buffer is not None:
+                            embed_buffer.data_rows.append(
+                                build_column_data_row(
+                                    live_id=live_col_id,
+                                    column_name=column.name,
+                                    column_description=column.description,
+                                    data_type=column.type,
+                                    sample_values=column.sample_values,
+                                    table_name=table.name,
+                                    schema_name=schema.name,
+                                    database_name=schema_db_name,
+                                ),
+                            )
                     else:
                         skipped["columns"] += 1
                     get_neo4j_conn().query_write(
@@ -670,6 +749,25 @@ def _import_catalog(
                         MERGE (tbl)-[:{Edges.CONTAINS}]->(col)
                         """,
                         {"table_id": live_table_id, "column_id": live_col_id},
+                    )
+                    table_column_embed_specs.append(
+                        {
+                            "column_name": column.name,
+                            "data_type": column.type,
+                            "description": column.description,
+                        },
+                    )
+
+                if tbl_created and embed_buffer is not None:
+                    embed_buffer.data_rows.append(
+                        build_table_data_row(
+                            live_id=live_table_id,
+                            table_name=table.name,
+                            table_description=table.description,
+                            schema_name=schema.name,
+                            database_name=schema_db_name,
+                            columns=table_column_embed_specs,
+                        ),
                     )
     return live_db_ids
 
@@ -825,6 +923,7 @@ def _import_terms(
     id_map: dict[str, str],
     created: dict[str, int],
     skipped: dict[str, int],
+    embed_buffer: ImportEmbedBuffer | None,
 ) -> None:
     for term in document.semantic_layer.terms:
         live_term_id, was_created = _resolve_entity(
@@ -841,7 +940,6 @@ def _import_terms(
             created["terms"] += 1
         else:
             skipped["terms"] += 1
-            # Still ensure REPRESENTS edges for remapped tables.
         table_ids = [
             _remap(id_map, table_id, kind="term represents table")
             for table_id in term.represents
@@ -858,6 +956,16 @@ def _import_terms(
             """,
             {"term_id": live_term_id, "table_ids": table_ids},
         )
+        if was_created and embed_buffer is not None:
+            database_name = _database_name_for_term(live_term_id) or ""
+            embed_buffer.semantic_rows.extend(
+                build_term_semantic_rows(
+                    database_name=database_name,
+                    live_id=live_term_id,
+                    name=term.name,
+                    description=term.description,
+                ),
+            )
 
 
 def _import_column_attributes(
@@ -865,10 +973,18 @@ def _import_column_attributes(
     id_map: dict[str, str],
     created: dict[str, int],
     skipped: dict[str, int],
+    embed_buffer: ImportEmbedBuffer | None,
+    column_meta: dict[str, ColumnCatalogMeta],
 ) -> None:
     for term in document.semantic_layer.terms:
         live_term_id = _remap(id_map, term.id, kind="term")
         for attr in term.columns_attributes:
+            col_ctx = column_meta.get(attr.column_id)
+            live_table_id = (
+                _remap(id_map, col_ctx.table_yaml_id, kind="column attribute table")
+                if col_ctx
+                else ""
+            )
             live_attr_id, was_created = _resolve_entity(
                 LABEL_COLUMN_ATTRIBUTE,
                 attr.id,
@@ -876,6 +992,9 @@ def _import_column_attributes(
                     "name": attr.name,
                     "description": attr.description,
                     "source": SEMANTIC_SOURCE,
+                    "term_name": term.name,
+                    "source_column": col_ctx.name if col_ctx else "",
+                    "table_id": live_table_id,
                 },
             )
             id_map[attr.id] = live_attr_id
@@ -898,6 +1017,19 @@ def _import_column_attributes(
                     "term_id": live_term_id,
                 },
             )
+            if was_created and embed_buffer is not None and col_ctx is not None:
+                embed_buffer.semantic_rows.extend(
+                    build_column_attribute_semantic_rows(
+                        database_name=col_ctx.database_name,
+                        live_id=live_attr_id,
+                        name=attr.name,
+                        description=attr.description,
+                        term_name=term.name,
+                        source_column=col_ctx.name,
+                        sample_values=col_ctx.sample_values,
+                        schema_name=col_ctx.schema_name,
+                    ),
+                )
 
 
 def _import_semantic_fks(document: GsfModelDocument, id_map: dict[str, str]) -> None:
@@ -976,6 +1108,8 @@ def _import_sql_attributes(
     id_map: dict[str, str],
     created: dict[str, int],
     skipped: dict[str, int],
+    embed_buffer: ImportEmbedBuffer | None,
+    term_names: dict[str, str],
 ) -> None:
     for yaml_key in ("manual", "table", "sql", "bridge_table"):
         source = _YAML_KEY_TO_SOURCE[yaml_key]
@@ -1024,6 +1158,17 @@ def _import_sql_attributes(
                 extra_props={"expression": attr.sql, "source": source},
             )
             link_to_term(live_attr_id, live_term_id)
+            if embed_buffer is not None:
+                embed_buffer.semantic_rows.append(
+                    build_sql_attribute_semantic_row(
+                        live_id=live_attr_id,
+                        name=attr.name,
+                        description=attr.description,
+                        term_name=term_names.get(attr.term_id, ""),
+                        sql=attr.sql,
+                        database_name=database_name,
+                    ),
+                )
 
 
 def _import_custom_analyses(
@@ -1031,6 +1176,7 @@ def _import_custom_analyses(
     id_map: dict[str, str],
     created: dict[str, int],
     skipped: dict[str, int],
+    embed_buffer: ImportEmbedBuffer | None,
 ) -> None:
     for analysis in document.semantic_layer.custom_analyses:
         live_ca_id, was_created = _resolve_entity(
@@ -1093,3 +1239,13 @@ def _import_custom_analyses(
             sql=analysis.sql,
             database_name=database_name,
         )
+        if embed_buffer is not None:
+            embed_buffer.semantic_rows.append(
+                build_custom_analysis_semantic_row(
+                    live_id=live_ca_id,
+                    name=analysis.name,
+                    description=analysis.description,
+                    sql=analysis.sql,
+                    database_name=database_name,
+                ),
+            )

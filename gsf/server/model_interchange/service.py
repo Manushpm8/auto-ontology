@@ -14,6 +14,10 @@ import yaml
 from gsf.connectors import get_connectors
 from gsf.dal import model_interchange as dal
 from gsf.dal.connections import list_connections
+from gsf.server.model_interchange.embed import (
+    ImportEmbedBuffer,
+    flush_import_embeddings,
+)
 from gsf.server.model_interchange.schemas import ExportRequest, GsfModelDocument
 
 logger = logging.getLogger(__name__)
@@ -59,10 +63,23 @@ def export_model(request: ExportRequest) -> str:
     )
 
 
-def import_model(yaml_text: str, *, replace: bool = True) -> dict[str, Any]:
+def import_model(
+    yaml_text: str,
+    *,
+    replace: bool = True,
+    embed: bool = True,
+) -> dict[str, Any]:
     """Validate and apply a YAML GSF model document."""
     payload = yaml.safe_load(yaml_text)
     if not isinstance(payload, dict):
         raise ValueError("YAML document must deserialize to a mapping")
     document = GsfModelDocument.model_validate(payload)
-    return dal.apply_import_model(document, replace=replace)
+    embed_buffer = ImportEmbedBuffer() if embed else None
+    summary = dal.apply_import_model(
+        document,
+        replace=replace,
+        embed_buffer=embed_buffer,
+    )
+    if embed and embed_buffer is not None:
+        summary["embeddings"] = flush_import_embeddings(embed_buffer)
+    return summary
