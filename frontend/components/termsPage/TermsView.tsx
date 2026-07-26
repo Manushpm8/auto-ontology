@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
@@ -931,7 +932,7 @@ export const TermsView = () => {
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<button
+					<Button
 						type="button"
 						onClick={handleBack}
 						className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
@@ -939,15 +940,15 @@ export const TermsView = () => {
 					>
 						<Icon name={IconName.Terms} className="h-4 w-4" />
 						Terms
-					</button>
+					</Button>
 					<span className="text-zinc-300 dark:text-zinc-600">/</span>
-					<button
+					<Button
 						type="button"
 						onClick={handleBackToTerm}
 						className="cursor-pointer rounded-lg px-1.5 py-1 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
 					>
 						{termTitle}
-					</button>
+					</Button>
 					<span className="text-zinc-300 dark:text-zinc-600">/</span>
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{sqlAttrTitle}
@@ -955,7 +956,7 @@ export const TermsView = () => {
 					<div className="ml-auto flex shrink-0 items-center gap-1">
 						{sqlAttrEditing ? null : (
 							<>
-								<button
+								<Button
 									type="button"
 									onClick={() => {
 										setSqlAttrEditError(null);
@@ -963,11 +964,12 @@ export const TermsView = () => {
 									}}
 									aria-label={`Edit ${sqlAttrTitle}`}
 									title="Edit"
-									className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+									className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
 								>
-									<Icon name={IconName.Pencil} className="h-4 w-4" />
-								</button>
-								<button
+									<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+									Edit
+								</Button>
+								<Button
 									type="button"
 									onClick={() => {
 										setDeletingSqlAttr({ id: sqlAttrId, name: sqlAttrTitle });
@@ -975,10 +977,11 @@ export const TermsView = () => {
 									}}
 									aria-label={`Delete ${sqlAttrTitle}`}
 									title="Delete"
-									className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+									className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
 								>
-									<Icon name={IconName.Trash} className="h-4 w-4" />
-								</button>
+									<Icon name={IconName.Trash} className="h-3.5 w-3.5" />
+									Delete
+								</Button>
 							</>
 						)}
 					</div>
@@ -1077,7 +1080,7 @@ export const TermsView = () => {
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<button
+					<Button
 						type="button"
 						onClick={handleBack}
 						className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
@@ -1085,22 +1088,22 @@ export const TermsView = () => {
 					>
 						<Icon name={IconName.Terms} className="h-4 w-4" />
 						Terms
-					</button>
+					</Button>
 					<span className="text-zinc-300 dark:text-zinc-600">/</span>
-					<button
+					<Button
 						type="button"
 						onClick={handleBackToTerm}
 						className="cursor-pointer rounded-lg px-1.5 py-1 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
 					>
 						{termTitle}
-					</button>
+					</Button>
 					<span className="text-zinc-300 dark:text-zinc-600">/</span>
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{colAttrTitle}
 					</span>
 					<div className="ml-auto flex shrink-0 items-center gap-1">
 						{columnAttrEditing ? null : (
-							<button
+							<Button
 								type="button"
 								onClick={() => {
 									setColumnAttrEditError(null);
@@ -1108,10 +1111,11 @@ export const TermsView = () => {
 								}}
 								aria-label={`Edit ${colAttrTitle}`}
 								title="Edit"
-								className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
+								className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
 							>
-								<Icon name={IconName.Pencil} className="h-4 w-4" />
-							</button>
+								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+								Edit
+							</Button>
 						)}
 					</div>
 				</header>
@@ -1148,7 +1152,7 @@ export const TermsView = () => {
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<button
+					<Button
 						type="button"
 						onClick={handleBack}
 						className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
@@ -1156,14 +1160,14 @@ export const TermsView = () => {
 					>
 						<Icon name={IconName.Terms} className="h-4 w-4" />
 						Terms
-					</button>
+					</Button>
 					<span className="text-zinc-300 dark:text-zinc-600">/</span>
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{termTitle}
 					</span>
 					<div className="ml-auto flex items-center gap-2">
 						{termEditing ? null : (
-							<button
+							<Button
 								type="button"
 								onClick={() => {
 									setTermEditing(true);
@@ -1171,9 +1175,9 @@ export const TermsView = () => {
 								className="cursor-pointer rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
 							>
 								Edit term
-							</button>
+							</Button>
 						)}
-						<button
+						<Button
 							type="button"
 							onClick={() => setCreateSqlAttrModalOpen(true)}
 							className="flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
@@ -1187,7 +1191,7 @@ export const TermsView = () => {
 								<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
 							</svg>
 							Create new sql attribute
-						</button>
+						</Button>
 					</div>
 				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">

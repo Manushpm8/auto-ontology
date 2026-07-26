@@ -14,6 +14,7 @@ import {
 	type ClipboardEvent,
 	type KeyboardEvent,
 } from 'react';
+import { Button } from '@/common/Button';
 
 export type TagInputHandle = {
 	/** Forces any pending text in the input to be committed as a tag. */
@@ -187,7 +188,7 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 						{tag}
 					</span>
 					{!disabled && (
-						<button
+						<Button
 							type="button"
 							onClick={(ev) => {
 								ev.stopPropagation();
@@ -204,7 +205,7 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 									strokeLinecap="round"
 								/>
 							</svg>
-						</button>
+						</Button>
 					)}
 				</span>
 			))}

@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
@@ -305,22 +306,22 @@ export const AnalysisView = () => {
 					{isPql ? 'PQL analyses' : 'Custom analyses'}
 				</h1>
 				<div className="ml-4 flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
-					<button
+					<Button
 						type="button"
 						onClick={() => setMode('sql')}
 						className={modeButtonClass('sql')}
 					>
 						SQL
-					</button>
-					<button
+					</Button>
+					<Button
 						type="button"
 						onClick={() => setMode('pql')}
 						className={modeButtonClass('pql')}
 					>
 						PQL
-					</button>
+					</Button>
 				</div>
-				<button
+				<Button
 					type="button"
 					onClick={openCreateModal}
 					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
@@ -329,7 +330,7 @@ export const AnalysisView = () => {
 						<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
 					</svg>
 					Create new analysis
-				</button>
+				</Button>
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
@@ -376,7 +377,7 @@ export const AnalysisView = () => {
 										{a.name}
 									</h2>
 									<div className="flex shrink-0 items-center gap-1">
-										<button
+										<Button
 											type="button"
 											onClick={() => openEditModal(a)}
 											aria-label={`Edit ${a.name}`}
@@ -384,8 +385,8 @@ export const AnalysisView = () => {
 											className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
 										>
 											<Icon name={IconName.Pencil} className="h-4 w-4" />
-										</button>
-										<button
+										</Button>
+										<Button
 											type="button"
 											onClick={() => openDeleteModal(a)}
 											aria-label={`Delete ${a.name}`}
@@ -393,7 +394,7 @@ export const AnalysisView = () => {
 											className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
 										>
 											<Icon name={IconName.Trash} className="h-4 w-4" />
-										</button>
+										</Button>
 									</div>
 								</div>
 								{a.description.trim() !== '' && (

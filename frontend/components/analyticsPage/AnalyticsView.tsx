@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
@@ -142,14 +143,14 @@ export const AnalyticsView = () => {
 				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
 					Analytics
 				</h1>
-				<button
+				<Button
 					type="button"
 					onClick={handleDownload}
 					disabled={rows.length === 0}
 					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400] disabled:cursor-not-allowed disabled:opacity-40"
 				>
 					Download
-				</button>
+				</Button>
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">

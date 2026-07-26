@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 
+import { Button } from '@/common/Button';
 import { Icon } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { getTableType } from '@/components/dataPage/get-table-type';
@@ -104,7 +105,7 @@ export const ActiveDataCard = ({
 					Showing info on this Data Object
 				</p>
 				<div className="flex items-center gap-1">
-					<button
+					<Button
 						type="button"
 						onClick={() => setMinimized((value) => !value)}
 						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
@@ -115,15 +116,15 @@ export const ActiveDataCard = ({
 						}
 					>
 						{minimized ? '+' : '−'}
-					</button>
-					<button
+					</Button>
+					<Button
 						type="button"
 						onClick={onClose}
 						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 						aria-label="Close data object details"
 					>
 						×
-					</button>
+					</Button>
 				</div>
 			</header>
 			{!minimized && (
@@ -145,13 +146,13 @@ export const ActiveDataCard = ({
 							</p>
 						</div>
 						<div className="flex shrink-0 items-center gap-1">
-							<button
+							<Button
 								type="button"
 								onClick={onView}
 								className="cursor-pointer rounded-lg bg-[#76b900] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#5e9400]"
 							>
 								View in Data
-							</button>
+							</Button>
 						</div>
 					</div>
 					<div className="grid grid-cols-2 gap-2">

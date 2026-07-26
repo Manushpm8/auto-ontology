@@ -6,6 +6,7 @@
 
 import type { ChangeEvent } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
+import { Button } from '@/common/Button';
 import {
 	CONNECTION_FIELDS,
 	connectionDisplayName,
@@ -78,7 +79,7 @@ export const ConnectionConnectStep = ({
 			</div>
 			<div className="mt-auto flex flex-col items-start">
 				{onTestConnection != null && (
-					<button
+					<Button
 						type="button"
 						data-testid="stepper-button-Test Connection"
 						onClick={onTestConnection}
@@ -86,7 +87,7 @@ export const ConnectionConnectStep = ({
 						className="cursor-pointer rounded-lg border border-[#76b900] bg-white px-4 py-2 text-sm font-medium text-[#5e9400] transition-colors hover:bg-[#76b900]/10 disabled:cursor-default disabled:border-zinc-300 disabled:text-zinc-400 dark:border-[#76b900] dark:bg-zinc-900 dark:hover:bg-[#76b900]/20 disabled:dark:border-zinc-600"
 					>
 						{testingConnection ? 'Test Connection…' : 'Test Connection'}
-					</button>
+					</Button>
 				)}
 				{testSuccessMessage != null && (
 					<p className="text-sm text-[#5e9400] dark:text-[#8fd100]">

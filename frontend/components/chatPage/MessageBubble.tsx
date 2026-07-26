@@ -6,6 +6,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import type { ChatMessage } from '@/types/chat';
+import { Button } from '@/common/Button';
 import { formatDate } from '@/common/date';
 import { parseSqlResponse, type ParsedTable } from '@/lib/parseSqlResponse';
 import { SqlBlock } from '@/common/SqlBlock';
@@ -25,13 +26,13 @@ const RawCopyButton = ({ text }: { text: string }) => {
 	}, [text]);
 
 	return (
-		<button
+		<Button
 			type="button"
 			onClick={handleCopy}
 			className="absolute top-2 right-2 rounded bg-zinc-700 px-2 py-1 text-xs text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-zinc-600"
 		>
 			{copied ? 'Copied!' : 'Copy'}
-		</button>
+		</Button>
 	);
 };
 

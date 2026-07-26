@@ -10,6 +10,7 @@ import type { Core } from 'cytoscape';
 
 import { explorationApi } from '@/api/exploration';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { SearchInput } from '@/common/SearchInput';
 import {
@@ -280,7 +281,7 @@ export const ExplorationView = () => {
 							<ul className="absolute top-12 max-h-[calc(100dvh-8.5rem)] w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
 								{filteredNodes.map((node) => (
 									<li key={node.id}>
-										<button
+										<Button
 											type="button"
 											onClick={() => {
 												setSearch('');
@@ -301,7 +302,7 @@ export const ExplorationView = () => {
 												}`}
 											/>
 											<span className="truncate">{node.name}</span>
-										</button>
+										</Button>
 									</li>
 								))}
 							</ul>

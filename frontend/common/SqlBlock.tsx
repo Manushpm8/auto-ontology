@@ -5,6 +5,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { Button } from '@/common/Button';
 
 type CopyButtonProps = {
 	text: string;
@@ -21,13 +22,13 @@ const CopyButton = ({ text }: CopyButtonProps) => {
 	}, [text]);
 
 	return (
-		<button
+		<Button
 			type="button"
 			onClick={handleCopy}
 			className="absolute top-2 right-2 rounded bg-zinc-700 px-2 py-1 text-xs text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-zinc-600"
 		>
 			{copied ? 'Copied!' : 'Copy'}
-		</button>
+		</Button>
 	);
 };
 

@@ -4,6 +4,7 @@
 
 'use client';
 
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { ConnectionType, connectionDisplayName } from '@/enums/connection';
 
@@ -19,7 +20,7 @@ export const ConnectionTypeStep = ({ onSelect }: ConnectionTypeStepProps) => (
 	<div className="flex flex-col gap-3 p-2">
 		<div className="grid grid-cols-2 gap-3">
 			{CONNECTOR_TYPES.map((type) => (
-				<button
+				<Button
 					key={type}
 					type="button"
 					data-testid={`connection-type-${type}`}
@@ -30,7 +31,7 @@ export const ConnectionTypeStep = ({ onSelect }: ConnectionTypeStepProps) => (
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{connectionDisplayName[type]}
 					</span>
-				</button>
+				</Button>
 			))}
 		</div>
 	</div>

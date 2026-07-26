@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { Role } from '@/enums/auth';
 import { usersApi } from '@/api/users';
+import { Button } from '@/common/Button';
 import { Table } from '@/common/Table';
 import { SkeletonTable } from '@/common/Skeleton';
 import { Toast } from '@/common/Toast';
@@ -101,22 +102,22 @@ export const UsersManager = () => {
 				const busy = busyId === user.id;
 				return (
 					<div className="flex justify-end gap-2">
-						<button
+						<Button
 							type="button"
 							disabled={busy || isLastAdmin}
 							onClick={() => toggleRole(user)}
 							className={actionButtonClass}
 						>
 							{isAdmin ? 'Make viewer' : 'Make admin'}
-						</button>
-						<button
+						</Button>
+						<Button
 							type="button"
 							disabled={busy || isLastAdmin}
 							onClick={() => deleteUser(user)}
 							className={deleteButtonClass}
 						>
 							Delete
-						</button>
+						</Button>
 					</div>
 				);
 			},

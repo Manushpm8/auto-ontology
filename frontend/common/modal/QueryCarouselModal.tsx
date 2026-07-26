@@ -7,6 +7,7 @@
 import { useState } from 'react';
 
 import { Icon, IconName } from '@/common/icons';
+import { Button } from '@/common/Button';
 import type { ExplorationForeignKey, ExplorationLink } from '@/types/exploration';
 import { LabelList } from '@/common/SinglePageComposer';
 import { SqlBlock } from '@/common/SqlBlock';
@@ -106,7 +107,7 @@ export const QueryCarouselModal = ({
 				<div className="flex items-center gap-3">
 					{queries.length > 1 && (
 						<div className="flex items-center gap-2">
-							<button
+							<Button
 								type="button"
 								onClick={() => setQueryIndex((index) => Math.max(0, index - 1))}
 								disabled={queryIndex === 0}
@@ -114,11 +115,11 @@ export const QueryCarouselModal = ({
 								aria-label="Previous query"
 							>
 								←
-							</button>
+							</Button>
 							<span className="text-xs text-zinc-500">
 								{queryIndex + 1}/{queries.length}
 							</span>
-							<button
+							<Button
 								type="button"
 								onClick={() =>
 									setQueryIndex((index) =>
@@ -130,17 +131,17 @@ export const QueryCarouselModal = ({
 								aria-label="Next query"
 							>
 								→
-							</button>
+							</Button>
 						</div>
 					)}
-					<button
+					<Button
 						type="button"
 						onClick={onClose}
 						className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 						aria-label="Close query"
 					>
 						×
-					</button>
+					</Button>
 				</div>
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">

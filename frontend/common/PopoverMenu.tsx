@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Button } from '@/common/Button';
 
 export type PopoverMenuItem = {
 	label: string;
@@ -45,7 +46,7 @@ export const PopoverMenu = ({ items, trigger, className = '' }: PopoverMenuProps
 			{open && (
 				<div className="absolute right-0 top-full z-30 mt-1 w-32 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
 					{items.map((item) => (
-						<button
+						<Button
 							key={item.label}
 							type="button"
 							onClick={() => {
@@ -60,7 +61,7 @@ export const PopoverMenu = ({ items, trigger, className = '' }: PopoverMenuProps
 						>
 							{item.icon}
 							{item.label}
-						</button>
+						</Button>
 					))}
 				</div>
 			)}

@@ -5,6 +5,7 @@
 'use client';
 
 import { useCallback, useRef, useState, type KeyboardEvent, type FormEvent } from 'react';
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 
 type ChatInputProps = {
@@ -74,23 +75,23 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 				/>
 
 				{isLoading ? (
-					<button
+					<Button
 						type="button"
 						onClick={onStop}
 						className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-500 text-white transition-colors hover:bg-red-600"
 						aria-label="Stop generation"
 					>
 						<Icon name={IconName.Stop} className="h-4 w-4" />
-					</button>
+					</Button>
 				) : (
-					<button
+					<Button
 						type="submit"
 						disabled={!hasText}
 						className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#76b900] text-white transition-colors hover:bg-[#5e9400] disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 disabled:hover:bg-zinc-300 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 dark:disabled:hover:bg-zinc-700"
 						aria-label="Send message"
 					>
 						<Icon name={IconName.Send} className="h-4 w-4" />
-					</button>
+					</Button>
 				)}
 			</div>
 		</form>

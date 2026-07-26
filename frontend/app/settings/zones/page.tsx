@@ -11,6 +11,7 @@ import { datasources } from '@/api/datasources';
 import { ModalWithSteps, ConfirmModal } from '@/common/modal';
 import { ColorPicker } from '@/common/ColorPicker';
 import type { ColorOption } from '@/common/ColorPicker';
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { PopoverMenu } from '@/common/PopoverMenu';
@@ -182,7 +183,7 @@ const ZoneCard = ({
 			</div>
 			<div className="flex shrink-0 items-start gap-2">
 				{isAdmin ? (
-					<button
+					<Button
 						type="button"
 						role="switch"
 						aria-checked={zone.enabled}
@@ -198,7 +199,7 @@ const ZoneCard = ({
 								zone.enabled ? 'translate-x-5' : 'translate-x-0.5'
 							}`}
 						/>
-					</button>
+					</Button>
 				) : null}
 				<div className="relative">
 					<PopoverMenu
@@ -216,14 +217,14 @@ const ZoneCard = ({
 							},
 						]}
 						trigger={({ toggle }) => (
-							<button
+							<Button
 								type="button"
 								onClick={toggle}
 								className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
 								aria-label="Zone actions"
 							>
 								<Icon name={IconName.DotsVertical} className="h-4 w-4" />
-							</button>
+							</Button>
 						)}
 					/>
 				</div>
@@ -625,7 +626,7 @@ export default function ZonesSettingsPage() {
 					<h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
 						Zones
 					</h1>
-					<button
+					<Button
 						type="button"
 						onClick={openCreateModal}
 						className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
@@ -639,7 +640,7 @@ export default function ZonesSettingsPage() {
 							<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
 						</svg>
 						Create new zone
-					</button>
+					</Button>
 				</div>
 
 				{error ? (

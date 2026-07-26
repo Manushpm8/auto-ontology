@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { DetailLinkButton } from '@/common/DetailLinkButton';
 import { ExplorationLayer } from '@/enums/exploration';
@@ -64,22 +65,22 @@ export const ActiveTermCard = ({
 					Showing info on this Semantic Object
 				</p>
 				<div className="flex items-center gap-1">
-					<button
+					<Button
 						type="button"
 						onClick={() => setMinimized((value) => !value)}
 						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 						aria-label={minimized ? 'Expand term details' : 'Minimize term details'}
 					>
 						{minimized ? '+' : '−'}
-					</button>
-					<button
+					</Button>
+					<Button
 						type="button"
 						onClick={onClose}
 						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 						aria-label="Close term details"
 					>
 						×
-					</button>
+					</Button>
 				</div>
 			</header>
 			{!minimized && (
@@ -102,13 +103,13 @@ export const ActiveTermCard = ({
 								{node.description || 'No Description'}
 							</p>
 						</div>
-						<button
+						<Button
 							type="button"
 							onClick={onView}
 							className="shrink-0 cursor-pointer rounded-lg bg-[#76b900] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#5e9400]"
 						>
 							View Term
-						</button>
+						</Button>
 					</div>
 					<div className="flex flex-wrap items-center gap-2">
 						<span className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">

@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Core } from 'cytoscape';
+import { Button } from '@/common/Button';
 
 type ZoomControlsProps = {
 	controller: Core | null;
@@ -47,27 +48,27 @@ export const ZoomControls = ({ controller }: ZoomControlsProps) => {
 	return (
 		<div className="flex items-center gap-2">
 			<div className="flex h-10 items-center rounded-lg border border-zinc-200 bg-white shadow-md dark:border-zinc-700 dark:bg-zinc-900">
-				<button
+				<Button
 					type="button"
 					onClick={() => changeZoom(-0.1)}
 					className="h-full cursor-pointer px-3 text-lg text-zinc-600 hover:text-[#76b900] dark:text-zinc-300"
 					aria-label="Zoom out"
 				>
 					−
-				</button>
+				</Button>
 				<span className="w-12 text-center text-xs text-zinc-600 dark:text-zinc-300">
 					{Math.round(zoom * 100)}%
 				</span>
-				<button
+				<Button
 					type="button"
 					onClick={() => changeZoom(0.1)}
 					className="h-full cursor-pointer px-3 text-lg text-zinc-600 hover:text-[#76b900] dark:text-zinc-300"
 					aria-label="Zoom in"
 				>
 					+
-				</button>
+				</Button>
 			</div>
-			<button
+			<Button
 				type="button"
 				onClick={resetView}
 				className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 shadow-md transition-colors hover:text-[#76b900] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
@@ -82,7 +83,7 @@ export const ZoomControls = ({ controller }: ZoomControlsProps) => {
 						strokeLinejoin="round"
 					/>
 				</svg>
-			</button>
+			</Button>
 		</div>
 	);
 };

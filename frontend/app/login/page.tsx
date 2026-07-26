@@ -6,10 +6,12 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonBlock } from '@/common/Skeleton';
 import { authApi, type SsoProvider } from '@/api/auth';
 import { useSession } from '@/auth/auth-client';
+import { SkeletonVariant } from '@/enums/skeleton';
 
 const inputClass =
 	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
@@ -20,8 +22,8 @@ const LoginLoading = () => (
 		role="status"
 		aria-label="Loading sign-in options"
 	>
-		<SkeletonBlock variant="rectangle" className="h-10 w-full" />
-		<SkeletonBlock variant="rectangle" className="h-10 w-full" />
+		<SkeletonBlock variant={SkeletonVariant.RECTANGLE} className="h-10 w-full" />
+		<SkeletonBlock variant={SkeletonVariant.RECTANGLE} className="h-10 w-full" />
 		<SkeletonBlock className="mx-auto h-3 w-1/3" />
 	</div>
 );
@@ -98,16 +100,16 @@ const LoginForm = () => {
 		return (
 			<div className="flex w-full max-w-sm flex-col gap-4">
 				{providers.map((provider) => (
-					<button
+					<Button
 						key={provider.providerId}
 						type="button"
 						onClick={() => handleSso(provider.providerId)}
 						className="cursor-pointer rounded-md bg-[#76b900] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#6aa600]"
 					>
 						Sign in with SSO
-					</button>
+					</Button>
 				))}
-				<button
+				<Button
 					type="button"
 					onClick={() => {
 						setError(null);
@@ -116,7 +118,7 @@ const LoginForm = () => {
 					className="cursor-pointer text-center text-xs text-zinc-400 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
 				>
 					Sign in with password
-				</button>
+				</Button>
 			</div>
 		);
 	}
@@ -161,16 +163,16 @@ const LoginForm = () => {
 
 			{error ? <p className="text-xs text-red-500">{error}</p> : null}
 
-			<button
+			<Button
 				type="submit"
 				disabled={submitting}
 				className="cursor-pointer rounded-md bg-[#76b900] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#6aa600] disabled:opacity-50"
 			>
 				{submitting ? 'Signing in…' : 'Sign in'}
-			</button>
+			</Button>
 
 			{ssoEnabled ? (
-				<button
+				<Button
 					type="button"
 					onClick={() => {
 						setError(null);
@@ -179,7 +181,7 @@ const LoginForm = () => {
 					className="cursor-pointer text-center text-xs text-zinc-400 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
 				>
 					Back to SSO
-				</button>
+				</Button>
 			) : null}
 		</form>
 	);

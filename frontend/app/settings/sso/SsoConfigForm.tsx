@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { authApi, type SsoProvider } from '@/api/auth';
+import { Button } from '@/common/Button';
 import { Toast } from '@/common/Toast';
 
 // Only one provider is supported; its id is a fixed constant. It's the DB key
@@ -159,22 +160,22 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 					</div>
 
 					{provider ? (
-						<button
+						<Button
 							type="button"
 							onClick={() => handleDelete(provider.providerId)}
 							disabled={deletingId === provider.providerId}
 							className="cursor-pointer self-start rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
 						>
 							{deletingId === provider.providerId ? 'Deleting…' : 'Delete provider'}
-						</button>
+						</Button>
 					) : (
-						<button
+						<Button
 							type="submit"
 							disabled={submitting}
 							className="cursor-pointer self-start rounded-md bg-[#76b900] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#6aa600] disabled:opacity-50"
 						>
 							{submitting ? 'Saving…' : 'Save provider'}
-						</button>
+						</Button>
 					)}
 				</form>
 			</div>

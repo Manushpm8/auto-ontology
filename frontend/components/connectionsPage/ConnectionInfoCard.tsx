@@ -4,6 +4,7 @@
 
 'use client';
 
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import type { Connection } from '@/types/connection';
@@ -48,14 +49,14 @@ export const ConnectionInfoCard = ({
 								},
 							]}
 							trigger={({ toggle }) => (
-								<button
+								<Button
 									type="button"
 									onClick={toggle}
 									className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
 									aria-label={`Actions for ${connection.database_name}`}
 								>
 									<Icon name={IconName.DotsVertical} className="h-4 w-4" />
-								</button>
+								</Button>
 							)}
 						/>
 					)}

@@ -7,9 +7,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
+import { Button } from '@/common/Button';
 import { ModalCreateNewItem, ConfirmModal } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { acronymsApi, promptsApi, type Acronym, type Prompt } from '@/api/settings';
+import { SkeletonVariant } from '@/enums/skeleton';
 
 type SettingsSectionProps = {
 	title: string;
@@ -53,20 +55,20 @@ const PromptEditor = ({
 						className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-600"
 					/>
 					<div className="flex justify-end gap-2">
-						<button
+						<Button
 							type="button"
 							onClick={onCancel}
 							className="cursor-pointer rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
 						>
 							Cancel
-						</button>
-						<button
+						</Button>
+						<Button
 							type="button"
 							onClick={() => onSave(value)}
 							className="cursor-pointer rounded-md bg-[#76b900] px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-[#6aa500]"
 						>
 							Save
-						</button>
+						</Button>
 					</div>
 				</div>
 			</div>
@@ -102,13 +104,13 @@ const AcronymRow = ({
 					},
 				]}
 				trigger={({ toggle }) => (
-					<button
+					<Button
 						type="button"
 						onClick={toggle}
 						className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
 					>
 						<Icon name={IconName.DotsVertical} className="h-4 w-4" />
-					</button>
+					</Button>
 				)}
 			/>
 		</td>
@@ -233,14 +235,14 @@ const AcronymsSection = () => {
 					</span>
 				</div>
 				{hasAcronyms && (
-					<button
+					<Button
 						type="button"
 						onClick={openAddModal}
 						className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#76b900]/40 px-3 py-1.5 text-sm font-medium text-[#76b900] transition-colors hover:bg-[#76b900]/10"
 					>
 						<Icon name={IconName.ChatBubble} className="h-3.5 w-3.5" />
 						Add
-					</button>
+					</Button>
 				)}
 			</div>
 
@@ -279,14 +281,14 @@ const AcronymsSection = () => {
 					<p className="text-sm text-zinc-400 dark:text-zinc-500">
 						No Glossary definitions created yet
 					</p>
-					<button
+					<Button
 						type="button"
 						onClick={openAddModal}
 						className="flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#6aa500]"
 					>
 						<Icon name={IconName.ChatBubble} className="h-4 w-4" />
 						Add Definition
-					</button>
+					</Button>
 				</div>
 			)}
 
@@ -389,14 +391,14 @@ const SettingsSection = ({
 					</h2>
 					<span className="text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</span>
 				</div>
-				<button
+				<Button
 					type="button"
 					onClick={handleButtonClick}
 					className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#76b900]/40 px-3 py-1.5 text-sm font-medium text-[#76b900] transition-colors hover:bg-[#76b900]/10"
 				>
 					<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
 					{hasPrompts ? 'Edit' : 'Add'}
-				</button>
+				</Button>
 			</div>
 
 			{editing ? (
@@ -423,7 +425,7 @@ const SettingsSection = ({
 					aria-label="Loading custom prompts"
 				>
 					<SkeletonBlock className="h-3 w-20" />
-					<SkeletonBlock variant="rectangle" className="h-24 w-full" />
+					<SkeletonBlock variant={SkeletonVariant.RECTANGLE} className="h-24 w-full" />
 				</div>
 			) : (
 				<div className="flex flex-col items-center justify-center gap-2 rounded-b-lg bg-zinc-50/80 px-8 py-10 dark:bg-zinc-900/30">

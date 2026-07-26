@@ -5,6 +5,7 @@
 'use client';
 
 import { Icon, IconName } from '@/common/icons';
+import { Button } from '@/common/Button';
 
 /** Small link-style icon button shown next to a count, only rendered when count > 0. */
 export const DetailLinkButton = ({
@@ -17,7 +18,7 @@ export const DetailLinkButton = ({
 	label: string;
 }) =>
 	count > 0 ? (
-		<button
+		<Button
 			type="button"
 			onClick={onClick}
 			className="cursor-pointer rounded p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
@@ -25,5 +26,5 @@ export const DetailLinkButton = ({
 			title={label}
 		>
 			<Icon name={IconName.Link} className="h-3.5 w-3.5" />
-		</button>
+		</Button>
 	) : null;

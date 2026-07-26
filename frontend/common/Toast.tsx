@@ -6,6 +6,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { Button } from '@/common/Button';
 
 type ToastVariant = 'error' | 'success' | 'info' | 'pending';
 
@@ -119,7 +120,7 @@ export const Toast = ({ open, message, title, variant = 'error', onClose }: Toas
 				<span className="text-sm text-zinc-800 dark:text-zinc-200">
 					{capitalizeFirst(message)}
 				</span>
-				<button
+				<Button
 					type="button"
 					onClick={onClose}
 					aria-label="Dismiss notification"
@@ -137,7 +138,7 @@ export const Toast = ({ open, message, title, variant = 'error', onClose }: Toas
 						<line x1="18" y1="6" x2="6" y2="18" />
 						<line x1="6" y1="6" x2="18" y2="18" />
 					</svg>
-				</button>
+				</Button>
 			</div>
 		</div>,
 		document.body,

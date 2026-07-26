@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { semanticCompilationApi } from '@/api/settings';
+import { Button } from '@/common/Button';
 import { Toast } from '@/common/Toast';
 
 export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: boolean }) => {
@@ -61,7 +62,7 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 							{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
 						</span>
 					</div>
-					<button
+					<Button
 						type="button"
 						role="switch"
 						aria-checked={enabled}
@@ -77,7 +78,7 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 								enabled ? 'translate-x-5' : 'translate-x-0.5'
 							}`}
 						/>
-					</button>
+					</Button>
 				</div>
 			</div>
 

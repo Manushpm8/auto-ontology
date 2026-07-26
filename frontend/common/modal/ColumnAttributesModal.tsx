@@ -9,6 +9,7 @@ import { Spinner } from '@nvidia/foundations-react-core';
 
 import { termsApi } from '@/api/terms';
 import { Icon, IconName } from '@/common/icons';
+import { Button } from '@/common/Button';
 import type { ColumnAttribute } from '@/types/terms';
 import type { TableColumn } from '@/types/table';
 import { LabelList } from '@/common/SinglePageComposer';
@@ -92,14 +93,14 @@ export const ColumnAttributesModal = ({ term, onClose }: ColumnAttributesModalPr
 						{term?.name} — Attribute Columns ({attributes.length})
 					</h2>
 				</div>
-				<button
+				<Button
 					type="button"
 					onClick={onClose}
 					className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 					aria-label="Close attribute columns"
 				>
 					×
-				</button>
+				</Button>
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">
 				{loading ? (
