@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Spinner } from '@nvidia/foundations-react-core';
 import NextLink from 'next/link';
 
 import { datasources } from '@/api/datasources';
@@ -206,11 +207,7 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 			<div className="max-h-[70dvh] overflow-y-auto p-5">
 				{loading ? (
 					<div className="flex h-32 items-center justify-center">
-						<div
-							className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900]"
-							role="status"
-							aria-label={`Loading ${title}`}
-						/>
+						<Spinner aria-label={`Loading ${title}`} className="h-8 w-8" />
 					</div>
 				) : error != null ? (
 					<p className="text-sm text-red-600 dark:text-red-300">{error}</p>

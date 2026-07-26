@@ -88,12 +88,9 @@ export const ConnectionsView = () => {
 
 	if (loading) {
 		return (
-			<div className="flex h-full min-h-[240px] w-full flex-1 items-center justify-center">
-				<div
-					className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-					role="status"
-					aria-label="Loading connections"
-				/>
+			<div className="flex h-full w-full flex-1 flex-col gap-4 p-6">
+				<div className="h-8 w-48 animate-pulse rounded-md bg-zinc-100 dark:bg-zinc-800/70" />
+				<ConnectionsInfoCardView connections={[]} loading />
 			</div>
 		);
 	}

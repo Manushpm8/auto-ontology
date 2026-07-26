@@ -5,12 +5,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
 import {
 	SinglePageComposer,
 	type ComposerEditValue,
 	type SinglePageComposerProps,
 } from '@/common/SinglePageComposer';
+import { SkeletonDetail } from '@/common/Skeleton';
 
 export type SinglePageFormat = SinglePageComposerProps;
 
@@ -96,11 +96,8 @@ export const SinglePageView = ({
 
 	if (loading) {
 		return (
-			<div className="flex flex-1 flex-col items-center justify-center gap-4" role="status">
-				<Spinner aria-label="Loading" />
-				<p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-					Loading details…
-				</p>
+			<div className="flex flex-1" role="status" aria-label="Loading details">
+				<SkeletonDetail />
 			</div>
 		);
 	}

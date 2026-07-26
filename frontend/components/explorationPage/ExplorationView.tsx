@@ -29,6 +29,7 @@ import { ViewToggle } from './graph/ViewToggle';
 import { ZoomControls } from './graph/ZoomControls';
 import { HoverNodeCard } from './HoverNodeCard';
 import { ActiveDataCard, buildDataGraph } from './ExplorationData';
+import { ExplorationLoader } from './ExplorationLoader';
 import { ActiveTermCard, buildSemanticGraph } from './ExplorationSemantic';
 
 const EMPTY_GRAPH: ExplorationGraph = { nodes: [], links: [] };
@@ -311,15 +312,7 @@ export const ExplorationView = () => {
 				<ZoomControls controller={controller} />
 			</div>
 
-			{loading && (
-				<div className="flex h-full items-center justify-center">
-					<div
-						className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-						role="status"
-						aria-label="Loading exploration"
-					/>
-				</div>
-			)}
+			{loading && <ExplorationLoader overlay />}
 
 			{!loading && error != null && (
 				<div className="flex h-full items-center justify-center px-6 text-center">

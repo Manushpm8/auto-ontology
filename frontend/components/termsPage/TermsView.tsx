@@ -9,12 +9,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Icon, IconName } from '@/common/icons';
+import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
-import { zonesApi } from '@/api/zones';
-import { useSession } from '@/auth/auth-client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
 import { Label } from '@/common/Label';
@@ -39,6 +38,25 @@ type SqlAttributeDeleteTarget = {
 	id: string;
 	name: string;
 };
+
+const LOADING_SKELETON_CLASSNAMES = [
+	'',
+	'',
+	'hidden [@media(min-height:760px)]:block',
+	'hidden [@media(min-height:960px)]:block',
+] as const;
+
+export const TermsLoadingSkeleton = () => (
+	<div
+		className="flex min-h-[calc(100dvh-11rem)] flex-col gap-4"
+		role="status"
+		aria-label="Loading terms"
+	>
+		{LOADING_SKELETON_CLASSNAMES.map((className, index) => (
+			<SkeletonCard key={index} className={className} rows={4} />
+		))}
+	</div>
+);
 
 const TermCard = ({
 	term,
@@ -173,10 +191,6 @@ export const TermsView = () => {
 	const sqlAttrId = searchParams.get('sqlAttr');
 	const colAttrId = searchParams.get('colAttr');
 
-	const { data: session } = useSession();
-	const sessionUserId = session?.user?.id ?? null;
-	const sessionRole = session?.user?.role ?? null;
-
 	const [terms, setTerms] = useState<Term[]>([]);
 	const [sqlAttrs, setSqlAttrs] = useState<SqlAttribute[]>([]);
 	const [columnAttrs, setColumnAttrs] = useState<ColumnAttribute[]>([]);
@@ -185,6 +199,7 @@ export const TermsView = () => {
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [hasLoadedTerms, setHasLoadedTerms] = useState(false);
 	const [searchQuery, setSearchQuery] = useState('');
 	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
 	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
@@ -247,6 +262,7 @@ export const TermsView = () => {
 			} else {
 				setError(null);
 				setTerms(termsRes.terms ?? []);
+				setHasLoadedTerms(true);
 				const map = new Map<string, number>();
 				for (const { term_id, count } of termsRes.column_attribute_counts ?? []) {
 					map.set(term_id, count);
@@ -858,11 +874,7 @@ export const TermsView = () => {
 
 	const getSqlAttributeSinglePage = useCallback(
 		async (attrId: string): Promise<SinglePageFormat> => {
-			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, userZonesRes] = await Promise.all([
-				sqlAttributesApi.get(attrId),
-				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
-			]);
+			const res = await sqlAttributesApi.get(attrId);
 			if (res.error || !res.data) {
 				return {
 					sections: [],
@@ -880,12 +892,6 @@ export const TermsView = () => {
 				if (!exists) return [...prev, attr];
 				return prev.map((a) => (a.id === attr.id ? attr : a));
 			});
-
-			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
-			const userZoneIds: string[] | null =
-				userZonesRes !== null && !userZonesRes.error
-					? (userZonesRes.data ?? []).map((z) => z.id)
-					: null;
 
 			return {
 				header: {
@@ -923,159 +929,146 @@ export const TermsView = () => {
 							color: z.color,
 							enabled: z.enabled,
 						})),
-						userZoneIds,
 					},
 				],
 			};
 		},
-		[sessionUserId, sessionRole],
+		[],
 	);
 
-	const getSinglePage = useCallback(
-		async (termId: string): Promise<SinglePageFormat> => {
-			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, attrsRes, sqlAttrsRes, userZonesRes] = await Promise.all([
-				termsApi.get(termId),
-				termsApi.getColumnAttributes(termId),
-				termsApi.getSqlAttributes(termId),
-				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
-			]);
-			if (res.error || !res.data) {
-				return {
-					sections: [],
-					header: { header: { title: 'Term not found', withBorder: true } },
-				};
-			}
-			const term = res.data;
-			const termAttrs = attrsRes?.data ?? [];
-			const termSqlAttrs = sqlAttrsRes?.data ?? [];
-			const relatedTerms = term.related_terms ?? [];
-			// Populate the sqlAttrs/columnAttrs caches from this term's own
-			// attributes (fetched per-term above) rather than a global list —
-			// the Terms list endpoint only returns counts, not the attribute
-			// nodes themselves, to avoid pulling every attribute in the graph
-			// on every page load. This keeps breadcrumb titles working once
-			// the user has opened this term's detail page.
-			setSqlAttrs(termSqlAttrs);
-			setColumnAttrs(termAttrs);
-
-			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
-			const userZoneIds: string[] | null =
-				userZonesRes !== null && !userZonesRes.error
-					? (userZonesRes.data ?? []).map((z) => z.id)
-					: null;
-
+	const getSinglePage = useCallback(async (termId: string): Promise<SinglePageFormat> => {
+		const [res, attrsRes, sqlAttrsRes] = await Promise.all([
+			termsApi.get(termId),
+			termsApi.getColumnAttributes(termId),
+			termsApi.getSqlAttributes(termId),
+		]);
+		if (res.error || !res.data) {
 			return {
-				header: {
-					header: {
-						title: term.name,
-						withBorder: true,
-						showContentHeader: true,
-						titleEditable: true,
-						certification: { certified: term.name_certified },
-					},
-				},
-				sections: [
-					{
-						type: ComposerSectionKind.TEXT_CARD,
-						id: 'description',
-						title: 'Description',
-						body: term.description ?? '',
-						editable: true,
-						certification: { certified: term.description_certified },
-					},
-					{
-						type: ComposerSectionKind.TAG_LIST,
-						id: 'synonyms',
-						title: 'Synonyms',
-						values: term.synonyms ?? [],
-					},
-					{
-						type: ComposerSectionKind.ENTITY_CHIPS,
-						id: 'entities',
-						title: 'Entities',
-						entities: (term.tables ?? []).map((table) => ({
-							id: table.id,
-							name: table.name,
-							focusId: [table.db_id, table.schema_id, table.id].join('|'),
-						})),
-					},
-					{
-						type: ComposerSectionKind.ZONES_CHIPS,
-						id: 'zones',
-						title: 'Zones',
-						zones: term.zones.map((z) => ({
-							id: z.id,
-							name: z.name,
-							color: z.color,
-							enabled: z.enabled,
-						})),
-						userZoneIds,
-					},
-					{
-						type: ComposerSectionKind.RELATED_TERMS_CHIPS,
-						id: 'related_terms',
-						title: 'Related Terms',
-						terms: relatedTerms.map((t) => ({
-							id: t.id,
-							name: t.name,
-							description: t.description,
-						})),
-					},
-					{
-						type: ComposerSectionKind.DATA_TABLE,
-						id: 'column_attributes',
-						title: 'Column Attributes',
-						rowIdKey: 'id',
-						layout: 'fixed',
-						columns: [
-							{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
-							{ key: 'description', label: 'Description', truncate: true },
-							{
-								key: 'certification',
-								label: 'Certification',
-								kind: 'certification',
-								align: 'center',
-								width: 'w-44',
-							},
-						],
-						rows: termAttrs.map((attr) => ({
-							id: attr.id,
-							name: attr.name,
-							description: attr.description ?? '',
-							certification: attributeStatus(attr),
-						})),
-					},
-					{
-						type: ComposerSectionKind.DATA_TABLE,
-						id: 'sql_attributes',
-						title: 'SQL Attributes',
-						rowIdKey: 'id',
-						layout: 'fixed',
-						columns: [
-							{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
-							{ key: 'description', label: 'Description', truncate: true },
-							{
-								key: 'certification',
-								label: 'Certification',
-								kind: 'certification',
-								align: 'center',
-								width: 'w-44',
-							},
-						],
-						rows: termSqlAttrs.map((attr) => ({
-							id: attr.id,
-							name: attr.name,
-							description: attr.description ?? '',
-							certification: attributeStatus(attr),
-						})),
-						emptyMessage: 'SQL attribute does not exist',
-					},
-				],
+				sections: [],
+				header: { header: { title: 'Term not found', withBorder: true } },
 			};
-		},
-		[sessionUserId, sessionRole],
-	);
+		}
+		const term = res.data;
+		const termAttrs = attrsRes?.data ?? [];
+		const termSqlAttrs = sqlAttrsRes?.data ?? [];
+		const relatedTerms = term.related_terms ?? [];
+		// Populate the sqlAttrs/columnAttrs caches from this term's own
+		// attributes (fetched per-term above) rather than a global list —
+		// the Terms list endpoint only returns counts, not the attribute
+		// nodes themselves, to avoid pulling every attribute in the graph
+		// on every page load. This keeps breadcrumb titles working once
+		// the user has opened this term's detail page.
+		setSqlAttrs(termSqlAttrs);
+		setColumnAttrs(termAttrs);
+
+		return {
+			header: {
+				header: {
+					title: term.name,
+					withBorder: true,
+					showContentHeader: true,
+					titleEditable: true,
+					certification: { certified: term.name_certified },
+				},
+			},
+			sections: [
+				{
+					type: ComposerSectionKind.TEXT_CARD,
+					id: 'description',
+					title: 'Description',
+					body: term.description ?? '',
+					editable: true,
+					certification: { certified: term.description_certified },
+				},
+				{
+					type: ComposerSectionKind.TAG_LIST,
+					id: 'synonyms',
+					title: 'Synonyms',
+					values: term.synonyms ?? [],
+				},
+				{
+					type: ComposerSectionKind.ENTITY_CHIPS,
+					id: 'entities',
+					title: 'Entities',
+					entities: (term.tables ?? []).map((table) => ({
+						id: table.id,
+						name: table.name,
+						focusId: [table.db_id, table.schema_id, table.id].join('|'),
+					})),
+				},
+				{
+					type: ComposerSectionKind.ZONES_CHIPS,
+					id: 'zones',
+					title: 'Zones',
+					zones: term.zones.map((z) => ({
+						id: z.id,
+						name: z.name,
+						color: z.color,
+						enabled: z.enabled,
+					})),
+				},
+				{
+					type: ComposerSectionKind.RELATED_TERMS_CHIPS,
+					id: 'related_terms',
+					title: 'Related Terms',
+					terms: relatedTerms.map((t) => ({
+						id: t.id,
+						name: t.name,
+						description: t.description,
+					})),
+				},
+				{
+					type: ComposerSectionKind.DATA_TABLE,
+					id: 'column_attributes',
+					title: 'Column Attributes',
+					rowIdKey: 'id',
+					layout: 'fixed',
+					columns: [
+						{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
+						{ key: 'description', label: 'Description', truncate: true },
+						{
+							key: 'certification',
+							label: 'Certification',
+							kind: 'certification',
+							align: 'center',
+							width: 'w-44',
+						},
+					],
+					rows: termAttrs.map((attr) => ({
+						id: attr.id,
+						name: attr.name,
+						description: attr.description ?? '',
+						certification: attributeStatus(attr),
+					})),
+				},
+				{
+					type: ComposerSectionKind.DATA_TABLE,
+					id: 'sql_attributes',
+					title: 'SQL Attributes',
+					rowIdKey: 'id',
+					layout: 'fixed',
+					columns: [
+						{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
+						{ key: 'description', label: 'Description', truncate: true },
+						{
+							key: 'certification',
+							label: 'Certification',
+							kind: 'certification',
+							align: 'center',
+							width: 'w-44',
+						},
+					],
+					rows: termSqlAttrs.map((attr) => ({
+						id: attr.id,
+						name: attr.name,
+						description: attr.description ?? '',
+						certification: attributeStatus(attr),
+					})),
+					emptyMessage: 'SQL attribute does not exist',
+				},
+			],
+		};
+	}, []);
 
 	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 	const focusedSqlAttr =
@@ -1434,23 +1427,17 @@ export const TermsView = () => {
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
-				<SearchInput
-					value={searchQuery}
-					onChange={setSearchQuery}
-					placeholder="Search terms…"
-					aria-label="Search terms"
-					className="mb-6 w-full"
-				/>
-
-				{loading && (
-					<div className="flex h-full items-center justify-center">
-						<div
-							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-							role="status"
-							aria-label="Loading terms"
-						/>
-					</div>
+				{hasLoadedTerms && (
+					<SearchInput
+						value={searchQuery}
+						onChange={setSearchQuery}
+						placeholder="Search terms…"
+						aria-label="Search terms"
+						className="mb-6 w-full"
+					/>
 				)}
+
+				{loading && <TermsLoadingSkeleton />}
 
 				{!loading && error != null && (
 					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
