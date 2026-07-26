@@ -112,6 +112,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
 # ── LLM accessor ────────────────────────────────────────────────────────────
 
 _llm = None
+_fast_llm = None
 
 
 def _get_llm():
@@ -120,6 +121,14 @@ def _get_llm():
         from gsf.retrieval.text_to_sql.main import llm_client
         _llm = llm_client
     return _llm
+
+
+def _get_fast_llm():
+    global _fast_llm
+    if _fast_llm is None:
+        from gsf.retrieval.text_to_sql.main import non_reasoning_llm_client
+        _fast_llm = non_reasoning_llm_client or _get_llm()
+    return _fast_llm
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
@@ -134,6 +143,7 @@ def create_session(
     data_retriever: Any,
     semantic_retriever: Any,
     connectors: list,
+    max_clarify_turns: int = 5,
 ) -> InteractiveSessionState:
     return InteractiveSessionState(
         session_id=session_id,
@@ -143,6 +153,7 @@ def create_session(
         external_kg=external_kg,
         original_question=question,
         working_question=question,
+        max_clarify_turns=max_clarify_turns,
         data_retriever=data_retriever,
         semantic_retriever=semantic_retriever,
         connectors=connectors,
@@ -170,10 +181,10 @@ def step(
     elif turn_type == TurnType.DEBUG:
         _apply_debug_seed(session, orchestrator_message)
 
-    # Debug turns skip clarification — go straight to SQL
-    if turn_type != TurnType.DEBUG:
-        llm = _get_llm()
-        should_ask, question = should_clarify(session, llm)
+    # Debug turns and exhausted budgets skip clarification — go straight to SQL
+    under_budget = len(session.clarify_history) < session.max_clarify_turns
+    if turn_type != TurnType.DEBUG and under_budget:
+        should_ask, question = should_clarify(session, _get_fast_llm())
         if should_ask:
             session._pending_question = question
             return AskUserAction(question=question)
@@ -187,9 +198,8 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
     if session._pending_question:
         session.clarify_history.append({"q": session._pending_question, "a": answer})
         session._pending_question = None
-    llm = _get_llm()
     session.working_question = merge_clarification(
-        session.original_question, session.clarify_history, llm
+        session.original_question, session.clarify_history, _get_fast_llm()
     )
 
 

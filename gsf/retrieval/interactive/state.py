@@ -15,6 +15,7 @@ class InteractiveSessionState:
     external_kg: str
     original_question: str
     working_question: str
+    max_clarify_turns: int = 5
     clarify_history: list[dict] = field(default_factory=list)   # [{"q": ..., "a": ...}]
     phase: InteractivePhase = InteractivePhase.PHASE1_CLARIFY
     phase1_sql: Optional[str] = None
