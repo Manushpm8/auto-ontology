@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Icon, IconName } from '@/common/icons';
+import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
 import { termsApi } from '@/api/terms';
@@ -33,6 +34,25 @@ type SqlAttributeDeleteTarget = {
 	id: string;
 	name: string;
 };
+
+const LOADING_SKELETON_CLASSNAMES = [
+	'',
+	'',
+	'hidden [@media(min-height:760px)]:block',
+	'hidden [@media(min-height:960px)]:block',
+] as const;
+
+export const TermsLoadingSkeleton = () => (
+	<div
+		className="flex min-h-[calc(100dvh-11rem)] flex-col gap-4"
+		role="status"
+		aria-label="Loading terms"
+	>
+		{LOADING_SKELETON_CLASSNAMES.map((className, index) => (
+			<SkeletonCard key={index} className={className} rows={4} />
+		))}
+	</div>
+);
 
 const TermCard = ({
 	term,
@@ -167,6 +187,7 @@ export const TermsView = () => {
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [hasLoadedTerms, setHasLoadedTerms] = useState(false);
 	const [searchQuery, setSearchQuery] = useState('');
 	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
 	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
@@ -227,6 +248,7 @@ export const TermsView = () => {
 			} else {
 				setError(null);
 				setTerms(termsRes.terms ?? []);
+				setHasLoadedTerms(true);
 				const map = new Map<string, number>();
 				for (const { term_id, count } of termsRes.column_attribute_counts ?? []) {
 					map.set(term_id, count);
@@ -1251,23 +1273,17 @@ export const TermsView = () => {
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
-				<SearchInput
-					value={searchQuery}
-					onChange={setSearchQuery}
-					placeholder="Search terms…"
-					aria-label="Search terms"
-					className="mb-6 w-full"
-				/>
-
-				{loading && (
-					<div className="flex h-full items-center justify-center">
-						<div
-							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-							role="status"
-							aria-label="Loading terms"
-						/>
-					</div>
+				{hasLoadedTerms && (
+					<SearchInput
+						value={searchQuery}
+						onChange={setSearchQuery}
+						placeholder="Search terms…"
+						aria-label="Search terms"
+						className="mb-6 w-full"
+					/>
 				)}
+
+				{loading && <TermsLoadingSkeleton />}
 
 				{!loading && error != null && (
 					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
+import { SkeletonBlock, SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
@@ -215,12 +216,15 @@ export function DataWorkspaceView() {
 
 	if (loading && databases.length === 0) {
 		return (
-			<div className="flex h-full flex-1 items-center justify-center">
-				<div
-					className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-					role="status"
-					aria-label="Loading databases"
-				/>
+			<div className="flex h-full flex-1" role="status" aria-label="Loading databases">
+				<aside className="w-72 border-r border-zinc-200 p-4 dark:border-zinc-800">
+					<SkeletonBlock className="mb-5 h-6 w-24" />
+					<SkeletonRows rows={8} />
+				</aside>
+				<main className="flex flex-1 flex-col gap-4 p-6">
+					<SkeletonCard rows={4} />
+					<SkeletonCard rows={4} />
+				</main>
 			</div>
 		);
 	}
