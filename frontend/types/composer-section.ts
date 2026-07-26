@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ComposerSectionKind } from '@/enums/datasources';
+import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 
 /** Certification state attached to a certifiable field (name / description). */
 export type ComposerCertification = {
@@ -43,11 +43,11 @@ export type ComposerDataTableColumn = {
 	key: string;
 	label: string;
 	/**
-	 * Renders the cell as a list of read-only pills (`'tags'`) or an icon-only
-	 * certification badge (`'certification'`, cell value is a `CertificationStatus`)
-	 * instead of plain text. Defaults to `'text'`.
+	 * Renders the cell as a list of read-only pills (`TAGS`) or an icon-only
+	 * certification badge (`CERTIFICATION`, cell value is a `CertificationStatus`)
+	 * instead of plain text. Defaults to `TEXT`.
 	 */
-	kind?: 'text' | 'tags' | 'certification';
+	type?: ComposerColumnType;
 	/** Clips long text to one line and shows the full value in a popover on hover, only when clipped. */
 	truncate?: boolean;
 	/** Tailwind max-width class applied when `truncate` is set. Defaults to `max-w-sm`. */

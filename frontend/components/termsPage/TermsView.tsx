@@ -18,7 +18,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
 import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
-import { ComposerSectionKind } from '@/enums/datasources';
+import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import { CertificationStatus } from '@/enums/certification';
 import { attributeStatus } from '@/lib/certification';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
@@ -1024,7 +1024,7 @@ export const TermsView = () => {
 						{
 							key: 'certification',
 							label: 'Certification',
-							kind: 'certification',
+							type: ComposerColumnType.CERTIFICATION,
 							align: 'center',
 							width: 'w-44',
 						},
@@ -1048,7 +1048,7 @@ export const TermsView = () => {
 						{
 							key: 'certification',
 							label: 'Certification',
-							kind: 'certification',
+							type: ComposerColumnType.CERTIFICATION,
 							align: 'center',
 							width: 'w-44',
 						},

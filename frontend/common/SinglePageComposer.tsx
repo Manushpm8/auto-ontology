@@ -8,7 +8,7 @@ import { forwardRef, useEffect, useRef, useState, useCallback, type ReactNode } 
 import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
-import { ComposerSectionKind } from '@/enums/datasources';
+import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import {
 	isComposerSection,
 	type ComposerSection,
@@ -455,12 +455,12 @@ function renderComposerSection(
 								className: alignClass,
 								cell: (row: Record<string, string | string[]>) => {
 									const value = row[col.key];
-									if (col.kind === 'tags') {
+									if (col.type === ComposerColumnType.TAGS) {
 										return (
 											<LabelList values={Array.isArray(value) ? value : []} />
 										);
 									}
-									if (col.kind === 'certification') {
+									if (col.type === ComposerColumnType.CERTIFICATION) {
 										const status =
 											typeof value === 'string'
 												? (value as CertificationStatus)
