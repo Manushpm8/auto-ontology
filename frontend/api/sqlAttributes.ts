@@ -26,6 +26,7 @@ export type SqlAttributeValidatePayload = {
 export type SqlAttributePatchPayload = {
 	name?: string;
 	description?: string | null;
+	certified?: boolean;
 };
 
 type ValidateResult = { data: { valid: boolean; expression: string } };

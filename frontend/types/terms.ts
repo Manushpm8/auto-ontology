@@ -2,6 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CertificationStatus } from '@/enums/certification';
+
 export type TermZone = {
 	id: string;
 	name: string;
@@ -15,6 +17,14 @@ export type Term = {
 	description: string | null;
 	synonyms: string[];
 	zones: TermZone[];
+	name_certified: boolean;
+	description_certified: boolean;
+	/**
+	 * Aggregate three-state certification status computed by the `/terms` list
+	 * endpoint (term name/description plus all column & sql attribute flags).
+	 * Absent on the single-term detail response, which derives it client-side.
+	 */
+	certification?: CertificationStatus;
 };
 
 export type TermTable = {
@@ -54,6 +64,7 @@ export type ColumnAttribute = {
 	primary_column: AttributeColumnRef | null;
 	/** Columns elsewhere that point at this attribute via `SEMANTIC_FK`. */
 	referenced_columns: AttributeColumnRef[];
+	certified: boolean;
 };
 
 export type SqlAttribute = {
@@ -66,6 +77,7 @@ export type SqlAttribute = {
 	term_id: string;
 	term_name: string;
 	zones?: TermZone[];
+	certified: boolean;
 };
 
 export type RelatedTerm = {

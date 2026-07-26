@@ -27,14 +27,25 @@ type UpdateResult = {
 		name: string;
 		description: string | null;
 		sample_values?: string[] | null;
+		/** Term-level flags (Terms keep separate name/description certification). */
+		name_certified?: boolean;
+		description_certified?: boolean;
+		/** Attribute-level single certification flag. */
+		certified?: boolean;
 	};
 };
 type UpdateResponse = ResponseWithError<UpdateResult>;
-type TermUpdatePayload = { name?: string; description?: string | null };
+type TermUpdatePayload = {
+	name?: string;
+	description?: string | null;
+	name_certified?: boolean;
+	description_certified?: boolean;
+};
 type ColumnAttributeUpdatePayload = {
 	name?: string;
 	description?: string | null;
 	sample_values?: string[];
+	certified?: boolean;
 };
 
 type ListResult = {
