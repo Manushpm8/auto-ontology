@@ -58,6 +58,99 @@ def _with_parsed_sample_values(rows: list[dict[str, Any]]) -> list[dict[str, Any
     return rows
 
 
+# All-or-nothing table visibility for a Term: a Term represented by any table
+# outside the accessible set is hidden entirely. Expects a `$table_ids` param
+# and binds `term`. See fetch_all_terms for the rationale.
+_TERM_TABLE_SCOPE_CONDITION = (
+    f"NOT EXISTS {{"
+    f" (other:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)"
+    f" WHERE NOT other.id IN $table_ids"
+    f" }}"
+)
+
+# Maps the `flags` list built by _certification_flags_clause onto the
+# three-state status the frontend renders.
+_CERTIFICATION_CASE = """CASE
+                   WHEN size([f IN flags WHERE f]) = size(flags) THEN 'certified'
+                   WHEN size([f IN flags WHERE f]) = 0           THEN 'pending'
+                   ELSE 'partial'
+               END"""
+
+
+def _certification_flags_clause(*, zone_scoped: bool) -> str:
+    """Cypher fragment building a Term's aggregate certification ``flags`` list.
+
+    This is the single definition of a Term's aggregate certification —
+    ``fetch_all_terms`` (list cards), ``get_full_term_by_id`` (detail page) and
+    ``get_term_certification`` (certification writes) all project it through
+    :data:`_CERTIFICATION_CASE`, so those three surfaces can never disagree.
+
+    The flags are the Term's own name/description booleans plus one boolean per
+    column and sql attribute. Because the Term flags are always present the
+    list is never empty, and a Term with no attributes is decided by its own
+    two flags alone.
+
+    When *zone_scoped*, each attribute comprehension applies the same
+    visibility rule as the endpoint that lists those attributes — plain
+    ``table_id`` membership for ColumnAttribute (see
+    ``fetch_column_attribute_counts``) and all-or-nothing over the tables a
+    SqlAttribute's SQL touches (see ``_sql_attr_zone_filter``) — so the
+    aggregate never reflects an attribute the caller isn't allowed to see.
+    Expects `term` in scope and a ``$table_ids`` param.
+    """
+    if zone_scoped:
+        column_where = "WHERE ca.table_id IN $table_ids "
+        sql_where = (
+            f"WHERE NOT EXISTS {{"
+            f" (sa)-[:{Edges.HAS_SQL}]->(:{Labels.SQL})"
+            f"-[:{Edges.SQL}]->(tbl:{Labels.TABLE})"
+            f" WHERE NOT tbl.id IN $table_ids"
+            f" }} "
+        )
+    else:
+        column_where = ""
+        sql_where = ""
+    return f"""[coalesce(term.name_certified, false),
+              coalesce(term.description_certified, false)]
+             + [(term)<-[:{REL_PROPERTY_OF}]-(ca:{LABEL_COLUMN_ATTRIBUTE})
+                {column_where}| coalesce(ca.certified, false)]
+             + [(term)<-[:{REL_PROPERTY_OF}]-(sa:{LABEL_SQL_ATTRIBUTE})
+                {sql_where}| coalesce(sa.certified, false)] AS flags"""
+
+
+def get_term_certification(
+    term_id: str,
+    zone_ids: list[str] | None = None,
+) -> str | None:
+    """Return one Term's aggregate certification status, or None when missing.
+
+    Certification writes call this to hand the caller a freshly recomputed
+    aggregate, so the Terms list card can be updated without the frontend
+    duplicating the rollup rule (or refetching the whole list).
+    """
+    if zone_ids is None:
+        term_filter = ""
+        params: dict[str, Any] = {"term_id": term_id}
+    else:
+        term_filter = f"WHERE {_TERM_TABLE_SCOPE_CONDITION}"
+        params = {
+            "term_id": term_id,
+            "table_ids": list(resolve_accessible_catalog_ids(zone_ids)["table_ids"]),
+        }
+
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (term:{LABEL_TERM} {{id: $term_id}})
+        {term_filter}
+        WITH term, {_certification_flags_clause(zone_scoped=zone_ids is not None)}
+        RETURN {_CERTIFICATION_CASE} AS certification
+        LIMIT 1
+        """,
+        params,
+    )
+    return rows[0]["certification"] if rows else None
+
+
 def semantic_layer_calculated() -> bool:
     """True if at least one semantic Term exists in the graph."""
     rows = get_neo4j_conn().query_read(
@@ -223,6 +316,10 @@ def fetch_all_terms(
     and the Exploration graph) render Zone chips from one response instead
     of a second per-page request.
 
+    Each row also carries the aggregate ``certification`` status (see
+    ``_certification_flags_clause``), zone-scoped to the same boundary, so
+    the Terms list renders a per-card badge without fetching attributes.
+
     Pass a pre-resolved *data_ids_by_zone* (see
     ``resolve_accessible_catalog_ids``) when the caller already resolved
     *zone_ids* for this request — e.g.
@@ -237,12 +334,7 @@ def fetch_all_terms(
 
     if data_ids_by_zone is not None:
         term_params["table_ids"] = list(data_ids_by_zone["table_ids"])
-        term_conditions.append(
-            f"NOT EXISTS {{"
-            f" (other:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)"
-            f" WHERE NOT other.id IN $table_ids"
-            f" }}"
-        )
+        term_conditions.append(_TERM_TABLE_SCOPE_CONDITION)
 
     if search:
         term_params["search"] = search.strip().lower()
@@ -258,22 +350,13 @@ def fetch_all_terms(
         OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
         WITH term, collect(DISTINCT sch.name) AS schemas
         WITH term, schemas,
-             [coalesce(term.name_certified, false),
-              coalesce(term.description_certified, false)]
-             + [(term)<-[:{REL_PROPERTY_OF}]-(ca:{LABEL_COLUMN_ATTRIBUTE})
-                | coalesce(ca.certified, false)]
-             + [(term)<-[:{REL_PROPERTY_OF}]-(sa:{LABEL_SQL_ATTRIBUTE})
-                | coalesce(sa.certified, false)] AS flags
+             {_certification_flags_clause(zone_scoped=data_ids_by_zone is not None)}
         RETURN term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id,
                schemas AS schema_names,
                coalesce(term.name_certified, false)        AS name_certified,
                coalesce(term.description_certified, false) AS description_certified,
-               CASE
-                   WHEN size([f IN flags WHERE f]) = size(flags) THEN 'certified'
-                   WHEN size([f IN flags WHERE f]) = 0 THEN 'pending'
-                   ELSE 'partial'
-               END AS certification
+               {_CERTIFICATION_CASE} AS certification
         """,
         term_params,
     )
@@ -356,12 +439,7 @@ def get_full_term_by_id(
         term_params: dict[str, Any] = {"term_id": term_id}
     else:
         table_ids = list(resolve_accessible_catalog_ids(zone_ids)["table_ids"])
-        term_filter = (
-            f"WHERE NOT EXISTS {{"
-            f" (other:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)"
-            f" WHERE NOT other.id IN $table_ids"
-            f" }}"
-        )
+        term_filter = f"WHERE {_TERM_TABLE_SCOPE_CONDITION}"
         term_params = {"term_id": term_id, "table_ids": table_ids}
 
     rows = conn.query_read(
@@ -378,12 +456,15 @@ def get_full_term_by_id(
                  db_id: db.id
              }} END) AS raw_tables
         WITH term, [tbl IN raw_tables WHERE tbl IS NOT NULL] AS tables
+        WITH term, tables,
+             {_certification_flags_clause(zone_scoped=zone_ids is not None)}
         RETURN term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id,
                size(tables) AS table_count,
                tables AS tables,
                coalesce(term.name_certified, false)        AS name_certified,
-               coalesce(term.description_certified, false) AS description_certified
+               coalesce(term.description_certified, false) AS description_certified,
+               {_CERTIFICATION_CASE} AS certification
         LIMIT 1
         """,
         term_params,
