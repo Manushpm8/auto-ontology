@@ -21,7 +21,7 @@ import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { CertificationStatus } from '@/enums/certification';
-import { attributeStatus, termStatus } from '@/lib/certification';
+import { attributeStatus } from '@/lib/certification';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import type { ColumnAttribute, SqlAttribute, Term } from '@/types/terms';
@@ -160,6 +160,12 @@ const FIELD_INPUT_CLASSNAME =
 
 const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
 
+const ErrorBanner = ({ message }: { message: string }) => (
+	<div className="border-t border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+		{message}
+	</div>
+);
+
 export const TermsView = () => {
 	const router = useRouter();
 	const searchParams = useSearchParams();
@@ -200,6 +206,7 @@ export const TermsView = () => {
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
 	const [columnAttrEditing, setColumnAttrEditing] = useState(false);
 	const [columnAttrEditError, setColumnAttrEditError] = useState<string | null>(null);
+	const [certError, setCertError] = useState<string | null>(null);
 
 	const [prevFocusId, setPrevFocusId] = useState(focusId);
 	const [prevSqlAttrId, setPrevSqlAttrId] = useState(sqlAttrId);
@@ -213,6 +220,7 @@ export const TermsView = () => {
 		setSqlAttrEditError(null);
 		setColumnAttrEditing(false);
 		setColumnAttrEditError(null);
+		setCertError(null);
 	}
 	const [sqlEditModalOpen, setSqlEditModalOpen] = useState(false);
 	const [sqlEditValue, setSqlEditValue] = useState('');
@@ -549,6 +557,13 @@ export const TermsView = () => {
 		return { error: false };
 	};
 
+	const applyTermCertification = (termId: string, certification: CertificationStatus | null) => {
+		if (certification == null) return;
+		setTerms((prev) =>
+			prev.map((term) => (term.id === termId ? { ...term, certification } : term)),
+		);
+	};
+
 	// Certification changes save immediately (independent of the text Save
 	// toolbar). `id` is `'name'` or `'description'`; both map to the matching
 	// `*_certified` flag on the backend PATCH endpoints.
@@ -557,15 +572,19 @@ export const TermsView = () => {
 		const payload =
 			id === 'name' ? { name_certified: certified } : { description_certified: certified };
 		const res = await termsApi.update(focusId, payload);
-		if (res.error) return;
+		if (res.error) {
+			setCertError(res.message ?? 'Failed to update certification');
+			return;
+		}
+		setCertError(null);
 		setTerms((prev) =>
 			prev.map((term) =>
 				term.id === focusId
 					? {
 							...term,
-							name_certified: res.data.name_certified ?? term.name_certified,
-							description_certified:
-								res.data.description_certified ?? term.description_certified,
+							name_certified: res.data.name_certified,
+							description_certified: res.data.description_certified,
+							certification: res.data.certification,
 						}
 					: term,
 			),
@@ -580,33 +599,44 @@ export const TermsView = () => {
 		const res = await termsApi.updateColumnAttribute(focusId, focusedColAttr.id, {
 			certified,
 		});
-		if (res.error) return;
+		if (res.error) {
+			setCertError(res.message ?? 'Failed to update certification');
+			return;
+		}
+		setCertError(null);
 		setColumnAttrs((prev) =>
 			prev.map((attr) =>
 				attr.id === focusedColAttr.id
 					? {
 							...attr,
-							certified: res.data.certified ?? attr.certified,
+							certified: res.data.certified,
 						}
 					: attr,
 			),
 		);
+		applyTermCertification(focusId, res.term_certification);
 		setColumnAttrsEpoch((prev) => prev + 1);
 	};
 
 	const handleSqlAttrCertificationChange = async (_id: string, certified: boolean) => {
 		if (focusedSqlAttr == null) return;
 		const res = await sqlAttributesApi.patch(focusedSqlAttr.id, { certified });
-		if (res.error) return;
+		if (res.error) {
+			setCertError(res.message ?? 'Failed to update certification');
+			return;
+		}
+		setCertError(null);
 		setSqlAttrs((prev) =>
 			prev.map((attr) => (attr.id === focusedSqlAttr.id ? res.data : attr)),
 		);
+		applyTermCertification(res.data.term_id, res.term_certification);
 		setSqlAttrsEpoch((prev) => prev + 1);
 	};
 
 	// Certification dropdowns inside the term page's Column/SQL attribute
 	// tables save immediately and update the relevant attribute cache so the
-	// term's aggregate badge and the table cell reflect the change.
+	// table cell reflects the change. The epoch bump refetches the term page
+	// (which passes `treeDataEpoch={sqlAttrsEpoch}`) for both branches.
 	const handleTermTableCertificationChange = async (
 		sectionId: string,
 		rowId: string,
@@ -615,19 +645,27 @@ export const TermsView = () => {
 		if (sectionId === 'column_attributes') {
 			if (focusId == null) return;
 			const res = await termsApi.updateColumnAttribute(focusId, rowId, { certified });
-			if (res.error) return;
+			if (res.error) {
+				setCertError(res.message ?? 'Failed to update certification');
+				return;
+			}
+			setCertError(null);
 			setColumnAttrs((prev) =>
 				prev.map((attr) =>
-					attr.id === rowId
-						? { ...attr, certified: res.data.certified ?? certified }
-						: attr,
+					attr.id === rowId ? { ...attr, certified: res.data.certified } : attr,
 				),
 			);
+			applyTermCertification(focusId, res.term_certification);
 			setSqlAttrsEpoch((prev) => prev + 1);
 		} else if (sectionId === 'sql_attributes') {
 			const res = await sqlAttributesApi.patch(rowId, { certified });
-			if (res.error) return;
+			if (res.error) {
+				setCertError(res.message ?? 'Failed to update certification');
+				return;
+			}
+			setCertError(null);
 			setSqlAttrs((prev) => prev.map((attr) => (attr.id === rowId ? res.data : attr)));
+			applyTermCertification(res.data.term_id, res.term_certification);
 			setSqlAttrsEpoch((prev) => prev + 1);
 		}
 	};
@@ -1045,11 +1083,8 @@ export const TermsView = () => {
 	const focusedColAttr =
 		colAttrId != null ? (columnAttrs.find((attr) => attr.id === colAttrId) ?? null) : null;
 
-	// Three-state badge for the term top bar: derived from the term's own
-	// name/description flags plus every column and sql attribute flag.
-	const termCertificationStatus = focusedTerm
-		? termStatus(focusedTerm, columnAttrs, sqlAttrs)
-		: CertificationStatus.Pending;
+	// Same server-rolled-up value the list card shows, so the two can't disagree.
+	const termCertificationStatus = focusedTerm?.certification ?? CertificationStatus.Pending;
 
 	if (focusId != null && sqlAttrId != null) {
 		const termTitle = focusedTerm?.name ?? focusId;
@@ -1141,11 +1176,8 @@ export const TermsView = () => {
 						onCertificationChange={handleSqlAttrCertificationChange}
 					/>
 				</main>
-				{sqlAttrEditError != null && (
-					<div className="border-t border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-						{sqlAttrEditError}
-					</div>
-				)}
+				{sqlAttrEditError != null && <ErrorBanner message={sqlAttrEditError} />}
+				{certError != null && <ErrorBanner message={certError} />}
 				<ConfirmModal
 					open={deletingSqlAttr !== null}
 					onCancel={handleDeleteSqlAttrClose}
@@ -1262,11 +1294,8 @@ export const TermsView = () => {
 						onCertificationChange={handleColumnAttrCertificationChange}
 					/>
 				</main>
-				{columnAttrEditError != null && (
-					<div className="border-t border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-						{columnAttrEditError}
-					</div>
-				)}
+				{columnAttrEditError != null && <ErrorBanner message={columnAttrEditError} />}
+				{certError != null && <ErrorBanner message={certError} />}
 			</div>
 		);
 	}
@@ -1339,6 +1368,7 @@ export const TermsView = () => {
 						onDataTableCertificationChange={handleTermTableCertificationChange}
 					/>
 				</main>
+				{certError != null && <ErrorBanner message={certError} />}
 				<ModalCreateNewItem
 					open={createSqlAttrModalOpen}
 					onClose={handleCreateSqlAttrClose}
@@ -1453,9 +1483,7 @@ export const TermsView = () => {
 								columnAttributeCount={columnAttrCountsMap.get(term.id) ?? 0}
 								sqlAttributeCount={sqlAttrCountsMap.get(term.id) ?? 0}
 								relatedCount={relatedCountsMap.get(term.id) ?? 0}
-								certificationStatus={
-									term.certification ?? CertificationStatus.Pending
-								}
+								certificationStatus={term.certification}
 								onClick={handleCardClick}
 							/>
 						))}

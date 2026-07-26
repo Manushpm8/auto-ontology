@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { requests } from './requests';
+import type { CertificationStatus } from '@/enums/certification';
 import type {
 	ColumnAttribute,
 	RelatedTermCount,
@@ -21,20 +22,32 @@ type SqlAttributeListResponse = ResponseWithError<SqlAttributeListResult>;
 
 type SingleResult = { data: TermDetail };
 type SingleResponse = ResponseWithError<SingleResult>;
-type UpdateResult = {
+
+type TermUpdateResult = {
+	data: {
+		id: string;
+		name: string;
+		description: string | null;
+		name_certified: boolean;
+		description_certified: boolean;
+		certification: CertificationStatus;
+	};
+};
+type TermUpdateResponse = ResponseWithError<TermUpdateResult>;
+
+type ColumnAttributeUpdateResult = {
 	data: {
 		id: string;
 		name: string;
 		description: string | null;
 		sample_values?: string[] | null;
-		/** Term-level flags (Terms keep separate name/description certification). */
-		name_certified?: boolean;
-		description_certified?: boolean;
-		/** Attribute-level single certification flag. */
-		certified?: boolean;
+		certified: boolean;
 	};
+	/** Owning term's aggregate status, recomputed server-side after the write. */
+	term_certification: CertificationStatus | null;
 };
-type UpdateResponse = ResponseWithError<UpdateResult>;
+type ColumnAttributeUpdateResponse = ResponseWithError<ColumnAttributeUpdateResult>;
+
 type TermUpdatePayload = {
 	name?: string;
 	description?: string | null;
@@ -65,16 +78,16 @@ export const termsApi = {
 	list: (params?: TermsListParams): Promise<ListResponse> =>
 		requests.get<ListResult>('terms', params?.q ? { q: params.q } : {}),
 	get: (id: string): Promise<SingleResponse> => requests.get<SingleResult>(`terms/${id}`),
-	update: (id: string, payload: TermUpdatePayload): Promise<UpdateResponse> =>
-		requests.patch<UpdateResult>(`terms/${encodeURIComponent(id)}`, payload),
+	update: (id: string, payload: TermUpdatePayload): Promise<TermUpdateResponse> =>
+		requests.patch<TermUpdateResult>(`terms/${encodeURIComponent(id)}`, payload),
 	getColumnAttributes: (id: string): Promise<AttributeListResponse> =>
 		requests.get<AttributeListResult>(`terms/${id}/column-attributes`),
 	updateColumnAttribute: (
 		termId: string,
 		attrId: string,
 		payload: ColumnAttributeUpdatePayload,
-	): Promise<UpdateResponse> =>
-		requests.patch<UpdateResult>(
+	): Promise<ColumnAttributeUpdateResponse> =>
+		requests.patch<ColumnAttributeUpdateResult>(
 			`terms/${encodeURIComponent(termId)}/column-attributes/${encodeURIComponent(attrId)}`,
 			payload,
 		),

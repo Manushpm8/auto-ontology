@@ -4,12 +4,6 @@
 
 import { CertificationStatus } from '@/enums/certification';
 
-/** Shape shared by every entity with separate name/description flags (Term). */
-export type CertifiableFields = {
-	name_certified: boolean;
-	description_certified: boolean;
-};
-
 /** Shape shared by attributes, which carry a single top-level certification flag. */
 export type AttributeCertifiableFields = {
 	certified: boolean;
@@ -26,28 +20,11 @@ export const fieldStatus = (certified: boolean): CertificationStatus =>
 export const attributeStatus = (item: AttributeCertifiableFields): CertificationStatus =>
 	fieldStatus(item.certified);
 
-/**
- * Three-state status for a term, derived from its own name/description flags
- * plus every column and sql attribute's single certification flag:
- *  - CERTIFIED when all flags are certified
- *  - PENDING when none are certified
- *  - PARTIAL otherwise
- *
- * Empty attribute collections are treated as vacuously certified (they never
- * block a CERTIFIED result).
+/*
+ * A term's three-state aggregate status is deliberately NOT computed here.
+ * The Terms list only receives per-term attribute *counts*, never the
+ * attribute nodes, so the rollup can only be done in Cypher — see
+ * `_certification_flags_clause` in gsf/dal/terms.py. Every read returns it as
+ * `Term.certification` and every certification write returns the recomputed
+ * value, so there is exactly one implementation of the rule.
  */
-export const termStatus = (
-	term: CertifiableFields,
-	columnAttributes: AttributeCertifiableFields[],
-	sqlAttributes: AttributeCertifiableFields[],
-): CertificationStatus => {
-	const flags: boolean[] = [
-		term.name_certified,
-		term.description_certified,
-		...columnAttributes.map((a) => a.certified),
-		...sqlAttributes.map((a) => a.certified),
-	];
-	if (flags.every(Boolean)) return CertificationStatus.Certified;
-	if (flags.every((flag) => !flag)) return CertificationStatus.Pending;
-	return CertificationStatus.Partial;
-};

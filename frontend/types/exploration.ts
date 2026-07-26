@@ -6,9 +6,12 @@ import type { TableType } from '@/enums/datasources';
 import type { ExplorationLayer } from '@/enums/exploration';
 import type { Term, TermZone } from '@/types/terms';
 
-// The exploration graph does not surface certification, so those Term flags
+// The exploration graph does not surface certification, so those Term fields
 // are intentionally omitted from the graph node shape.
-export type ExplorationTermNode = Omit<Term, 'name_certified' | 'description_certified'> & {
+export type ExplorationTermNode = Omit<
+	Term,
+	'name_certified' | 'description_certified' | 'certification'
+> & {
 	layer: ExplorationLayer.Semantic;
 	nodeType: 'term';
 	relationshipCount: number;
