@@ -22,12 +22,15 @@ logger = logging.getLogger(__name__)
 class TermUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     description: str | None = None
+    name_certified: bool | None = None
+    description_certified: bool | None = None
 
 
 class ColumnAttributeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     description: str | None = None
     sample_values: list[str] | None = None
+    certified: bool | None = None
 
 
 @router.get("/terms")
@@ -118,6 +121,7 @@ def update_column_attribute(
             name=name if isinstance(name, str) else None,
             description=patch.get("description"),
             sample_values=patch.get("sample_values"),
+            certified=patch.get("certified"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -130,6 +134,7 @@ def update_column_attribute(
             "name": row["name"],
             "description": row.get("description"),
             "sample_values": row.get("sample_values"),
+            "certified": row.get("certified", False),
         }
     }
 
@@ -165,28 +170,38 @@ def update_term(term_id: str, body: TermUpdate) -> dict:
         term_id,
         name=name if isinstance(name, str) else None,
         description=patch.get("description"),
+        name_certified=patch.get("name_certified"),
+        description_certified=patch.get("description_certified"),
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Term not found")
 
-    name_changed = (row.get("old_name") or "").strip() != row["name"].strip()
+    # Certification flags carry no embedding content; only name/description
+    # changes need suggestion invalidation and a VDB refresh.
+    content_changed = "name" in patch or "description" in patch
+    name_changed = (
+        content_changed and (row.get("old_name") or "").strip() != row["name"].strip()
+    )
     if name_changed:
         sql_attr_dal.clear_sql_attribute_description_suggestions_for_term(term_id)
 
-    try:
-        term_service.refresh_term_embeddings(
-            term_id, refresh_dependent_attrs=name_changed
-        )
-    except Exception:
-        logger.warning(
-            "Failed to refresh Term embeddings for %r", term_id, exc_info=True
-        )
+    if content_changed:
+        try:
+            term_service.refresh_term_embeddings(
+                term_id, refresh_dependent_attrs=name_changed
+            )
+        except Exception:
+            logger.warning(
+                "Failed to refresh Term embeddings for %r", term_id, exc_info=True
+            )
 
     return {
         "data": {
             "id": row["id"],
             "name": row["name"],
             "description": row.get("description"),
+            "name_certified": row.get("name_certified", False),
+            "description_certified": row.get("description_certified", False),
         }
     }
 

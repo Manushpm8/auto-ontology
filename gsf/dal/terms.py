@@ -47,7 +47,8 @@ _COLUMN_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.source_column AS source_column,
                attr.datatype      AS datatype,
                attr.table_id      AS table_id,
-               col.sample_values  AS sample_values"""
+               col.sample_values  AS sample_values,
+               coalesce(attr.certified, false) AS certified"""
 
 
 def _with_parsed_sample_values(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -107,23 +108,36 @@ def update_term(
     *,
     name: str | None = None,
     description: str | None = None,
-) -> dict[str, str] | None:
+    name_certified: bool | None = None,
+    description_certified: bool | None = None,
+) -> dict[str, Any] | None:
     """Update a Term and return old/new values, or None when missing."""
     rows = get_neo4j_conn().query_write(
         f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         WITH term, term.name AS old_name
         SET term.name = coalesce($name, term.name),
-            term.description = coalesce($description, term.description)
+            term.description = coalesce($description, term.description),
+            term.name_certified = coalesce($name_certified, term.name_certified),
+            term.description_certified =
+                coalesce($description_certified, term.description_certified)
         WITH term, old_name
         OPTIONAL MATCH (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term)
         SET attr.term_name = term.name
         RETURN term.id AS id,
                old_name,
                term.name AS name,
-               term.description AS description
+               term.description AS description,
+               coalesce(term.name_certified, false)        AS name_certified,
+               coalesce(term.description_certified, false) AS description_certified
         """,
-        {"term_id": term_id, "name": name, "description": description},
+        {
+            "term_id": term_id,
+            "name": name,
+            "description": description,
+            "name_certified": name_certified,
+            "description_certified": description_certified,
+        },
     )
     return dict(rows[0]) if rows else None
 
@@ -243,9 +257,23 @@ def fetch_all_terms(
         {term_filter}
         OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
         WITH term, collect(DISTINCT sch.name) AS schemas
+        WITH term, schemas,
+             [coalesce(term.name_certified, false),
+              coalesce(term.description_certified, false)]
+             + [(term)<-[:{REL_PROPERTY_OF}]-(ca:{LABEL_COLUMN_ATTRIBUTE})
+                | coalesce(ca.certified, false)]
+             + [(term)<-[:{REL_PROPERTY_OF}]-(sa:{LABEL_SQL_ATTRIBUTE})
+                | coalesce(sa.certified, false)] AS flags
         RETURN term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id,
-               schemas AS schema_names
+               schemas AS schema_names,
+               coalesce(term.name_certified, false)        AS name_certified,
+               coalesce(term.description_certified, false) AS description_certified,
+               CASE
+                   WHEN size([f IN flags WHERE f]) = size(flags) THEN 'certified'
+                   WHEN size([f IN flags WHERE f]) = 0 THEN 'pending'
+                   ELSE 'partial'
+               END AS certification
         """,
         term_params,
     )
@@ -353,7 +381,9 @@ def get_full_term_by_id(
         RETURN term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id,
                size(tables) AS table_count,
-               tables AS tables
+               tables AS tables,
+               coalesce(term.name_certified, false)        AS name_certified,
+               coalesce(term.description_certified, false) AS description_certified
         LIMIT 1
         """,
         term_params,

@@ -62,7 +62,8 @@ _SQL_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.description_suggestion AS description_suggestion,
                attr.expression    AS expression,
                attr.source        AS source,
-               sql.sql_full_query AS sql"""
+               sql.sql_full_query AS sql,
+               coalesce(attr.certified, false) AS certified"""
 
 
 def _sql_attr_zone_filter(
@@ -355,6 +356,7 @@ def update_sql_attribute(
     description: str | None = None,
     expression: str | None = None,
     source: str | None = None,
+    certified: bool | None = None,
 ) -> None:
     """SET properties on an existing SqlAttribute node.
 
@@ -366,7 +368,8 @@ def update_sql_attribute(
         SET attr.name        = coalesce($name, attr.name),
             attr.description = coalesce($description, attr.description),
             attr.expression  = coalesce($expression, attr.expression),
-            attr.source      = coalesce($source, attr.source)
+            attr.source      = coalesce($source, attr.source),
+            attr.certified   = coalesce($certified, attr.certified)
         """,
         {
             "id": attr_id,
@@ -374,6 +377,7 @@ def update_sql_attribute(
             "description": description,
             "expression": expression,
             "source": source,
+            "certified": certified,
         },
     )
 

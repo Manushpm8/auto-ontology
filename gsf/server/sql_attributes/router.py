@@ -39,6 +39,7 @@ class SqlAttributeUpdate(BaseModel):
 class SqlAttributeMetadataPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     description: str | None = None
+    certified: bool | None = None
 
 
 @router.get("/sql-attributes")
@@ -182,6 +183,7 @@ def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
             attr_id=attr_id,
             name=name if isinstance(name, str) else None,
             description=patch.get("description"),
+            certified=patch.get("certified"),
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
