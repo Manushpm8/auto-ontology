@@ -322,6 +322,20 @@ def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
     return result
 
 
+def fetch_all_term_names() -> list[str]:
+    """Return distinct semantic Term names from Neo4j, ordered alphabetically."""
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (:{Labels.TABLE})-[:{REL_REPRESENTS}]->
+              (term:{LABEL_TERM} {{source: $source}})
+        RETURN DISTINCT term.name AS name
+        ORDER BY term.name
+        """,
+        {"source": SEMANTIC_SOURCE},
+    )
+    return [str(row["name"]) for row in rows if row.get("name")]
+
+
 def fetch_all_terms(
     zone_ids: list[str] | None = None,
     search: str | None = None,

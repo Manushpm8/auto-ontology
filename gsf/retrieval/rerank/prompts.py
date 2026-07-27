@@ -5,14 +5,25 @@
 """Prompt templates for the rerank flow."""
 
 
-def create_question_extraction_prompt(question: str) -> str:
+def _format_term_names_section(term_names: list[str]) -> str:
+    if not term_names:
+        return "(none — leave target_entity_type empty)"
+    return "\n".join(f"- {name}" for name in term_names)
+
+
+def create_question_extraction_prompt(
+    question: str,
+    term_names: list[str] | None = None,
+) -> str:
     """Prompt to normalize a question and extract its search entities.
 
     Produces a concise ``normalized_question`` plus entities split into five
     buckets: the target item (``search_for`` / ``search_for_details``), an
     optional prior item used as context (``reference_entity`` /
-    ``reference_entity_details``), and how they relate (``relation``).
+    ``reference_entity_details``), and how they relate (``relation``), plus
+    ``target_entity_type`` chosen from the catalog Term names.
     """
+    catalog_terms = _format_term_names_section(term_names or [])
     return f"""You analyze a shopping/search request. Do TWO things:
 
 1. normalized_question: Rewrite the request into a concise, search-ready question.
@@ -20,7 +31,7 @@ def create_question_extraction_prompt(question: str) -> str:
    (item, brand, colors, qualifiers, numbers). If the input is already concise,
    return it unchanged.
 
-2. entities: Extract the search entities into exactly five buckets:
+2. entities: Extract the search entities into exactly six fields:
    - "search_for": the SINGLE core item the user wants to find NOW — exactly ONE
      entry. Keep the words describing that one item together in a single phrase
      and use the SINGULAR form, never plural (e.g. "pen" not "pens").
@@ -39,12 +50,20 @@ def create_question_extraction_prompt(question: str) -> str:
      phrase when a reference exists (e.g. "similar to", "compatible with",
      "accessory for", "upgrade for", "replacement for"). Empty when there is no
      reference_entity.
+   - "target_entity_type": what type of node/table constitutes the answer — the
+     kind of entity the result rows should represent. Copy EXACTLY ONE Term name
+     from the catalog list below, or use an empty string if none apply.
+
+Available entity types (Term names from the catalog):
+{catalog_terms}
 
 Target vs reference vs relation:
 - The TARGET is what the user wants to get now (search_for).
 - The REFERENCE is an item they already have that provides context (reference_entity).
 - The RELATION is the link between them (relation) — put comparative/relational
   words HERE, not in any other bucket.
+- TARGET ENTITY TYPE is the catalog Term that best describes what the answer rows
+  are (e.g. a question asking for products -> pick the Product Term if listed).
 - Example: "I bought a Forest Byke derailleur hanger 65 and need an adapter for it"
   -> search_for: ["adapter"], reference_entity: ["derailleur hanger 65"],
      relation: ["compatible with"].
@@ -74,6 +93,8 @@ Rules:
   them in search_for, search_for_details, reference_entity, or
   reference_entity_details.
 - If reference_entity is empty, relation MUST be empty.
+- target_entity_type MUST be copied exactly from the catalog list (case-sensitive)
+  or be an empty string. Never invent a Term name.
 
 Example 1 — follow-up with a reference item
 Input: "I just bought a Forest Byke Company Derailleur Hanger 65, please recommend
@@ -84,7 +105,8 @@ Output:
   "search_for_details": ["x5"],
   "reference_entity": ["Forest Byke Company Derailleur Hanger 65"],
   "reference_entity_details": [],
-  "relation": ["similar to"]
+  "relation": ["similar to"],
+  "target_entity_type": "Derailleur Hanger"
 }}
 
 Example 2 — plain search, no reference
@@ -95,7 +117,8 @@ Output:
   "search_for_details": ["red", "Panini"],
   "reference_entity": [],
   "reference_entity_details": [],
-  "relation": []
+  "relation": [],
+  "target_entity_type": "Product"
 }}
 
 Example 3 — bought item with a need for an accessory
@@ -106,7 +129,8 @@ Output:
   "search_for_details": [],
   "reference_entity": ["desktop computer"],
   "reference_entity_details": ["slow"],
-  "relation": ["upgrade for"]
+  "relation": ["upgrade for"],
+  "target_entity_type": "Product"
 }}
 
 Question: {question}
