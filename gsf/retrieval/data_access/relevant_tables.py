@@ -207,9 +207,10 @@ def get_relevant_tables(
     initial_question,
     k: int | None = None,
     database_name: str | None = None,
+    schema_name: str | None = None,
     allowed_table_ids: set[str] | None = None,
 ) -> list[dict]:
-    """Search table embeddings, optionally limited to authorized table IDs."""
+    """Search table embeddings filtered by database, schema, and authorized table IDs."""
     search_k = k if k is not None else PER_LABEL_LIMIT
     try:
         raw_rows = search_semantic_index(
@@ -218,6 +219,7 @@ def get_relevant_tables(
             label_filter=[Labels.TABLE],
             per_label_k=search_k,
             database_name=database_name,
+            schema_name=schema_name,
             allowed_ids=allowed_table_ids,
         )
     except Exception:

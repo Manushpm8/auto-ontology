@@ -54,6 +54,7 @@ def _search_by_label(
     entity: str,
     label: str,
     k: int,
+    database_name: str | None,
     allowed_ids: set[str] | None,
 ) -> list[dict]:
     """Return up to *k* authorized VDB hits for *label*.
@@ -68,6 +69,7 @@ def _search_by_label(
                 entity,
                 label_filter=[label],
                 per_label_k=k,
+                database_name=database_name,
                 allowed_ids=allowed_ids,
             )
         )
@@ -340,6 +342,7 @@ class CandidateRetrievalAgent(BaseAgent):
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         scope = state["zone_access_scope"]
+        target_db = path_state.get("target_db")
 
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
@@ -356,6 +359,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         question,
                         Labels.CUSTOM_ANALYSIS,
                         3,
+                        target_db,
                         scope.custom_analysis_ids,
                     ),
                 ),
@@ -366,6 +370,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         question,
                         LABEL_SQL_ATTRIBUTE,
                         3,
+                        target_db,
                         scope.sql_attribute_ids,
                     ),
                 ),
@@ -377,6 +382,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             entity,
                             LABEL_COLUMN_ATTRIBUTE,
                             2,
+                            target_db,
                             scope.column_attribute_ids,
                         ),
                     )

@@ -36,9 +36,9 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
-    # Resolved by the authenticated frontend BFF. ``None`` is the unrestricted
-    # admin scope; ``[]`` intentionally denies catalog access.
-    zone_ids: list[str] | None
+    # When omitted, no zone scope is applied. ``[]`` intentionally denies
+    # catalog access.
+    zone_ids: list[str] | None = None
 
 
 class ChatRequestWithEvidence(BaseModel):
@@ -47,3 +47,6 @@ class ChatRequestWithEvidence(BaseModel):
     question: str = Field(..., min_length=1)
     database: str = Field(..., min_length=1)
     evidence: str = Field(default="")
+    # Match ``ChatRequest`` so this endpoint can pass the same scope to the
+    # text-to-SQL agent. Omission retains the unscoped internal-call behavior.
+    zone_ids: list[str] | None = None

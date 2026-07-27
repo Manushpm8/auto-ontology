@@ -18,27 +18,22 @@ const fetchEnabledZoneIds = async (userId: string): Promise<string[]> => {
 };
 
 /**
- * Shared zone-scoping rule: with zero enabled zones there is no boundary to
- * enforce, so callers get the unrestricted scope (`null`). With at least one
- * enabled zone, callers are scoped to every one of them. Zone membership is
- * no longer a per-user authorization boundary, so this does not depend on
- * the requesting user's own grants — only on whether any zone exists at
- * all — and applies identically regardless of role.
+ * Shared zone-scoping rule: callers are scoped to every enabled zone. An
+ * empty list means there are no enabled zones and denies catalog access.
+ * Omitted zone IDs are reserved for unscoped internal callers. Zone
+ * membership is no longer a per-user authorization boundary, so this does
+ * not depend on the requesting user's own grants and applies identically
+ * regardless of role.
  */
-const resolveEnabledZoneScope = async (userId: string): Promise<string[] | null> => {
-	const zoneIds = await fetchEnabledZoneIds(userId);
-	return zoneIds.length > 0 ? zoneIds : null;
-};
+const resolveEnabledZoneScope = async (userId: string): Promise<string[]> =>
+	fetchEnabledZoneIds(userId);
 
 /**
  * Catalog/Terms access: both admins and viewers share the same scope — see
  * ``resolveEnabledZoneScope``. *role* is accepted for call-site compatibility
  * but no longer changes the result.
  */
-export async function resolveZoneIds(
-	userId: string,
-	role: string | null,
-): Promise<string[] | null> {
+export async function resolveZoneIds(userId: string, role: string | null): Promise<string[]> {
 	void role;
 	return resolveEnabledZoneScope(userId);
 }
@@ -47,6 +42,6 @@ export async function resolveZoneIds(
  * Text-to-SQL agent scope — see ``resolveEnabledZoneScope``. Applies
  * identically for both admins and viewers.
  */
-export async function resolveAgentZoneIds(userId: string): Promise<string[] | null> {
+export async function resolveAgentZoneIds(userId: string): Promise<string[]> {
 	return resolveEnabledZoneScope(userId);
 }

@@ -255,6 +255,7 @@ async def chat_with_evidence(request: ChatRequestWithEvidence) -> dict:
         "acronyms": fetch_acronyms(),
         "custom_prompts": fetch_custom_prompts(),
         "target_db": request.database,
+        "zone_ids": request.zone_ids,
     }
     result = get_agent_response(payload)
     return {

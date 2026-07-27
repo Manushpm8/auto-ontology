@@ -199,6 +199,7 @@ class SQLReconstructionAgent(BaseAgent):
 
         existing_ids = {str(t.get("id", "")) for t in existing_tables if t.get("id")}
 
+        database_name = (state.get("path_state") or {}).get("target_db")
         combined: list[dict] = []
         for query_text in search_queries:
             try:
@@ -206,6 +207,7 @@ class SQLReconstructionAgent(BaseAgent):
                     data_retriever,
                     query_text,
                     k=3,
+                    database_name=database_name,
                     allowed_table_ids=state["zone_access_scope"].table_ids,
                 )
                 combined.extend(hits)
