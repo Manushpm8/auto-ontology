@@ -8,7 +8,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ChatMessage } from '@/types/chat';
 import { formatDate } from '@/common/date';
 import { parseSqlResponse, type ParsedTable } from '@/lib/parseSqlResponse';
-import { SqlBlock } from '@/components/SqlBlock';
+import { SqlBlock } from '@/common/SqlBlock';
 import { DynamicTable } from './DynamicTable';
 import { FormattedContent } from './FormattedContent';
 
@@ -104,7 +104,15 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 			>
 				<FormattedContent content={message.content} className="text-sm leading-relaxed" />
 
-				{message.sql && <SqlBlock sql={message.sql} className="mt-3" />}
+				{message.sql && (
+					<SqlBlock
+						sql={message.sql}
+						label={
+							message.sql.trim().toUpperCase().startsWith('PREDICT') ? 'PQL' : 'SQL'
+						}
+						className="mt-3"
+					/>
+				)}
 
 				{showQueryResults && (
 					<QueryResultsSection

@@ -24,7 +24,7 @@ Design Decisions:
 
 import logging
 from typing import Any, Dict
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from gsf.utils.llm_invoke import safe_invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -41,22 +41,49 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_dialect_rules,
     format_dual_question_block,
+)
+from gsf.retrieval.text_to_sql.evidence_hints import (
+    build_evidence_hints_block,
+    extract_evidence,
 )
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 
 logger = logging.getLogger(__name__)
 
 
+def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
+    """Format a hop endpoint (``side`` is ``"source"`` or ``"target"``) as
+    ``schema.table.column`` (or ``table.column`` when the schema is absent).
+
+    ``target_db`` scopes execution to one database, so the *database* prefix is
+    dropped — but the schema qualifier is kept whenever present, since schema
+    dialects (Postgres/Snowflake) need it to resolve the table.
+    """
+    schema = hop.get(f"{side}_schema", "")
+    table = hop.get(f"{side}_table", "")
+    column = hop.get(f"{side}_column", "")
+    if not schema:
+        prefix = table
+    else:
+        prefix = f"{schema}.{table}"
+    return f"{prefix}.{column}"
+
+
 def _format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
+    target_db: str | None = None,
 ) -> str:
     """Format the semantic anchor + join-path context for the SQL prompt.
 
     Produces a human-readable block describing the anchor table/column and
     how to reach every other retrieved column via JOIN conditions derived
     from the semantic graph.
+
+    When *target_db* is set, schema qualifiers are omitted because
+    execution is already scoped to that database.
 
     Example output::
 
@@ -84,7 +111,10 @@ def _format_semantic_context(
     if attribute_join_paths:
         lines.append("")
         lines.append(
-            "SUGGESTED JOIN PATHS (derived from semantic model — use only the hops you need):"
+            "JOIN PATHS (AUTHORITATIVE — derived from the verified semantic model). "
+            "This is our most reliable knowledge of how these tables join: use these "
+            "exact join conditions almost always, and only deviate if they clearly "
+            "cannot answer the question. Use only the hops you need:"
         )
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
@@ -96,27 +126,33 @@ def _format_semantic_context(
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
-                for hop in path:
-                    src_s = hop.get("source_schema", "")
-                    src_t = hop.get("source_table", "")
-                    src_c = hop.get("source_column", "")
-                    tgt_s = hop.get("target_schema", "")
-                    tgt_t = hop.get("target_table", "")
-                    tgt_c = hop.get("target_column", "")
-                    src = f"{src_s}.{src_t}.{src_c}" if src_s else f"{src_t}.{src_c}"
-                    tgt = f"{tgt_s}.{tgt_t}.{tgt_c}" if tgt_s else f"{tgt_t}.{tgt_c}"
-                    lines.append(f"      {src} = {tgt}")
+                # The anchor column is the first hop's source; the destination
+                # is the last hop's target. Within a hop, source/target are the
+                # same table (navigation), so the actual cross-table joins are
+                # between consecutive hops: target[i] = source[i+1].
+                if len(path) == 1:
+                    left = _hop_column(path[0], "source", target_db)
+                    right = _hop_column(path[0], "target", target_db)
+                    lines.append(f"      {left} = {right}")
+                else:
+                    for cur, nxt in zip(path, path[1:]):
+                        left = _hop_column(cur, "target", target_db)
+                        right = _hop_column(nxt, "source", target_db)
+                        lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)
 
 
-def format_tables_for_prompt(tables: list[dict]) -> str:
+def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -> str:
     """
     Format tables with clear column information to prevent cross-table column confusion.
 
     Args:
         tables: Table dicts from ``path_state["relevant_tables"]`` — each must expose
             ``columns`` as a list of dicts (from ``_normalize_table_to_relevant_shape`` / prep).
+        target_db: When set, only the *database* prefix is omitted (execution is
+            already scoped to this database). The schema qualifier is kept when
+            present, since schema dialects (Postgres/Snowflake) need it.
 
     Returns:
         Formatted string clearly showing which columns belong to each table
@@ -137,8 +173,10 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
         database_name = table.get("database_name", "")
         schema_name = table.get("schema_name", "")
 
-        # Build table header
-        if database_name and schema_name:
+        # target_db scopes execution to one database, so drop only the *database*
+        # prefix; keep the schema (Postgres/Snowflake need schema.table). SQLite/
+        # BIRD tables carry no schema_name, so this collapses to a bare name.
+        if database_name and schema_name and not target_db:
             full_name = f"{database_name}.{schema_name}.{table_name}"
         elif schema_name:
             full_name = f"{schema_name}.{table_name}"
@@ -309,6 +347,10 @@ class SQLFromCandidatesAgent(BaseAgent):
                         f"  {term_name}: also known as {', '.join(syns)}"
                     )
                 observation_block += "\n" + "\n".join(gloss_lines) + "\n"
+            if extract_evidence(original_question):
+                evidence_hints = build_evidence_hints_block(original_question)
+                if evidence_hints:
+                    observation_block += f"\n{evidence_hints}\n"
 
             # Build custom analyses section for user prompt
             ca_section = ""
@@ -352,36 +394,53 @@ class SQLFromCandidatesAgent(BaseAgent):
                     + "\n\n"
                 )
 
-            # Build tables/schema section — semantic hint and available tables are co-equal.
-            parts = []
+            target_db = path_state.get("target_db")
+
+            # Build the join-paths section (semantic hint + suggested joins).
+            join_paths = ""
             if primary_attribute:
-                parts.append(
-                    _format_semantic_context(primary_attribute, attribute_join_paths)
+                join_paths = (
+                    "## Semantic Hints & Join Paths\n"
+                    + _format_semantic_context(
+                        primary_attribute,
+                        attribute_join_paths,
+                        target_db=target_db,
+                    )
+                    + "\n\n"
                 )
-            if relevant_tables:
-                parts.append(
-                    "AVAILABLE TABLES (schema context):\n"
-                    + format_tables_for_prompt(relevant_tables)
-                )
-            tables_section = "\n\n".join(parts) if parts else "No tables available."
+
+            # Build the available-tables schema section.
+            tables_section = (
+                "AVAILABLE TABLES (schema context):\n"
+                + format_tables_for_prompt(relevant_tables, target_db=target_db)
+                if relevant_tables
+                else "No tables available."
+            )
 
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
                 dialect=dialect,
+                dialect_rules=format_dialect_rules(dialect),
                 main_question=main_question,
                 observation_block=observation_block,
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
+                join_paths=join_paths,
                 custom_analyses=ca_section + sa_section,
             )
 
             # Choose system prompt based on context
-            system_prompt = create_sql_from_candidates_prompt()
+            has_evidence = extract_evidence(original_question) is not None
+            system_prompt = create_sql_from_candidates_prompt(
+                dialect=dialect,
+                target_db=target_db,
+                has_evidence=has_evidence,
+            )
 
             messages = state["messages"] + [
                 SystemMessage(content=system_prompt),
-                AIMessage(content=user_prompt),
+                HumanMessage(content=user_prompt),
             ]
 
             # Add calendar time window reminder if needed

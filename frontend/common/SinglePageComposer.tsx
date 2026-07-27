@@ -4,46 +4,60 @@
 
 'use client';
 
-import {
-	forwardRef,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-	useCallback,
-	type ReactNode,
-} from 'react';
+import { forwardRef, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
-import { ComposerSectionKind } from '@/enums/datasources';
+import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import {
 	isComposerSection,
 	type ComposerSection,
 	type ComposerZonesSection,
+	type ComposerCertification,
 } from '@/types/composer-section';
-import { Icon, IconName } from '@/components/icons';
-import { TagInput } from '@/components/TagInput';
-import { Table } from '@/components/Table';
-import { SqlBlock } from '@/components/SqlBlock';
+import { CertificationStatus } from '@/enums/certification';
+import { fieldStatus } from '@/lib/certification';
+import { CertificationBadge } from '@/common/CertificationBadge';
+import { CertificationSelect } from '@/common/CertificationSelect';
+import { Icon, IconName } from '@/common/icons';
+import { TagInput } from '@/common/TagInput';
+import { Table } from '@/common/Table';
+import { TruncatedText } from '@/common/TruncatedText';
+import { SqlBlock } from '@/common/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
-import { Toast } from '@/components/Toast';
+import type { TermZone } from '@/types/terms';
+import { Toast } from '@/common/Toast';
+import { Label } from '@/common/Label';
 
 export type ComposerEditValue = string | string[];
 
-function zoneChipStyle(color: string): React.CSSProperties {
-	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };
-}
+export const LabelList = ({ values }: { values: string[] }) => {
+	const nonEmptyValues = values.filter((v) => v.trim() !== '');
+	if (nonEmptyValues.length === 0) return <span>—</span>;
+	return (
+		<ul className="flex flex-wrap gap-1">
+			{nonEmptyValues.map((v, i) => (
+				<li key={`${v}-${i}`}>
+					<Label label={v} maxWidthClass="max-w-[16rem]" />
+				</li>
+			))}
+		</ul>
+	);
+};
 
-const ZoneChip = ({ name, color }: { name: string; color: string | null }) => (
-	<span
-		className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-		style={color ? zoneChipStyle(color) : undefined}
-	>
-		{name}
-	</span>
+export const ZonesRow = ({ zones }: { zones: TermZone[] }) => (
+	<div className="mt-2 flex flex-wrap items-center gap-1.5">
+		<span className="text-xs text-zinc-400">Zones:</span>
+		{zones.length > 0 ? (
+			zones.map((zone) => (
+				<Label key={zone.id} label={zone.name} color={zone.color} muted={!zone.enabled} />
+			))
+		) : (
+			<span className="text-xs text-zinc-500 dark:text-zinc-400">-</span>
+		)}
+	</div>
 );
 
 export type SinglePageComposerProps = {
@@ -69,6 +83,25 @@ export type SinglePageComposerProps = {
 	onCancel?: () => void;
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
 	onEditSql?: (sectionId: string, sql: string) => void;
+	/**
+	 * Called when a certification dropdown changes. `id` is `'name'` for the
+	 * title/header field or the section id (e.g. `'description'`) for a text card.
+	 * When provided (and in edit mode), certification fields render an editable
+	 * dropdown instead of a read-only badge. A returned promise drives the
+	 * dropdown's saving spinner.
+	 */
+	onCertificationChange?: (id: string, certified: boolean) => void | Promise<void>;
+	/**
+	 * Called when a certification dropdown inside a DATA_TABLE row changes.
+	 * When provided (and in edit mode), the certification cell renders an
+	 * editable dropdown instead of a read-only badge. `rowId` is the row's
+	 * `rowIdKey` value. A returned promise drives the dropdown's saving spinner.
+	 */
+	onDataTableCertificationChange?: (
+		sectionId: string,
+		rowId: string,
+		certified: boolean,
+	) => void | Promise<void>;
 	/** Returns an AI-suggested body for a `suggestable` text-card section, or null when none is available. */
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
 	inlineSaveSectionId?: string;
@@ -172,6 +205,7 @@ const EditableTextCard = ({
 	saving = false,
 	autoFocus = false,
 	onSuggest,
+	certificationSlot,
 }: {
 	section: { id: string; title: string; body: string; suggestable?: boolean };
 	onChange: (sectionId: string, value: string) => void;
@@ -179,6 +213,7 @@ const EditableTextCard = ({
 	saving?: boolean;
 	autoFocus?: boolean;
 	onSuggest?: () => Promise<string | null>;
+	certificationSlot?: ReactNode;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const [value, setValue] = useState(section.body);
@@ -199,9 +234,12 @@ const EditableTextCard = ({
 
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 shadow-sm ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-				{section.title}
-			</h2>
+			<div className="flex items-start justify-between gap-3">
+				<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					{section.title}
+				</h2>
+				{certificationSlot}
+			</div>
 			<textarea
 				ref={textareaRef}
 				value={value}
@@ -281,38 +319,31 @@ const ReadOnlyTagList = ({
 	title: string;
 	values: string[];
 	sectionId: string;
-}) => (
-	<div
-		id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
-		className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
-	>
-		<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
-		{values.length === 0 ? (
-			<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
-		) : (
-			<ul className="mt-3 flex flex-wrap gap-1.5">
-				{values.map((v, i) => (
-					<li
-						key={`${v}-${i}`}
-						className="inline-flex max-w-full items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200"
-					>
-						<span className="max-w-[24rem] truncate" title={v}>
-							{v}
-						</span>
-					</li>
-				))}
-			</ul>
-		)}
-	</div>
-);
+}) => {
+	const nonEmptyValues = values.filter((v) => v.trim() !== '');
+	return (
+		<div
+			id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
+			className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+		>
+			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
+			{nonEmptyValues.length === 0 ? (
+				<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+			) : (
+				<ul className="mt-3 flex flex-wrap gap-1.5">
+					{nonEmptyValues.map((v, i) => (
+						<li key={`${v}-${i}`}>
+							<Label label={v} maxWidthClass="max-w-[24rem]" />
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+};
 
 const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
-	const displayedZones = useMemo(() => {
-		if (Array.isArray(section.userZoneIds)) {
-			return section.zones.filter((z) => (section.userZoneIds as string[]).includes(z.id));
-		}
-		return section.zones;
-	}, [section.zones, section.userZoneIds]);
+	const displayedZones = section.zones;
 
 	return (
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
@@ -325,7 +356,7 @@ const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
 				<ul className="mt-3 flex flex-wrap gap-2">
 					{displayedZones.map((zone) => (
 						<li key={zone.id}>
-							<ZoneChip name={zone.name} color={zone.color} />
+							<Label label={zone.name} color={zone.color} muted={!zone.enabled} />
 						</li>
 					))}
 				</ul>
@@ -341,6 +372,11 @@ function renderComposerSection(
 	isEditingActive = false,
 	onEditSql?: (sectionId: string, sql: string) => void,
 	onEntityClick?: (focusId: string) => void,
+	onDataTableCertificationChange?: (
+		sectionId: string,
+		rowId: string,
+		certified: boolean,
+	) => void | Promise<void>,
 ): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
@@ -349,9 +385,17 @@ function renderComposerSection(
 					id={section.id === 'description' ? 'description-section' : undefined}
 					className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
 				>
-					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-						{section.title}
-					</h2>
+					<div className="flex items-start justify-between gap-3">
+						<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+							{section.title}
+						</h2>
+						{section.certification ? (
+							<CertificationBadge
+								status={fieldStatus(section.certification.certified)}
+								iconOnly
+							/>
+						) : null}
+					</div>
 					<p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
 						{section.body}
 					</p>
@@ -399,29 +443,97 @@ function renderComposerSection(
 					<Table
 						className="mt-4"
 						containerClassName="overflow-x-auto rounded-md border border-zinc-200/90 dark:border-zinc-700"
-						layout="auto"
+						layout={section.layout ?? 'auto'}
 						minWidthClass="min-w-[28rem]"
 						cellClassName="px-3 py-2"
 						theadClassName="border-b border-zinc-200 bg-zinc-100/95 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/90 dark:text-zinc-300"
 						bodyClassName="text-zinc-800 dark:text-zinc-200"
 						rowClassName="border-b border-zinc-100 transition-colors hover:bg-zinc-50/80 dark:border-zinc-800 dark:hover:bg-zinc-900/50"
-						columns={section.columns.map((col) => ({
-							key: col.key,
-							header: col.label,
-							cell: (row: Record<string, string>) => row[col.key] || '—',
-						}))}
+						columns={section.columns.map((col) => {
+							const alignClass =
+								col.align === 'center'
+									? 'text-center'
+									: col.align === 'right'
+										? 'text-right'
+										: undefined;
+							return {
+								key: col.key,
+								header: col.label,
+								width: col.width,
+								headerClassName: alignClass,
+								className: alignClass,
+								cell: (row: Record<string, string | string[]>) => {
+									const value = row[col.key];
+									if (col.type === ComposerColumnType.TAGS) {
+										return (
+											<LabelList values={Array.isArray(value) ? value : []} />
+										);
+									}
+									if (col.type === ComposerColumnType.CERTIFICATION) {
+										const status =
+											typeof value === 'string'
+												? (value as CertificationStatus)
+												: CertificationStatus.Pending;
+										const rowId = section.rowIdKey
+											? row[section.rowIdKey]
+											: undefined;
+										const control =
+											isEditingActive &&
+											onDataTableCertificationChange != null &&
+											typeof rowId === 'string' &&
+											rowId !== '' ? (
+												// Stop propagation so toggling certification
+												// never triggers the row's navigation click.
+												<span
+													role="presentation"
+													onClick={(e) => e.stopPropagation()}
+												>
+													<CertificationSelect
+														certified={
+															status === CertificationStatus.Certified
+														}
+														onChange={(next) =>
+															onDataTableCertificationChange(
+																section.id,
+																rowId,
+																next,
+															)
+														}
+													/>
+												</span>
+											) : (
+												<CertificationBadge status={status} iconOnly />
+											);
+										return col.align === 'center' ? (
+											<span className="flex justify-center">{control}</span>
+										) : (
+											control
+										);
+									}
+									const text = typeof value === 'string' ? value : '';
+									if (!text) return '—';
+									return col.truncate ? (
+										<TruncatedText
+											text={text}
+											maxWidthClass={col.maxWidthClass}
+										/>
+									) : (
+										text
+									);
+								},
+							};
+						})}
 						rows={section.rows}
-						rowKey={(row, index) =>
-							isClickable && section.rowIdKey
-								? (row[section.rowIdKey] ?? String(index))
-								: String(index)
-						}
+						rowKey={(row, index) => {
+							const rowId = section.rowIdKey ? row[section.rowIdKey] : undefined;
+							return isClickable && typeof rowId === 'string' ? rowId : String(index);
+						}}
 						onRowClick={
 							isClickable && section.rowIdKey
 								? (row) => {
 										const rowId = row[section.rowIdKey as string];
 										if (rowId) {
-											onDataTableRowClick(section.id, rowId);
+											onDataTableRowClick(section.id, rowId as string);
 										}
 									}
 								: undefined
@@ -457,23 +569,13 @@ function renderComposerSection(
 						<ul className="mt-3 flex flex-wrap gap-2">
 							{section.terms.map((term) => (
 								<li key={term.id}>
-									{onTermClick ? (
-										<button
-											type="button"
-											title={term.description ?? undefined}
-											onClick={() => onTermClick(term.id)}
-											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
-										>
-											{term.name}
-										</button>
-									) : (
-										<span
-											title={term.description ?? undefined}
-											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-										>
-											{term.name}
-										</span>
-									)}
+									<Label
+										label={term.name}
+										title={term.description ?? undefined}
+										onClick={
+											onTermClick ? () => onTermClick(term.id) : undefined
+										}
+									/>
 								</li>
 							))}
 						</ul>
@@ -492,23 +594,15 @@ function renderComposerSection(
 						<ul className="mt-3 flex flex-wrap gap-2">
 							{section.entities.map((entity) => (
 								<li key={entity.id}>
-									{onEntityClick ? (
-										<button
-											type="button"
-											title={entity.name}
-											onClick={() => onEntityClick(entity.focusId)}
-											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
-										>
-											{entity.name}
-										</button>
-									) : (
-										<span
-											title={entity.name}
-											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-										>
-											{entity.name}
-										</span>
-									)}
+									<Label
+										label={entity.name}
+										title={entity.name}
+										onClick={
+											onEntityClick
+												? () => onEntityClick(entity.focusId)
+												: undefined
+										}
+									/>
 								</li>
 							))}
 						</ul>
@@ -576,6 +670,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			onDataTableRowClick,
 			onEditSql,
 			onSuggestDescription,
+			onCertificationChange,
+			onDataTableCertificationChange,
 			inlineSaveSectionId,
 			hideEditToolbar = false,
 		} = props;
@@ -600,6 +696,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const entityId = (hh?.entityId as string) ?? '';
 		const showContentHeader = hh?.showContentHeader === true;
 		const titleEditable = hh?.titleEditable === true;
+		const headerCertification = hh?.certification as ComposerCertification | undefined;
 		const shouldAutofocusTitle = showContentHeader && titleEditable;
 		const pdfPageName = (hh?.pdfProps as { pageName?: string } | undefined)?.pageName;
 		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
@@ -617,6 +714,20 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const [saving, setSaving] = useState(false);
 		const [saveError, setSaveError] = useState<string | null>(null);
 		const isEditingActive = controlledEditingMode || localEditingMode;
+
+		const renderCertControl = (id: string, cert: ComposerCertification): ReactNode =>
+			onCertificationChange && isEditingActive ? (
+				<CertificationSelect
+					certified={cert.certified}
+					showLabel={cert.showLabel}
+					onChange={(next) => onCertificationChange(id, next)}
+				/>
+			) : (
+				<CertificationBadge
+					status={fieldStatus(cert.certified)}
+					iconOnly={cert.showLabel !== true}
+				/>
+			);
 
 		const titleInputRef = useRef<HTMLInputElement>(null);
 		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
@@ -853,25 +964,33 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						) : (
 							<div className="space-y-5">
 								{showContentHeader ? (
-									<div>
-										{isEditingActive && titleEditable ? (
-											<input
-												ref={titleInputRef}
-												key={title}
-												type="text"
-												autoFocus
-												defaultValue={title}
-												onChange={(e) => {
-													pendingEditsRef.current.name = e.target.value;
-												}}
-												className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-zinc-900 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-												aria-label="Name"
-											/>
-										) : (
-											<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-												{title}
-											</h1>
-										)}
+									<div className="flex items-start justify-between gap-3">
+										<div className="min-w-0 flex-1">
+											{isEditingActive && titleEditable ? (
+												<input
+													ref={titleInputRef}
+													key={title}
+													type="text"
+													autoFocus
+													defaultValue={title}
+													onChange={(e) => {
+														pendingEditsRef.current.name =
+															e.target.value;
+													}}
+													className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-zinc-900 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+													aria-label="Name"
+												/>
+											) : (
+												<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+													{title}
+												</h1>
+											)}
+										</div>
+										{headerCertification ? (
+											<div className="shrink-0 pt-1">
+												{renderCertControl('name', headerCertification)}
+											</div>
+										) : null}
 									</div>
 								) : null}
 								{sections.map((section, i) => {
@@ -931,6 +1050,14 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 															? () => onSuggestDescription(section.id)
 															: undefined
 													}
+													certificationSlot={
+														section.certification
+															? renderCertControl(
+																	section.id,
+																	section.certification,
+																)
+															: undefined
+													}
 												/>
 											) : isEditableTagList ? (
 												<EditableTagListCard
@@ -951,6 +1078,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													isEditingActive,
 													onEditSql,
 													handleEntityClick,
+													onDataTableCertificationChange,
 												)
 											)}
 										</div>

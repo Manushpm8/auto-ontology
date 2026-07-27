@@ -42,13 +42,14 @@ class TextToSQLPayload(TypedDict):
     connectors: NotRequired[list[SQLDatabase]]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
+    target_db: NotRequired[str]
 
 
 class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
     llm: ChatNVIDIA
-    entity_llm: NotRequired[BaseChatModel]
+    non_reasoning_llm: NotRequired[BaseChatModel]
     initial_question: str
     messages: list[HumanMessage]
     decision: str

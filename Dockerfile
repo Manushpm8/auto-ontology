@@ -22,7 +22,7 @@
 # ---------------------------------------------------------------------------
 
 ARG PYTHON_VERSION=3.12
-ARG UV_VERSION=0.5.11
+ARG UV_VERSION=0.11.29
 ARG BASE_IMG=nvcr.io/nvidia/base/ubuntu
 ARG BASE_IMG_TAG=jammy-20250619
 
@@ -30,6 +30,8 @@ ARG BASE_IMG_TAG=jammy-20250619
 # Stage 1: builder
 ############################
 FROM $BASE_IMG:$BASE_IMG_TAG AS builder
+
+ARG UV_VERSION
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -48,13 +50,17 @@ RUN apt-get update \
         libpq-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
+# Install uv without introducing a non-NVIDIA build stage.
+RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" \
+        -o /tmp/install-uv.sh \
+ && env UV_UNMANAGED_INSTALL=/usr/local/bin sh /tmp/install-uv.sh \
+ && rm /tmp/install-uv.sh
 
 WORKDIR /app
 
 # Copy lock + project metadata first to maximise layer caching.
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock .python-version ./
+COPY vendor/ vendor/
 
 # Resolve and install the dependency closure into /opt/venv.
 RUN --mount=type=cache,target=/root/.cache/uv \

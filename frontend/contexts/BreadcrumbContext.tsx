@@ -6,12 +6,13 @@
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
-import type { BreadcrumbItem } from '@/components/Breadcrumbs';
+import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 
 const PATH_LABELS: Record<string, BreadcrumbItem> = {
 	'/chat': { label: 'Chat', href: '/chat' },
 	'/terms': { label: 'Terms', href: '/terms' },
 	'/analysis': { label: 'Analysis', href: '/analysis' },
+	'/exploration': { label: 'Exploration', href: '/exploration' },
 	'/data': { label: 'All Data', href: '/data' },
 	'/analytics': { label: 'Analytics', href: '/analytics' },
 	'/settings': { label: 'Settings', href: '/settings' },

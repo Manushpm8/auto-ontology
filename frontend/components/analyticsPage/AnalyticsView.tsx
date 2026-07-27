@@ -6,9 +6,10 @@
 
 import { useEffect, useState } from 'react';
 
-import { Icon, IconName } from '@/components/icons';
-import { Table } from '@/components/Table';
-import { Toast } from '@/components/Toast';
+import { Icon, IconName } from '@/common/icons';
+import { SkeletonTable } from '@/common/Skeleton';
+import { Table } from '@/common/Table';
+import { Toast } from '@/common/Toast';
 import { analyticsApi } from '@/api/analytics';
 import { formatDate } from '@/common/date';
 import type { ConversationAnalytics } from '@/types/analytics';
@@ -153,12 +154,8 @@ export const AnalyticsView = () => {
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
 				{loading && (
-					<div className="flex h-full items-center justify-center">
-						<div
-							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-							role="status"
-							aria-label="Loading analytics"
-						/>
+					<div role="status" aria-label="Loading analytics">
+						<SkeletonTable columns={6} rows={10} />
 					</div>
 				)}
 

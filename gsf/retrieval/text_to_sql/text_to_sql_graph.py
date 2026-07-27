@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
+
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
 from gsf.retrieval.text_to_sql.state import (
@@ -16,10 +18,21 @@ from gsf.retrieval.text_to_sql.agents.candidates_preparation import (
 from gsf.retrieval.text_to_sql.agents.candidates_retrieval import (
     CandidateRetrievalAgent,
 )
+from gsf.retrieval.text_to_sql.agents.empty_result_value_repair import (
+    EmptyResultValueRepairAgent,
+)
+from gsf.retrieval.text_to_sql.agents.proactive_value_check import (
+    ProactiveValueCheckAgent,
+)
 from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionAgent
 from gsf.retrieval.text_to_sql.agents.question_sanitization import (
     QuestionSanitizationAgent,
 )
+from gsf.retrieval.text_to_sql.agents.prediction_classification import (
+    PredictionClassificationAgent,
+)
+from gsf.retrieval.text_to_sql.agents.prediction_graph import PredictionGraphAgent
+from gsf.retrieval.text_to_sql.agents.kumo_prediction import KumoPredictionAgent
 from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
     EmptyLikeResultCheckAgent,
 )
@@ -32,6 +45,9 @@ from gsf.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructio
 from gsf.retrieval.text_to_sql.agents.sql_unconstructable import SQLUnconstructableAgent
 from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationAgent
 from gsf.retrieval.text_to_sql.base import agent_wrapper
+from gsf.retrieval.text_to_sql.db_probe.config import (
+    is_db_probe_proactive,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +141,16 @@ def route_translation(state: AgentState) -> str:
     return "end"
 
 
+def _prediction_enabled() -> bool:
+    """Whether the KumoRFM prediction branch should be built into the graph.
+
+    Evaluated ONCE at graph-creation (startup), not per request: when
+    ``KUMO_RFM_API_KEY`` is unset the prediction nodes/edges are never added, so
+    the classify → prepare-graph → predict path simply does not exist.
+    """
+    return bool(os.environ.get("KUMO_RFM_API_KEY"))
+
+
 def route_decision(state: AgentState) -> str:
     """
     Generic router — returns the current ``decision`` value from state,
@@ -188,6 +214,11 @@ def wrap_node_with_logging(node_name: str, fn):
 
 def create_graph():
 
+    # KumoRFM prediction is wired in only when configured — decided once here at
+    # graph creation (startup), never per request.
+    prediction_enabled = _prediction_enabled()
+    logger.info("Text-to-SQL graph: prediction branch %s", prediction_enabled)
+
     # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
@@ -220,6 +251,19 @@ def create_graph():
     )
     prepare_candidates_node = _make_node(
         "prepare_candidates", agent_wrapper(candidate_preparation_agent)
+    )
+    # Live DB grounding is a repair signal, not always-on context: the
+    # value-repair node only runs after an empty execution result.
+    value_repair_node = _make_node(
+        "check_value_repair", agent_wrapper(EmptyResultValueRepairAgent())
+    )
+    # Optional proactive (pre-execution) literal check — opt-in via DB_PROBE_PROACTIVE.
+    proactive_enabled = is_db_probe_proactive()
+    logger.info("Text-to-SQL graph: db-probe proactive %s", proactive_enabled)
+    proactive_value_node = (
+        _make_node("precheck_value_repair", agent_wrapper(ProactiveValueCheckAgent()))
+        if proactive_enabled
+        else None
     )
     construct_sql_not_from_snippets_node = _make_node(
         "construct_sql_not_from_snippets", agent_wrapper(sql_from_tables_agent)
@@ -263,6 +307,9 @@ def create_graph():
     graph.add_node("entities_extraction", entities_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
+    graph.add_node("check_value_repair", value_repair_node)
+    if proactive_value_node is not None:
+        graph.add_node("precheck_value_repair", proactive_value_node)
     graph.add_node(
         "construct_sql_not_from_snippets", construct_sql_not_from_snippets_node
     )
@@ -279,7 +326,54 @@ def create_graph():
     graph.add_edge("sanitize_question", "entities_extraction")
     graph.add_edge("entities_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
-    graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
+
+    after_prepare = (
+        "classify_prediction" if prediction_enabled else "construct_sql_from_candidates"
+    )
+    graph.add_edge("prepare_candidates", after_prepare)
+
+    if prediction_enabled:
+        # After candidate preparation, a decision tree routes prediction questions
+        # to the KumoRFM tool (scoped to the relevant tables just prepared) and
+        # everything else into SQL construction. The prediction path itself is two
+        # nodes: ``prepare_prediction_graph`` (build the graph/model) →
+        # ``kumo_predict`` (generate PQL + predict), so the slow build step streams
+        # its own progress. Built only when KumoRFM is configured (KUMO_RFM_API_KEY).
+        graph.add_node(
+            "classify_prediction",
+            _make_node(
+                "classify_prediction",
+                agent_wrapper(PredictionClassificationAgent()),
+            ),
+        )
+        graph.add_node(
+            "prepare_prediction_graph",
+            _make_node(
+                "prepare_prediction_graph", agent_wrapper(PredictionGraphAgent())
+            ),
+        )
+        graph.add_node(
+            "kumo_predict",
+            _make_node("kumo_predict", agent_wrapper(KumoPredictionAgent())),
+        )
+
+        graph.add_conditional_edges(
+            "classify_prediction",
+            route_decision,
+            {
+                "prediction": "prepare_prediction_graph",
+                "sql": "construct_sql_from_candidates",
+            },
+        )
+        graph.add_conditional_edges(
+            "prepare_prediction_graph",
+            route_decision,
+            {
+                "predict_ready": "kumo_predict",
+                "predict_failed": END,
+            },
+        )
+        graph.add_edge("kumo_predict", END)
 
     graph.add_conditional_edges(
         "construct_sql_from_candidates",
@@ -290,13 +384,21 @@ def create_graph():
         },
     )
 
+    # When the proactive check is enabled, every route that would otherwise go
+    # straight to execution is funnelled through it first.
+    pre_execute_target = (
+        "precheck_value_repair"
+        if proactive_value_node is not None
+        else "execute_sql_query"
+    )
+
     # SQL validation → route
     graph.add_conditional_edges(
         "validate_sql_query",
         route_sql_validation,
         {
             "valid_sql": "validate_intent",  # Validate intent after syntax validation succeeds
-            "skip_intent_validation": "execute_sql_query",  # Skip intent validation after 5+ reconstructions
+            "skip_intent_validation": pre_execute_target,  # Skip intent validation after 5+ reconstructions
             "invalid_sql": "reconstruct_sql",
             "fallback": "construct_sql_not_from_snippets",
             "unconstructable": "unconstructable_sql_response",
@@ -308,10 +410,20 @@ def create_graph():
         "validate_intent",
         route_intent_validation,
         {
-            "valid_sql": "execute_sql_query",  # Format after both validations succeed
+            "valid_sql": pre_execute_target,  # Format after both validations succeed
             "invalid_sql": "reconstruct_sql",  # Reconstruct if intent is invalid
         },
     )
+
+    if proactive_value_node is not None:
+        graph.add_conditional_edges(
+            "precheck_value_repair",
+            route_decision,
+            {
+                "valid_sql": "execute_sql_query",
+                "invalid_sql": "reconstruct_sql",
+            },
+        )
 
     # SQL execution → route (use route_sql_validation to enforce attempt limits)
     graph.add_conditional_edges(
@@ -326,8 +438,18 @@ def create_graph():
         },
     )
 
+    # After the empty-LIKE check, run the value-repair check (also gated on an
+    # empty result at run time).
     graph.add_conditional_edges(
         "check_empty_like_result",
+        route_decision,
+        {
+            "valid_sql": "check_value_repair",
+            "invalid_sql": "reconstruct_sql",
+        },
+    )
+    graph.add_conditional_edges(
+        "check_value_repair",
         route_decision,
         {
             "valid_sql": "format_and_respond",

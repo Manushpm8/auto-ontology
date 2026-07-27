@@ -8,9 +8,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
 import { formatDate } from '@/common/date';
-import { Icon, IconName } from '@/components/icons';
-import { ConfirmModal } from '@/components/ConfirmModal';
-import { PopoverMenu } from '@/components/PopoverMenu';
+import { Icon, IconName } from '@/common/icons';
+import { SkeletonRows } from '@/common/Skeleton';
+import { ConfirmModal } from '@/common/modal';
+import { PopoverMenu } from '@/common/PopoverMenu';
 
 type ChatSidebarProps = {
 	conversations: Conversation[];
@@ -203,12 +204,8 @@ export const ChatSidebar = ({
 
 				<nav className="flex-1 overflow-y-auto px-2 pb-2">
 					{sidebarLoading ? (
-						<div className="flex h-full items-center justify-center py-6">
-							<div
-								className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-								role="status"
-								aria-label="Loading conversations"
-							/>
+						<div className="py-2" role="status" aria-label="Loading conversations">
+							<SkeletonRows rows={8} />
 						</div>
 					) : conversations.length === 0 ? (
 						<p className="px-2 py-4 text-center text-xs text-zinc-500 dark:text-zinc-400">

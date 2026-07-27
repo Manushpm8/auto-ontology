@@ -14,6 +14,7 @@ export type Column = {
 	ordinal_position: number;
 	description?: string;
 	sample_values?: string[];
+	description_certified?: boolean;
 };
 
 export type Table = {
@@ -22,9 +23,12 @@ export type Table = {
 	database_name: string;
 	schema_name: string;
 	columns_count: number;
+	sql_count?: number;
+	terms_count?: number;
 	columns: Column[];
 	table_type: TableType;
 	description?: string;
+	description_certified?: boolean;
 };
 
 export type Schema = {

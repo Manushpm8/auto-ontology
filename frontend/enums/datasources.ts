@@ -5,7 +5,7 @@
 export enum DataModels {
 	DB = 'db',
 	SCHEMA = 'schema',
-	TABLE = 'table',
+	TABLE = 'base table',
 	VIEW = 'view',
 	MATERIALIZED_VIEW = 'materialized view',
 	COLUMN = 'column',
@@ -35,6 +35,13 @@ export enum ComposerSectionKind {
 	RELATED_TERMS_CHIPS = 'relatedTermsChips',
 	ENTITY_CHIPS = 'entityChips',
 	SQL_BLOCK = 'sqlBlock',
+}
+
+/** How a DATA_TABLE column renders its cells. */
+export enum ComposerColumnType {
+	TEXT = 'text',
+	TAGS = 'tags',
+	CERTIFICATION = 'certification',
 }
 
 export enum Usage {

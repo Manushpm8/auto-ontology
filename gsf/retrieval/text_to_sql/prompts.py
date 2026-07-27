@@ -37,6 +37,7 @@ create_sql_user_prompt = (
     "**Joins**\n"
     "- Join only when necessary; choose join type (INNER / LEFT / RIGHT) "
     "based on the question's intent. Avoid fan-out from many-to-many joins.\n\n"
+    "{join_paths}\n\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
     "Use CASE WHEN inside aggregates instead: "
@@ -51,8 +52,18 @@ create_sql_user_prompt = (
     "or any other vendor-specific or non-standard syntax.\n"
     "- Preserve the exact capitalization of values, names, and identifiers "
     "from the user's question.\n\n"
+    "{dialect_rules}"
     "**Style**\n"
-    "- Prefer name columns over ID columns when both are available.\n"
+    "- SELECT only the columns explicitly asked; extra columns make the result "
+    "wrong even when the rows are right. For superlative/ranking questions "
+    "(most/least/top/highest/lowest/peak/best/worst), select ONLY the item named "
+    "— the ranking key OR the aggregated value, never both — and never add the "
+    "ORDER BY metric unless its value is asked. To identify an entity "
+    "(who/which/what), return one identifying column (name if it exists, else id), "
+    "not both.\n"
+    "- If evidence maps an answer concept to specific columns, preserve that "
+    "projection exactly; do not collapse, reshape, or replace those columns "
+    "unless the question explicitly asks for a transformed value.\n"
     "- Time windows: 'last week/month/year' means the most recent "
     "completed calendar period, not a rolling window.\n"
     "- Infer LIMIT from the question's intent: "
@@ -67,13 +78,147 @@ create_sql_user_prompt = (
 )
 
 
-def create_sql_from_candidates_prompt() -> str:
-    """System prompt for SQL generation from semantic retrieval candidates."""
-    return """You are an expert SQL query builder. You MUST always produce a SQL query.
+# Functions the LLM reaches for (Postgres / Snowflake / BigQuery / PostGIS
+# habits) that are absent from the stdlib SQLite build used at execution time.
+# Math builtins (sin/cos/acos/radians/sqrt/pi/pow/ln/log/exp/mod/…) ARE
+# available, so distance math can be written by hand.
+_SQLITE_DIALECT_RULES = (
+    "**SQLite-specific (STRICT — these will error at execution)**\n"
+    "- No LEAST / GREATEST. Use scalar MIN(a, b, …) / MAX(a, b, …) instead.\n"
+    "- No spatial / PostGIS functions (ST_Distance, ST_X, ST_Y, ST_DWithin, "
+    "POINT, distance(), …). Compute great-circle distance by hand with the "
+    "Haversine formula using sin/cos/acos/radians/sqrt (all available).\n"
+    "- No statistical aggregates (STDDEV, STDDEV_POP, VARIANCE, VAR_POP, "
+    "PERCENTILE_CONT, PERCENTILE_DISC, MEDIAN, CORR, REGR_*). Derive them with "
+    "plain arithmetic (AVG, SUM, COUNT, window functions).\n"
+    "- No STRING_AGG / ARRAY_AGG — use GROUP_CONCAT. No generate_series.\n"
+    "- No EXTRACT(...) / DATE_TRUNC / DATE_PART / AGE / NOW() / INTERVAL "
+    "literals. Use strftime(), date(), datetime() for all date/time work.\n"
+    "- No :: casts and no ILIKE. Use CAST(x AS type); LIKE is case-insensitive "
+    "for ASCII.\n"
+    "- Coordinates and other composite columns are stored as TEXT, not JSON or "
+    "arrays. Do NOT use json_extract on non-JSON text — inspect the value shape "
+    "and parse with substr()/instr()/CAST as needed.\n"
+    "- Prefer built-in aggregate/math functions and window functions only.\n\n"
+)
 
-Key rules:
-- Use fully qualified table names exactly as provided (e.g., schema.table_name).
-  Never drop the schema/database prefix.
+
+# Snowflake folds unquoted identifiers to UPPERCASE. Datasets loaded from
+# BigQuery/Google-public-data (e.g. Spider2 PATENTS) keep their original
+# lowercase, case-sensitive column names, so an unquoted/upper reference raises
+# "invalid identifier". Nested BigQuery RECORD/REPEATED fields land as VARIANT
+# arrays that need LATERAL FLATTEN to unnest.
+_SNOWFLAKE_DIALECT_RULES = (
+    "**Snowflake-specific (STRICT — these OVERRIDE the generic syntax bans above)**\n"
+    "- The general rule against `::` casts and LATERAL joins does NOT apply here: "
+    "Snowflake REQUIRES `::type` casts and `LATERAL FLATTEN` to read VARIANT data.\n"
+    "- Identifiers are CASE-SENSITIVE when quoted, and Snowflake folds unquoted "
+    "names to UPPERCASE. The schema above lists the real stored names. Wrap every "
+    "table and column identifier in double quotes using the EXACT case shown, e.g. "
+    '`SELECT t."publication_number" FROM "PATENTS"."PUBLICATIONS" AS t`. '
+    "Never reference a lowercase column unquoted — it will fail as 'invalid identifier'.\n"
+    "- Aliases you define may stay unquoted; only real table/column names need the "
+    "exact-case double quotes.\n"
+    "- VARIANT / ARRAY / OBJECT columns hold nested (semi-structured) data. To read "
+    "fields inside them, use LATERAL FLATTEN: "
+    '`FROM "T", LATERAL FLATTEN(input => "T"."assignee_harmonized") f` then '
+    'access `f.value:"name"::string`. Selecting a VARIANT column directly returns '
+    "the whole JSON, not scalar fields.\n"
+    "- Use `:` / `[...]` path syntax for OBJECT fields and `::type` casts on the "
+    'extracted values (e.g. `f.value:"name"::string`).\n'
+    "- Date columns loaded from BigQuery are often integer epoch/`YYYYMMDD` NUMBERs, "
+    "not DATE types — check the sample values and cast/parse accordingly.\n\n"
+)
+
+
+# Dialects with a single flat namespace (no schemas): tables are referenced by
+# bare name. Everything else (Postgres, Snowflake, HeavyDB) namespaces tables
+# under a schema that MUST be kept in the identifier (``schema.table``).
+_SCHEMALESS_DIALECTS = {"sqlite", "duckdb"}
+
+
+def format_dialect_rules(dialect: str | None) -> str:
+    """Return dialect-specific SQL rules for the ``dialect_rules`` prompt slot.
+
+    SQLite lacks many functions the model habitually emits (spatial,
+    LEAST/GREATEST, stats aggregates, EXTRACT/DATE_TRUNC). Snowflake needs
+    identifier-quoting and VARIANT/FLATTEN guidance for case-sensitive
+    lowercase columns (Spider2 PATENTS etc.). Returns '' for other dialects.
+    """
+    normalized = (dialect or "").strip().lower()
+    if normalized == "sqlite":
+        return _SQLITE_DIALECT_RULES
+    if normalized == "snowflake":
+        return _SNOWFLAKE_DIALECT_RULES
+    return ""
+
+
+def create_sql_from_candidates_prompt(
+    *,
+    dialect: str | None = None,
+    target_db: str | None = None,
+    has_evidence: bool = False,
+) -> str:
+    """System prompt for SQL generation from semantic retrieval candidates.
+
+    Table naming is gated on the **dialect**, not on ``target_db``: schema-less
+    dialects (SQLite/DuckDB, incl. BIRD) use bare table names, while schema
+    dialects (Postgres/Snowflake) keep the ``schema.table`` qualifier. Scoping a
+    query to one database (``target_db``) removes only the *database* prefix — the
+    schema is still required to resolve the table, so it is never dropped here.
+    """
+    bare_table_names = (dialect or "").lower() in _SCHEMALESS_DIALECTS
+    if bare_table_names:
+        table_name_rule = (
+            "- Use table names exactly as shown in AVAILABLE TABLES "
+            "(unqualified — do NOT add a schema or database prefix).\n"
+        )
+        join_template = "    JOIN target_table ON source_table.source_column = target_table.target_column"
+        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
+FROM sales AS s
+JOIN customers AS c ON s.customer_id = c.customer_id
+WHERE s.order_date BETWEEN '2024-01-01' AND '2024-03-31'
+GROUP BY c.country_name
+ORDER BY total_sales DESC;"""
+    else:
+        table_name_rule = (
+            "- Use table names exactly as shown in AVAILABLE TABLES, INCLUDING the "
+            "schema prefix (e.g., schema.table_name). Never drop the schema; do NOT "
+            "add a database-name prefix.\n"
+        )
+        join_template = (
+            "    JOIN target_schema.target_table ON source_schema.source_table.source_column\n"
+            "         = target_schema.target_table.target_column"
+        )
+        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
+FROM PUBLIC.SALES AS s
+JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
+WHERE s.order_date BETWEEN
+  DATE_TRUNC('quarter', ADD_MONTHS(CURRENT_DATE, -3))
+  AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
+GROUP BY c.country_name
+ORDER BY total_sales DESC;"""
+
+    evidence_block = (
+        "## Evidence Priority\n"
+        'The question includes an "Evidence:" section — treat it as authoritative '
+        "ground truth. Evidence overrides semantic hints, examples, descriptions, and "
+        "your own interpretation. Apply every evidence clause exactly: use named "
+        "columns/tables, formulas, filters, synonyms, ranking rules, and LIKE patterns "
+        "as specified. If evidence maps a requested answer to columns, SELECT those "
+        "columns exactly. Do NOT substitute semantically similar columns or raw "
+        "question literals when evidence gives an exact SQL mapping. "
+        "Follow any explicit evidence formula verbatim: same operands and same "
+        "numerator/denominator order even if the question implies the opposite, "
+        "with no added * 100, - 1, ROUND, or extra columns.\n\n"
+        if has_evidence
+        else ""
+    )
+
+    return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
+
+{evidence_block}Key rules:
+{table_name_rule}
 - When SQL snippets are provided as reference, do NOT copy their aliases.
   Define your own aliases in FROM/JOIN and use only those.
 - File contents (if present) are inputs only — use them as literals, filters,
@@ -84,8 +229,7 @@ Key rules:
   use them instead. Never force the semantic hint if it doesn't match the question.
 - SUGGESTED JOIN PATHS show column-level join conditions. Use only the hops you
   actually need:
-    JOIN target_schema.target_table ON source_schema.source_table.source_column
-         = target_schema.target_table.target_column
+{join_template}
   Follow hops in order when the path spans more than one table.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,
@@ -99,6 +243,11 @@ Key rules:
 - When creating a JOIN, both sides of the ON condition must use columns with
   the same data type. Never join a text column to a numeric column or a date
   column to an integer column, or uuid column to a string column.
+- Never match a human name/label against an id or foreign-key column (`*_id`,
+  `link_to_*`). To filter by a name, join to the table holding the name columns
+  (first_name/last_name/*_name) and filter there. Join each foreign key to the
+  primary key it actually references (e.g. `expense.link_to_member` =
+  `member.member_id`, never `event.event_id`).
 - Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
   RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
   NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
@@ -122,14 +271,7 @@ thought:
 Join sales and customers, filter last full quarter, aggregate by country.
 
 sql_code:
-SELECT c.country_name, SUM(s.sales_amount) AS total_sales
-FROM PUBLIC.SALES AS s
-JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
-WHERE s.order_date BETWEEN
-  DATE_TRUNC('quarter', ADD_MONTHS(CURRENT_DATE, -3))
-  AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
-GROUP BY c.country_name
-ORDER BY total_sales DESC;
+{example_sql}
 
 response:
 This calculates total sales revenue per country for the most recently completed
@@ -253,6 +395,71 @@ Output: How many shipments were delivered last month?
 
 Input: {question}
 Output:"""
+
+
+def create_prediction_classification_prompt(question: str) -> str:
+    return f"""You are a router that decides whether a question requires a PREDICTION.
+
+A PREDICTION question asks for a FUTURE, expected, or currently-unknown value that
+must be forecast or estimated from patterns in the data — it cannot be answered by
+simply querying rows that already exist.
+
+Decision rule: default to NOT a prediction. Answer True ONLY if the question is
+explicitly about the future or an unknown outcome — typically signalled by words
+like "will", "predict", "forecast", "expected", "projected", "likely", "next
+month/quarter/year", "going to", or "at risk".
+
+A question about what ALREADY happened is NEVER a prediction, even when it names a
+specific date, month, or year (past OR future) — counting, listing, or aggregating
+existing rows is a plain data query. "How many X were created/added/sold in <year>"
+asks to COUNT rows that already exist, so it is NOT a prediction.
+
+Prediction (True):
+- "How many orders will customer 42 place in the next 30 days?"
+- "Predict which customers are likely to churn."
+- "What is the expected revenue next quarter?"
+- "Will this user upgrade their subscription?"
+
+Not a prediction (False) — answerable from existing data:
+- "How many GPUs created in 2025?"          (counts existing rows for a year)
+- "How many orders were placed in 2025?"
+- "How many orders did customer 42 place last month?"
+- "List the top 10 customers by revenue."
+- "What was total revenue last quarter?"
+
+Question: {question}
+
+Decide: is this a prediction request?"""
+
+
+def create_pql_generation_prompt(question: str, schema_text: str) -> str:
+    return f"""You translate a natural-language question into a single KumoRFM
+Predictive Query Language (PQL) query.
+
+PQL structure: PREDICT <target> FOR <entity> [WHERE <filters>]
+- Target: an aggregation over related rows across a future window, or a column.
+  Aggregations take (column_or_*, start_offset, end_offset, unit), e.g.
+  SUM(orders.price, 0, 30, days), COUNT(orders.*, 0, 90, days).
+- Entity: a table's primary key selecting the row(s) to predict for, e.g.
+  users.user_id=42, or users.user_id (all rows).
+
+Examples:
+- PREDICT SUM(orders.price, 0, 30, days) FOR users.user_id=42
+- PREDICT COUNT(orders.*, 0, 90, days) = 0 FOR users.user_id=42
+- PREDICT users.age FOR users.user_id=42
+
+Rules:
+- Use ONLY the tables and columns listed below. Do not invent names.
+- Reference columns as table.column exactly as named.
+- Return exactly one valid PQL query.
+
+## Available tables and columns
+{schema_text}
+
+## Question
+{question}
+
+Produce the PQL query."""
 
 
 def create_intent_validation_prompt(

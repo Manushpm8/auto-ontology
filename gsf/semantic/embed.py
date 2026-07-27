@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,6 +12,7 @@ from nemo_retriever.common.params.models import EmbedParams
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
+from gsf.utils.model_config import resolve
 from gsf.vdb import get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
 
@@ -126,22 +126,17 @@ def build_semantic_embedder(
     reset: bool,
 ) -> SemanticEmbedder | None:
     """Construct an embedder bound to the semantic VDB, or None when disabled."""
-    api_key = os.environ.get("EMBED_API_KEY", "") or os.environ.get(
-        "NVIDIA_API_KEY", ""
-    )
+    api_key = resolve("EMBED", "API_KEY")
     if not api_key:
         logger.warning(
-            "EMBED_API_KEY / NVIDIA_API_KEY not set — semantic VDB embedding disabled"
+            "EMBED_API_KEY / DEFAULT_MODELS_API_KEY not set — "
+            "semantic VDB embedding disabled"
         )
         return None
 
     embed_params = EmbedParams(
-        embed_invoke_url=os.environ.get(
-            "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
-        ),
-        model_name=os.environ.get(
-            "EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2"
-        ),
+        embed_invoke_url=resolve("EMBED", "ENDPOINT"),
+        model_name=resolve("EMBED", "MODEL"),
         api_key=api_key,
         embed_modality="text",
     )
@@ -190,6 +185,7 @@ def embed_all_semantic_nodes(
                     "description": term.get("description") or "",
                     "synonyms": term.get("synonyms") or [],
                     "id": term.get("id"),
+                    "schema_names": term.get("schema_names") or [],
                 },
                 attrs_by_term.get(term_name, []),
             )
@@ -221,14 +217,14 @@ def embed_all_semantic_nodes(
     return len(with_embeddings)
 
 
-def _format_sample_values(raw: str | None) -> str:
+def _format_sample_values(raw: str | list[Any] | None) -> str:
     """Return a ' Sample values: ...' suffix string, or empty string if unavailable."""
     if not raw:
         return ""
     try:
         import json
 
-        values = json.loads(raw)
+        values = json.loads(raw) if isinstance(raw, str) else list(raw)
         non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
         if not non_null:
             return ""
@@ -256,6 +252,9 @@ def _build_rows(
         }
         if term.get("id"):
             fields["id"] = term["id"]
+        schema_names = [s for s in (term.get("schema_names") or []) if s]
+        if schema_names:
+            fields["schema_names"] = schema_names
         rows.append(
             {
                 "text": text,
@@ -285,7 +284,7 @@ def _build_rows(
             if a.get("id")
             else f"semantic:attr:{owner}:{a.get('source_column')}"
         )
-        fields = {
+        fields: dict[str, Any] = {
             "label": "ColumnAttribute",
             "name": attr_name,
             "term_name": owner,
@@ -293,6 +292,8 @@ def _build_rows(
             "database_name": database_name,
             "source_path": path,
         }
+        if a.get("schema_name"):
+            fields["schema_name"] = a["schema_name"]
         if a.get("id"):
             fields["id"] = a["id"]
         rows.append(

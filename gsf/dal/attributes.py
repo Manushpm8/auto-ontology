@@ -76,6 +76,50 @@ def merge_column_attribute(
     return rows[0]["id"] if rows else None
 
 
+def update_column_attribute(
+    attr_id: str,
+    term_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    certified: bool | None = None,
+) -> dict[str, Any] | None:
+    """Update ColumnAttribute metadata and return its embedding context."""
+    rows = get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: $attr_id}})
+              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
+        SET attr.name = coalesce($name, attr.name),
+            attr.description = coalesce($description, attr.description),
+            attr.certified = coalesce($certified, attr.certified)
+        WITH attr, term
+        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
+        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+        RETURN attr.id AS id,
+               attr.name AS name,
+               attr.description AS description,
+               attr.term_name AS term_name,
+               attr.source_column AS source_column,
+               col.id AS column_id,
+               col.sample_values AS sample_values,
+               term.id AS term_id,
+               term.synonyms AS term_synonyms,
+               head(collect(DISTINCT db.name)) AS database_name,
+               coalesce(attr.certified, false) AS certified
+        """,
+        {
+            "attr_id": attr_id,
+            "term_id": term_id,
+            "name": name,
+            "description": description,
+            "certified": certified,
+        },
+    )
+    return dict(rows[0]) if rows else None
+
+
 def find_column_attribute_by_column_id(column_id: str) -> str | None:
     """Return the id of the ColumnAttribute connected to a given Column, or None."""
     rows = get_neo4j_conn().query_read(
@@ -134,25 +178,128 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 
 
-def find_unlinked_fk_columns() -> list[dict[str, Any]]:
+def find_unlinked_fk_columns(
+    database_name: str | None = None,
+) -> list[dict[str, Any]]:
     """Return Column nodes with no SEMANTIC_FK and no HAS_ATTRIBUTE edge.
 
     These are FK columns that have not yet been linked to a ColumnAttribute.
+
+    When *database_name* is provided, only columns belonging to that database
+    are returned. Multiple databases can be co-resident in the same Neo4j
+    graph (e.g. the BIRD benchmark), so scoping keeps each compile pass'
+    FK-resolution isolated to a single database. When omitted, every unlinked
+    FK column in the graph is returned.
     """
-    return get_neo4j_conn().query_read(
+    if database_name is not None:
+        result = get_neo4j_conn().query_read(
+            f"""
+            MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+                  (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+                  (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+            WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
+              AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
+            OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            RETURN col.id          AS id,
+                   col.name        AS name,
+                   col.description AS description,
+                   col.sample_values AS sample_values,
+                   t.name          AS table_name,
+                   tgt.id          AS fk_target_col_id
+            """,
+            {"database_name": database_name},
+        )
+    else:
+        result = get_neo4j_conn().query_read(
+            f"""
+            MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+            WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
+              AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
+            OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            RETURN col.id          AS id,
+                   col.name        AS name,
+                   col.description AS description,
+                   col.sample_values AS sample_values,
+                   t.name          AS table_name,
+                   tgt.id          AS fk_target_col_id
+            """
+        )
+    return result
+
+
+_COLUMN_PATH_RETURN = (
+    "col.id AS id, col.name AS column_name, "
+    "t.id AS table_id, t.name AS table_name, "
+    "sch.id AS schema_id, db.id AS db_id"
+)
+
+
+def _column_path_dict(row: dict[str, Any]) -> dict[str, Any]:
+    """Project a Neo4j column-path row into the API column-ref shape."""
+    return {
+        "id": row["id"],
+        "column_name": row["column_name"],
+        "table_id": row["table_id"],
+        "table_name": row["table_name"],
+        "schema_id": row["schema_id"],
+        "db_id": row["db_id"],
+    }
+
+
+def fetch_column_attribute_columns_map(
+    attr_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Return primary/referenced columns keyed by ColumnAttribute id.
+
+    Each value is ``{primary_column, referenced_columns}``. Missing
+    attributes are omitted; callers should default to
+    ``primary_column=None`` / ``referenced_columns=[]``.
+
+    Each column dict includes catalog path ids (``db_id``, ``schema_id``,
+    ``table_id``, ``id``) plus display names so the UI can navigate to
+    ``/data?focus=db|schema|table|column``.
+    """
+    if not attr_ids:
+        return {}
+
+    conn = get_neo4j_conn()
+    primary_rows = conn.query_read(
         f"""
-        MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-        WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
-          AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
-        OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
-        RETURN col.id          AS id,
-               col.name        AS name,
-               col.description AS description,
-               col.sample_values AS sample_values,
-               t.name          AS table_name,
-               tgt.id          AS fk_target_col_id
-        """
+        UNWIND $attr_ids AS attr_id
+        MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
+              (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: attr_id}})
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
+              -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+        RETURN attr.id AS attr_id, {_COLUMN_PATH_RETURN}
+        """,
+        {"attr_ids": attr_ids},
     )
+    referenced_rows = conn.query_read(
+        f"""
+        UNWIND $attr_ids AS attr_id
+        MATCH (col:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->
+              (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: attr_id}})
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
+              -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+        RETURN attr.id AS attr_id, {_COLUMN_PATH_RETURN}
+        ORDER BY t.name, col.name
+        """,
+        {"attr_ids": attr_ids},
+    )
+
+    result: dict[str, dict[str, Any]] = {
+        attr_id: {"primary_column": None, "referenced_columns": []}
+        for attr_id in attr_ids
+    }
+    for row in primary_rows:
+        attr_id = row["attr_id"]
+        if attr_id in result and result[attr_id]["primary_column"] is None:
+            result[attr_id]["primary_column"] = _column_path_dict(row)
+    for row in referenced_rows:
+        attr_id = row["attr_id"]
+        if attr_id in result:
+            result[attr_id]["referenced_columns"].append(_column_path_dict(row))
+    return result
 
 
 def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
@@ -175,7 +322,13 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     """Find the shortest semantic join path between two Column nodes.
 
-    Traverses SEMANTIC_FK, HAS_ATTRIBUTE, and CONTAINS edges undirected.
+    SEMANTIC_FK is directional (Column -> ColumnAttribute) and is followed
+    only in that outgoing direction: an FK column points at the attribute it
+    references. Traversing it undirected would hop from one FK column up to a
+    shared target attribute and back down a *different* FK column, fabricating
+    a join between two unrelated columns that merely reference the same target
+    (e.g. two person-id columns). HAS_ATTRIBUTE and CONTAINS stay undirected.
+
     Returns a list of hop dicts:
         [{source_schema, source_table, source_column,
           target_schema, target_table, target_column}, ...]
@@ -184,13 +337,24 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     if anchor_col_id == dest_col_id:
         return []
 
+    # apoc.path.expandConfig is used instead of shortestPath because Cypher's
+    # variable-length patterns apply a single direction to every relationship
+    # type, whereas we need SEMANTIC_FK outgoing-only (">") while keeping
+    # HAS_ATTRIBUTE and CONTAINS bidirectional. bfs + limit:1 yields the
+    # shortest path; labelFilter "-Schema" keeps Schema nodes out of the path.
     path_query = """
     MATCH (col_anchor:Column {id: $anchor_col_id})
     MATCH (col_dest:Column {id: $dest_col_id})
-    MATCH path = shortestPath(
-        (col_anchor)-[:SEMANTIC_FK|HAS_ATTRIBUTE|CONTAINS*..30]-(col_dest)
-    )
-    WHERE NONE(n IN nodes(path) WHERE n:Schema)
+    CALL apoc.path.expandConfig(col_anchor, {
+        relationshipFilter: 'SEMANTIC_FK>|HAS_ATTRIBUTE|CONTAINS',
+        labelFilter: '-Schema',
+        terminatorNodes: [col_dest],
+        bfs: true,
+        uniqueness: 'NODE_GLOBAL',
+        minLevel: 1,
+        maxLevel: 30,
+        limit: 1
+    }) YIELD path
     RETURN [n IN nodes(path) | {
         id: n.id,
         name: n.name,
