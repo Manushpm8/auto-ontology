@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any
 from urllib.parse import quote
@@ -19,15 +20,19 @@ def _connection_string(token: str = "secret") -> str:
 
 
 def test_parse_connection_string() -> None:
-    kwargs, catalog = _parse_connection_string(_connection_string("secret/with@chars"))
+    kwargs, catalog, schema_contains = _parse_connection_string(
+        _connection_string("secret/with@chars")
+    )
 
     assert kwargs == {
         "server_hostname": "example.databricks.com",
         "http_path": "/sql/1.0/warehouses/warehouse-id",
         "access_token": "secret/with@chars",
         "catalog": "main",
+        "enable_telemetry": False,
     }
     assert catalog == "main"
+    assert schema_contains is None
 
 
 def test_build_connection_string() -> None:
@@ -46,6 +51,67 @@ def test_build_connection_string() -> None:
         "databricks://token:token%2Fwith%40reserved@example.databricks.com/main"
         "?http_path=%2Fsql%2F1.0%2Fwarehouses%2Fwarehouse-id"
     )
+
+
+def test_build_connection_string_carries_schema_contains() -> None:
+    connection_string = build_connection_string(
+        {
+            "type": "databricks",
+            "host": "example.databricks.com",
+            "http_path": "/sql/1.0/warehouses/warehouse-id",
+            "password": "token",
+            "database": "main",
+            "schema_contains": "sales & co",
+        }
+    )
+
+    assert connection_string.endswith("&schema_contains=sales%20%26%20co")
+    _kwargs, _catalog, schema_contains = _parse_connection_string(connection_string)
+    assert schema_contains == "sales & co"
+
+
+def test_get_schemas_applies_contains_filter(monkeypatch: MonkeyPatch) -> None:
+    executed: list[str] = []
+
+    def fake_execute(self: DatabricksDatabase, sql_text: str, parameters: Any = None):
+        executed.append(sql_text)
+        return pd.DataFrame({"databaseName": ["sales_raw", "sales_curated"]})
+
+    monkeypatch.setattr(DatabricksDatabase, "execute", fake_execute)
+
+    plain = DatabricksDatabase(_connection_string())
+    assert plain.get_schemas() == ["sales_raw", "sales_curated"]
+    assert executed[-1] == "SHOW SCHEMAS IN `main`"
+
+    filtered = DatabricksDatabase(_connection_string() + "&schema_contains=sal*es")
+    filtered.get_schemas()
+    # ``*`` is escaped so the user's substring matches literally.
+    assert executed[-1] == "SHOW SCHEMAS IN `main` LIKE '*sal\\*es*'"
+
+
+def test_create_connection_drops_schema_contains(monkeypatch: MonkeyPatch) -> None:
+    from gsf.server.connections import service
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        service, "insert_connection", lambda **kwargs: captured.update(kwargs)
+    )
+    monkeypatch.setattr(service, "_database_already_connected", lambda _name: False)
+    monkeypatch.setattr(service, "is_vault_configured", lambda: False)
+    monkeypatch.setattr(service, "invalidate_connectors_cache", lambda: None)
+    monkeypatch.setattr(service, "refresh_chat_workers", lambda: None)
+    monkeypatch.setattr(service, "trigger_ingest", lambda _connection: None)
+
+    stored = service.create_connection(
+        connection={
+            "type": "databricks",
+            "database": "main",
+            "schema_contains": "sales",
+        }
+    )
+
+    assert "schema_contains" not in stored
+    assert "schema_contains" not in json.loads(captured["connection"])
 
 
 def test_schema_selection_filters_introspection() -> None:

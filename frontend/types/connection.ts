@@ -12,6 +12,8 @@ export type DatabricksConnectionParams = {
 	database: string;
 	/** Optional ingestion allowlist: only these schemas are ingested. Empty/absent = all. */
 	schemas?: string[];
+	/** Test-only substring filter narrowing the schema picker. Never persisted. */
+	schema_contains?: string;
 };
 
 export type PostgresConnectionParams = {

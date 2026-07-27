@@ -63,6 +63,12 @@ def create_connection(
 ) -> dict[str, Any]:
     """Create a UI-managed connection stored in Neo4j."""
 
+    # ``schema_contains`` only narrows the test-time schema picker. Persisting it
+    # would silently narrow ingestion too, so drop it before storing.
+    connection = {
+        key: value for key, value in connection.items() if key != "schema_contains"
+    }
+
     database_name = str(connection.get("database"))
     if not database_name:
         raise ValueError("Database name is required")

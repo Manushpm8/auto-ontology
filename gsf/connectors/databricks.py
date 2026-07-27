@@ -26,14 +26,26 @@ def _quoted_identifier(name: str) -> str:
     return f"`{name.replace('`', '``')}`"
 
 
+def _like_literal(value: str) -> str:
+    """Return a ``SHOW SCHEMAS ... LIKE`` pattern matching *value* anywhere.
+
+    ``SHOW SCHEMAS`` takes no bind parameters, so the pattern is inlined. Only
+    ``*`` and ``|`` are wildcards in Databricks' pattern syntax; both are
+    escaped so a user-supplied substring matches literally.
+    """
+    escaped = value.replace("'", "\\'").replace("*", "\\*").replace("|", "\\|")
+    return f"'*{escaped}*'"
+
+
 def _parse_connection_string(
     connection_string: str,
-) -> tuple[dict[str, Any], str]:
-    """Parse a Databricks URL into connector kwargs and a catalog name.
+) -> tuple[dict[str, Any], str, str | None]:
+    """Parse a Databricks URL into connector kwargs, catalog, and schema filter.
 
     Expected format::
 
         databricks://token:ACCESS_TOKEN@HOST/CATALOG?http_path=SQL_HTTP_PATH
+            [&schema_contains=SUBSTRING]
     """
     parsed = urlparse(connection_string)
     if parsed.scheme.split("+", 1)[0].lower() != "databricks":
@@ -65,14 +77,22 @@ def _parse_connection_string(
             "Databricks connection string requires ?http_path=/sql/1.0/warehouses/..."
         )
 
+    schema_contains = unquote(query.get("schema_contains", [""])[0]).strip() or None
+
     return (
         {
             "server_hostname": parsed.hostname,
             "http_path": unquote(http_path),
             "access_token": access_token,
             "catalog": catalog,
+            # The connector fetches a telemetry feature flag on every connect.
+            # That endpoint is unreachable from some networks and stalls for
+            # 30s per attempt with retries, so a connect can take 60s+. We do
+            # not use the telemetry, and disabling it skips the fetch entirely.
+            "enable_telemetry": False,
         },
         catalog,
+        schema_contains,
     )
 
 
@@ -84,9 +104,11 @@ class DatabricksDatabase(SQLDatabase):
         connection_string: str,
         schemas: list[str] | None = None,
     ) -> None:
-        self._connect_kwargs, self._database_name = _parse_connection_string(
-            connection_string
-        )
+        (
+            self._connect_kwargs,
+            self._database_name,
+            self._schema_contains,
+        ) = _parse_connection_string(connection_string)
         self._schema_filter: set[str] | None = (
             {schema.casefold() for schema in schemas if schema.strip()}
             if schemas
@@ -130,9 +152,10 @@ class DatabricksDatabase(SQLDatabase):
                 return pd.DataFrame(cursor.fetchall(), columns=columns)
 
     def get_schemas(self) -> list[str]:
-        frame = self.execute(
-            f"SHOW SCHEMAS IN {_quoted_identifier(self._database_name)}"
-        )
+        query = f"SHOW SCHEMAS IN {_quoted_identifier(self._database_name)}"
+        if self._schema_contains:
+            query += f" LIKE {_like_literal(self._schema_contains)}"
+        frame = self.execute(query)
         if frame.empty:
             return []
         return [str(name) for name in frame.iloc[:, 0].tolist()]
