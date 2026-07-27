@@ -5,6 +5,7 @@
 'use client';
 
 import type { ChangeEvent } from 'react';
+import { Spinner } from '@nvidia/foundations-react-core';
 import {
 	CONNECTION_FIELDS,
 	connectionDisplayName,
@@ -36,11 +37,7 @@ export const ConnectionConnectStep = ({
 	if (loading) {
 		return (
 			<div className="flex flex-1 items-center justify-center">
-				<div
-					className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-					role="status"
-					aria-label="Loading connection"
-				/>
+				<Spinner aria-label="Loading connection" className="h-10 w-10" />
 			</div>
 		);
 	}

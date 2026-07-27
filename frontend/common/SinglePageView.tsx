@@ -5,12 +5,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
 import {
 	SinglePageComposer,
 	type ComposerEditValue,
 	type SinglePageComposerProps,
 } from '@/common/SinglePageComposer';
+import { SkeletonDetail } from '@/common/Skeleton';
 
 export type SinglePageFormat = SinglePageComposerProps;
 
@@ -31,6 +31,8 @@ export type SinglePageViewProps = {
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
 	onEditSql?: (sectionId: string, sql: string) => void;
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
+	onCertificationChange?: (id: string, certified: boolean) => void;
+	onDataTableCertificationChange?: (sectionId: string, rowId: string, certified: boolean) => void;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
 };
@@ -49,6 +51,8 @@ export const SinglePageView = ({
 	onDataTableRowClick,
 	onEditSql,
 	onSuggestDescription,
+	onCertificationChange,
+	onDataTableCertificationChange,
 	inlineSaveSectionId,
 	hideEditToolbar,
 }: SinglePageViewProps): React.JSX.Element | null => {
@@ -92,11 +96,8 @@ export const SinglePageView = ({
 
 	if (loading) {
 		return (
-			<div className="flex flex-1 flex-col items-center justify-center gap-4" role="status">
-				<Spinner aria-label="Loading" />
-				<p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-					Loading details…
-				</p>
+			<div className="flex flex-1" role="status" aria-label="Loading details">
+				<SkeletonDetail />
 			</div>
 		);
 	}
@@ -130,6 +131,8 @@ export const SinglePageView = ({
 				onDataTableRowClick={onDataTableRowClick}
 				onEditSql={onEditSql}
 				onSuggestDescription={onSuggestDescription}
+				onCertificationChange={onCertificationChange}
+				onDataTableCertificationChange={onDataTableCertificationChange}
 				inlineSaveSectionId={inlineSaveSectionId}
 				hideEditToolbar={hideEditToolbar}
 			/>

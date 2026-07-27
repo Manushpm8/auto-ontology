@@ -16,6 +16,7 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.cypher_fragments import table_description_expr
 from gsf.dal.datasources import TABLE_COUNTS_SUBQUERY
 from gsf.dal.sql_attributes import fetch_sql_attribute_counts
 from gsf.dal.terms import (
@@ -338,7 +339,7 @@ def fetch_data_exploration_graph(
                db.name AS database_name,
                s.id AS schema_id,
                s.name AS schema_name,
-               t.description AS description,
+               {table_description_expr("t")} AS description,
                columns_count,
                sql_count,
                size(unique_term_ids) AS terms_count
