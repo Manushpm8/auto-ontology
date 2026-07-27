@@ -8,6 +8,7 @@ Each module is the single source of truth for a domain:
   sql_attributes  — SqlAttribute / Sql subgraph
   foreign_keys    — FK and join edge traversal
   connections     — UI-managed database connection metadata on DB nodes
+  reset           — Deleting a database's catalog/semantic nodes and embeddings
   candidates      — Vector-hit graph enrichment at retrieval time
   users           — Zone-scope helpers for catalog queries. Users and
                     user-to-zone relationships are not stored in Neo4j.

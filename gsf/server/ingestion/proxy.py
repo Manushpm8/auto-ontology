@@ -59,7 +59,7 @@ def trigger_reset(database_name: str) -> None:
     try:
         httpx.post(
             url,
-            json={"database_name": database_name},
+            params={"database_name": database_name},
             timeout=_REQUEST_TIMEOUT,
         ).raise_for_status()
     except Exception:

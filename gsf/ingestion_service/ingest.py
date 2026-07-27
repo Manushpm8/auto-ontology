@@ -23,7 +23,7 @@ from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 from gsf.vdb import get_data_vdb
 from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
-from gsf.dal.reset import delete_database, delete_semantic
+from gsf.dal.reset import delete_all_data, delete_semantic_layer
 
 logger = logging.getLogger("ingestion_service.ingest")
 
@@ -101,12 +101,12 @@ def trigger_ingest(connection: dict[str, Any]) -> None:
     ).start()
 
 
-def trigger_delete_ingest(database_name: str) -> None:
+def trigger_delete_ingest(database_name: str | None = None) -> None:
     """Delete a database's ingested graph and embeddings without blocking."""
 
     def _run() -> None:
         try:
-            delete_database(database_name)
+            delete_all_data(database_name)
         except Exception:
             logger.exception(
                 "Background delete-ingest failed for database %s",
@@ -120,23 +120,23 @@ def trigger_delete_ingest(database_name: str) -> None:
     ).start()
 
 
-def trigger_reset_semantic(database_name: str) -> None:
-    """Delete a database's semantic layer then recompile it, non-blocking."""
+def trigger_reset_semantic(database_name: str | None = None) -> None:
+    """Delete a database's semantic layer without blocking.
+
+    Passing ``None`` resets the semantic layer of every database.
+    """
 
     def _run() -> None:
         try:
-            delete_semantic(database_name)
-            from gsf.semantic.compile import run_semantic_compilation
-
-            run_semantic_compilation(database_name)
+            delete_semantic_layer(database_name)
         except Exception:
             logger.exception(
                 "Background reset-semantic failed for database %s",
-                database_name,
+                database_name or "<all>",
             )
 
     threading.Thread(
         target=_run,
         daemon=True,
-        name=f"reset-semantic-{database_name}",
+        name=f"reset-semantic-{database_name or 'all'}",
     ).start()

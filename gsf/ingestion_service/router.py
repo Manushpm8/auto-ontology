@@ -9,8 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
-from pydantic import BaseModel
-
 from gsf.ingestion_service.ingest import (
     trigger_delete_ingest,
     trigger_ingest,
@@ -18,10 +16,6 @@ from gsf.ingestion_service.ingest import (
 )
 
 router = APIRouter()
-
-
-class DatabaseRef(BaseModel):
-    database_name: str
 
 
 @router.get("/health")
@@ -37,20 +31,24 @@ async def ingest_connection(connection: dict[str, Any] = Body(...)) -> dict[str,
 
 
 @router.post("/ingest/delete", status_code=202)
-async def reset_database(ref: DatabaseRef) -> dict[str, str]:
-    """Trigger a non-blocking reset of a database's ingested data."""
-    trigger_delete_ingest(ref.database_name)
+async def reset_database(database_name: str) -> dict[str, str]:
+    """Trigger a non-blocking reset of a database's ingested data.
+
+    ``database_name`` is required: this endpoint always targets one database.
+    """
+    trigger_delete_ingest(database_name)
     return {"status": "accepted"}
 
 
 @router.post("/semantic/reset", status_code=202)
-async def reset_semantic(ref: DatabaseRef) -> dict[str, str]:
+async def reset_semantic(database_name: str | None = None) -> dict[str, str]:
     """Trigger a non-blocking reset of a database's semantic layer.
 
-    Deletes the semantic nodes and embeddings, then recompiles the semantic
-    layer for the database.
+    Deletes the semantic nodes and embeddings. Omitting ``database_name`` resets
+    every database. Recompiling is a separate step, via ``POST
+    /semantic/compile`` or the scheduler's next run.
     """
-    trigger_reset_semantic(ref.database_name)
+    trigger_reset_semantic(database_name)
     return {"status": "accepted"}
 
 
