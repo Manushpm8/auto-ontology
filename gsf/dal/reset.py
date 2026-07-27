@@ -50,11 +50,6 @@ _SEMANTIC_LABELS = (
 )
 
 
-def _database_filter(database_name: str | None) -> str:
-    """Inline Cypher predicate pinning the ``Database`` node, empty for all."""
-    return "" if database_name is None else " {name: $database_name}"
-
-
 def _delete_nodes_in_batches(node_match: str, database_name: str | None) -> int:
     """``DETACH DELETE`` every node returned as ``n`` by *node_match*.
 
@@ -90,9 +85,11 @@ def _delete_database_nodes(database_name: str | None = None) -> int:
     every ``Database`` node and its graph is removed. Returns the number of
     nodes deleted.
     """
+    # Pin the traversal to one Database node, or start from every one of them.
+    database_filter = "" if database_name is None else " {name: $database_name}"
     deleted = _delete_nodes_in_batches(
         f"""
-        MATCH (db:{Labels.DB}{_database_filter(database_name)})
+        MATCH (db:{Labels.DB}{database_filter})
         CALL apoc.path.subgraphNodes(db, {{}}) YIELD node AS n
         RETURN DISTINCT n
         """,
@@ -123,7 +120,7 @@ def _delete_semantic_nodes(database_name: str | None = None) -> int:
     else:
         label_predicate = " OR ".join(f"n:{label}" for label in _SEMANTIC_LABELS)
         node_match = f"""
-        MATCH (db:{Labels.DB}{_database_filter(database_name)})
+        MATCH (db:{Labels.DB} {{name: $database_name}})
         CALL apoc.path.subgraphNodes(db, {{}}) YIELD node AS n
         WHERE {label_predicate}
         RETURN DISTINCT n
