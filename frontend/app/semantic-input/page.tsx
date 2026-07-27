@@ -5,9 +5,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Icon, IconName } from '@/components/icons';
-import { ModalCreateNewItem, ConfirmModal } from '@/components/modal';
-import { PopoverMenu } from '@/components/PopoverMenu';
+import { Icon, IconName } from '@/common/icons';
+import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
+import { ModalCreateNewItem, ConfirmModal } from '@/common/modal';
+import { PopoverMenu } from '@/common/PopoverMenu';
 import { acronymsApi, promptsApi, type Acronym, type Prompt } from '@/api/settings';
 
 type SettingsSectionProps = {
@@ -116,6 +117,7 @@ const AcronymRow = ({
 
 const AcronymsSection = () => {
 	const [acronyms, setAcronyms] = useState<Acronym[]>([]);
+	const [loading, setLoading] = useState(true);
 	const [modalOpen, setModalOpen] = useState(false);
 	const [editingAcronym, setEditingAcronym] = useState<Acronym | null>(null);
 	const [confirmDelete, setConfirmDelete] = useState<Acronym | null>(null);
@@ -128,8 +130,15 @@ const AcronymsSection = () => {
 	const isEditing = editingAcronym !== null;
 
 	const fetchAcronyms = useCallback(async () => {
-		const data = await acronymsApi.get();
-		setAcronyms(data);
+		setLoading(true);
+		try {
+			const data = await acronymsApi.get();
+			setAcronyms(data);
+		} catch {
+			setAcronyms([]);
+		} finally {
+			setLoading(false);
+		}
 	}, []);
 
 	useEffect(() => {
@@ -235,7 +244,11 @@ const AcronymsSection = () => {
 				)}
 			</div>
 
-			{hasAcronyms ? (
+			{loading ? (
+				<div className="mt-4" role="status" aria-label="Loading glossary definitions">
+					<SkeletonTable columns={3} rows={5} />
+				</div>
+			) : hasAcronyms ? (
 				<div className="mt-4 overflow-visible rounded-md border border-zinc-200/90 dark:border-zinc-700">
 					<table className="w-full min-w-[28rem] text-left text-sm">
 						<thead className="border-b border-zinc-200 bg-zinc-100/95 dark:border-zinc-700 dark:bg-zinc-800/90">
@@ -403,7 +416,16 @@ const SettingsSection = ({
 						</p>
 					</div>
 				</div>
-			) : !loading ? (
+			) : loading ? (
+				<div
+					className="space-y-3 rounded-b-lg bg-zinc-50/80 p-4 dark:bg-zinc-900/30"
+					role="status"
+					aria-label="Loading custom prompts"
+				>
+					<SkeletonBlock className="h-3 w-20" />
+					<SkeletonBlock variant="rectangle" className="h-24 w-full" />
+				</div>
+			) : (
 				<div className="flex flex-col items-center justify-center gap-2 rounded-b-lg bg-zinc-50/80 px-8 py-10 dark:bg-zinc-900/30">
 					<Icon
 						name={IconName.ChatBubble}
@@ -411,7 +433,7 @@ const SettingsSection = ({
 					/>
 					<p className="text-sm text-zinc-400 dark:text-zinc-500">No Prompt</p>
 				</div>
-			) : null}
+			)}
 		</div>
 	);
 };

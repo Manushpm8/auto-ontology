@@ -6,9 +6,10 @@
 
 import { useEffect, useState } from 'react';
 
-import { Icon, IconName } from '@/components/icons';
-import { ConfirmModal, ModalCreateNewItem } from '@/components/modal';
-import { SqlBlock, SqlEditor } from '@/components/SqlBlock';
+import { Icon, IconName } from '@/common/icons';
+import { SkeletonCard } from '@/common/Skeleton';
+import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
+import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
 import { analyses } from '@/api/analyses';
 import { pqlAnalyses } from '@/api/pqlAnalyses';
 
@@ -25,12 +26,29 @@ const FIELD_INPUT_CLASSNAME =
 const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
 
 const MODE_LABEL: Record<AnalysisMode, string> = { sql: 'SQL', pql: 'PQL' };
+const SKELETON_CARD_HEIGHT = 184;
+const SKELETON_CARD_GAP = 16;
+const LOADING_AREA_RESERVED_HEIGHT = 112;
+const MAX_LOADING_SKELETON_COUNT = 4;
+
+const getLoadingSkeletonCount = () =>
+	Math.max(
+		1,
+		Math.min(
+			MAX_LOADING_SKELETON_COUNT,
+			Math.floor(
+				(window.innerHeight - LOADING_AREA_RESERVED_HEIGHT + SKELETON_CARD_GAP) /
+					(SKELETON_CARD_HEIGHT + SKELETON_CARD_GAP),
+			),
+		),
+	);
 
 export const AnalysisView = () => {
 	const [mode, setMode] = useState<AnalysisMode>('sql');
 	const [items, setItems] = useState<AnalysisItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [loadingSkeletonCount, setLoadingSkeletonCount] = useState(3);
 
 	const [modalOpen, setModalOpen] = useState(false);
 	const [editingId, setEditingId] = useState<string | null>(null);
@@ -51,6 +69,15 @@ export const AnalysisView = () => {
 
 	const isEditing = editingId !== null;
 	const isPql = mode === 'pql';
+
+	useEffect(() => {
+		const updateLoadingSkeletonCount = () => setLoadingSkeletonCount(getLoadingSkeletonCount());
+
+		updateLoadingSkeletonCount();
+		window.addEventListener('resize', updateLoadingSkeletonCount);
+
+		return () => window.removeEventListener('resize', updateLoadingSkeletonCount);
+	}, []);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -307,12 +334,14 @@ export const AnalysisView = () => {
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
 				{loading && (
-					<div className="flex h-full items-center justify-center">
-						<div
-							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-							role="status"
-							aria-label={`Loading ${MODE_LABEL[mode]} analyses`}
-						/>
+					<div
+						className="flex min-h-[calc(100dvh-7rem)] flex-col gap-4"
+						role="status"
+						aria-label={`Loading ${MODE_LABEL[mode]} analyses`}
+					>
+						{Array.from({ length: loadingSkeletonCount }).map((_, index) => (
+							<SkeletonCard key={index} rows={4} />
+						))}
 					</div>
 				)}
 

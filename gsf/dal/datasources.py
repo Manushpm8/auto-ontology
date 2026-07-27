@@ -25,17 +25,20 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.cypher_fragments import column_description_expr
+from gsf.dal.cypher_fragments import column_description_expr, table_description_expr
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
+    LABEL_SQL_ATTRIBUTE,
     LABEL_TERM,
+    SQL_ATTR_SOURCE_BRIDGE,
     REL_HAS_ATTRIBUTE,
     REL_PROPERTY_OF,
     REL_REPRESENTS,
     REL_SEMANTIC_FK,
 )
+from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -344,7 +347,9 @@ def fetch_tables_for_schema(
                t.name AS name,
                t.table_type AS table_type,
                db.name AS database_name,
-               s.name AS schema_name, t.description AS description,
+               s.name AS schema_name,
+               {table_description_expr("t")} AS description,
+               coalesce(t.description_certified, false) AS description_certified,
                columns_count,
                sql_count,
                size(unique_term_ids) AS terms_count
@@ -508,6 +513,7 @@ def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
                  column_name: c.name,
                  data_type: c.data_type,
                  description: {column_description_expr("c")},
+                 description_certified: coalesce(c.description_certified, false),
                  sample_values: c.sample_values
              }}) AS columns
         RETURN t.name AS table_name,
@@ -521,7 +527,10 @@ def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
     )
     if not rows:
         return None
-    return rows[0]
+    table = rows[0]
+    for column in table.get("columns") or []:
+        column["sample_values"] = parse_sample_values(column.get("sample_values"))
+    return table
 
 
 def fetch_parent_table_id_for_column(column_id: str) -> str | None:
@@ -768,3 +777,66 @@ def fetch_item_by_id(item_id: str, label: str | list[str]) -> dict | None:
     if result is None:
         logger.error("Required item with id %r not found in graph.", item_id)
     return result
+
+
+def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
+    """Return pure-FK junction tables eligible for bridge SqlAttribute creation.
+
+    A table qualifies when it has at least two columns, no column has
+    HAS_ATTRIBUTE, every column is linked via FOREIGN_KEY or SEMANTIC_FK,
+    every column resolves to an FK pair, and no SqlAttribute with source
+    ``bridgeTable`` already references the table through HAS_SQL -> Sql -> SQL.
+
+    Self-referential bridges are allowed (multiple FK columns targeting the
+    same table), e.g. ``also_buy(product_id, also_buy_product_id)``.
+    """
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (db:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
+        MATCH (t)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WITH sch, t, collect(col) AS cols
+        WHERE size(cols) >= 2
+          AND NONE(c IN cols WHERE (c)-[:{REL_HAS_ATTRIBUTE}]->())
+          AND ALL(
+            c IN cols
+            WHERE (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})
+               OR (c)-[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
+          )
+          AND NOT EXISTS {{
+            (attr:{LABEL_SQL_ATTRIBUTE} {{source: $bridge_source}})
+                  -[:{Edges.HAS_SQL}]->(:{Labels.SQL})-[:{Edges.SQL}]->(t)
+          }}
+        WITH sch, t, cols
+        UNWIND cols AS col
+        OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(fk_tgt:{Labels.COLUMN})
+              <-[:{Edges.CONTAINS}]-(fk_tbl:{Labels.TABLE})
+              <-[:{Edges.CONTAINS}]-(fk_sch:{Labels.SCHEMA})
+        OPTIONAL MATCH (col)-[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              <-[:{REL_HAS_ATTRIBUTE}]-(sem_tgt:{Labels.COLUMN})
+              <-[:{Edges.CONTAINS}]-(sem_tbl:{Labels.TABLE})
+              <-[:{Edges.CONTAINS}]-(sem_sch:{Labels.SCHEMA})
+        WITH sch, t, cols, col,
+             coalesce(fk_tbl, sem_tbl) AS tgt_tbl,
+             coalesce(fk_sch, sem_sch) AS tgt_sch,
+             coalesce(fk_tgt, sem_tgt) AS tgt_col
+        WHERE tgt_tbl IS NOT NULL AND tgt_col IS NOT NULL
+        WITH sch, t, cols,
+             collect(DISTINCT {{
+               source_column: col.name,
+               target_table: tgt_tbl.name,
+               target_schema: tgt_sch.name,
+               target_column: tgt_col.name,
+               target_table_id: tgt_tbl.id
+             }}) AS fk_pairs
+        WHERE size(fk_pairs) >= 2 AND size(fk_pairs) = size(cols)
+        RETURN t.id AS table_id,
+               t.name AS table_name,
+               sch.name AS schema_name,
+               t.description AS description,
+               fk_pairs
+        ORDER BY t.name
+        """,
+        {"database_name": database_name, "bridge_source": SQL_ATTR_SOURCE_BRIDGE},
+    )
+    return [dict(row) for row in rows]

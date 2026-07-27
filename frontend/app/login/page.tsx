@@ -6,12 +6,25 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
+import { SkeletonBlock } from '@/common/Skeleton';
 import { authApi, type SsoProvider } from '@/api/auth';
 import { useSession } from '@/auth/auth-client';
 
 const inputClass =
 	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
+
+const LoginLoading = () => (
+	<div
+		className="w-full max-w-sm space-y-4 py-6"
+		role="status"
+		aria-label="Loading sign-in options"
+	>
+		<SkeletonBlock variant="rectangle" className="h-10 w-full" />
+		<SkeletonBlock variant="rectangle" className="h-10 w-full" />
+		<SkeletonBlock className="mx-auto h-3 w-1/3" />
+	</div>
+);
 
 const LoginForm = () => {
 	const router = useRouter();
@@ -75,7 +88,7 @@ const LoginForm = () => {
 	// Avoid flashing the form before we know whether SSO is configured, and while
 	// an already-authenticated user is being redirected to their destination.
 	if (!providersLoaded || sessionPending || session) {
-		return <p className="w-full max-w-sm text-center text-sm text-zinc-500" />;
+		return <LoginLoading />;
 	}
 
 	// SSO configured: show a "Sign in with SSO" button (no auto-login) so the
@@ -179,7 +192,7 @@ const LoginPage = () => (
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
 				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">GSF</span>
 			</div>
-			<Suspense fallback={null}>
+			<Suspense fallback={<LoginLoading />}>
 				<LoginForm />
 			</Suspense>
 		</div>

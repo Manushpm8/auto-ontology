@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { requests } from './requests';
+import type { CertificationStatus } from '@/enums/certification';
 import type {
 	ColumnAttribute,
-	RelatedTerm,
 	RelatedTermCount,
 	SqlAttribute,
 	Term,
@@ -13,9 +13,6 @@ import type {
 	TermDetail,
 } from '@/types/terms';
 import type { ResponseWithError } from './types';
-
-type ListResult = { data: Term[]; count: number };
-type ListResponse = ResponseWithError<ListResult>;
 
 type AttributeListResult = { data: ColumnAttribute[]; count: number };
 type AttributeListResponse = ResponseWithError<AttributeListResult>;
@@ -25,18 +22,52 @@ type SqlAttributeListResponse = ResponseWithError<SqlAttributeListResult>;
 
 type SingleResult = { data: TermDetail };
 type SingleResponse = ResponseWithError<SingleResult>;
-type UpdateResult = { data: { id: string; name: string; description: string | null } };
-type UpdateResponse = ResponseWithError<UpdateResult>;
-type TermUpdatePayload = { name?: string; description?: string | null };
 
-type RelatedTermsResult = { data: RelatedTerm[]; count: number };
-type RelatedTermsResponse = ResponseWithError<RelatedTermsResult>;
+type TermUpdateResult = {
+	data: {
+		id: string;
+		name: string;
+		description: string | null;
+		name_certified: boolean;
+		description_certified: boolean;
+		certification: CertificationStatus;
+	};
+};
+type TermUpdateResponse = ResponseWithError<TermUpdateResult>;
 
-type RelatedCountsResult = { data: RelatedTermCount[]; count: number };
-type RelatedCountsResponse = ResponseWithError<RelatedCountsResult>;
+type ColumnAttributeUpdateResult = {
+	data: {
+		id: string;
+		name: string;
+		description: string | null;
+		sample_values?: string[] | null;
+		certified: boolean;
+	};
+	/** Owning term's aggregate status, recomputed server-side after the write. */
+	term_certification: CertificationStatus | null;
+};
+type ColumnAttributeUpdateResponse = ResponseWithError<ColumnAttributeUpdateResult>;
 
-type AttributeCountsResult = { data: TermCount[]; count: number };
-type AttributeCountsResponse = ResponseWithError<AttributeCountsResult>;
+type TermUpdatePayload = {
+	name?: string;
+	description?: string | null;
+	name_certified?: boolean;
+	description_certified?: boolean;
+};
+type ColumnAttributeUpdatePayload = {
+	name?: string;
+	description?: string | null;
+	sample_values?: string[];
+	certified?: boolean;
+};
+
+type ListResult = {
+	terms: Term[];
+	column_attribute_counts: TermCount[];
+	sql_attribute_counts: TermCount[];
+	related_counts: RelatedTermCount[];
+};
+type ListResponse = ResponseWithError<ListResult>;
 
 export type TermsListParams = {
 	/** Case-insensitive substring filter on the term name. */
@@ -46,23 +77,20 @@ export type TermsListParams = {
 export const termsApi = {
 	list: (params?: TermsListParams): Promise<ListResponse> =>
 		requests.get<ListResult>('terms', params?.q ? { q: params.q } : {}),
-	listColumnAttributes: (): Promise<AttributeListResponse> =>
-		requests.get<AttributeListResult>('terms/column-attributes'),
-	listSqlAttributes: (): Promise<SqlAttributeListResponse> =>
-		requests.get<SqlAttributeListResult>('terms/sql-attributes'),
-	listRelatedCounts: (): Promise<RelatedCountsResponse> =>
-		requests.get<RelatedCountsResult>('terms/related-counts'),
-	listColumnAttributeCounts: (): Promise<AttributeCountsResponse> =>
-		requests.get<AttributeCountsResult>('terms/column-attributes/counts'),
-	listSqlAttributeCounts: (): Promise<AttributeCountsResponse> =>
-		requests.get<AttributeCountsResult>('terms/sql-attributes/counts'),
 	get: (id: string): Promise<SingleResponse> => requests.get<SingleResult>(`terms/${id}`),
-	update: (id: string, payload: TermUpdatePayload): Promise<UpdateResponse> =>
-		requests.patch<UpdateResult>(`terms/${encodeURIComponent(id)}`, payload),
+	update: (id: string, payload: TermUpdatePayload): Promise<TermUpdateResponse> =>
+		requests.patch<TermUpdateResult>(`terms/${encodeURIComponent(id)}`, payload),
 	getColumnAttributes: (id: string): Promise<AttributeListResponse> =>
 		requests.get<AttributeListResult>(`terms/${id}/column-attributes`),
+	updateColumnAttribute: (
+		termId: string,
+		attrId: string,
+		payload: ColumnAttributeUpdatePayload,
+	): Promise<ColumnAttributeUpdateResponse> =>
+		requests.patch<ColumnAttributeUpdateResult>(
+			`terms/${encodeURIComponent(termId)}/column-attributes/${encodeURIComponent(attrId)}`,
+			payload,
+		),
 	getSqlAttributes: (id: string): Promise<SqlAttributeListResponse> =>
 		requests.get<SqlAttributeListResult>(`terms/${id}/sql-attributes`),
-	getRelatedTerms: (id: string): Promise<RelatedTermsResponse> =>
-		requests.get<RelatedTermsResult>(`terms/${id}/related-terms`),
 };

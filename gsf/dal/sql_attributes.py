@@ -34,10 +34,6 @@ from gsf.server.zones.constants import (
 
 logger = logging.getLogger(__name__)
 
-# Source values stored on SqlAttribute nodes.
-SQL_ATTR_SOURCE_MANUAL = "manual"
-SQL_ATTR_SOURCE_SQL = "sql"
-
 
 # ---------------------------------------------------------------------------
 # Domain errors
@@ -62,7 +58,8 @@ _SQL_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.description_suggestion AS description_suggestion,
                attr.expression    AS expression,
                attr.source        AS source,
-               sql.sql_full_query AS sql"""
+               sql.sql_full_query AS sql,
+               coalesce(attr.certified, false) AS certified"""
 
 
 def _sql_attr_zone_filter(
@@ -242,13 +239,6 @@ def get_full_sql_attribute_by_id(
     return result
 
 
-def fetch_sql_attributes(
-    zone_ids: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Return SqlAttribute nodes, optionally restricted to zone-visible terms."""
-    return _query_sql_attributes(zone_ids=zone_ids, order_by="term.name, attr.name")
-
-
 def fetch_sql_attributes_by_term_id(
     term_id: str,
     zone_ids: list[str] | None = None,
@@ -362,6 +352,7 @@ def update_sql_attribute(
     description: str | None = None,
     expression: str | None = None,
     source: str | None = None,
+    certified: bool | None = None,
 ) -> None:
     """SET properties on an existing SqlAttribute node.
 
@@ -373,7 +364,8 @@ def update_sql_attribute(
         SET attr.name        = coalesce($name, attr.name),
             attr.description = coalesce($description, attr.description),
             attr.expression  = coalesce($expression, attr.expression),
-            attr.source      = coalesce($source, attr.source)
+            attr.source      = coalesce($source, attr.source),
+            attr.certified   = coalesce($certified, attr.certified)
         """,
         {
             "id": attr_id,
@@ -381,6 +373,7 @@ def update_sql_attribute(
             "description": description,
             "expression": expression,
             "source": source,
+            "certified": certified,
         },
     )
 
