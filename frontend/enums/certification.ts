@@ -2,4 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export { TermsLoadingSkeleton, TermsView } from './TermsView';
+export enum CertificationStatus {
+	Pending = 'pending',
+	Partial = 'partial',
+	Certified = 'certified',
+}

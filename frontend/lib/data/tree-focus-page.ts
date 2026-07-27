@@ -4,10 +4,16 @@
 
 import type { SinglePageFormat } from '@/common/SinglePageView';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
-import { ComposerSectionKind, DataModels, TreeFocusState } from '@/enums/datasources';
+import {
+	ComposerColumnType,
+	ComposerSectionKind,
+	DataModels,
+	TreeFocusState,
+} from '@/enums/datasources';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
-import type { ComposerSection } from '@/types/composer-section';
+import type { ComposerCertification, ComposerSection } from '@/types/composer-section';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
+import { fieldStatus } from '@/lib/certification';
 
 export const WORKSPACE_ROOT_PARENT_ID = 'workspace-root';
 
@@ -76,6 +82,7 @@ export function resolveTreeNode(focusId: string | null, databases: Database[]): 
 function baseCardsForEntity(
 	description: string,
 	items: { label: string; value: string }[],
+	certification?: ComposerCertification,
 ): ComposerSection[] {
 	return [
 		{
@@ -84,6 +91,7 @@ function baseCardsForEntity(
 			title: 'Description',
 			body: description,
 			editable: true,
+			certification,
 		},
 		{
 			type: ComposerSectionKind.INFO_GRID,
@@ -206,13 +214,22 @@ export function buildTreeFocusPageFormat(
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-tables',
 				title: `Tables (${schema.tables.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'columns', label: 'Columns' },
+					{
+						key: 'certification',
+						label: 'Certification',
+						type: ComposerColumnType.CERTIFICATION,
+						align: 'center',
+					},
 				],
 				rows: schema.tables.map((table) => ({
+					id: table.id,
 					name: table.name,
 					columns: String(table.columns_count),
+					certification: fieldStatus(table.description_certified === true),
 				})),
 			});
 			return {
@@ -231,27 +248,40 @@ export function buildTreeFocusPageFormat(
 			const { database, schema, table } = resolvedFocus;
 			const tableTypeLabel = catalogNodeInfo[table.table_type].title;
 			sections.push(
-				...baseCardsForEntity(table.description ?? '', [
-					{ label: 'Type', value: tableTypeLabel },
-					{ label: 'Name', value: table.name },
-					{ label: 'Schema', value: table.schema_name },
-					{ label: 'Database', value: table.database_name },
-					{ label: 'Columns', value: String(table.columns_count) },
-				]),
+				...baseCardsForEntity(
+					table.description ?? '',
+					[
+						{ label: 'Type', value: tableTypeLabel },
+						{ label: 'Name', value: table.name },
+						{ label: 'Schema', value: table.schema_name },
+						{ label: 'Database', value: table.database_name },
+						{ label: 'Columns', value: String(table.columns_count) },
+					],
+					{ certified: table.description_certified === true },
+				),
 			);
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-columns',
 				title: `Columns (${table.columns.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'ordinal_position', label: '#' },
 					{ key: 'name', label: 'Name' },
 					{ key: 'data_type', label: 'Type' },
+					{
+						key: 'certification',
+						label: 'Certification',
+						type: ComposerColumnType.CERTIFICATION,
+						align: 'center',
+					},
 				],
 				rows: table.columns.map((column) => ({
+					id: column.id,
 					ordinal_position: String(column.ordinal_position),
 					name: column.column_name,
 					data_type: column.data_type,
+					certification: fieldStatus(column.description_certified === true),
 				})),
 			});
 			return {
@@ -275,6 +305,7 @@ export function buildTreeFocusPageFormat(
 					title: 'Description',
 					body: column.description ?? '',
 					editable: true,
+					certification: { certified: column.description_certified === true },
 				},
 				{
 					type: ComposerSectionKind.TAG_LIST,

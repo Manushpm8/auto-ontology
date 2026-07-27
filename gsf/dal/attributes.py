@@ -82,6 +82,7 @@ def update_column_attribute(
     *,
     name: str | None = None,
     description: str | None = None,
+    certified: bool | None = None,
 ) -> dict[str, Any] | None:
     """Update ColumnAttribute metadata and return its embedding context."""
     rows = get_neo4j_conn().query_write(
@@ -89,7 +90,9 @@ def update_column_attribute(
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: $attr_id}})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
         SET attr.name = coalesce($name, attr.name),
-            attr.description = coalesce($description, attr.description)
+            attr.description = coalesce($description, attr.description),
+            attr.certified = coalesce($certified, attr.certified)
+        WITH attr, term
         OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
         OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
               (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
@@ -103,13 +106,15 @@ def update_column_attribute(
                col.sample_values AS sample_values,
                term.id AS term_id,
                term.synonyms AS term_synonyms,
-               head(collect(DISTINCT db.name)) AS database_name
+               head(collect(DISTINCT db.name)) AS database_name,
+               coalesce(attr.certified, false) AS certified
         """,
         {
             "attr_id": attr_id,
             "term_id": term_id,
             "name": name,
             "description": description,
+            "certified": certified,
         },
     )
     return dict(rows[0]) if rows else None

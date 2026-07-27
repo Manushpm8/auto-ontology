@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Icon, IconName } from '@/common/icons';
+import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
 import { termsApi } from '@/api/terms';
@@ -16,9 +17,13 @@ import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
 import { Label } from '@/common/Label';
-import { ComposerSectionKind } from '@/enums/datasources';
+import { CertificationBadge } from '@/common/CertificationBadge';
+import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
+import { CertificationStatus } from '@/enums/certification';
+import { attributeStatus } from '@/lib/certification';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
+import { Toast } from '@/common/Toast';
 import type { ColumnAttribute, SqlAttribute, Term } from '@/types/terms';
 
 type TermCardProps = {
@@ -26,6 +31,7 @@ type TermCardProps = {
 	columnAttributeCount: number;
 	sqlAttributeCount: number;
 	relatedCount: number;
+	certificationStatus: CertificationStatus;
 	onClick: (term: Term) => void;
 };
 
@@ -34,11 +40,31 @@ type SqlAttributeDeleteTarget = {
 	name: string;
 };
 
+const LOADING_SKELETON_CLASSNAMES = [
+	'',
+	'',
+	'hidden [@media(min-height:760px)]:block',
+	'hidden [@media(min-height:960px)]:block',
+] as const;
+
+export const TermsLoadingSkeleton = () => (
+	<div
+		className="flex min-h-[calc(100dvh-11rem)] flex-col gap-4"
+		role="status"
+		aria-label="Loading terms"
+	>
+		{LOADING_SKELETON_CLASSNAMES.map((className, index) => (
+			<SkeletonCard key={index} className={className} rows={4} />
+		))}
+	</div>
+);
+
 const TermCard = ({
 	term,
 	columnAttributeCount,
 	sqlAttributeCount,
 	relatedCount,
+	certificationStatus,
 	onClick,
 }: TermCardProps) => (
 	<li
@@ -60,6 +86,7 @@ const TermCard = ({
 					</p>
 				)}
 			</div>
+			<CertificationBadge status={certificationStatus} />
 		</div>
 
 		{term.description != null && term.description.trim() !== '' ? (
@@ -167,6 +194,7 @@ export const TermsView = () => {
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [hasLoadedTerms, setHasLoadedTerms] = useState(false);
 	const [searchQuery, setSearchQuery] = useState('');
 	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
 	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
@@ -188,6 +216,7 @@ export const TermsView = () => {
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
 	const [columnAttrEditing, setColumnAttrEditing] = useState(false);
 	const [columnAttrEditError, setColumnAttrEditError] = useState<string | null>(null);
+	const [certError, setCertError] = useState<string | null>(null);
 
 	const [prevFocusId, setPrevFocusId] = useState(focusId);
 	const [prevSqlAttrId, setPrevSqlAttrId] = useState(sqlAttrId);
@@ -201,6 +230,7 @@ export const TermsView = () => {
 		setSqlAttrEditError(null);
 		setColumnAttrEditing(false);
 		setColumnAttrEditError(null);
+		setCertError(null);
 	}
 	const [sqlEditModalOpen, setSqlEditModalOpen] = useState(false);
 	const [sqlEditValue, setSqlEditValue] = useState('');
@@ -227,6 +257,7 @@ export const TermsView = () => {
 			} else {
 				setError(null);
 				setTerms(termsRes.terms ?? []);
+				setHasLoadedTerms(true);
 				const map = new Map<string, number>();
 				for (const { term_id, count } of termsRes.column_attribute_counts ?? []) {
 					map.set(term_id, count);
@@ -537,6 +568,119 @@ export const TermsView = () => {
 		return { error: false };
 	};
 
+	const applyTermCertification = (termId: string, certification: CertificationStatus | null) => {
+		if (certification == null) return;
+		setTerms((prev) =>
+			prev.map((term) => (term.id === termId ? { ...term, certification } : term)),
+		);
+	};
+
+	// Certification changes save immediately (independent of the text Save
+	// toolbar). `id` is `'name'` or `'description'`; both map to the matching
+	// `*_certified` flag on the backend PATCH endpoints.
+	const handleTermCertificationChange = async (id: string, certified: boolean) => {
+		if (focusId == null) return;
+		const payload =
+			id === 'name' ? { name_certified: certified } : { description_certified: certified };
+		const res = await termsApi.update(focusId, payload);
+		if (res.error) {
+			setCertError(res.message ?? 'Failed to update certification');
+			return;
+		}
+		setCertError(null);
+		setTerms((prev) =>
+			prev.map((term) =>
+				term.id === focusId
+					? {
+							...term,
+							name_certified: res.data.name_certified,
+							description_certified: res.data.description_certified,
+							certification: res.data.certification,
+						}
+					: term,
+			),
+		);
+		setSqlAttrsEpoch((prev) => prev + 1);
+	};
+
+	// Attributes carry a single top-level certification flag, so the `id`
+	// argument (name/description) from the composer control is ignored.
+	const handleColumnAttrCertificationChange = async (_id: string, certified: boolean) => {
+		if (focusId == null || focusedColAttr == null) return;
+		const res = await termsApi.updateColumnAttribute(focusId, focusedColAttr.id, {
+			certified,
+		});
+		if (res.error) {
+			setCertError(res.message ?? 'Failed to update certification');
+			return;
+		}
+		setCertError(null);
+		setColumnAttrs((prev) =>
+			prev.map((attr) =>
+				attr.id === focusedColAttr.id
+					? {
+							...attr,
+							certified: res.data.certified,
+						}
+					: attr,
+			),
+		);
+		applyTermCertification(focusId, res.term_certification);
+		setColumnAttrsEpoch((prev) => prev + 1);
+	};
+
+	const handleSqlAttrCertificationChange = async (_id: string, certified: boolean) => {
+		if (focusedSqlAttr == null) return;
+		const res = await sqlAttributesApi.patch(focusedSqlAttr.id, { certified });
+		if (res.error) {
+			setCertError(res.message ?? 'Failed to update certification');
+			return;
+		}
+		setCertError(null);
+		setSqlAttrs((prev) =>
+			prev.map((attr) => (attr.id === focusedSqlAttr.id ? res.data : attr)),
+		);
+		applyTermCertification(res.data.term_id, res.term_certification);
+		setSqlAttrsEpoch((prev) => prev + 1);
+	};
+
+	// Certification dropdowns inside the term page's Column/SQL attribute
+	// tables save immediately and update the relevant attribute cache so the
+	// table cell reflects the change. The epoch bump refetches the term page
+	// (which passes `treeDataEpoch={sqlAttrsEpoch}`) for both branches.
+	const handleTermTableCertificationChange = async (
+		sectionId: string,
+		rowId: string,
+		certified: boolean,
+	) => {
+		if (sectionId === 'column_attributes') {
+			if (focusId == null) return;
+			const res = await termsApi.updateColumnAttribute(focusId, rowId, { certified });
+			if (res.error) {
+				setCertError(res.message ?? 'Failed to update certification');
+				return;
+			}
+			setCertError(null);
+			setColumnAttrs((prev) =>
+				prev.map((attr) =>
+					attr.id === rowId ? { ...attr, certified: res.data.certified } : attr,
+				),
+			);
+			applyTermCertification(focusId, res.term_certification);
+			setSqlAttrsEpoch((prev) => prev + 1);
+		} else if (sectionId === 'sql_attributes') {
+			const res = await sqlAttributesApi.patch(rowId, { certified });
+			if (res.error) {
+				setCertError(res.message ?? 'Failed to update certification');
+				return;
+			}
+			setCertError(null);
+			setSqlAttrs((prev) => prev.map((attr) => (attr.id === rowId ? res.data : attr)));
+			applyTermCertification(res.data.term_id, res.term_certification);
+			setSqlAttrsEpoch((prev) => prev + 1);
+		}
+	};
+
 	const trimmedSqlEditValue = sqlEditValue.trim();
 	const sqlEditUnchanged = trimmedSqlEditValue === sqlEditOriginalValue.trim();
 	const canSaveSqlEdit =
@@ -658,6 +802,7 @@ export const TermsView = () => {
 						withBorder: true,
 						showContentHeader: true,
 						titleEditable: true,
+						certification: { certified: attr.certified, showLabel: true },
 					},
 				},
 				sections: [
@@ -750,6 +895,7 @@ export const TermsView = () => {
 						withBorder: true,
 						showContentHeader: true,
 						titleEditable: true,
+						certification: { certified: attr.certified, showLabel: true },
 					},
 				},
 				sections: [
@@ -817,6 +963,7 @@ export const TermsView = () => {
 					withBorder: true,
 					showContentHeader: true,
 					titleEditable: true,
+					certification: { certified: term.name_certified },
 				},
 			},
 			sections: [
@@ -826,6 +973,7 @@ export const TermsView = () => {
 					title: 'Description',
 					body: term.description ?? '',
 					editable: true,
+					certification: { certified: term.description_certified },
 				},
 				{
 					type: ComposerSectionKind.TAG_LIST,
@@ -869,16 +1017,23 @@ export const TermsView = () => {
 					id: 'column_attributes',
 					title: 'Column Attributes',
 					rowIdKey: 'id',
+					layout: 'fixed',
 					columns: [
-						{ key: 'name', label: 'Attribute Name' },
+						{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
 						{ key: 'description', label: 'Description', truncate: true },
-						{ key: 'sample_values', label: 'Sample Values', kind: 'tags' },
+						{
+							key: 'certification',
+							label: 'Certification',
+							type: ComposerColumnType.CERTIFICATION,
+							align: 'center',
+							width: 'w-44',
+						},
 					],
 					rows: termAttrs.map((attr) => ({
 						id: attr.id,
 						name: attr.name,
 						description: attr.description ?? '',
-						sample_values: attr.sample_values ?? [],
+						certification: attributeStatus(attr),
 					})),
 				},
 				{
@@ -886,10 +1041,23 @@ export const TermsView = () => {
 					id: 'sql_attributes',
 					title: 'SQL Attributes',
 					rowIdKey: 'id',
-					columns: [{ key: 'name', label: 'Attribute Name' }],
+					layout: 'fixed',
+					columns: [
+						{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
+						{ key: 'description', label: 'Description', truncate: true },
+						{
+							key: 'certification',
+							label: 'Certification',
+							type: ComposerColumnType.CERTIFICATION,
+							align: 'center',
+							width: 'w-44',
+						},
+					],
 					rows: termSqlAttrs.map((attr) => ({
 						id: attr.id,
 						name: attr.name,
+						description: attr.description ?? '',
+						certification: attributeStatus(attr),
 					})),
 					emptyMessage: 'SQL attribute does not exist',
 				},
@@ -902,6 +1070,9 @@ export const TermsView = () => {
 		sqlAttrId != null ? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ?? null) : null;
 	const focusedColAttr =
 		colAttrId != null ? (columnAttrs.find((attr) => attr.id === colAttrId) ?? null) : null;
+
+	// Same server-rolled-up value the list card shows, so the two can't disagree.
+	const termCertificationStatus = focusedTerm?.certification ?? CertificationStatus.Pending;
 
 	if (focusId != null && sqlAttrId != null) {
 		const termTitle = focusedTerm?.name ?? focusId;
@@ -990,13 +1161,18 @@ export const TermsView = () => {
 							if (res.error) return null;
 							return res.data;
 						}}
+						onCertificationChange={handleSqlAttrCertificationChange}
 					/>
 				</main>
-				{sqlAttrEditError != null && (
-					<div className="border-t border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-						{sqlAttrEditError}
-					</div>
-				)}
+				<Toast
+					open={sqlAttrEditError != null || certError != null}
+					message={sqlAttrEditError ?? certError ?? ''}
+					variant="error"
+					onClose={() => {
+						setSqlAttrEditError(null);
+						setCertError(null);
+					}}
+				/>
 				<ConfirmModal
 					open={deletingSqlAttr !== null}
 					onCancel={handleDeleteSqlAttrClose}
@@ -1110,13 +1286,18 @@ export const TermsView = () => {
 							setColumnAttrEditing(false);
 							setColumnAttrEditError(null);
 						}}
+						onCertificationChange={handleColumnAttrCertificationChange}
 					/>
 				</main>
-				{columnAttrEditError != null && (
-					<div className="border-t border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-						{columnAttrEditError}
-					</div>
-				)}
+				<Toast
+					open={columnAttrEditError != null || certError != null}
+					message={columnAttrEditError ?? certError ?? ''}
+					variant="error"
+					onClose={() => {
+						setColumnAttrEditError(null);
+						setCertError(null);
+					}}
+				/>
 			</div>
 		);
 	}
@@ -1139,6 +1320,7 @@ export const TermsView = () => {
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{termTitle}
 					</span>
+					<CertificationBadge status={termCertificationStatus} />
 					<div className="ml-auto flex items-center gap-2">
 						{termEditing ? null : (
 							<button
@@ -1184,8 +1366,16 @@ export const TermsView = () => {
 							setTermEditing(false);
 						}}
 						onDataTableRowClick={handleDataTableRowClick}
+						onCertificationChange={handleTermCertificationChange}
+						onDataTableCertificationChange={handleTermTableCertificationChange}
 					/>
 				</main>
+				<Toast
+					open={certError != null}
+					message={certError ?? ''}
+					variant="error"
+					onClose={() => setCertError(null)}
+				/>
 				<ModalCreateNewItem
 					open={createSqlAttrModalOpen}
 					onClose={handleCreateSqlAttrClose}
@@ -1251,23 +1441,17 @@ export const TermsView = () => {
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
-				<SearchInput
-					value={searchQuery}
-					onChange={setSearchQuery}
-					placeholder="Search terms…"
-					aria-label="Search terms"
-					className="mb-6 w-full"
-				/>
-
-				{loading && (
-					<div className="flex h-full items-center justify-center">
-						<div
-							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-							role="status"
-							aria-label="Loading terms"
-						/>
-					</div>
+				{hasLoadedTerms && (
+					<SearchInput
+						value={searchQuery}
+						onChange={setSearchQuery}
+						placeholder="Search terms…"
+						aria-label="Search terms"
+						className="mb-6 w-full"
+					/>
 				)}
+
+				{loading && <TermsLoadingSkeleton />}
 
 				{!loading && error != null && (
 					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
@@ -1300,6 +1484,7 @@ export const TermsView = () => {
 								columnAttributeCount={columnAttrCountsMap.get(term.id) ?? 0}
 								sqlAttributeCount={sqlAttrCountsMap.get(term.id) ?? 0}
 								relatedCount={relatedCountsMap.get(term.id) ?? 0}
+								certificationStatus={term.certification}
 								onClick={handleCardClick}
 							/>
 						))}

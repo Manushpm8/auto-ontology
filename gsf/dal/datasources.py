@@ -25,6 +25,7 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.cypher_fragments import column_description_expr, table_description_expr
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 
 from gsf.semantic.constants import (
@@ -262,7 +263,7 @@ MATCH (tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: col.description}}) AS cols
+                         description: {column_description_expr("col")}}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
        sch.name AS schema_name, cols
 """
@@ -346,7 +347,9 @@ def fetch_tables_for_schema(
                t.name AS name,
                t.table_type AS table_type,
                db.name AS database_name,
-               s.name AS schema_name, t.description AS description,
+               s.name AS schema_name,
+               {table_description_expr("t")} AS description,
+               coalesce(t.description_certified, false) AS description_certified,
                columns_count,
                sql_count,
                size(unique_term_ids) AS terms_count
@@ -472,7 +475,7 @@ MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
 RETURN c.id AS id,
        c.name AS name,
        c.data_type AS data_type,
-       c.description AS description,
+       {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
        EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key
@@ -510,7 +513,8 @@ def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
                  ordinal_position: c.ordinal_position,
                  column_name: c.name,
                  data_type: c.data_type,
-                 description: c.description,
+                 description: {column_description_expr("c")},
+                 description_certified: coalesce(c.description_certified, false),
                  sample_values: c.sample_values
              }}) AS columns
         RETURN t.name AS table_name,
@@ -658,7 +662,7 @@ def fetch_tables_and_columns_by_node_ids(
                    s.name AS table_schema,
                    c.name AS column_name,
                    c.data_type AS data_type,
-                   c.description AS description,
+                   {column_description_expr("c")} AS description,
                    c.sample_values AS sample_values,
                    db.name AS database_name
             """,

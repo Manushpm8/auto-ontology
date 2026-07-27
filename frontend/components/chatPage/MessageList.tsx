@@ -7,6 +7,7 @@
 import { useEffect, useRef } from 'react';
 import type { ChatMessage, GraphStep } from '@/types/chat';
 import { Icon, IconName } from '@/common/icons';
+import { SkeletonBlock } from '@/common/Skeleton';
 import { MessageBubble } from './MessageBubble';
 import { ThinkingMessage } from './ThinkingMessage';
 
@@ -31,12 +32,14 @@ export const MessageList = ({
 
 	if (messageListLoading) {
 		return (
-			<div className="flex flex-1 items-center justify-center">
-				<div
-					className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-					role="status"
-					aria-label="Loading messages"
-				/>
+			<div
+				className="flex flex-1 flex-col gap-4 p-6"
+				role="status"
+				aria-label="Loading messages"
+			>
+				<SkeletonBlock className="h-16 w-2/3" />
+				<SkeletonBlock className="ml-auto h-12 w-1/2" />
+				<SkeletonBlock className="h-20 w-3/5" />
 			</div>
 		);
 	}
