@@ -38,8 +38,9 @@ class TextToSQLPayload(TypedDict):
     """Payload for the text-to-SQL agent flow (data + semantic retrievers)."""
 
     question: str
-    # ``None`` denotes an admin scope (all data); an empty list denotes a
-    # viewer with no accessible zones and therefore no catalog access.
+    # ``None`` denotes no zone boundary (all data) — used when no enabled
+    # zones are configured, for both admins and viewers. An empty list
+    # intentionally denies catalog access.
     zone_ids: list[str] | None
     data_retriever: Retriever
     semantic_retriever: NotRequired[Retriever]

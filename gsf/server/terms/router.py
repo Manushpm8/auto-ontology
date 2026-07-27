@@ -40,8 +40,8 @@ def list_terms(
 ) -> dict:
     """Return Term nodes zone-scoped to the provided zones.
 
-    ``None`` (param absent) → no filter, return all (admin callers).
-    ``[]`` (empty list) → viewer with no zone access, returns empty.
+    ``None`` (param absent) → no filter, return all (no zones configured).
+    ``[]`` (empty list) → intentionally deny access, returns empty.
     ``[id, ...]`` → filter to terms reachable through those zones.
 
     *q*, when given, additionally filters to terms whose name contains it

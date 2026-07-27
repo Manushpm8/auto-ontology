@@ -36,8 +36,8 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
-    # When omitted, no zone scope is applied. ``[]`` intentionally denies
-    # catalog access.
+    # When omitted/None, no zone scope is applied (all data). ``[]``
+    # intentionally denies catalog access.
     zone_ids: list[str] | None = None
 
 

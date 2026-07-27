@@ -17,14 +17,14 @@ const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 export type ProxyOptions = {
 	/** When set, appended as repeated `?zone_ids=<id>` params for zone-scoped filtering. */
 	zoneIds?: string[];
-	/** Response body returned when a viewer has no zones. */
+	/** Response body returned when zoneIds is an explicit empty list (deny). */
 	emptyResponse?: unknown;
 };
 
 export async function proxyToBackend(req: Request, options?: ProxyOptions): Promise<Response> {
-	// Viewer with no zone access: short-circuit and return an empty result
-	// rather than forwarding the request without zone_ids (which would make
-	// the backend return all data, effectively treating the viewer as admin).
+	// Explicit empty zoneIds means "deny all". Omit zoneIds (undefined) to
+	// leave the request unscoped — that is the "no zones configured → all
+	// data" path used by both admins and viewers.
 	if (options?.zoneIds !== undefined && options.zoneIds.length === 0) {
 		return new Response(JSON.stringify(options.emptyResponse ?? { data: [], count: 0 }), {
 			headers: { 'Content-Type': 'application/json' },

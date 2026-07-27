@@ -18,22 +18,28 @@ const fetchEnabledZoneIds = async (userId: string): Promise<string[]> => {
 };
 
 /**
- * Shared zone-scoping rule: callers are scoped to every enabled zone. An
- * empty list means there are no enabled zones and denies catalog access.
- * Omitted zone IDs are reserved for unscoped internal callers. Zone
- * membership is no longer a per-user authorization boundary, so this does
+ * Shared zone-scoping rule for admins and viewers alike:
+ * - ``null`` — no enabled zones configured → no boundary to enforce → all data.
+ * - ``[id, ...]`` — restrict catalog/agent access to tables reachable via those zones.
+ *
+ * Zone membership is no longer a per-user authorization boundary, so this does
  * not depend on the requesting user's own grants and applies identically
  * regardless of role.
  */
-const resolveEnabledZoneScope = async (userId: string): Promise<string[]> =>
-	fetchEnabledZoneIds(userId);
+const resolveEnabledZoneScope = async (userId: string): Promise<string[] | null> => {
+	const enabledZoneIds = await fetchEnabledZoneIds(userId);
+	return enabledZoneIds.length > 0 ? enabledZoneIds : null;
+};
 
 /**
  * Catalog/Terms access: both admins and viewers share the same scope — see
  * ``resolveEnabledZoneScope``. *role* is accepted for call-site compatibility
  * but no longer changes the result.
  */
-export async function resolveZoneIds(userId: string, role: string | null): Promise<string[]> {
+export async function resolveZoneIds(
+	userId: string,
+	role: string | null,
+): Promise<string[] | null> {
 	void role;
 	return resolveEnabledZoneScope(userId);
 }
@@ -42,6 +48,6 @@ export async function resolveZoneIds(userId: string, role: string | null): Promi
  * Text-to-SQL agent scope — see ``resolveEnabledZoneScope``. Applies
  * identically for both admins and viewers.
  */
-export async function resolveAgentZoneIds(userId: string): Promise<string[]> {
+export async function resolveAgentZoneIds(userId: string): Promise<string[] | null> {
 	return resolveEnabledZoneScope(userId);
 }
