@@ -16,7 +16,6 @@ sequence of VDB query -> Neo4j read -> single-column SQL.
 """
 
 import logging
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Optional
 
@@ -27,7 +26,8 @@ from gsf.dal.attributes import (
     fetch_semantic_fk_related_tables,
     find_join_path_between_tables,
 )
-from gsf.dal.datasources import fetch_tables_by_ids
+from gsf.dal.datasources import fetch_columns_for_table, fetch_tables_by_ids
+from gsf.dal.terms import get_full_term_by_id
 from gsf.retrieval.data_access.relevant_tables import dedupe_merge_relevant_tables
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.retrieval.rerank.state import RerankState
@@ -53,6 +53,8 @@ _VALUE_BUCKETS = ("terms",)
 # (they are concept columns like price/quantity, not text matched against data).
 _TEXT_MATCH_BUCKETS = ("search_for", "search_for_details")
 _ALL_BUCKETS = ("search_for", "search_for_details", "terms", "numeric_concepts")
+# Buckets whose vector-search query is captioned with ``target_entity_type``.
+_PREFIXED_VECTOR_BUCKETS = ("search_for", "reference_entity")
 
 
 def _quote_char(dialect: str | None) -> str:
@@ -200,6 +202,21 @@ def _attr_record(ctx: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _vector_search_query(
+    entity: str,
+    bucket: str,
+    target_entity_type: str = "",
+) -> str:
+    """Build the VDB query text, optionally captioned with the entity type."""
+    text = (entity or "").strip()
+    prefix = (target_entity_type or "").strip()
+    if not text or bucket not in _PREFIXED_VECTOR_BUCKETS or not prefix:
+        return text
+    if text.lower().startswith(f"{prefix.lower()} "):
+        return text
+    return f"{prefix} {text}"
+
+
 def _resolve_entity(
     retriever: object,
     connector: Optional[SQLDatabase],
@@ -207,6 +224,7 @@ def _resolve_entity(
     bucket: str,
     entity: str,
     exclude_table_ids: Optional[set] = None,
+    target_entity_type: str = "",
 ) -> Dict[str, Any]:
     """Resolve one entity to its table/column (+ value for value-buckets).
 
@@ -216,11 +234,15 @@ def _resolve_entity(
     value is not found in any candidate column's data is dropped entirely — its
     ``mapping`` comes back ``None`` so the caller skips it.
 
+    For ``search_for`` / ``reference_entity``, the vector search query is
+    prefixed with ``target_entity_type`` on the fly; SQL probes and the stored
+    mapping keep the original entity text.
+
     Returns ``{"mapping": <mapping | None>, "column_attributes": [<attr records>]}``.
     """
     hits = search_semantic_index(
         retriever,
-        entity,
+        _vector_search_query(entity, bucket, target_entity_type),
         label_filter=[LABEL_COLUMN_ATTRIBUTE],
         per_label_k=CANDIDATE_COLS_K,
     )
@@ -329,49 +351,46 @@ def _dedupe_attrs(attrs: list) -> list:
     return list(best.values())
 
 
-# Question-independent semantic query used to locate the central item table.
-_PRODUCT_HUB_QUERY = os.getenv("RERANK_PRODUCT_HUB_QUERY", "product_id")
+def _find_target_hub(term_id: str) -> Optional[Dict[str, Any]]:
+    """Locate the answer table from the extracted ``target_entity_type_id``.
 
-
-def _find_product_hub(retriever: object) -> Optional[Dict[str, Any]]:
-    """Locate the central item table by semantically searching for 'product_id'.
-
-    Independent of the user's question: the top ColumnAttribute hit for the
-    literal text ``'product_id'`` is owned by the primary items table (e.g.
-    ``products``). We use that table as the anchor for every join path so paths
-    radiate from the central item table out through the correct junction tables,
-    instead of wandering between dimension tables.
+    Uses :func:`get_full_term_by_id` to find Tables that REPRESENT the Term,
+    then picks the one with the most columns as the join-path anchor so paths
+    radiate from the answer entity out through the correct junction tables.
 
     Returns ``{"table_id", "database_name"}`` or ``None``.
     """
+    if not term_id:
+        return None
     try:
-        hits = search_semantic_index(
-            retriever,
-            _PRODUCT_HUB_QUERY,
-            label_filter=[LABEL_COLUMN_ATTRIBUTE],
-            per_label_k=CANDIDATE_COLS_K,
-        )
+        term = get_full_term_by_id(term_id)
     except Exception:
-        logger.warning("Product hub search failed", exc_info=True)
+        logger.warning(
+            "Target hub lookup failed for term_id=%r",
+            term_id,
+            exc_info=True,
+        )
         return None
-    if not hits:
+    table_ids = [t["id"] for t in (term or {}).get("tables") or [] if t.get("id")]
+    if not table_ids:
         return None
-    ctxs = fetch_attr_column_contexts([h["id"] for h in hits if h.get("id")])
-    for h in hits:
-        ctx = ctxs.get(h.get("id"))
-        if ctx and ctx.get("table_id"):
-            return {
-                "table_id": ctx["table_id"],
-                "database_name": h.get("database_name"),
-            }
-    return None
+    fetched = fetch_tables_by_ids(table_ids)
+    if not fetched:
+        return None
+    best = max(fetched, key=lambda t: len(t.get("columns") or []))
+    table_id = best["id"]
+    details = fetch_columns_for_table(table_id)
+    return {
+        "table_id": table_id,
+        "database_name": (details or {}).get("database_name"),
+    }
 
 
 def _store_results(
     path_state: dict,
     mappings: Dict[str, list],
     column_attributes: list | None = None,
-    product_hub: Optional[Dict[str, Any]] = None,
+    target_hub: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Persist entity mappings plus resolved columns and full tables.
 
@@ -379,8 +398,8 @@ def _store_results(
     resolved table we fetch the full table from Neo4j (all columns with their
     descriptions) via :func:`fetch_tables_by_ids`, mirroring how
     ``candidate_preparation`` gathers relevant tables. ``column_attributes`` are
-    the raw semantic-VDB hits we retrieved. ``product_hub`` is the central item
-    table (see :func:`_find_product_hub`) used to anchor the join paths.
+    the raw semantic-VDB hits we retrieved. ``target_hub`` is the table for
+    ``target_entity_type_id`` (see :func:`_find_target_hub`) used to anchor joins.
     """
     path_state["entity_mappings"] = mappings
     path_state["column_attributes"] = _dedupe_attrs(column_attributes or [])
@@ -414,12 +433,12 @@ def _store_results(
 
     path_state["resolved_columns"] = list(columns.values())
 
-    # The product hub is the central item table we join everything to and select
+    # The target hub is the answer entity table we join everything to and select
     # from; include it among the resolved tables even when no entity resolved to
     # it directly.
-    anchor_id = product_hub.get("table_id") if product_hub else None
+    anchor_id = target_hub.get("table_id") if target_hub else None
     if anchor_id and anchor_id not in db_by_table_id:
-        db_by_table_id[anchor_id] = product_hub.get("database_name")
+        db_by_table_id[anchor_id] = target_hub.get("database_name")
         table_ids.append(anchor_id)
 
     # Fetch each resolved table with its full column list + descriptions from
@@ -434,7 +453,7 @@ def _store_results(
     # sql_generation can join them. find_join_path_between_tables walks the graph
     # and supports multi-hop paths, including many-to-many joins via a junction
     # table (e.g. products -> product_colors -> colors). All paths are anchored
-    # at the product hub table, so we find the path from it to every other
+    # at the target hub table, so we find the path from it to every other
     # resolved (entity_mapping) table.
     seen_hops: set = set()
     hops: list[dict] = []
@@ -533,10 +552,17 @@ class ColumnResolutionAgent(BaseAgent):
         connector = connectors[0] if connectors else None
         char = _quote_char(getattr(connector, "dialect", None))
 
-        # Central item table used to anchor every join path (found via a
-        # question-independent semantic search for 'product_id').
-        product_hub = _find_product_hub(retriever)
-        self.logger.info("Product hub table: %s", product_hub)
+        # Answer-entity table used to anchor every join path (from question
+        # extraction's target_entity_type_id Term id).
+        target_entity_type = (entities.get("target_entity_type") or "").strip()
+        target_entity_type_id = (entities.get("target_entity_type_id") or "").strip()
+        target_hub = _find_target_hub(target_entity_type_id)
+        self.logger.info(
+            "Target hub table for target_entity_type_id=%r (%s): %s",
+            target_entity_type_id,
+            target_entity_type,
+            target_hub,
+        )
 
         column_attributes: list = []
 
@@ -546,7 +572,14 @@ class ColumnResolutionAgent(BaseAgent):
         search_for_table_ids: set = set()
         for entity in entities.get("search_for") or []:
             try:
-                res = _resolve_entity(retriever, connector, char, "search_for", entity)
+                res = _resolve_entity(
+                    retriever,
+                    connector,
+                    char,
+                    "search_for",
+                    entity,
+                    target_entity_type=target_entity_type,
+                )
                 mapping = res["mapping"]
                 column_attributes.extend(res["column_attributes"])
             except Exception:
@@ -569,7 +602,7 @@ class ColumnResolutionAgent(BaseAgent):
             for entity in (entities.get(bucket) or [])
         ]
         if not tasks:
-            _store_results(path_state, mappings, column_attributes, product_hub)
+            _store_results(path_state, mappings, column_attributes, target_hub)
             self.logger.info("Entity mappings: %s", mappings)
             return result
 
@@ -583,6 +616,7 @@ class ColumnResolutionAgent(BaseAgent):
                     bucket,
                     entity,
                     search_for_table_ids,
+                    target_entity_type,
                 ): (bucket, entity)
                 for bucket, entity in tasks
             }
@@ -607,6 +641,6 @@ class ColumnResolutionAgent(BaseAgent):
                     continue
                 mappings[bucket].append(mapping)
 
-        _store_results(path_state, mappings, column_attributes, product_hub)
+        _store_results(path_state, mappings, column_attributes, target_hub)
         self.logger.info("Entity mappings: %s", mappings)
         return result

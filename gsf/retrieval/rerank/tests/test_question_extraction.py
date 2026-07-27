@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock, patch
 
+from gsf.retrieval.rerank.agents.column_resolution import _vector_search_query
 from gsf.retrieval.rerank.agents.question_extraction import (
     ExtractedEntities,
     QuestionExtractionAgent,
     QuestionExtractionModel,
-    _sanitize_target_entity_type,
+    _resolve_target_entity_type,
 )
 from gsf.retrieval.rerank.prompts import create_question_extraction_prompt
 
@@ -35,27 +36,47 @@ def test_extracted_entities_includes_target_entity_type() -> None:
     assert dumped["search_for"] == ["shoe"]
 
 
-def test_sanitize_clears_unknown_target_entity_type() -> None:
+def test_resolve_target_entity_type_maps_name_to_id() -> None:
     logger = logging.getLogger("test")
-    term_names = ["Product", "Brand"]
+    term_id_by_name = {"Product": "term-1", "Brand": "term-2"}
 
-    assert _sanitize_target_entity_type("Product", term_names, logger) == "Product"
-    assert _sanitize_target_entity_type("Unknown", term_names, logger) == ""
-    assert _sanitize_target_entity_type("", term_names, logger) == ""
+    assert _resolve_target_entity_type("Product", term_id_by_name, logger) == (
+        "Product",
+        "term-1",
+    )
+    assert _resolve_target_entity_type("Unknown", term_id_by_name, logger) == ("", "")
+    assert _resolve_target_entity_type("", term_id_by_name, logger) == ("", "")
+
+
+def test_vector_search_query_prefixes_selected_buckets() -> None:
+    assert _vector_search_query("shoe", "search_for", "Product") == "Product shoe"
+    assert (
+        _vector_search_query("hanger", "reference_entity", "Product")
+        == "Product hanger"
+    )
+    assert _vector_search_query("red", "search_for_details", "Product") == "red"
+    assert _vector_search_query("shoe", "search_for", "") == "shoe"
+    assert (
+        _vector_search_query("Product shoe", "search_for", "Product") == "Product shoe"
+    )
 
 
 @patch("gsf.retrieval.rerank.agents.question_extraction.invoke_with_structured_output")
-@patch("gsf.retrieval.rerank.agents.question_extraction.fetch_all_term_names")
+@patch("gsf.retrieval.rerank.agents.question_extraction.fetch_all_terms")
 def test_agent_passes_term_names_and_returns_target_entity_type(
     mock_fetch_terms: MagicMock,
     mock_invoke: MagicMock,
 ) -> None:
-    mock_fetch_terms.return_value = ["Product", "Brand"]
+    mock_fetch_terms.return_value = [
+        {"id": "term-product", "name": "Product"},
+        {"id": "term-brand", "name": "Brand"},
+    ]
     mock_invoke.return_value = QuestionExtractionModel(
         normalized_question="find red shoes",
         entities=ExtractedEntities(
             search_for=["shoe"],
             search_for_details=["red"],
+            reference_entity=["derailleur hanger"],
             target_entity_type="Product",
         ),
     )
@@ -72,16 +93,20 @@ def test_agent_passes_term_names_and_returns_target_entity_type(
     prompt_arg = mock_invoke.call_args[0][1][0].content
     assert "- Product" in prompt_arg
     assert "- Brand" in prompt_arg
-    assert result["path_state"]["entities"]["target_entity_type"] == "Product"
+    entities = result["path_state"]["entities"]
+    assert entities["target_entity_type"] == "Product"
+    assert entities["target_entity_type_id"] == "term-product"
+    assert entities["search_for"] == ["shoe"]
+    assert entities["reference_entity"] == ["derailleur hanger"]
 
 
 @patch("gsf.retrieval.rerank.agents.question_extraction.invoke_with_structured_output")
-@patch("gsf.retrieval.rerank.agents.question_extraction.fetch_all_term_names")
+@patch("gsf.retrieval.rerank.agents.question_extraction.fetch_all_terms")
 def test_agent_clears_invented_target_entity_type(
     mock_fetch_terms: MagicMock,
     mock_invoke: MagicMock,
 ) -> None:
-    mock_fetch_terms.return_value = ["Product"]
+    mock_fetch_terms.return_value = [{"id": "term-product", "name": "Product"}]
     mock_invoke.return_value = QuestionExtractionModel(
         normalized_question="find shoes",
         entities=ExtractedEntities(
@@ -99,4 +124,7 @@ def test_agent_clears_invented_target_entity_type(
         },
     )
 
-    assert result["path_state"]["entities"]["target_entity_type"] == ""
+    entities = result["path_state"]["entities"]
+    assert entities["target_entity_type"] == ""
+    assert entities["target_entity_type_id"] == ""
+    assert entities["search_for"] == ["shoe"]

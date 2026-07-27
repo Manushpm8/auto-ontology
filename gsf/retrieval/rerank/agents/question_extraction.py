@@ -9,7 +9,7 @@ search entities into five buckets: the item the user wants now
 (``search_for`` / ``search_for_details``), an existing item used as context
 (``reference_entity`` / ``reference_entity_details``), how those two relate
 (``relation``), and the catalog Term type that constitutes the answer
-(``target_entity_type``).
+(``target_entity_type`` / ``target_entity_type_id``).
 """
 
 from typing import Any, Dict
@@ -17,7 +17,7 @@ from typing import Any, Dict
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
-from gsf.dal.terms import fetch_all_term_names
+from gsf.dal.terms import fetch_all_terms
 from gsf.retrieval.rerank.prompts import create_question_extraction_prompt
 from gsf.retrieval.rerank.state import RerankState, get_original_question
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -30,6 +30,7 @@ _EMPTY_ENTITIES: dict[str, Any] = {
     "reference_entity_details": [],
     "relation": [],
     "target_entity_type": "",
+    "target_entity_type_id": "",
 }
 
 
@@ -109,22 +110,23 @@ class QuestionExtractionModel(BaseModel):
     )
 
 
-def _sanitize_target_entity_type(
+def _resolve_target_entity_type(
     target_entity_type: str,
-    term_names: list[str],
+    term_id_by_name: dict[str, str],
     logger: Any,
-) -> str:
-    """Clear invented Term names so downstream only sees catalog values."""
+) -> tuple[str, str]:
+    """Map a catalog Term name to its id; clear invented names."""
     value = (target_entity_type or "").strip()
     if not value:
-        return ""
-    if value in term_names:
-        return value
+        return "", ""
+    term_id = term_id_by_name.get(value, "")
+    if term_id:
+        return value, term_id
     logger.warning(
         "Question extraction returned unknown target_entity_type=%r; clearing",
         value,
     )
-    return ""
+    return "", ""
 
 
 class QuestionExtractionAgent(BaseAgent):
@@ -149,7 +151,13 @@ class QuestionExtractionAgent(BaseAgent):
 
         result: Dict[str, Any] = {"path_state": path_state}
 
-        term_names = fetch_all_term_names()
+        terms = fetch_all_terms()
+        term_id_by_name = {
+            str(term["name"]): str(term["id"])
+            for term in terms
+            if term.get("name") and term.get("id")
+        }
+        term_names = sorted(term_id_by_name)
         messages = [
             SystemMessage(
                 content=create_question_extraction_prompt(question, term_names),
@@ -171,11 +179,13 @@ class QuestionExtractionAgent(BaseAgent):
 
         normalized = (extraction.normalized_question or "").strip() or question
         entities = extraction.entities.model_dump()
-        entities["target_entity_type"] = _sanitize_target_entity_type(
+        name, term_id = _resolve_target_entity_type(
             entities.get("target_entity_type", ""),
-            term_names,
+            term_id_by_name,
             self.logger,
         )
+        entities["target_entity_type"] = name
+        entities["target_entity_type_id"] = term_id
         path_state["normalized_question"] = normalized
         path_state["entities"] = entities
 
