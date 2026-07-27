@@ -42,7 +42,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "dev_tools.evaluation.eval_chatbot",
-      "args": ["--single", "--database-name", "museum"],
+      "args": ["--single", "--database-name", "alien"],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
       "envFile": "${workspaceFolder}/.env",

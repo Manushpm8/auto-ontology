@@ -23,6 +23,10 @@ class InteractiveSessionState:
     latest_feedback: Optional[str] = None    # message from Bird :6002/submit
     path_state: dict = field(default_factory=dict)  # durable across GSF calls
     _pending_question: Optional[str] = None  # last AskUserAction (for apply_user_answer)
+    _cached_unresolvable: Optional[list] = None  # cached per working_question
+    _cached_unresolvable_for: Optional[str] = None  # working_question at cache time
+    _grounded_kg: Optional[str] = None  # relevant KB text extracted during coverage check
+    _grounded_kg_for: Optional[str] = None  # working_question when _grounded_kg was set
     data_retriever: Any = None
     semantic_retriever: Any = None
     connectors: list = field(default_factory=list)

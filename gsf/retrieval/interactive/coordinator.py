@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Union
+
+logger = logging.getLogger(__name__)
 
 # NOTE: get_agent_response_with_state and TextToSQLPayload are imported lazily
 # inside _run_sql_generation to avoid triggering LLM client initialisation at
 # import time (which requires NVIDIA_API_KEY to be set).
-from .clarify import should_clarify
+from .clarify import should_clarify, _STUCK_PHRASES
+from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
@@ -88,6 +92,15 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     from gsf.retrieval.text_to_sql.main import get_agent_response_with_state
     from gsf.retrieval.text_to_sql.state import TextToSQLPayload
 
+    # Reuse grounded KB text from clarification if it was computed for this question,
+    # otherwise run grounding now (debug turns skip clarification entirely).
+    if session._grounded_kg_for == session.working_question:
+        grounded_kg = session._grounded_kg or ""
+    else:
+        grounded_kg = ground_external_knowledge(
+            session.working_question, session.external_kg, _get_fast_llm()
+        )
+
     payload: TextToSQLPayload = {
         "question": session.working_question,
         "data_retriever": session.data_retriever,
@@ -95,7 +108,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         "connectors": session.connectors,
         "path_state": dict(session.path_state),  # copy so GSF doesn't mutate in place
         "acronyms": [],
-        "custom_prompts": "",
+        "custom_prompts": grounded_kg,
     }
     result = get_agent_response_with_state(payload)
 
@@ -174,6 +187,11 @@ def step(
             if extracted:
                 session.original_question = extracted
                 session.working_question = extracted
+                logger.info(
+                    "[%s] Query: \033[1;35m%s\033[0m",
+                    session.task_id,
+                    extracted,
+                )
 
     elif turn_type == TurnType.FOLLOW_UP:
         _apply_follow_up_seed(session, orchestrator_message)
@@ -184,7 +202,7 @@ def step(
     # Debug turns and exhausted budgets skip clarification — go straight to SQL
     under_budget = len(session.clarify_history) < session.max_clarify_turns
     if turn_type != TurnType.DEBUG and under_budget:
-        should_ask, question = should_clarify(session, _get_fast_llm())
+        should_ask, question = should_clarify(session, _get_llm())
         if should_ask:
             session._pending_question = question
             return AskUserAction(question=question)
@@ -198,9 +216,19 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
     if session._pending_question:
         session.clarify_history.append({"q": session._pending_question, "a": answer})
         session._pending_question = None
-    session.working_question = merge_clarification(
-        session.original_question, session.clarify_history, _get_fast_llm()
-    )
+    answer_lower = answer.lower()
+    user_could_not_answer = any(phrase in answer_lower for phrase in _STUCK_PHRASES)
+    if not user_could_not_answer:
+        session.working_question = merge_clarification(
+            session.working_question,
+            session.clarify_history[-1],
+            _get_fast_llm(),
+        )
+        logger.info(
+            "[%s] Merged question: %s",
+            session.task_id,
+            session.working_question,
+        )
 
 
 def apply_submit_result(session: InteractiveSessionState, result: dict) -> None:
