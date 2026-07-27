@@ -87,16 +87,21 @@ export type SinglePageComposerProps = {
 	 * Called when a certification dropdown changes. `id` is `'name'` for the
 	 * title/header field or the section id (e.g. `'description'`) for a text card.
 	 * When provided (and in edit mode), certification fields render an editable
-	 * dropdown instead of a read-only badge.
+	 * dropdown instead of a read-only badge. A returned promise drives the
+	 * dropdown's saving spinner.
 	 */
-	onCertificationChange?: (id: string, certified: boolean) => void;
+	onCertificationChange?: (id: string, certified: boolean) => void | Promise<void>;
 	/**
 	 * Called when a certification dropdown inside a DATA_TABLE row changes.
 	 * When provided (and in edit mode), the certification cell renders an
 	 * editable dropdown instead of a read-only badge. `rowId` is the row's
-	 * `rowIdKey` value.
+	 * `rowIdKey` value. A returned promise drives the dropdown's saving spinner.
 	 */
-	onDataTableCertificationChange?: (sectionId: string, rowId: string, certified: boolean) => void;
+	onDataTableCertificationChange?: (
+		sectionId: string,
+		rowId: string,
+		certified: boolean,
+	) => void | Promise<void>;
 	/** Returns an AI-suggested body for a `suggestable` text-card section, or null when none is available. */
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
 	inlineSaveSectionId?: string;
@@ -367,7 +372,11 @@ function renderComposerSection(
 	isEditingActive = false,
 	onEditSql?: (sectionId: string, sql: string) => void,
 	onEntityClick?: (focusId: string) => void,
-	onDataTableCertificationChange?: (sectionId: string, rowId: string, certified: boolean) => void,
+	onDataTableCertificationChange?: (
+		sectionId: string,
+		rowId: string,
+		certified: boolean,
+	) => void | Promise<void>,
 ): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
