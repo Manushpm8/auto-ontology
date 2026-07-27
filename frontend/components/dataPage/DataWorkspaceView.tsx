@@ -11,6 +11,7 @@ import { SkeletonBlock, SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
+import { Toast } from '@/common/Toast';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
 import { WORKSPACE_ROOT_PARENT_ID, buildTreeFocusPageFormat } from '@/lib/data/tree-focus-page';
@@ -33,6 +34,7 @@ export function DataWorkspaceView() {
 
 	const [databases, setDatabases] = useState<Database[]>([]);
 	const [loadError, setLoadError] = useState<string | null>(null);
+	const [certError, setCertError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 
 	const databasesRef = useRef<Database[]>([]);
@@ -195,7 +197,11 @@ export function DataWorkspaceView() {
 			const res = await datasources.updateNode(focusedEntityId, {
 				description_certified: certified,
 			});
-			if (res.error) return;
+			if (res.error) {
+				setCertError(res.message ?? 'Failed to update certification');
+				return;
+			}
+			setCertError(null);
 			applyNodePatch(focusedEntityId, { description_certified: certified });
 		},
 		[applyNodePatch, focusedEntityId],
@@ -206,7 +212,11 @@ export function DataWorkspaceView() {
 			const res = await datasources.updateNode(rowId, {
 				description_certified: certified,
 			});
-			if (res.error) return;
+			if (res.error) {
+				setCertError(res.message ?? 'Failed to update certification');
+				return;
+			}
+			setCertError(null);
 			applyNodePatch(rowId, { description_certified: certified });
 		},
 		[applyNodePatch],
@@ -286,6 +296,12 @@ export function DataWorkspaceView() {
 					onDataTableCertificationChange={handleChildCertificationChange}
 				/>
 			</main>
+			<Toast
+				open={certError != null}
+				message={certError ?? ''}
+				variant="error"
+				onClose={() => setCertError(null)}
+			/>
 		</BackPanelLayout>
 	);
 }
