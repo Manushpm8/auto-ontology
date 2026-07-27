@@ -77,7 +77,7 @@ export const PopoverMenu = ({ items, trigger, className = '' }: PopoverMenuProps
 					<div
 						ref={menuRef}
 						style={{ top: menu.top, right: menu.right }}
-						className="fixed z-[1000] w-32 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+						className="fixed z-[1000] w-max min-w-32 whitespace-nowrap rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
 					>
 						{items.map((item) => (
 							<button
