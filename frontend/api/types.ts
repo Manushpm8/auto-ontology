@@ -28,6 +28,7 @@ export type SchemasResponse = {
 export type NodePatch = {
 	description?: string;
 	sample_values?: string[];
+	description_certified?: boolean;
 };
 
 /** Response from the node update endpoint. */
@@ -43,6 +44,12 @@ export type ColumnsEnvelope = {
 	columns_count: number;
 	columns: Pick<
 		Column,
-		'id' | 'ordinal_position' | 'column_name' | 'data_type' | 'description' | 'sample_values'
+		| 'id'
+		| 'ordinal_position'
+		| 'column_name'
+		| 'data_type'
+		| 'description'
+		| 'description_certified'
+		| 'sample_values'
 	>[];
 };

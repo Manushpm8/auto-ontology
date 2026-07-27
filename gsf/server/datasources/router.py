@@ -17,6 +17,7 @@ from gsf.server.pql_analyses import service as pql_analyses_dal
 class NodeUpdate(BaseModel):
     description: str | None = None
     sample_values: list[str] | None = None
+    description_certified: bool | None = None
 
 
 class CustomAnalysisValidate(BaseModel):

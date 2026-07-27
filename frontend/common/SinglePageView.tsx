@@ -31,6 +31,12 @@ export type SinglePageViewProps = {
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
 	onEditSql?: (sectionId: string, sql: string) => void;
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
+	onCertificationChange?: (id: string, certified: boolean) => void | Promise<void>;
+	onDataTableCertificationChange?: (
+		sectionId: string,
+		rowId: string,
+		certified: boolean,
+	) => void | Promise<void>;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
 };
@@ -49,6 +55,8 @@ export const SinglePageView = ({
 	onDataTableRowClick,
 	onEditSql,
 	onSuggestDescription,
+	onCertificationChange,
+	onDataTableCertificationChange,
 	inlineSaveSectionId,
 	hideEditToolbar,
 }: SinglePageViewProps): React.JSX.Element | null => {
@@ -127,6 +135,8 @@ export const SinglePageView = ({
 				onDataTableRowClick={onDataTableRowClick}
 				onEditSql={onEditSql}
 				onSuggestDescription={onSuggestDescription}
+				onCertificationChange={onCertificationChange}
+				onDataTableCertificationChange={onDataTableCertificationChange}
 				inlineSaveSectionId={inlineSaveSectionId}
 				hideEditToolbar={hideEditToolbar}
 			/>

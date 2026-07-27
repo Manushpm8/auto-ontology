@@ -4,24 +4,28 @@
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
 import { SkeletonBlock, SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
-import type { Database } from '@/types/datasources';
+import { Toast } from '@/common/Toast';
+import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
 import { WORKSPACE_ROOT_PARENT_ID, buildTreeFocusPageFormat } from '@/lib/data/tree-focus-page';
 import {
 	mergeColumnsIntoTable,
 	mergeSchemasIntoDatabase,
 	mergeTablesIntoSchema,
+	patchNodeInTree,
 } from '@/lib/data/datasource-tree-merge';
 import { datasources } from '@/api/datasources';
 
 export type DataWorkspaceViewProps = Record<string, never>;
+
+type CatalogNodePatch = Partial<Database> & Partial<Schema> & Partial<Table> & Partial<Column>;
 
 export function DataWorkspaceView() {
 	const searchParams = useSearchParams();
@@ -30,6 +34,7 @@ export function DataWorkspaceView() {
 
 	const [databases, setDatabases] = useState<Database[]>([]);
 	const [loadError, setLoadError] = useState<string | null>(null);
+	const [certError, setCertError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 
 	const databasesRef = useRef<Database[]>([]);
@@ -156,41 +161,65 @@ export function DataWorkspaceView() {
 		[hydrateBranchForFocus],
 	);
 
+	const focusedEntityId = useMemo(() => {
+		if (!treeFocusId) return null;
+		const segments = treeFocusId.split('|').filter((s) => s.length > 0);
+		return segments[segments.length - 1] ?? null;
+	}, [treeFocusId]);
+
+	// Merges a patch into the matching catalog node anywhere in the tree and
+	// bumps the epoch so the detail page rebuilds with the new values.
+	const applyNodePatch = useCallback((entityId: string, patch: CatalogNodePatch) => {
+		if (!entityId || Object.keys(patch).length === 0) return;
+		const [updated, found] = patchNodeInTree(databasesRef.current, entityId, patch);
+		if (!found) return;
+		databasesRef.current = updated;
+		setTreeDatabases(updated);
+		setTreeDataEpoch((n) => n + 1);
+	}, []);
+
 	const syncEdits = useCallback(
 		(edits: Record<string, ComposerEditValue>) => {
-			if (!treeFocusId || Object.keys(edits).length === 0) return;
-			const segments = treeFocusId.split('|').filter((s) => s.length > 0);
-			const entityId = segments[segments.length - 1];
-			if (!entityId) return;
-
-			const patch = (node: Record<string, unknown>) => ({ ...node, ...edits });
-
-			const updated = databasesRef.current.map((db) => {
-				if (db.id === entityId) return { ...db, ...edits };
-				return {
-					...db,
-					schemas: db.schemas.map((s) => {
-						if (s.id === entityId) return patch(s) as typeof s;
-						return {
-							...s,
-							tables: s.tables.map((t) => {
-								if (t.id === entityId) return patch(t) as typeof t;
-								return {
-									...t,
-									columns: t.columns.map((c) =>
-										c.id === entityId ? (patch(c) as typeof c) : c,
-									),
-								};
-							}),
-						};
-					}),
-				};
-			});
-			databasesRef.current = updated;
-			setTreeDatabases(updated);
-			setTreeDataEpoch((n) => n + 1);
+			if (focusedEntityId == null) return;
+			// Composer edits are keyed by section id, which for editable catalog
+			// sections maps onto `description` / `sample_values`.
+			applyNodePatch(focusedEntityId, edits as CatalogNodePatch);
 		},
-		[treeFocusId],
+		[applyNodePatch, focusedEntityId],
+	);
+
+	// Certification saves immediately, independent of the description Save
+	// toolbar. Only the Description card carries certification for catalog
+	// nodes, so the composer's field id is unused.
+	const handleCertificationChange = useCallback(
+		async (_id: string, certified: boolean) => {
+			if (focusedEntityId == null) return;
+			const res = await datasources.updateNode(focusedEntityId, {
+				description_certified: certified,
+			});
+			if (res.error) {
+				setCertError(res.message ?? 'Failed to update certification');
+				return;
+			}
+			setCertError(null);
+			applyNodePatch(focusedEntityId, { description_certified: certified });
+		},
+		[applyNodePatch, focusedEntityId],
+	);
+
+	const handleChildCertificationChange = useCallback(
+		async (_sectionId: string, rowId: string, certified: boolean) => {
+			const res = await datasources.updateNode(rowId, {
+				description_certified: certified,
+			});
+			if (res.error) {
+				setCertError(res.message ?? 'Failed to update certification');
+				return;
+			}
+			setCertError(null);
+			applyNodePatch(rowId, { description_certified: certified });
+		},
+		[applyNodePatch],
 	);
 
 	if (loadError) {
@@ -263,8 +292,16 @@ export function DataWorkspaceView() {
 					treeDataEpoch={treeDataEpoch}
 					getSinglePage={getSinglePage}
 					onSave={syncEdits}
+					onCertificationChange={handleCertificationChange}
+					onDataTableCertificationChange={handleChildCertificationChange}
 				/>
 			</main>
+			<Toast
+				open={certError != null}
+				message={certError ?? ''}
+				variant="error"
+				onClose={() => setCertError(null)}
+			/>
 		</BackPanelLayout>
 	);
 }

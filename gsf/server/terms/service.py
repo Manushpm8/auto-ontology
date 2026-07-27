@@ -27,21 +27,33 @@ def update_column_attribute(
     name: str | None = None,
     description: str | None = None,
     sample_values: list[str] | None = None,
+    certified: bool | None = None,
 ) -> dict[str, Any] | None:
     """Update ColumnAttribute metadata and refresh related VDB rows.
 
     ``sample_values`` live on the owning Column. When provided, this updates
     that Column (same path as catalog column edit), re-embeds the Column in
     the data VDB, then re-embeds this ColumnAttribute in the semantic VDB.
+
+    The certification flag carries no embedding content, so a
+    certification-only update skips the VDB refresh entirely.
     """
     row = attributes_dal.update_column_attribute(
         attr_id,
         term_id,
         name=name,
         description=description,
+        certified=certified,
     )
     if row is None:
         return None
+
+    content_changed = (
+        name is not None or description is not None or sample_values is not None
+    )
+    if not content_changed:
+        row["sample_values"] = parse_sample_values(row.get("sample_values"))
+        return row
 
     if sample_values is not None:
         column_id = row.get("column_id")
