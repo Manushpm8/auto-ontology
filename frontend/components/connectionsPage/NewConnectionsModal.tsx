@@ -47,15 +47,23 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		[supportsSchemaSelection],
 	);
 
-	const buildConnection = useCallback((): ConnectionInput => {
-		const fields = CONNECTION_FIELDS[connectionType];
-		const entries = fields.map((field) => [field.key, (values[field.key] ?? '').trim()]);
-		const base = { type: connectionType, ...Object.fromEntries(entries) };
-		if (supportsSchemaSelection && selectedSchemas.length > 0) {
-			return { ...base, schemas: selectedSchemas } as ConnectionInput;
-		}
-		return base as ConnectionInput;
-	}, [connectionType, values, supportsSchemaSelection, selectedSchemas]);
+	// `testOnly` fields (the Databricks schema filter) shape the connection test
+	// but must not end up on the stored connection, so they are dropped unless
+	// the payload is headed for the test endpoint.
+	const buildConnection = useCallback(
+		({ forTest = false }: { forTest?: boolean } = {}): ConnectionInput => {
+			const fields = CONNECTION_FIELDS[connectionType].filter(
+				(field) => forTest || !field.testOnly,
+			);
+			const entries = fields.map((field) => [field.key, (values[field.key] ?? '').trim()]);
+			const base = { type: connectionType, ...Object.fromEntries(entries) };
+			if (supportsSchemaSelection && selectedSchemas.length > 0) {
+				return { ...base, schemas: selectedSchemas } as ConnectionInput;
+			}
+			return base as ConnectionInput;
+		},
+		[connectionType, values, supportsSchemaSelection, selectedSchemas],
+	);
 
 	const fieldsComplete = useMemo(
 		() =>
@@ -106,7 +114,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		setAlert(null);
 		setTestSuccessMessage(null);
 
-		const res = await connectionsApi.test(buildConnection());
+		const res = await connectionsApi.test(buildConnection({ forTest: true }));
 		setTestingConnection(false);
 
 		if ('error' in res && res.error) {
