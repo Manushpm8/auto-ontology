@@ -349,6 +349,7 @@ def fetch_tables_for_schema(
                db.name AS database_name,
                s.name AS schema_name,
                {table_description_expr("t")} AS description,
+               coalesce(t.description_certified, false) AS description_certified,
                columns_count,
                sql_count,
                size(unique_term_ids) AS terms_count
@@ -512,6 +513,7 @@ def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
                  column_name: c.name,
                  data_type: c.data_type,
                  description: {column_description_expr("c")},
+                 description_certified: coalesce(c.description_certified, false),
                  sample_values: c.sample_values
              }}) AS columns
         RETURN t.name AS table_name,
