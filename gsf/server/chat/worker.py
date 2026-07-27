@@ -116,12 +116,23 @@ def _worker_loop(
         if tag != _MSG_ASK:
             continue
 
+        question, subject_token = payload
         try:
+            # Per-user Databricks auth trades the prewarmed connectors for ones
+            # bound to the caller's exchanged token. Databricks connectors open
+            # connections per operation, so rebuilding them here is cheap.
+            if subject_token is not None:
+                from gsf.connectors.registry import get_connectors_for_subject_token
+
+                ask_connectors = get_connectors_for_subject_token(subject_token)
+            else:
+                ask_connectors = connectors
+
             agent_payload = {
-                "question": payload,
+                "question": question,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
-                "connectors": connectors,
+                "connectors": ask_connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": fetch_custom_prompts(),
             }
@@ -167,8 +178,14 @@ class PrewarmedWorker:
     def is_alive(self) -> bool:
         return self._proc.is_alive()
 
-    def submit(self, question: str) -> None:
-        self._in_q.put((_MSG_ASK, question))
+    def submit(self, question: str, subject_token: str | None = None) -> None:
+        """Ask *question*, optionally authenticating to Databricks as the caller.
+
+        *subject_token* is the caller's SSO JWT. When present the worker builds
+        per-user connectors for this question instead of using the prewarmed
+        ones, so SQL executes under that user's own Databricks grants.
+        """
+        self._in_q.put((_MSG_ASK, (question, subject_token)))
 
     def events(self) -> Generator[dict[str, Any] | None, None, None]:
         """Yield agent events for the current question.

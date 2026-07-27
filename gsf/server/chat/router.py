@@ -184,6 +184,33 @@ def _stream_with_slot(slot: _Slot) -> Generator[str, None, None]:
         _release(slot)
 
 
+def _subject_token(http_request: Request) -> str | None:
+    """Return the caller's SSO JWT when a connection authenticates as the user.
+
+    The frontend forwards the browser user's SSO token (or a service caller's
+    own bearer token) as ``Authorization: Bearer``. Fail closed: when any
+    connection has "Authenticate as signed-in user" enabled, a request without a
+    token is rejected rather than allowed to run under that connection's PAT.
+    """
+    from gsf.connectors.databricks_oauth import any_connection_uses_sso_federation
+
+    if not any_connection_uses_sso_federation():
+        return None
+
+    header = http_request.headers.get("authorization") or ""
+    scheme, _, token = header.partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "A connection is configured to authenticate as the signed-in "
+                "user, but the request carried no SSO bearer token."
+            ),
+        )
+    return token
+
+
 @router.post("/chat/completions")
 async def chat_completions(
     request: ChatRequest, http_request: Request
@@ -192,6 +219,8 @@ async def chat_completions(
     # run happens. The chat page gates on the status API; this is the backstop.
     if not semantic_layer_calculated():
         raise HTTPException(status_code=409, detail=_SEMANTIC_MISSING_MSG)
+
+    subject_token = _subject_token(http_request)
 
     pool = get_pool()
     worker = pool.acquire()
@@ -217,7 +246,7 @@ async def chat_completions(
         displaced.cancelled.set()
         _release(displaced)
 
-    worker.submit(request.question)
+    worker.submit(request.question, subject_token)
     asyncio.create_task(_watch_disconnect(http_request, slot))
 
     return StreamingResponse(

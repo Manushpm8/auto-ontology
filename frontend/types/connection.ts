@@ -14,6 +14,12 @@ export type DatabricksConnectionParams = {
 	schemas?: string[];
 	/** Test-only substring filter narrowing the schema picker. Never persisted. */
 	schema_contains?: string;
+	/**
+	 * Run chat queries as the signed-in user by exchanging their SSO token for a
+	 * Databricks token, instead of using the stored access token. Ingestion is
+	 * unaffected and always uses the stored token.
+	 */
+	sso_federation?: boolean;
 };
 
 export type PostgresConnectionParams = {

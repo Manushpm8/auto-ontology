@@ -55,7 +55,12 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 			const fields = CONNECTION_FIELDS[connectionType].filter(
 				(field) => forTest || !field.testOnly,
 			);
-			const entries = fields.map((field) => [field.key, (values[field.key] ?? '').trim()]);
+			const entries = fields.map((field) => [
+				field.key,
+				// Checkbox fields go over the wire as real booleans; the form
+				// stores them as 'true'/'' like every other value.
+				field.boolean ? values[field.key] === 'true' : (values[field.key] ?? '').trim(),
+			]);
 			const base = { type: connectionType, ...Object.fromEntries(entries) };
 			if (supportsSchemaSelection && selectedSchemas.length > 0) {
 				return { ...base, schemas: selectedSchemas } as ConnectionInput;

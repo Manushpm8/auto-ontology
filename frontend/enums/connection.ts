@@ -30,7 +30,8 @@ export type ConnectionFieldKey =
 	| 'password'
 	| 'database'
 	| 'protocol'
-	| 'schema_contains';
+	| 'schema_contains'
+	| 'sso_federation';
 
 export type ConnectionField = {
 	key: ConnectionFieldKey;
@@ -41,6 +42,10 @@ export type ConnectionField = {
 	optional?: boolean;
 	/** Sent with the connection test only; stripped before the connection is created. */
 	testOnly?: boolean;
+	/** Rendered as a checkbox and sent as a boolean rather than a string. */
+	boolean?: boolean;
+	/** Helper text shown under the field. */
+	hint?: string;
 };
 
 /** Form fields rendered per connector type. `database` is the connection identity. */
@@ -64,6 +69,13 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 			placeholder: 'Filter the schema list, e.g. sales',
 			optional: true,
 			testOnly: true,
+		},
+		{
+			key: 'sso_federation',
+			label: 'Authenticate as signed-in user (SSO)',
+			hint: 'Chat queries run with the signed-in user’s own Databricks privileges instead of the access token above. Requires a Databricks federation policy trusting your SSO issuer. Ingestion always uses the access token.',
+			optional: true,
+			boolean: true,
 		},
 	],
 	[ConnectionType.POSTGRESQL]: [

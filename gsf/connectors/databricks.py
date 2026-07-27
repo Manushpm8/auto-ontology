@@ -20,6 +20,13 @@ from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 logger = logging.getLogger(__name__)
 
+# The SQL connector logs several INFO lines per operation (session opened,
+# session closed, "HTTP Response with status code 200" from both the thrift
+# client and the retry policy). This connector opens a connection per operation,
+# so at INFO that is 4-6 lines of noise per query with no diagnostic value.
+# Warnings and errors — including retry/timeout warnings — still come through.
+logging.getLogger("databricks.sql").setLevel(logging.WARNING)
+
 
 def _quoted_identifier(name: str) -> str:
     """Return a Databricks-quoted identifier."""

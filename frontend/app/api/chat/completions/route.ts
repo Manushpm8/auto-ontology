@@ -11,6 +11,7 @@
 
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
+import { resolveSubjectToken } from '@/auth/sso-token';
 import { getPrisma } from '@/lib/prisma';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
@@ -78,12 +79,20 @@ const readFinalAnswer = async (
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const body = await req.text();
 
+	// Forward the caller's SSO token whenever we have one. Only the backend knows
+	// which connections are configured to authenticate as the signed-in user, so
+	// it owns the fail-closed decision; sending the token is a no-op otherwise.
+	const upstreamHeaders: Record<string, string> = {
+		'Content-Type': 'application/json',
+		Accept: 'text/event-stream',
+	};
+
+	const subjectToken = await resolveSubjectToken(req.headers, user.id);
+	if (subjectToken) upstreamHeaders.Authorization = `Bearer ${subjectToken}`;
+
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Accept: 'text/event-stream',
-		},
+		headers: upstreamHeaders,
 		body,
 		// Disable Node's transparent decompression so we can pipe bytes 1:1.
 		// @ts-expect-error — `duplex` is required by Node's fetch when

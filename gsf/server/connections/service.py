@@ -94,6 +94,43 @@ def create_connection(
     return connection
 
 
+def set_sso_federation(*, database_name: str, enabled: bool) -> dict[str, Any]:
+    """Toggle "authenticate as signed-in user" on an existing connection.
+
+    Deliberately narrow: it rewrites only the ``sso_federation`` flag on the
+    stored connection, so callers never have to re-send credentials to change
+    it. Ingestion is unaffected — it always uses the stored access token — so
+    no re-ingest is triggered.
+    """
+    connection = next(
+        (
+            conn
+            for conn in list_connections()
+            if str(conn.get("database") or "").strip() == database_name
+        ),
+        None,
+    )
+    if connection is None:
+        raise ValueError(f"No connection found for database {database_name!r}")
+
+    updated = {**connection, "sso_federation": enabled}
+
+    if is_vault_configured():
+        write_secret(database_name, updated)
+    else:
+        insert_connection(
+            connection=json.dumps(updated),
+            database_name=database_name,
+        )
+
+    # Connectors cache the credential, and chat workers hold connectors, so both
+    # must be rebuilt for the change to take effect on the next question.
+    invalidate_connectors_cache()
+    refresh_chat_workers()
+
+    return {"database_name": database_name, "sso_federation": enabled}
+
+
 def delete_connection(database_name: str) -> dict[str, str]:
     """Delete a UI-managed connection and tear down its ingested database graph."""
     if is_vault_configured():

@@ -21,6 +21,7 @@ export const ConnectionsView = () => {
 	const [deletingConnection, setDeletingConnection] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteError, setDeleteError] = useState<string | null>(null);
+	const [ssoFederationPending, setSsoFederationPending] = useState<string | null>(null);
 
 	const fetchConnections = useCallback(async () => {
 		try {
@@ -57,6 +58,27 @@ export const ConnectionsView = () => {
 	const handleConnectionModalConfirm = () => {
 		handleConnectionModalClose();
 		void fetchConnections();
+	};
+
+	const handleSsoFederationChange = async (databaseName: string, enabled: boolean) => {
+		setError(null);
+		setSsoFederationPending(databaseName);
+		const res = await connectionsApi.setSsoFederation(databaseName, enabled);
+		setSsoFederationPending(null);
+
+		if (res.error) {
+			setError(res.message ?? 'Failed to update connection.');
+			return;
+		}
+
+		// Reflect the saved value locally rather than refetching the whole list.
+		setConnections((prev) =>
+			prev.map((c) =>
+				c.database_name === databaseName
+					? { ...c, connection: { ...c.connection, sso_federation: enabled } }
+					: c,
+			),
+		);
 	};
 
 	const handleDeleteRequest = (databaseName: string) => {
@@ -148,6 +170,10 @@ export const ConnectionsView = () => {
 					<ConnectionsInfoCardView
 						connections={connections}
 						onDelete={handleDeleteRequest}
+						onSsoFederationChange={(databaseName, enabled) => {
+							void handleSsoFederationChange(databaseName, enabled);
+						}}
+						ssoFederationPending={ssoFederationPending}
 					/>
 				</div>
 			)}

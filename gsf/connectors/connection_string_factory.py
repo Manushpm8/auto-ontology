@@ -61,7 +61,12 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         if host.startswith(("https://", "http://")):
             host = host.split("://", 1)[1]
         http_path = _require(connection, "http_path")
-        access_token = _require(connection, "password")
+        # ``access_token_override`` carries a Databricks token exchanged from the
+        # caller's SSO identity, so the query runs with that user's privileges
+        # instead of the connection's stored PAT.
+        access_token = str(connection.get("access_token_override") or "").strip()
+        if not access_token:
+            access_token = _require(connection, "password")
         catalog = _require(connection, "database")
         url = (
             f"databricks://token:{_enc(access_token)}@{host}/{_enc(catalog)}"
