@@ -31,7 +31,7 @@ async def ingest_connection(connection: dict[str, Any] = Body(...)) -> dict[str,
 
 
 @router.post("/ingest/delete", status_code=202)
-async def reset_database(database_name: str) -> dict[str, str]:
+async def ingest_delete(database_name: str) -> dict[str, str]:
     """Trigger a non-blocking reset of a database's ingested data.
 
     ``database_name`` is required: this endpoint always targets one database.
