@@ -74,4 +74,6 @@ export const semanticCompilationApi = {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),
 		}),
+
+	reset: () => json<{ status: string }>('/api/semantic-compilation/reset', { method: 'POST' }),
 };

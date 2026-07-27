@@ -53,6 +53,25 @@ def trigger_semantic_compile() -> None:
         logger.exception("Failed to trigger semantic compile via %s", url)
 
 
+def trigger_semantic_reset(database_name: str | None = None) -> None:
+    """Ask the ingestion service to delete the semantic layer (best-effort).
+
+    Omitting ``database_name`` resets every database. The service deletes the
+    semantic nodes and embeddings without recompiling; the next scheduled run
+    rebuilds them.
+    """
+    url = f"{_base_url()}/semantic/reset"
+    params = {} if database_name is None else {"database_name": database_name}
+    try:
+        httpx.post(
+            url,
+            params=params,
+            timeout=_REQUEST_TIMEOUT,
+        ).raise_for_status()
+    except Exception:
+        logger.exception("Failed to trigger semantic reset via %s", url)
+
+
 def trigger_reset(database_name: str) -> None:
     """Ask the ingestion service to reset a database's data (best-effort)."""
     url = f"{_base_url()}/ingest/delete"

@@ -20,6 +20,7 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 from gsf.semantic.constants import (
     LABEL_ANALYSIS,
     LABEL_COLUMN_ATTRIBUTE,
+    LABEL_PQL_ANALYSIS,
     LABEL_SQL_ATTRIBUTE,
     LABEL_TERM,
     LABEL_TEXT_ATTRIBUTE,
@@ -38,15 +39,14 @@ class ResetResult:
     semantic_rows: int
 
 
-# Every label under "Semantic node labels" in gsf.semantic.constants, i.e.
-# everything semantic compilation produces and can therefore rebuild.
-# `PqlAnalysis` is deliberately absent: it is user-authored, not compiled.
 _SEMANTIC_LABELS = (
     LABEL_TERM,
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_SQL_ATTRIBUTE,
     LABEL_TEXT_ATTRIBUTE,
     LABEL_ANALYSIS,
+    LABEL_PQL_ANALYSIS,
+    Labels.CUSTOM_ANALYSIS,
 )
 
 
@@ -110,11 +110,12 @@ def _delete_semantic_nodes(database_name: str | None = None) -> int:
     """Delete semantic Neo4j nodes, leaving data nodes intact.
 
     Deletes only nodes carrying one of :data:`_SEMANTIC_LABELS`; data nodes
-    (``DB``/``Schema``/``Table``/``Column``) and user-owned nodes are
-    untouched. Scoped to one database, semantic nodes are found by traversing
-    out from its ``Database`` node; for a full wipe they are matched on label
-    alone, so nodes orphaned from every ``Database`` node are collected too.
-    Returns the number of nodes deleted.
+    (``DB``/``Schema``/``Table``/``Column``) are untouched. Scoped to one
+    database, semantic nodes are found by traversing out from its ``Database``
+    node; for a full wipe they are matched on label alone, so nodes orphaned
+    from every ``Database`` node are collected too — including ``PqlAnalysis``,
+    which is never attached to a ``Database``. Returns the number of nodes
+    deleted.
     """
     labels = "|".join(_SEMANTIC_LABELS)
     if database_name is None:
@@ -142,8 +143,11 @@ def delete_semantic_layer(database_name: str | None = None) -> int:
     When ``database_name`` is given, removes only that database's semantic nodes
     (see :data:`_SEMANTIC_LABELS`) reachable from the ``Database`` node and its
     ``semantic_layer`` rows. When ``None``, removes semantic nodes and
-    embeddings across every database. Data nodes are left intact. Returns the
-    number of pgvector rows deleted.
+    embeddings across every database. Data nodes are left intact.
+
+    Custom analyses, SQL and predictive alike, are part of what goes: they are
+    user-authored, so nothing recompiles them afterwards. Returns the number of
+    pgvector rows deleted.
     """
     _delete_semantic_nodes(database_name)
 

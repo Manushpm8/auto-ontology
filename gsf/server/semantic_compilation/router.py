@@ -4,9 +4,10 @@
 
 """API route for triggering semantic compilation on the ingestion service.
 
-The settings UI stores the on/off flag directly in Postgres (via Prisma); this
-route only relays the "run it now" request to the ingestion service, mirroring
-how connection changes trigger ingest (see ``connections/service.py``).
+The settings UI stores the on/off flag directly in Postgres (via Prisma); these
+routes only relay the "run it now" and "reset the layer" requests to the
+ingestion service, mirroring how connection changes trigger ingest (see
+``connections/service.py``).
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import logging
 from fastapi import APIRouter
 
 from gsf.dal.terms import semantic_layer_calculated
-from gsf.server.ingestion.proxy import trigger_semantic_compile
+from gsf.server.ingestion.proxy import trigger_semantic_compile, trigger_semantic_reset
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,20 @@ router = APIRouter()
 @router.post("/semantic-compilation/trigger", status_code=202)
 async def trigger() -> dict[str, str]:
     """Ask the ingestion service to run (and schedule) semantic compilation."""
+    trigger_semantic_compile()
+    return {"status": "accepted"}
+
+
+@router.post("/semantic-compilation/reset", status_code=202)
+async def reset() -> dict[str, str]:
+    """Ask the ingestion service to rebuild every database's semantic layer.
+
+    The semantic nodes and embeddings are deleted and a compilation run is
+    requested straight after, so the layer is rebuilt from scratch without
+    waiting for the next scheduled run. Both requests return as soon as the
+    service accepts them, so the deletion and the compilation run overlap.
+    """
+    trigger_semantic_reset()
     trigger_semantic_compile()
     return {"status": "accepted"}
 

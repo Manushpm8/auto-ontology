@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { semanticCompilationApi } from '@/api/settings';
+import { ConfirmModal } from '@/common/modal';
 import { Toast } from '@/common/Toast';
 
 export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: boolean }) => {
@@ -13,6 +14,7 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 	// paint; updated optimistically and rolled back if the save fails.
 	const [enabled, setEnabled] = useState(initialEnabled);
 	const [saving, setSaving] = useState(false);
+	const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 
@@ -38,6 +40,19 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 		} finally {
 			setSaving(false);
 		}
+	};
+
+	const handleReset = () => {
+		setError(null);
+		setConfirmModalOpen(false);
+		// The ingestion service deletes in the background and answers 202, so the
+		// request only starts the reset. Nothing here depends on the response, so
+		// it is left unawaited and only a failure to reach the API is surfaced.
+		setMessage('Semantic layer reset started — it runs in the background.');
+		semanticCompilationApi.reset().catch(() => {
+			setMessage(null);
+			setError('Failed to reset the semantic layer. Please try again.');
+		});
 	};
 
 	return (
@@ -79,7 +94,38 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 						/>
 					</button>
 				</div>
+
+				{enabled && (
+					<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+						<div className="flex flex-col">
+							<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+								Reset semantic layer
+							</span>
+							<span className="text-xs text-zinc-500">
+								Deletes the semantic layer for every database, and rebuild it from
+								scratch.
+							</span>
+						</div>
+						<button
+							type="button"
+							disabled={saving}
+							onClick={() => setConfirmModalOpen(true)}
+							className="cursor-pointer rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"
+						>
+							Reset
+						</button>
+					</div>
+				)}
 			</div>
+
+			<ConfirmModal
+				open={confirmModalOpen}
+				title="Reset semantic layer"
+				message="This deletes the semantic layer and a rebuild will be triggered."
+				confirmLabel="Reset"
+				onConfirm={handleReset}
+				onCancel={() => setConfirmModalOpen(false)}
+			/>
 
 			<Toast
 				open={error !== null}
