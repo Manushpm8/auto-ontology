@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Button } from '@/common/Button';
+import { ButtonSize, ButtonVariant } from '@/enums/button';
 import { Modal } from './Modal';
 
 type Tone = 'danger' | 'default';
@@ -52,8 +53,8 @@ export const ConfirmModal = ({
 				<Button
 					onClick={onCancel}
 					disabled={confirming}
-					variant="icon"
-					size="icon"
+					variant={ButtonVariant.Icon}
+					size={ButtonSize.Icon}
 					aria-label="Close"
 				>
 					<svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
@@ -73,8 +74,8 @@ export const ConfirmModal = ({
 						ref={cancelRef}
 						onClick={onCancel}
 						disabled={confirming}
-						variant="secondary"
-						size="md"
+						variant={ButtonVariant.Secondary}
+						size={ButtonSize.Medium}
 					>
 						{cancelLabel}
 					</Button>
@@ -83,8 +84,8 @@ export const ConfirmModal = ({
 							void onConfirm();
 						}}
 						loading={confirming}
-						variant={tone === 'danger' ? 'danger' : 'primary'}
-						size="md"
+						variant={tone === 'danger' ? ButtonVariant.Danger : ButtonVariant.Primary}
+						size={ButtonSize.Medium}
 					>
 						{confirming ? `${confirmLabel}…` : confirmLabel}
 					</Button>

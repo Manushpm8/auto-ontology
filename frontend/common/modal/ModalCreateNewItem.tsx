@@ -6,6 +6,7 @@
 
 import type { ReactNode } from 'react';
 import { Button } from '@/common/Button';
+import { ButtonSize, ButtonVariant } from '@/enums/button';
 import { Modal } from './Modal';
 
 type Accent = 'emerald' | 'teal';
@@ -45,7 +46,12 @@ export const ModalCreateNewItem = ({
 	<Modal open={open} onClose={onClose} className={className}>
 		<div className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
 			<h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{title}</h3>
-			<Button onClick={onClose} variant="icon" size="icon" aria-label="Close">
+			<Button
+				onClick={onClose}
+				variant={ButtonVariant.Icon}
+				size={ButtonSize.Icon}
+				aria-label="Close"
+			>
 				<svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
 					<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
 				</svg>
@@ -60,8 +66,8 @@ export const ModalCreateNewItem = ({
 							void secondaryAction.onClick();
 						}}
 						disabled={secondaryAction.disabled}
-						variant="outline"
-						size="md"
+						variant={ButtonVariant.Outline}
+						size={ButtonSize.Medium}
 					>
 						{secondaryAction.label}
 					</Button>
@@ -71,8 +77,8 @@ export const ModalCreateNewItem = ({
 						void onSubmit();
 					}}
 					disabled={!canSubmit}
-					variant={accent === 'emerald' ? 'primary' : 'teal'}
-					size="md"
+					variant={accent === 'emerald' ? ButtonVariant.Primary : ButtonVariant.Teal}
+					size={ButtonSize.Medium}
 				>
 					{submitLabel}
 				</Button>

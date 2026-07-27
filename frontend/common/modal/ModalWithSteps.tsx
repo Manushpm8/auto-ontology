@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Button } from '@/common/Button';
+import { ButtonSize, ButtonVariant } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { Modal } from './Modal';
 
@@ -83,7 +84,12 @@ export const ModalWithSteps = ({
 						{title}
 					</h3>
 				</div>
-				<Button onClick={onClose} variant="icon" size="icon" aria-label="Close">
+				<Button
+					onClick={onClose}
+					variant={ButtonVariant.Icon}
+					size={ButtonSize.Icon}
+					aria-label="Close"
+				>
 					<svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
 						<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
 					</svg>
@@ -149,8 +155,8 @@ export const ModalWithSteps = ({
 								onClick={action.onClick}
 								loading={action.loading}
 								disabled={action.disabled}
-								variant={isPrimary ? 'primary' : 'outline'}
-								size="md"
+								variant={isPrimary ? ButtonVariant.Primary : ButtonVariant.Outline}
+								size={ButtonSize.Medium}
 							>
 								{action.loading ? `${action.label}…` : action.label}
 							</Button>
