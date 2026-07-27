@@ -381,7 +381,7 @@ export default function ZonesSettingsPage() {
 
 	const loadTreeDatabases = useCallback(async (): Promise<Database[]> => {
 		setTreeLoading(true);
-		const response = await datasources.getDBs();
+		const response = await datasources.getDBsForZoneManagement();
 		if (response.error) {
 			setTreeError(response.message ?? 'Failed to load catalog data.');
 			setTreeDatabases([]);
@@ -403,7 +403,7 @@ export default function ZonesSettingsPage() {
 			const schemaResponses = await Promise.all(
 				baseDatabases.map(async (database) => ({
 					databaseId: database.id,
-					response: await datasources.getSchemasForDatabase(database.id),
+					response: await datasources.getSchemasForZoneManagement(database.id),
 				})),
 			);
 			schemaResponses.forEach(({ databaseId, response }) => {
@@ -420,7 +420,7 @@ export default function ZonesSettingsPage() {
 			const tableResponses = await Promise.all(
 				schemaNodes.map(async (schemaNode) => ({
 					schemaId: schemaNode.schemaId,
-					response: await datasources.getTablesForSchema(schemaNode.schemaId, {
+					response: await datasources.getTablesForZoneManagement(schemaNode.schemaId, {
 						databaseName: schemaNode.databaseName,
 					}),
 				})),
@@ -436,14 +436,14 @@ export default function ZonesSettingsPage() {
 	);
 
 	const loadSchemasForDatabase = useCallback(async (dbId: string) => {
-		const response = await datasources.getSchemasForDatabase(dbId);
+		const response = await datasources.getSchemasForZoneManagement(dbId);
 		if (response.error || !response.data) return [];
 		setTreeDatabases((prev) => mergeSchemasIntoDatabase(prev, dbId, response.data ?? []));
 		return response.data ?? [];
 	}, []);
 
 	const loadTablesForSchema = useCallback(async (schemaId: string) => {
-		const response = await datasources.getTablesForSchema(schemaId);
+		const response = await datasources.getTablesForZoneManagement(schemaId);
 		if (response.error || !response.data) return;
 		setTreeDatabases((prev) => mergeTablesIntoSchema(prev, schemaId, response.data ?? []));
 	}, []);

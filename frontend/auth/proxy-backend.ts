@@ -19,6 +19,8 @@ export type ProxyOptions = {
 	zoneIds?: string[];
 	/** Response body returned when zoneIds is an explicit empty list (deny). */
 	emptyResponse?: unknown;
+	/** Upstream API pathname to use instead of the incoming frontend route pathname. */
+	targetPathname?: string;
 };
 
 export async function proxyToBackend(req: Request, options?: ProxyOptions): Promise<Response> {
@@ -37,7 +39,7 @@ export async function proxyToBackend(req: Request, options?: ProxyOptions): Prom
 			incoming.searchParams.append('zone_ids', id);
 		}
 	}
-	const target = `${PYTHON_API_URL}${incoming.pathname}${incoming.search}`;
+	const target = `${PYTHON_API_URL}${options?.targetPathname ?? incoming.pathname}${incoming.search}`;
 
 	const headers: Record<string, string> = { Accept: 'application/json' };
 	const contentType = req.headers.get('content-type');

@@ -25,6 +25,9 @@ const columnsByTableMap = new Map<string, Promise<ApiResponse<Column[]>>>();
 export const datasources = {
 	getDBs: () => requests.get<ResponseWithCount<Database[]>>('datasources/dbs'),
 
+	/** Full catalog for zone management; requires the zone-manage permission. */
+	getDBsForZoneManagement: () => requests.get<ResponseWithCount<Database[]>>('zones/catalog/dbs'),
+
 	/** Schemas for one database; parallel callers with the same key share one HTTP request. */
 	getSchemasForDatabase: (dbId: string): Promise<ApiResponse<Schema[]>> => {
 		const pending = schemasByDbMap.get(dbId);
@@ -45,6 +48,17 @@ export const datasources = {
 		schemasByDbMap.set(dbId, promise);
 		return promise;
 	},
+
+	/** Unscoped schemas for zone management; requires the zone-manage permission. */
+	getSchemasForZoneManagement: (dbId: string): Promise<ApiResponse<Schema[]>> =>
+		requests
+			.get<SchemasResponse>(`zones/catalog/schemas/${encodeURIComponent(dbId)}`)
+			.then((res): ApiResponse<Schema[]> => {
+				if (res.error) return res as unknown as ApiResponse<Schema[]>;
+				const raw = res as unknown as SchemasResponse;
+				const schemas: Schema[] = raw.schemas.map((schema) => ({ ...schema, tables: [] }));
+				return { data: schemas, count: raw.schemas_count };
+			}),
 
 	/** Tables for one schema; parallel callers with the same key share one HTTP request. */
 	getTablesForSchema: (
@@ -73,6 +87,27 @@ export const datasources = {
 
 		tablesBySchemaMap.set(key, promise);
 		return promise;
+	},
+
+	/** Unscoped tables for zone management; requires the zone-manage permission. */
+	getTablesForZoneManagement: (
+		schemaId: string,
+		opts: { databaseName?: string } = {},
+	): Promise<ApiResponse<Table[]>> => {
+		const params: Params = {};
+		if (opts.databaseName != null && opts.databaseName !== '') {
+			params.database_name = opts.databaseName;
+		}
+
+		return requests
+			.get<
+				ResponseWithCount<Omit<Table, 'columns'>[]>
+			>(`zones/catalog/tables/${encodeURIComponent(schemaId)}`, params)
+			.then((res): ApiResponse<Table[]> => {
+				if (res.error) return res as unknown as ApiResponse<Table[]>;
+				const tables: Table[] = res.data.map((table) => ({ ...table, columns: [] }));
+				return { data: tables, count: tables.length };
+			});
 	},
 
 	/** Columns for one table; parallel callers with the same key share one HTTP request. */
