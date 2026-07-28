@@ -50,7 +50,7 @@ Terms not found in the database schema or external knowledge (ask the user to de
 {sort_direction_note}
 
 STRICT RULES — follow every one of these exactly:
-1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', or 'schemas'. You have the schema — use it. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing, e.g. "SnrRatio" maps to "snrratio"), resolve it from the schema without asking. BAD: "Which column stores quality X?" or "What does quality X refer to in the schema?" GOOD: "How is quality X defined?" or "What is the exact formula for quality X?"
+1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', or 'schemas'. You have the schema — use it. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing, e.g. "SnrRatio" maps to "snrratio"), resolve it from the schema without asking. BAD: "Which column does quality X refer to?"  GOOD: or "What is the exact formula or definition for quality X?"
 2. Only ask for information not provided by the schema, relevant external knowledge, or history: undefined terms, acronyms, or exact formulas missing from all three. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
 3. Never re-ask about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED") — not even rephrased. You MAY ask follow-up questions on topics the user did answer (e.g. if they named a metric, you can ask for its formula).
 4. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, you may ask about them one at a time. If the user cannot answer one, skip it and ask about the next.
@@ -69,8 +69,8 @@ the formula/threshold for that term. Only include entries whose definition or de
 gives the exact meaning, calculation, or threshold — not entries that merely mention or \
 relate to the concept.
 
-Example: for "signal quality", include "Signal-to-Noise Quality Indicator (SNQI)" \
-(it defines the formula) but NOT "Atmospheric Observability Index" (it only relates to conditions).
+Example: for "item weight", include "Unit Weight Index (UWI)" \
+(it defines the formula) but NOT "Shipment Volume Index" (it only relates to conditions).
 
 Terms:
 {entity_list}
@@ -87,6 +87,7 @@ _FILLER = frozenset([
     "average", "median", "mean", "count", "total", "sum", "min", "max",
     "number", "value", "measure", "metric", "level", "score", "ratio",
     "rate", "index", "indicator", "standard", "deviation", "percentage",
+    "coloumn",
     # Schema-structural words — stripping these improves VDB matching
     # e.g. "condition name" → "condition", "signal type" → "signal"
     "name", "type", "id", "key", "code", "label", "category", "of"
@@ -116,9 +117,20 @@ def _ambiguous_sort_direction(question: str) -> bool:
     return bool(_SORT_TRIGGERS.search(question)) and not bool(_SORT_DIRECTION.search(question))
 
 
+_ARTICLES = frozenset(["a", "an", "the"])
+
+
 def _normalize_entity(entity: str) -> str:
-    """Strip filler/aggregation words so VDB search targets the core domain term."""
-    tokens = [w for w in entity.lower().split() if w not in _FILLER]
+    """Strip filler/aggregation words and leading articles so VDB search targets the core domain term.
+
+    Filler words are only stripped when non-filler words remain — if every word is a filler
+    (e.g. "score level"), the phrase is kept intact so the VDB still receives a meaningful query.
+    """
+    raw = entity.lower().split()
+    non_filler = [w for w in raw if w not in _FILLER]
+    tokens = non_filler if non_filler else raw
+    while tokens and tokens[0] in _ARTICLES:
+        tokens.pop(0)
     return " ".join(tokens)
 
 

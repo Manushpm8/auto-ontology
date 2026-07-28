@@ -136,6 +136,12 @@ _SNOWFLAKE_DIALECT_RULES = (
 # under a schema that MUST be kept in the identifier (``schema.table``).
 _SCHEMALESS_DIALECTS = {"sqlite", "duckdb"}
 
+_POSTGRES_DIALECT_RULES = (
+    "**PostgreSQL-specific (STRICT — these will error at execution)**\n"
+    "- GROUP BY cannot reference SELECT aliases. Repeat the full expression "
+    "(including CASE WHEN blocks) in GROUP BY, or wrap the query in a subquery/CTE.\n\n"
+)
+
 
 def format_dialect_rules(dialect: str | None) -> str:
     """Return dialect-specific SQL rules for the ``dialect_rules`` prompt slot.
@@ -150,6 +156,8 @@ def format_dialect_rules(dialect: str | None) -> str:
         return _SQLITE_DIALECT_RULES
     if normalized == "snowflake":
         return _SNOWFLAKE_DIALECT_RULES
+    if normalized in ("postgres", "postgresql"):
+        return _POSTGRES_DIALECT_RULES
     return ""
 
 

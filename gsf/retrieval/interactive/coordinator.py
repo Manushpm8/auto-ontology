@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 from .clarify import should_clarify, _STUCK_PHRASES
 from .grounding import ground_external_knowledge
 from .merge import merge_clarification
-from .types import AskUserAction, SubmitSQLAction, TurnType
+from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
 
 
@@ -83,6 +83,11 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     session.original_question = session.working_question
     session.clarify_history = []
     session._pending_question = None
+    logger.info(
+        "[%s] Phase 2 Query: \033[1;35m%s\033[0m",
+        session.task_id,
+        session.working_question,
+    )
 
 
 # ── SQL generation ──────────────────────────────────────────────────────────
@@ -194,7 +199,13 @@ def step(
                 )
 
     elif turn_type == TurnType.FOLLOW_UP:
-        _apply_follow_up_seed(session, orchestrator_message)
+        if session.phase not in (
+            InteractivePhase.PHASE2_CLARIFY,
+            InteractivePhase.PHASE2_SUBMIT,
+            InteractivePhase.PHASE2_DEBUG,
+        ):
+            _apply_follow_up_seed(session, orchestrator_message)
+            session.phase = InteractivePhase.PHASE2_CLARIFY
 
     elif turn_type == TurnType.DEBUG:
         _apply_debug_seed(session, orchestrator_message)
@@ -219,11 +230,16 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
     answer_lower = answer.lower()
     user_could_not_answer = any(phrase in answer_lower for phrase in _STUCK_PHRASES)
     if not user_could_not_answer:
-        session.working_question = merge_clarification(
+        merged = merge_clarification(
             session.working_question,
             session.clarify_history[-1],
-            _get_fast_llm(),
+            _get_llm(),
+            relevant_kg=session._grounded_kg or "",
         )
+        if merged:
+            session.working_question = merged
+        else:
+            logger.warning("[%s] merge_clarification returned empty; keeping previous question", session.task_id)
         logger.info(
             "[%s] Merged question: %s",
             session.task_id,
