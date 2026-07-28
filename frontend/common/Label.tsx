@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CSSProperties } from 'react';
-import { Button } from '@/common/Button';
 
 const LABEL_BASE =
 	'inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium';
@@ -63,7 +62,7 @@ export const Label = ({
 
 	if (interactive) {
 		return (
-			<Button
+			<button
 				type="button"
 				onClick={onClick}
 				title={title ?? label}
@@ -71,7 +70,7 @@ export const Label = ({
 				style={style}
 			>
 				{content}
-			</Button>
+			</button>
 		);
 	}
 	return (

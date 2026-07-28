@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
 import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { ModalCreateNewItem, ConfirmModal } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { acronymsApi, promptsApi, type Acronym, type Prompt } from '@/api/settings';
@@ -56,16 +57,18 @@ const PromptEditor = ({
 					/>
 					<div className="flex justify-end gap-2">
 						<Button
+							theme={ButtonTheme.Secondary}
+							size={Size.SMALL}
 							type="button"
 							onClick={onCancel}
-							className="cursor-pointer rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
 						>
 							Cancel
 						</Button>
 						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.SMALL}
 							type="button"
 							onClick={() => onSave(value)}
-							className="cursor-pointer rounded-md bg-[#76b900] px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-[#6aa500]"
 						>
 							Save
 						</Button>
@@ -105,9 +108,11 @@ const AcronymRow = ({
 				]}
 				trigger={({ toggle }) => (
 					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={toggle}
-						className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
 					>
 						<Icon name={IconName.DotsVertical} className="h-4 w-4" />
 					</Button>
@@ -236,9 +241,11 @@ const AcronymsSection = () => {
 				</div>
 				{hasAcronyms && (
 					<Button
+						theme={ButtonTheme.Soft}
+						size={Size.REGULAR}
 						type="button"
 						onClick={openAddModal}
-						className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#76b900]/40 px-3 py-1.5 text-sm font-medium text-[#76b900] transition-colors hover:bg-[#76b900]/10"
+						iconPosition="left"
 					>
 						<Icon name={IconName.ChatBubble} className="h-3.5 w-3.5" />
 						Add
@@ -282,9 +289,12 @@ const AcronymsSection = () => {
 						No Glossary definitions created yet
 					</p>
 					<Button
+						theme={ButtonTheme.Primary}
+						size={Size.REGULAR}
 						type="button"
 						onClick={openAddModal}
-						className="flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#6aa500]"
+						iconPosition="left"
+						shadow
 					>
 						<Icon name={IconName.ChatBubble} className="h-4 w-4" />
 						Add Definition
@@ -299,7 +309,7 @@ const AcronymsSection = () => {
 				submitLabel="Save"
 				onSubmit={handleSubmit}
 				canSubmit={Boolean(canSubmit)}
-				accent="teal"
+				accent="emerald"
 			>
 				<div>
 					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
@@ -310,7 +320,7 @@ const AcronymsSection = () => {
 						value={name}
 						onChange={(e) => setName(e.target.value)}
 						placeholder="Name"
-						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 dark:border-zinc-600 dark:focus:border-teal-400 dark:focus:ring-teal-400/30'}`}
+						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30'}`}
 					/>
 					{nameExists && (
 						<p className="mt-1 text-xs text-red-500 dark:text-red-400">
@@ -332,7 +342,7 @@ const AcronymsSection = () => {
 						onChange={(e) => setDescription(e.target.value)}
 						placeholder="Add Short Description"
 						rows={4}
-						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-teal-400 dark:focus:ring-teal-400/30"
+						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30"
 					/>
 				</div>
 			</ModalCreateNewItem>
@@ -392,9 +402,11 @@ const SettingsSection = ({
 					<span className="text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</span>
 				</div>
 				<Button
+					theme={ButtonTheme.Outline}
+					size={Size.SMALL}
 					type="button"
 					onClick={handleButtonClick}
-					className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#76b900]/40 px-3 py-1.5 text-sm font-medium text-[#76b900] transition-colors hover:bg-[#76b900]/10"
+					iconPosition="left"
 				>
 					<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
 					{hasPrompts ? 'Edit' : 'Add'}

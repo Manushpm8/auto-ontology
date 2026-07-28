@@ -6,7 +6,8 @@
 
 import { useEffect, useState } from 'react';
 
-import { Button } from '@/common/Button';
+import { Button, SelectButton } from '@/common/Button';
+import { Size, ButtonTheme, SelectButtonVariant } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
@@ -292,11 +293,9 @@ export const AnalysisView = () => {
 	};
 
 	const modeButtonClass = (target: AnalysisMode) =>
-		`cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-			mode === target
-				? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-100'
-				: 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
-		}`;
+		mode === target
+			? ''
+			: 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200';
 
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
@@ -306,31 +305,42 @@ export const AnalysisView = () => {
 					{isPql ? 'PQL analyses' : 'Custom analyses'}
 				</h1>
 				<div className="ml-4 flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
-					<Button
-						type="button"
+					<SelectButton
+						variant={SelectButtonVariant.Segmented}
+						selected={mode === 'sql'}
 						onClick={() => setMode('sql')}
 						className={modeButtonClass('sql')}
 					>
 						SQL
-					</Button>
-					<Button
-						type="button"
+					</SelectButton>
+					<SelectButton
+						variant={SelectButtonVariant.Segmented}
+						selected={mode === 'pql'}
 						onClick={() => setMode('pql')}
 						className={modeButtonClass('pql')}
 					>
 						PQL
+					</SelectButton>
+				</div>
+				<div className="ml-auto">
+					<Button
+						theme={ButtonTheme.Primary}
+						size={Size.REGULAR}
+						onClick={openCreateModal}
+						iconPosition="left"
+						shadow
+					>
+						<svg
+							className="h-4 w-4"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							aria-hidden
+						>
+							<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
+						</svg>
+						Create new analysis
 					</Button>
 				</div>
-				<Button
-					type="button"
-					onClick={openCreateModal}
-					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
-				>
-					<svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-						<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
-					</svg>
-					Create new analysis
-				</Button>
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
@@ -378,20 +388,22 @@ export const AnalysisView = () => {
 									</h2>
 									<div className="flex shrink-0 items-center gap-1">
 										<Button
-											type="button"
+											theme={ButtonTheme.Icon}
+											size={Size.SMALL}
+											iconOnly
 											onClick={() => openEditModal(a)}
 											aria-label={`Edit ${a.name}`}
 											title="Edit"
-											className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
 										>
 											<Icon name={IconName.Pencil} className="h-4 w-4" />
 										</Button>
 										<Button
-											type="button"
+											theme={ButtonTheme.IconDanger}
+											size={Size.SMALL}
+											iconOnly
 											onClick={() => openDeleteModal(a)}
 											aria-label={`Delete ${a.name}`}
 											title="Delete"
-											className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
 										>
 											<Icon name={IconName.Trash} className="h-4 w-4" />
 										</Button>

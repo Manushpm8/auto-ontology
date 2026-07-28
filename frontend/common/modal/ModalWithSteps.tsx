@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Button } from '@/common/Button';
-import { ButtonSize, ButtonVariant } from '@/enums/button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { Modal } from './Modal';
 
@@ -86,8 +86,9 @@ export const ModalWithSteps = ({
 				</div>
 				<Button
 					onClick={onClose}
-					variant={ButtonVariant.Icon}
-					size={ButtonSize.Icon}
+					theme={ButtonTheme.Icon}
+					size={Size.SMALL}
+					iconOnly
 					aria-label="Close"
 				>
 					<svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
@@ -104,7 +105,7 @@ export const ModalWithSteps = ({
 					const status = getStepStatus(index, activeStep, disabledSteps);
 					return (
 						<div key={label} className="flex items-center gap-1">
-							<Button
+							<button
 								type="button"
 								disabled={status !== StepStatus.COMPLETED}
 								onClick={() => {
@@ -112,10 +113,10 @@ export const ModalWithSteps = ({
 										onActiveStepChange?.(index);
 									}
 								}}
-								className={`px-2 py-1 text-sm capitalize ${stepStatusClass[status]}`}
+								className={`rounded-lg px-2 py-1 text-sm capitalize transition-colors ${stepStatusClass[status]}`}
 							>
 								{label}
-							</Button>
+							</button>
 							{index < steps.length - 1 && (
 								<Icon
 									name={IconName.ChevronRight}
@@ -155,8 +156,8 @@ export const ModalWithSteps = ({
 								onClick={action.onClick}
 								loading={action.loading}
 								disabled={action.disabled}
-								variant={isPrimary ? ButtonVariant.Primary : ButtonVariant.Outline}
-								size={ButtonSize.Medium}
+								theme={isPrimary ? ButtonTheme.Primary : ButtonTheme.Outline}
+								size={Size.REGULAR}
 							>
 								{action.loading ? `${action.label}…` : action.label}
 							</Button>

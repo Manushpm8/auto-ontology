@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
@@ -1082,9 +1083,11 @@ export const TermsView = () => {
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
 					<Button
+						theme={ButtonTheme.Ghost}
+						size={Size.SMALL}
 						type="button"
 						onClick={handleBack}
-						className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+						iconPosition="left"
 						aria-label="Back to terms list"
 					>
 						<Icon name={IconName.Terms} className="h-4 w-4" />
@@ -1092,9 +1095,10 @@ export const TermsView = () => {
 					</Button>
 					<span className="text-zinc-300 dark:text-zinc-600">/</span>
 					<Button
+						theme={ButtonTheme.Ghost}
+						size={Size.SMALL}
 						type="button"
 						onClick={handleBackToTerm}
-						className="cursor-pointer rounded-lg px-1.5 py-1 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
 					>
 						{termTitle}
 					</Button>
@@ -1106,6 +1110,8 @@ export const TermsView = () => {
 						{sqlAttrEditing ? null : (
 							<>
 								<Button
+									theme={ButtonTheme.Primary}
+									size={Size.REGULAR}
 									type="button"
 									onClick={() => {
 										setSqlAttrEditError(null);
@@ -1113,12 +1119,14 @@ export const TermsView = () => {
 									}}
 									aria-label={`Edit ${sqlAttrTitle}`}
 									title="Edit"
-									className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
+									iconPosition="left"
 								>
 									<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
 									Edit
 								</Button>
 								<Button
+									theme={ButtonTheme.DangerSubtle}
+									size={Size.REGULAR}
 									type="button"
 									onClick={() => {
 										setDeletingSqlAttr({ id: sqlAttrId, name: sqlAttrTitle });
@@ -1126,7 +1134,7 @@ export const TermsView = () => {
 									}}
 									aria-label={`Delete ${sqlAttrTitle}`}
 									title="Delete"
-									className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+									iconPosition="left"
 								>
 									<Icon name={IconName.Trash} className="h-3.5 w-3.5" />
 									Delete
@@ -1235,9 +1243,11 @@ export const TermsView = () => {
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
 					<Button
+						theme={ButtonTheme.Ghost}
+						size={Size.SMALL}
 						type="button"
 						onClick={handleBack}
-						className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+						iconPosition="left"
 						aria-label="Back to terms list"
 					>
 						<Icon name={IconName.Terms} className="h-4 w-4" />
@@ -1245,9 +1255,10 @@ export const TermsView = () => {
 					</Button>
 					<span className="text-zinc-300 dark:text-zinc-600">/</span>
 					<Button
+						theme={ButtonTheme.Ghost}
+						size={Size.SMALL}
 						type="button"
 						onClick={handleBackToTerm}
-						className="cursor-pointer rounded-lg px-1.5 py-1 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
 					>
 						{termTitle}
 					</Button>
@@ -1258,6 +1269,8 @@ export const TermsView = () => {
 					<div className="ml-auto flex shrink-0 items-center gap-1">
 						{columnAttrEditing ? null : (
 							<Button
+								theme={ButtonTheme.Primary}
+								size={Size.REGULAR}
 								type="button"
 								onClick={() => {
 									setColumnAttrEditError(null);
@@ -1265,7 +1278,7 @@ export const TermsView = () => {
 								}}
 								aria-label={`Edit ${colAttrTitle}`}
 								title="Edit"
-								className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
+								iconPosition="left"
 							>
 								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
 								Edit
@@ -1312,9 +1325,11 @@ export const TermsView = () => {
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
 					<Button
+						theme={ButtonTheme.Ghost}
+						size={Size.SMALL}
 						type="button"
 						onClick={handleBack}
-						className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+						iconPosition="left"
 						aria-label="Back to terms list"
 					>
 						<Icon name={IconName.Terms} className="h-4 w-4" />
@@ -1328,19 +1343,25 @@ export const TermsView = () => {
 					<div className="ml-auto flex items-center gap-2">
 						{termEditing ? null : (
 							<Button
+								theme={ButtonTheme.Primary}
+								size={Size.REGULAR}
 								type="button"
 								onClick={() => {
 									setTermEditing(true);
 								}}
-								className="cursor-pointer rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+								iconPosition="left"
 							>
-								Edit term
+								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+								Edit
 							</Button>
 						)}
 						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.REGULAR}
 							type="button"
 							onClick={() => setCreateSqlAttrModalOpen(true)}
-							className="flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
+							iconPosition="left"
+							shadow
 						>
 							<svg
 								className="h-4 w-4"

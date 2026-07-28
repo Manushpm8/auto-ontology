@@ -5,7 +5,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '@/common/Button';
 import type { Database, Schema, Table } from '@/types/datasources';
 
 const treeRowClassName =
@@ -250,7 +249,7 @@ export const ZonesDataTree = ({
 		onToggle: () => void | Promise<void>,
 	) => (
 		<div key={id} className={treeRowClassName} style={{ paddingLeft: 8 + depth * 14 }}>
-			<Button
+			<button
 				type="button"
 				onClick={() => {
 					void onToggle();
@@ -259,7 +258,7 @@ export const ZonesDataTree = ({
 				aria-label={isOpen ? 'Collapse' : 'Expand'}
 			>
 				{loadingIds[id] ? '…' : hasChildren ? (isOpen ? '▼' : '▶') : '·'}
-			</Button>
+			</button>
 			<input
 				type="checkbox"
 				checked={selectionState.checked}

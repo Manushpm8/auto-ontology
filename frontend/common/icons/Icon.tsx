@@ -31,8 +31,10 @@ import LinkSvg from './svg/link.svg';
 import ExternalLinkSvg from './svg/external-link.svg';
 import ConnectionSvg from './svg/connection.svg';
 import CertificationSvg from './svg/certification.svg';
+import CloseSvg from './svg/close.svg';
 
 export enum IconName {
+	Close = 'close',
 	Menu = 'menu',
 	DotsVertical = 'dots-vertical',
 	Pencil = 'pencil',
@@ -63,6 +65,7 @@ export enum IconName {
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
+	[IconName.Close]: CloseSvg,
 	[IconName.Menu]: MenuSvg,
 	[IconName.DotsVertical]: DotsVerticalSvg,
 	[IconName.Pencil]: PencilSvg,

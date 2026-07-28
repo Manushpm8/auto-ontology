@@ -7,6 +7,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonBlock } from '@/common/Skeleton';
 import { authApi, type SsoProvider } from '@/api/auth';
@@ -101,21 +102,23 @@ const LoginForm = () => {
 			<div className="flex w-full max-w-sm flex-col gap-4">
 				{providers.map((provider) => (
 					<Button
+						theme={ButtonTheme.Primary}
+						size={Size.REGULAR}
 						key={provider.providerId}
 						type="button"
 						onClick={() => handleSso(provider.providerId)}
-						className="cursor-pointer rounded-md bg-[#76b900] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#6aa600]"
 					>
 						Sign in with SSO
 					</Button>
 				))}
 				<Button
+					theme={ButtonTheme.Ghost}
+					size={Size.SMALL}
 					type="button"
 					onClick={() => {
 						setError(null);
 						setShowPasswordLogin(true);
 					}}
-					className="cursor-pointer text-center text-xs text-zinc-400 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
 				>
 					Sign in with password
 				</Button>
@@ -164,21 +167,23 @@ const LoginForm = () => {
 			{error ? <p className="text-xs text-red-500">{error}</p> : null}
 
 			<Button
+				theme={ButtonTheme.Primary}
+				size={Size.REGULAR}
 				type="submit"
 				disabled={submitting}
-				className="cursor-pointer rounded-md bg-[#76b900] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#6aa600] disabled:opacity-50"
 			>
 				{submitting ? 'Signing in…' : 'Sign in'}
 			</Button>
 
 			{ssoEnabled ? (
 				<Button
+					theme={ButtonTheme.Ghost}
+					size={Size.SMALL}
 					type="button"
 					onClick={() => {
 						setError(null);
 						setShowPasswordLogin(false);
 					}}
-					className="cursor-pointer text-center text-xs text-zinc-400 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
 				>
 					Back to SSO
 				</Button>

@@ -6,7 +6,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { signOut, useSession } from '@/auth/auth-client';
-import { Button } from '@/common/Button';
+import { Button, SelectButton } from '@/common/Button';
+import { Size, ButtonTheme, SelectButtonVariant } from '@/enums/button';
 
 export const UserMenu = ({ version }: { version?: string }) => {
 	const { data } = useSession();
@@ -53,16 +54,16 @@ export const UserMenu = ({ version }: { version?: string }) => {
 
 	return (
 		<div ref={menuRef} className="relative">
-			<Button
-				type="button"
+			<SelectButton
+				variant={SelectButtonVariant.Avatar}
 				onClick={() => setOpen((value) => !value)}
 				aria-haspopup="menu"
 				aria-expanded={open}
 				aria-label="User menu"
-				className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-[#76b900]/15 text-xs font-semibold text-[#76b900] transition-colors hover:bg-[#76b900]/25"
+				className="h-7 w-7"
 			>
 				{initial}
-			</Button>
+			</SelectButton>
 
 			{open ? (
 				<div
@@ -86,10 +87,11 @@ export const UserMenu = ({ version }: { version?: string }) => {
 					</div>
 					<div className="border-t border-zinc-100 p-1 dark:border-zinc-800">
 						<Button
-							type="button"
+							theme={ButtonTheme.Ghost}
+							size={Size.SMALL}
 							onClick={handleSignOut}
 							disabled={signingOut}
-							className="w-full cursor-pointer rounded px-2 py-1.5 text-left text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+							full
 						>
 							{signingOut ? 'Signing out…' : 'Sign out'}
 						</Button>

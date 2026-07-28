@@ -4,8 +4,9 @@
 
 'use client';
 
-import { Button } from '@/common/Button';
+import { SelectButton } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
+import { SelectButtonVariant } from '@/enums/button';
 import { ConnectionType, connectionDisplayName } from '@/enums/connection';
 
 export type ConnectionTypeStepProps = {
@@ -20,18 +21,17 @@ export const ConnectionTypeStep = ({ onSelect }: ConnectionTypeStepProps) => (
 	<div className="flex flex-col gap-3 p-2">
 		<div className="grid grid-cols-2 gap-3">
 			{CONNECTOR_TYPES.map((type) => (
-				<Button
+				<SelectButton
 					key={type}
-					type="button"
+					variant={SelectButtonVariant.Card}
 					data-testid={`connection-type-${type}`}
 					onClick={() => onSelect(type)}
-					className="flex h-[150px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-6 shadow-sm transition-colors hover:border-[#76b900]/50 hover:bg-[#76b900]/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-[#76b900]/40"
 				>
 					<Icon name={IconName.Database} className="h-8 w-8 text-[#76b900]" />
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{connectionDisplayName[type]}
 					</span>
-				</Button>
+				</SelectButton>
 			))}
 		</div>
 	</div>

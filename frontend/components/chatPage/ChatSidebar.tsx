@@ -7,7 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
-import { Button } from '@/common/Button';
+import { Button, SelectButton } from '@/common/Button';
+import { Size, ButtonTheme, SelectButtonVariant } from '@/enums/button';
 import { formatDate } from '@/common/date';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonRows } from '@/common/Skeleton';
@@ -86,12 +87,13 @@ function ConversationItem({
 
 	return (
 		<li className="group relative">
-			<Button
-				type="button"
+			<SelectButton
+				variant={SelectButtonVariant.ListItem}
+				selected={isActive}
 				onClick={onSelect}
-				className={`w-full rounded-lg px-3 py-2 pr-8 text-left text-sm transition-colors ${
+				className={`flex-col items-start rounded-lg px-3 py-2 pr-8 ${
 					isActive
-						? 'bg-zinc-100 font-medium text-black dark:bg-zinc-800 dark:text-zinc-100'
+						? ''
 						: 'text-zinc-700 hover:bg-zinc-100 hover:text-black dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
 				}`}
 			>
@@ -99,10 +101,10 @@ function ConversationItem({
 				<span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">
 					{formatDate(conv.createdAt, '(DD.MM.YY)')}
 				</span>
-			</Button>
+			</SelectButton>
 
 			<PopoverMenu
-				className="absolute right-1 top-1.5"
+				className="absolute right-1 top-1.5 opacity-0 transition-opacity group-hover:opacity-100"
 				items={[
 					{
 						label: 'Rename',
@@ -121,9 +123,11 @@ function ConversationItem({
 				]}
 				trigger={({ toggle }) => (
 					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={toggle}
-						className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-200 hover:text-zinc-700 group-hover:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 						aria-label="Conversation options"
 					>
 						<Icon name={IconName.DotsVertical} className="h-4 w-4" />
@@ -159,14 +163,18 @@ export const ChatSidebar = ({
 	return (
 		<>
 			{/* Mobile toggle */}
-			<Button
-				type="button"
-				onClick={onToggle}
-				className="fixed top-3 left-3 z-30 rounded-lg bg-white p-2 shadow-md dark:bg-zinc-800 dark:shadow-zinc-900/50 lg:hidden"
-				aria-label="Toggle sidebar"
-			>
-				<Icon name={IconName.Menu} className="h-5 w-5 text-zinc-700 dark:text-zinc-200" />
-			</Button>
+			<div className="fixed top-3 left-3 z-30 overflow-hidden rounded-lg bg-white shadow-md dark:bg-zinc-800 dark:shadow-zinc-900/50 lg:hidden">
+				<Button
+					theme={ButtonTheme.IconNeutral}
+					size={Size.LARGE}
+					iconOnly
+					type="button"
+					onClick={onToggle}
+					aria-label="Toggle sidebar"
+				>
+					<Icon name={IconName.Menu} className="h-5 w-5" />
+				</Button>
+			</div>
 
 			{/* Backdrop for mobile */}
 			{isOpen && (
@@ -194,9 +202,12 @@ export const ChatSidebar = ({
 
 				<div className="px-3 py-3">
 					<Button
+						theme={ButtonTheme.Secondary}
+						size={Size.REGULAR}
 						type="button"
 						onClick={onNewChat}
-						className="flex w-full items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-black transition-colors hover:border-zinc-400 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
+						iconPosition="left"
+						full
 					>
 						<span className="text-lg leading-none text-[#76b900]">+</span>
 						New Chat

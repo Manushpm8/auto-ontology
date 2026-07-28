@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { semanticCompilationApi } from '@/api/settings';
-import { Button } from '@/common/Button';
+import { ToggleButton } from '@/common/Button';
 import { Toast } from '@/common/Toast';
 
 export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: boolean }) => {
@@ -62,23 +62,12 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 							{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
 						</span>
 					</div>
-					<Button
-						type="button"
-						role="switch"
-						aria-checked={enabled}
+					<ToggleButton
+						checked={enabled}
 						aria-label="Enable semantic compilation"
 						disabled={saving}
 						onClick={handleToggle}
-						className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-							enabled ? 'bg-[#76b900]' : 'bg-zinc-300 dark:bg-zinc-600'
-						}`}
-					>
-						<span
-							className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-								enabled ? 'translate-x-5' : 'translate-x-0.5'
-							}`}
-						/>
-					</Button>
+					/>
 				</div>
 			</div>
 

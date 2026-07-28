@@ -14,8 +14,6 @@ import {
 	type ClipboardEvent,
 	type KeyboardEvent,
 } from 'react';
-import { Button } from '@/common/Button';
-
 export type TagInputHandle = {
 	/** Forces any pending text in the input to be committed as a tag. */
 	flush: () => string[];
@@ -188,14 +186,14 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 						{tag}
 					</span>
 					{!disabled && (
-						<Button
+						<button
 							type="button"
 							onClick={(ev) => {
 								ev.stopPropagation();
 								removeAt(idx);
 							}}
 							aria-label={`Remove ${tag}`}
-							className="-mr-1 flex h-4 w-4 items-center justify-center rounded-full text-[#3f6b00] transition-colors hover:bg-[#76b900]/25 hover:text-[#2c4d00] dark:text-[#cdeb86] dark:hover:bg-[#76b900]/30"
+							className="-mr-1 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full text-[#3f6b00] transition-colors hover:bg-[#76b900]/25 hover:text-[#2c4d00] dark:text-[#cdeb86] dark:hover:bg-[#76b900]/30"
 						>
 							<svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
 								<path
@@ -205,7 +203,7 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 									strokeLinecap="round"
 								/>
 							</svg>
-						</Button>
+						</button>
 					)}
 				</span>
 			))}

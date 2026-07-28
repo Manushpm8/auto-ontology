@@ -10,7 +10,8 @@ import type { Core } from 'cytoscape';
 
 import { explorationApi } from '@/api/exploration';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
-import { Button } from '@/common/Button';
+import { SelectButton } from '@/common/Button';
+import { SelectButtonVariant } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SearchInput } from '@/common/SearchInput';
 import {
@@ -281,13 +282,13 @@ export const ExplorationView = () => {
 							<ul className="absolute top-12 max-h-[calc(100dvh-8.5rem)] w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
 								{filteredNodes.map((node) => (
 									<li key={node.id}>
-										<Button
-											type="button"
+										<SelectButton
+											variant={SelectButtonVariant.ListItem}
 											onClick={() => {
 												setSearch('');
 												handleSelectNode(node.id);
 											}}
-											className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+											className="gap-2 rounded-md px-3 py-2 text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
 										>
 											<Icon
 												name={
@@ -302,7 +303,7 @@ export const ExplorationView = () => {
 												}`}
 											/>
 											<span className="truncate">{node.name}</span>
-										</Button>
+										</SelectButton>
 									</li>
 								))}
 							</ul>

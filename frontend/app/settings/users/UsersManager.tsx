@@ -8,17 +8,12 @@ import { useEffect, useState } from 'react';
 import { Role } from '@/enums/auth';
 import { usersApi } from '@/api/users';
 import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { Table } from '@/common/Table';
 import { SkeletonTable } from '@/common/Skeleton';
 import { Toast } from '@/common/Toast';
 import type { TableColumn } from '@/types/table';
 import type { User } from '@/types/auth';
-
-const actionButtonClass =
-	'cursor-pointer rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800';
-
-const deleteButtonClass =
-	'cursor-pointer rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950';
 
 export const UsersManager = () => {
 	const [users, setUsers] = useState<User[]>([]);
@@ -103,18 +98,20 @@ export const UsersManager = () => {
 				return (
 					<div className="flex justify-end gap-2">
 						<Button
+							theme={ButtonTheme.Secondary}
+							size={Size.SMALL}
 							type="button"
 							disabled={busy || isLastAdmin}
 							onClick={() => toggleRole(user)}
-							className={actionButtonClass}
 						>
 							{isAdmin ? 'Make viewer' : 'Make admin'}
 						</Button>
 						<Button
+							theme={ButtonTheme.DangerOutline}
+							size={Size.SMALL}
 							type="button"
 							disabled={busy || isLastAdmin}
 							onClick={() => deleteUser(user)}
-							className={deleteButtonClass}
 						>
 							Delete
 						</Button>

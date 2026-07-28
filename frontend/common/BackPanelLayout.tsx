@@ -6,6 +6,7 @@
 
 import { useCallback, useState, type ReactNode } from 'react';
 import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 
 export type BackPanelLayoutProps = {
 	panel: ReactNode;
@@ -31,8 +32,10 @@ const PanelCollapseToggle = ({
 	collapseAriaLabel: string;
 }) => (
 	<Button
+		theme={ButtonTheme.IconNeutral}
+		size={Size.SMALL}
+		iconOnly
 		type="button"
-		className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
 		onClick={onToggle}
 		aria-label={collapsed ? expandAriaLabel : collapseAriaLabel}
 	>
