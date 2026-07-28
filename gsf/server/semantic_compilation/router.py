@@ -35,13 +35,10 @@ async def trigger() -> dict[str, str]:
 async def reset() -> dict[str, str]:
     """Ask the ingestion service to rebuild every database's semantic layer.
 
-    The semantic nodes and embeddings are deleted and a compilation run is
-    requested straight after, so the layer is rebuilt from scratch without
-    waiting for the next scheduled run. Both requests return as soon as the
-    service accepts them, so the deletion and the compilation run overlap.
+    The service deletes the semantic nodes and embeddings and compiles them
+    again, so the layer is rebuilt without waiting for the next scheduled run.
     """
     trigger_semantic_reset()
-    trigger_semantic_compile()
     return {"status": "accepted"}
 
 
