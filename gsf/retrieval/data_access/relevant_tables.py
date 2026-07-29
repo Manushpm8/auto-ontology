@@ -78,6 +78,62 @@ def _parse_table_text(text: str) -> dict:
     return parsed
 
 
+def _column_name_key(col: object) -> str | None:
+    """Return the lowercased column name used to match columns across sources."""
+    if isinstance(col, dict):
+        return str(col.get("name") or "").strip().lower() or None
+    return None
+
+
+def _merge_column_lists(a: object, b: object) -> list:
+    """Union two column lists by name, filling per-column gaps from either side.
+
+    Neither source is uniformly richer: Neo4j rows carry ``sample_values`` while
+    columns parsed out of vector-hit ``text`` carry only name/data_type/description.
+    Picking one whole list therefore drops fields the other side had.
+    """
+    list_a = [c for c in a if c] if isinstance(a, list) else []
+    list_b = [c for c in b if c] if isinstance(b, list) else []
+    if not list_a:
+        return list(list_b)
+    if not list_b:
+        return list(list_a)
+
+    base, extra = (list_a, list_b) if len(list_a) >= len(list_b) else (list_b, list_a)
+
+    merged: list = []
+    position_by_name: dict[str, int] = {}
+    for col in base:
+        key = _column_name_key(col)
+        if key is None:
+            merged.append(col)
+            continue
+        if key in position_by_name:
+            continue
+        position_by_name[key] = len(merged)
+        merged.append(dict(col))
+
+    for col in extra:
+        key = _column_name_key(col)
+        if key is None:
+            if col not in merged:
+                merged.append(col)
+            continue
+        position = position_by_name.get(key)
+        if position is None:
+            position_by_name[key] = len(merged)
+            merged.append(dict(col))
+            continue
+        target = merged[position]
+        for field, value in col.items():
+            if value in (None, "", [], {}):
+                continue
+            if target.get(field) in (None, "", [], {}):
+                target[field] = value
+
+    return merged
+
+
 def _normalize_table_to_relevant_shape(table: dict) -> dict:
     """Build the same per-table dict shape as :func:`get_relevant_tables` returns."""
     text = str(table.get("table_info") or table.get("text") or "")
@@ -98,12 +154,9 @@ def _normalize_table_to_relevant_shape(table: dict) -> dict:
         entry["database_name"] = str(database_name).strip()
     if table.get("schema_name") and not entry.get("schema_name"):
         entry["schema_name"] = table["schema_name"]
-    if table.get("columns") and not entry.get("columns"):
-        entry["columns"] = table["columns"]
+    entry["columns"] = _merge_column_lists(entry.get("columns"), table.get("columns"))
     if table.get("pk") is not None:
         entry["primary_key"] = table["pk"]
-    if not isinstance(entry.get("columns"), list):
-        entry["columns"] = []
     return entry
 
 
@@ -114,12 +167,7 @@ def _merge_two_relevant_table_dicts(a: dict, b: dict) -> dict:
         if v is None:
             continue
         if k == "columns":
-            ca = out.get("columns") if isinstance(out.get("columns"), list) else []
-            cb = v if isinstance(v, list) else []
-            if len(cb) > len(ca):
-                out["columns"] = cb
-            elif not ca and cb:
-                out["columns"] = cb
+            out["columns"] = _merge_column_lists(out.get("columns"), v)
             continue
         if k in ("table_info", "text"):
             sa = str(out.get(k) or "").strip()
