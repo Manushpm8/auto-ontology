@@ -379,8 +379,8 @@ class SQLReconstructionAgent(BaseAgent):
                 "path_state": path_state,
             }
 
-        sql_preview = (getattr(response, "sql_code", "") or "")[:100]
-        self.logger.info("SQL reconstructed: %s...", sql_preview)
+        sql_preview = (getattr(response, "sql_code", "") or "")[:300]
+        self.logger.info("SQL reconstructed: %s", sql_preview)
 
         thought = getattr(response, "thought", "No explanation")
         response_explanation = getattr(response, "response", "") or thought

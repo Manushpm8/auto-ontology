@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 # NOTE: get_agent_response_with_state and TextToSQLPayload are imported lazily
 # inside _run_sql_generation to avoid triggering LLM client initialisation at
 # import time (which requires NVIDIA_API_KEY to be set).
-from .clarify import should_clarify, _STUCK_PHRASES
+from .clarify import should_clarify, refresh_grounded_kg, _STUCK_PHRASES
 from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
@@ -78,11 +78,17 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     ):
         session.path_state.pop(key, None)
 
-    # Reset clarify state for Phase 2
+    # Carry the full Phase 1 KB union into Phase 2 Evidence generation,
+    # then reset so Phase 2 accumulates its own entries fresh.
+    session.phase1_grounded_kg = session.cumulative_grounded_kg
+    session.cumulative_grounded_kg = ""
+
+    # Reset clarify state for Phase 2; clarification questions are not allowed.
     session.working_question = follow_up_q if follow_up_q else session.working_question
     session.original_question = session.working_question
     session.clarify_history = []
     session._pending_question = None
+    session.max_clarify_turns = 0
     logger.info(
         "[%s] Phase 2 Query: \033[1;35m%s\033[0m",
         session.task_id,
@@ -90,30 +96,128 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     )
 
 
+# ── Cross-phase entity resolution ───────────────────────────────────────────
+
+_CROSS_PHASE_PROMPT = """\
+Phase 2 question: {p2_question}
+
+Terms from Phase 2 that could not be resolved from the database schema or \
+external knowledge:
+{unresolved_list}
+
+Phase 1 question (for context):
+{p1_question}
+
+Phase 1 SQL:
+{p1_sql}
+
+For each unresolved Phase 2 term that refers to a concept or formula defined \
+in Phase 1, write one SQL-friendly line:
+  TermInPhase2 = <formula or definition derived from Phase 1>
+Include threshold conditions if relevant (e.g. Low/Medium/High cutoffs). \
+Output NONE if none of the unresolved terms map to Phase 1 concepts."""
+
+
+def _resolve_cross_phase_entities(
+    p2_question: str,
+    unresolved: list,
+    p1_question: str,
+    p1_sql: str,
+) -> str:
+    """Map unresolved Phase 2 entities to Phase 1 definitions (one fast LLM call)."""
+    if not p1_sql or not p1_question or not unresolved:
+        return ""
+    unresolved_list = "\n".join(f"- {name}" for name, _ in unresolved)
+    prompt = _CROSS_PHASE_PROMPT.format(
+        p2_question=p2_question,
+        unresolved_list=unresolved_list,
+        p1_question=p1_question,
+        p1_sql=p1_sql[:800],
+    )
+    response = _get_llm().invoke(prompt).content.strip()
+    if not response or response.upper() == "NONE":
+        return ""
+    logger.info("Cross-phase resolution: %s", response[:200])
+    return response
+
+
 # ── SQL generation ──────────────────────────────────────────────────────────
+
+_EVIDENCE_PROMPT = """\
+Working question: {question}
+
+Relevant external knowledge (one entry per term):
+{grounded_kg}
+
+Extract only the formulas or calculation rules that are directly needed to answer \
+the working question above. For each such entry, output one line in SQL-friendly notation:
+  TermName = <formula using column names>
+Skip any entry whose formula is not required by the working question. \
+If no formulas are needed, output: NONE"""
+
+
+def _generate_evidence(question: str, grounded_kg: str) -> str:
+    """Convert grounded KB text into a short Evidence string for the SQL generator."""
+    if not grounded_kg:
+        return ""
+    prompt = _EVIDENCE_PROMPT.format(question=question, grounded_kg=grounded_kg)
+    response = _get_fast_llm().invoke(prompt).content.strip()
+    if not response or response.upper() == "NONE":
+        return ""
+    # Reject prose and aggregate-only lines — valid output must be "Term = <expression>"
+    # where the right-hand side is a computation, not a bare SQL aggregate call.
+    _AGG_ONLY = re.compile(r"^\w+\s*=\s*(STDDEV|AVG|COUNT|SUM|MIN|MAX)\s*\(", re.IGNORECASE)
+    valid_lines = [
+        l for l in response.splitlines()
+        if "=" in l and not l.lstrip().startswith("#") and not _AGG_ONLY.match(l.strip())
+    ]
+    if not valid_lines:
+        logger.warning("SQL gen — Evidence generation returned prose, discarding: %s", response[:100])
+        return ""
+    return "\n".join(valid_lines)
+
 
 def _run_sql_generation(session: InteractiveSessionState) -> str:
     """Call GSF and persist the returned path_state back to session."""
     from gsf.retrieval.text_to_sql.main import get_agent_response_with_state
     from gsf.retrieval.text_to_sql.state import TextToSQLPayload
 
-    # Reuse grounded KB text from clarification if it was computed for this question,
-    # otherwise run grounding now (debug turns skip clarification entirely).
-    if session._grounded_kg_for == session.working_question:
-        grounded_kg = session._grounded_kg or ""
-    else:
-        grounded_kg = ground_external_knowledge(
+    # For debug turns that skip clarification, run grounding now to get KB context.
+    # For normal turns, cumulative_grounded_kg already has everything from clarification.
+    extra_kg = ""
+    if session._grounded_kg_for != session.working_question:
+        extra_kg = ground_external_knowledge(
             session.working_question, session.external_kg, _get_fast_llm()
         )
 
+    # Cross-phase resolution: map unresolved Phase 2 entities to Phase 1 formulas.
+    # Only runs when there's a Phase 1 SQL to reference and Phase 2 unresolved entities.
+    p1_sql = session.phase1_sql or ""
+    p1_question = session.phase1_question or ""
+    cross_phase = _resolve_cross_phase_entities(
+        session.working_question,
+        session._cached_unresolvable or [],
+        p1_question,
+        p1_sql,
+    )
+
+    # Build Evidence from the union of: Phase 1 carry-over + cross-phase resolution
+    # + all this-phase KB turns + debug extra.
+    combined_kg = "\n".join(filter(None, [session.phase1_grounded_kg, cross_phase, session.cumulative_grounded_kg, extra_kg]))
+    question = session.working_question
+    evidence = _generate_evidence(question, combined_kg)
+    if evidence:
+        question = f"{question}\n\nEvidence: {evidence}"
+        logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence[:200])
+
     payload: TextToSQLPayload = {
-        "question": session.working_question,
+        "question": question,
         "data_retriever": session.data_retriever,
         "semantic_retriever": session.semantic_retriever,
         "connectors": session.connectors,
         "path_state": dict(session.path_state),  # copy so GSF doesn't mutate in place
         "acronyms": [],
-        "custom_prompts": grounded_kg,
+        "custom_prompts": combined_kg,  # full union as low-priority fallback
     }
     result = get_agent_response_with_state(payload)
 
@@ -210,13 +314,16 @@ def step(
     elif turn_type == TurnType.DEBUG:
         _apply_debug_seed(session, orchestrator_message)
 
-    # Debug turns and exhausted budgets skip clarification — go straight to SQL
     under_budget = len(session.clarify_history) < session.max_clarify_turns
     if turn_type != TurnType.DEBUG and under_budget:
         should_ask, question = should_clarify(session, _get_llm())
         if should_ask:
             session._pending_question = question
             return AskUserAction(question=question)
+    elif turn_type != TurnType.DEBUG and not under_budget:
+        # No clarification allowed (Phase 2 or budget exhausted) but still run
+        # KB coverage to update cumulative_grounded_kg for Evidence generation.
+        refresh_grounded_kg(session)
 
     sql = _run_sql_generation(session)
     return SubmitSQLAction(sql=sql)

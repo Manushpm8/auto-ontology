@@ -100,7 +100,11 @@ class SQLExecutionAgent(BaseAgent):
         response_from_db = _run_sql(sql_code, connector)
 
         if response_from_db.error:
-            self.logger.info("SQL execution error: %s", response_from_db.error)
+            self.logger.info(
+                "SQL execution failed\n  SQL: %s\n  Error: %s",
+                sql_code[:300],
+                response_from_db.error,
+            )
             path_state["error"] = response_from_db.error
             return {"decision": "invalid_sql", "path_state": path_state}
 

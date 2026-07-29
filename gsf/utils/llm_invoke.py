@@ -283,6 +283,9 @@ def safe_invoke_with_structured_output(
                 attempt + 1,
                 RETRY_MAX_ATTEMPTS,
             )
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                time.sleep(wait)
             continue
         if isinstance(result, schema):
             return result

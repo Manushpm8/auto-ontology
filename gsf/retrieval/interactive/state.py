@@ -27,6 +27,8 @@ class InteractiveSessionState:
     _cached_unresolvable_for: Optional[str] = None  # working_question at cache time
     _grounded_kg: Optional[str] = None  # relevant KB text extracted during coverage check
     _grounded_kg_for: Optional[str] = None  # working_question when _grounded_kg was set
+    phase1_grounded_kg: str = ""  # snapshot of cumulative_grounded_kg at Phase 1 PROCEED, carried into Phase 2
+    cumulative_grounded_kg: str = ""  # union of all _grounded_kg values seen this phase (never replaced, only grows)
     data_retriever: Any = None
     semantic_retriever: Any = None
     connectors: list = field(default_factory=list)

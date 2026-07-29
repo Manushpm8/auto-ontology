@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, TYPE_CHECKING
 
+import requests
 from langchain_core.messages import SystemMessage
 
 from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionModel
 from gsf.retrieval.text_to_sql.prompts import create_entity_extraction_prompt
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
-from gsf.utils.llm_invoke import get_non_reasoning_llm_client, invoke_with_structured_output
+from gsf.utils.llm_invoke import get_non_reasoning_llm_client, invoke_with_structured_output, LLM_INVOKE_TIMEOUT_S, RETRY_MAX_ATTEMPTS
 
 if TYPE_CHECKING:
     from .state import InteractiveSessionState
@@ -33,7 +35,7 @@ You are deciding whether to ask the user a clarification question before writing
 Database schema:
 {db_schema}
 
-Relevant external knowledge (definitions and formulas already known — do NOT ask about these):
+Relevant external knowledge:
 {relevant_knowledge}
 
 User question: {question}
@@ -41,7 +43,7 @@ User question: {question}
 Prior clarifications (Q&A):
 {history}
 
-Topics already asked about that went UNANSWERED (do NOT ask the exact same question again, but you MAY ask about the same concept from a different angle — e.g. ask for a definition or categorisation instead of a column location):
+Topics already asked about that went UNANSWERED (do NOT ask the exact same question again, but you MAY ask about the same concept from a different angle — e.g. ask for a definition instead of a column location):
 {unanswered_topics}
 
 Terms not found in the database schema or external knowledge (ask the user to define these):
@@ -50,10 +52,10 @@ Terms not found in the database schema or external knowledge (ask the user to de
 {sort_direction_note}
 
 STRICT RULES — follow every one of these exactly:
-1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', or 'schemas'. You have the schema — use it. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing, e.g. "SnrRatio" maps to "snrratio"), resolve it from the schema without asking. BAD: "Which column does quality X refer to?"  GOOD: or "What is the exact formula or definition for quality X?"
+1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', or 'schema'. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?"
 2. Only ask for information not provided by the schema, relevant external knowledge, or history: undefined terms, acronyms, or exact formulas missing from all three. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
 3. Never re-ask about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED") — not even rephrased. You MAY ask follow-up questions on topics the user did answer (e.g. if they named a metric, you can ask for its formula).
-4. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, you may ask about them one at a time. If the user cannot answer one, skip it and ask about the next.
+4. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
 5. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
 6. Output a single focused question only — never two questions joined with "and" or "or".
 7. Output PROCEED if you have enough information, have exhausted unresolvable terms, or cannot make further progress.
@@ -87,7 +89,7 @@ _FILLER = frozenset([
     "average", "median", "mean", "count", "total", "sum", "min", "max",
     "number", "value", "measure", "metric", "level", "score", "ratio",
     "rate", "index", "indicator", "standard", "deviation", "percentage",
-    "coloumn",
+    "column",
     # Schema-structural words — stripping these improves VDB matching
     # e.g. "condition name" → "condition", "signal type" → "signal"
     "name", "type", "id", "key", "code", "label", "category", "of"
@@ -168,6 +170,19 @@ def _parse_kg_entries(formatted_kg: str) -> dict[str, str]:
     return entries
 
 
+def _slim_kg_for_coverage(formatted_kg: str) -> str:
+    """Strip Definition lines so the coverage prompt is ~3x smaller.
+
+    The coverage LLM only needs entry names and descriptions to decide
+    which KB entries match an extracted entity. The full definitions are
+    looked up separately from the original formatted_kg, so nothing is lost.
+    """
+    return "\n".join(
+        line for line in formatted_kg.splitlines()
+        if not line.startswith("  Definition:")
+    )
+
+
 def _filter_covered_by_external_knowledge(
     entities: list[str],
     formatted_kg: str,
@@ -180,8 +195,45 @@ def _filter_covered_by_external_knowledge(
     """
     fast_llm = get_non_reasoning_llm_client()
     entity_list = "\n".join(f"- {e}" for e in entities)
-    prompt = _KG_COVERAGE_PROMPT.format(formatted_kg=formatted_kg, entity_list=entity_list)
-    response = fast_llm.invoke(prompt).content.strip()
+    slim_kg = _slim_kg_for_coverage(formatted_kg)
+    prompt = _KG_COVERAGE_PROMPT.format(formatted_kg=slim_kg, entity_list=entity_list)
+    def _is_valid_coverage_response(r: str, n_entities: int) -> bool:
+        """True when r looks like structured YES/NO lines, not prose."""
+        lines = [l for l in r.splitlines() if l.strip()]
+        if not lines:
+            return False
+        structured = sum(1 for l in lines if ": YES" in l.upper() or ": NO" in l.upper())
+        return structured >= max(1, n_entities // 2)
+
+    response = ""
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            response = fast_llm.invoke(prompt).content.strip()
+            if response and _is_valid_coverage_response(response, len(entities)):
+                break
+            if response:
+                logger.warning(
+                    "Clarify — coverage LLM returned prose on attempt %d/%d — retrying",
+                    attempt + 1, RETRY_MAX_ATTEMPTS,
+                )
+            else:
+                logger.warning(
+                    "Clarify — coverage LLM returned empty on attempt %d/%d — retrying",
+                    attempt + 1, RETRY_MAX_ATTEMPTS,
+                )
+            response = ""
+        except requests.exceptions.ReadTimeout:
+            logger.warning(
+                "Clarify — coverage LLM timed out on attempt %d/%d",
+                attempt + 1, RETRY_MAX_ATTEMPTS,
+            )
+        except Exception as e:
+            logger.error("Clarify — coverage LLM error on attempt %d/%d: %s", attempt + 1, RETRY_MAX_ATTEMPTS, e)
+            break
+        if attempt < RETRY_MAX_ATTEMPTS - 1:
+            time.sleep(2 ** (attempt + 1))
+        else:
+            logger.error("Clarify — coverage LLM failed after %d attempts; treating all entities as unresolvable", RETRY_MAX_ATTEMPTS)
     logger.info("Clarify — coverage LLM raw response:\n%s", response)
 
     kg_entries = _parse_kg_entries(formatted_kg)
@@ -369,6 +421,16 @@ def should_clarify(
         # An empty result is valid (entities not covered by KB this turn).
         session._grounded_kg = relevant_kg
         session._grounded_kg_for = session.working_question
+        # Accumulate across turns: union of all KB entries seen this phase.
+        if relevant_kg:
+            existing = _parse_kg_entries(session.cumulative_grounded_kg)
+            for name, text in _parse_kg_entries(relevant_kg).items():
+                if name not in existing:
+                    session.cumulative_grounded_kg = (
+                        session.cumulative_grounded_kg + "\n" + text
+                        if session.cumulative_grounded_kg
+                        else text
+                    )
     else:
         logger.info("Clarify — reusing cached unresolvable entities (question unchanged)")
     unresolvable = session._cached_unresolvable or []
@@ -407,3 +469,34 @@ def should_clarify(
         return True, question
     logger.info("Clarify — DECISION: PROCEED  (history len=%d)", len(session.clarify_history))
     return False, None
+
+
+def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
+    """Run entity extraction and KB coverage without making a clarification decision.
+
+    Updates session._grounded_kg and session.cumulative_grounded_kg so Evidence
+    generation has current KB context. Used in Phase 2 where clarification questions
+    are not allowed but KB grounding is still needed.
+    """
+    if session._cached_unresolvable_for == session.working_question:
+        logger.info("Clarify — KB already current for Phase 2 question (cached)")
+        return
+    unresolvable, relevant_kg = _find_unresolvable_entities(
+        session.working_question,
+        session.semantic_retriever,
+        session.db_name,
+        session.external_kg,
+    )
+    session._cached_unresolvable = unresolvable
+    session._cached_unresolvable_for = session.working_question
+    session._grounded_kg = relevant_kg
+    session._grounded_kg_for = session.working_question
+    if relevant_kg:
+        existing = _parse_kg_entries(session.cumulative_grounded_kg)
+        for name, text in _parse_kg_entries(relevant_kg).items():
+            if name not in existing:
+                session.cumulative_grounded_kg = (
+                    session.cumulative_grounded_kg + "\n" + text
+                    if session.cumulative_grounded_kg
+                    else text
+                )
