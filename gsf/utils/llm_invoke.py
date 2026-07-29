@@ -20,8 +20,15 @@ from gsf.utils.model_config import resolve
 
 logger = logging.getLogger(__name__)
 
+
+
+
 RETRY_MAX_ATTEMPTS = 3
-LLM_INVOKE_TIMEOUT_S = 50
+# Per-request LLM timeout. Reasoning models generating long SQL against wide
+# schemas can legitimately exceed the default; raise it via the env var rather
+# than letting the request abort mid-generation (an aborted call surfaces as
+# APITimeoutError, which yields no SQL at all).
+LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "50"))
 
 # Bound total concurrent LLM requests across all worker threads so the pipeline's
 # nested parallelism (tables × terms) doesn't saturate the hosted endpoint's
