@@ -309,7 +309,6 @@ const AcronymsSection = () => {
 				submitLabel="Save"
 				onSubmit={handleSubmit}
 				canSubmit={Boolean(canSubmit)}
-				accent="emerald"
 			>
 				<div>
 					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">

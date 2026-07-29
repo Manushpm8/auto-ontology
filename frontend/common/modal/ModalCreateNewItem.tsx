@@ -9,8 +9,6 @@ import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Modal } from './Modal';
 
-type Accent = 'emerald' | 'teal';
-
 export type ModalSecondaryAction = {
 	label: string;
 	onClick: () => void | Promise<void>;
@@ -25,7 +23,6 @@ export type ModalCreateNewItemProps = {
 	onSubmit: () => void | Promise<void>;
 	canSubmit: boolean;
 	children: ReactNode;
-	accent?: Accent;
 	className?: string;
 	/** Optional secondary button rendered left of the submit button, e.g. "Validate SQL". */
 	secondaryAction?: ModalSecondaryAction;
@@ -39,7 +36,6 @@ export const ModalCreateNewItem = ({
 	onSubmit,
 	canSubmit,
 	children,
-	accent = 'emerald',
 	className = 'min-h-[400px] w-[800px] max-w-full',
 	secondaryAction,
 }: ModalCreateNewItemProps) => (
@@ -78,7 +74,7 @@ export const ModalCreateNewItem = ({
 						void onSubmit();
 					}}
 					disabled={!canSubmit}
-					theme={accent === 'emerald' ? ButtonTheme.Primary : ButtonTheme.Teal}
+					theme={ButtonTheme.Primary}
 					size={Size.REGULAR}
 				>
 					{submitLabel}
