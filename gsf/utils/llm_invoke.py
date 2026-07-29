@@ -73,13 +73,6 @@ _NON_REASONING_BASE_URL = resolve("NON_REASONING", "ENDPOINT")
 _NON_REASONING_MODEL_NAME = resolve("NON_REASONING", "MODEL")
 _NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 
-# Non-reasoning model. Kept fully separate (key/base URL/model) so it can point at
-# a different endpoint than the main reasoning model (e.g. inference vs integrate
-# API). Each falls back to the main reasoning value when unset.
-_NON_REASONING_BASE_URL = os.environ.get("NON_REASONING_BASE_URL", _BASE_URL)
-_NON_REASONING_MODEL_NAME = os.environ.get("NON_REASONING_MODEL_NAME", _MODEL_NAME)
-_NON_REASONING_API_KEY = os.environ.get("NON_REASONING_NVIDIA_API_KEY", "")
-
 def _build_client(
     *,
     model: str,
