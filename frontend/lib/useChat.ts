@@ -29,6 +29,16 @@ const stringifySqlResponse = (value: unknown): string | undefined => {
 	}
 };
 
+/** Strip ```chart / ```chart-carousel fences so Message 1 stays prose-only. */
+const stripChartFences = (markdown: string): string =>
+	markdown
+		.replace(/(^|\n)```(?:chart|chart-carousel)\b[\s\S]*?```/g, '\n')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+
+const chartsToFencedContent = (charts: Record<string, unknown>[]): string =>
+	charts.map((spec) => `\`\`\`chart\n${JSON.stringify(spec)}\n\`\`\``).join('\n\n');
+
 export const useChat = () => {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [steps, setSteps] = useState<GraphStep[]>([]);
@@ -124,13 +134,33 @@ export const useChat = () => {
 							response,
 							sql_code: sqlCode,
 							sql_response_from_db: sqlResponseFromDb,
+							charts,
 						} = event.answer;
 						const sqlResponse = stringifySqlResponse(sqlResponseFromDb);
+						const prose = stripChartFences(response ?? '');
+						const chartContent =
+							Array.isArray(charts) && charts.length > 0
+								? chartsToFencedContent(charts)
+								: null;
 
-						appendAssistantMessage(conversationId, response, {
-							sql: sqlCode,
-							sqlResponse,
-						});
+						// Illumex-style split:
+						// Message 1 — text + SQL
+						// Message 2 — charts (if built) OR table (viz off / viz failed)
+						const hasMessage1Content = Boolean(prose) || Boolean(sqlCode);
+						if (hasMessage1Content) {
+							appendAssistantMessage(conversationId, prose, { sql: sqlCode });
+						}
+
+						if (chartContent) {
+							appendAssistantMessage(conversationId, chartContent);
+						} else if (sqlResponse) {
+							appendAssistantMessage(conversationId, '', { sqlResponse });
+						} else if (!hasMessage1Content) {
+							// Nothing at all came back — surface something rather than
+							// silently leaving the user without a reply.
+							appendAssistantMessage(conversationId, GENERIC_ERROR_MESSAGE);
+						}
+
 						setSteps((prev) =>
 							prev.map((s) => ({ ...s, status: 'completed' as const })),
 						);
