@@ -39,6 +39,9 @@ from gsf.server.semantic_compilation.router import (  # noqa: E402
 from gsf.server.sql_attributes.router import router as sql_attributes_router  # noqa: E402
 from gsf.server.zones.router import router as zones_router  # noqa: E402
 from gsf.server.terms.router import router as terms_router  # noqa: E402
+from gsf.server.model_interchange.router import (  # noqa: E402
+    router as model_interchange_router,
+)
 
 
 @asynccontextmanager
@@ -87,6 +90,9 @@ def main() -> None:
     )
     app.include_router(zones_router, prefix="/api", tags=["zones"])
     app.include_router(terms_router, prefix="/api", tags=["terms"])
+    app.include_router(
+        model_interchange_router, prefix="/api", tags=["model-interchange"]
+    )
 
     uvicorn.run(
         app,

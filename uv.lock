@@ -994,6 +994,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyheavydb" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "snowflake-connector-python" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1022,6 +1023,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyheavydb", specifier = ">=8.0.1.post1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "snowflake-connector-python", specifier = ">=4.6.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
 ]
@@ -1889,7 +1891,7 @@ wheels = [
 
 [[package]]
 name = "nemo-retriever"
-version = "2026.7.17.dev20260717010429"
+version = "2026.7.26.dev20260726130349"
 source = { git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever#ee3230910b7d25a267386a11a8a4fec2882ac324" }
 dependencies = [
     { name = "backoff" },
