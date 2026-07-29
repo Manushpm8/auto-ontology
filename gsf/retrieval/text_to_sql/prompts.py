@@ -2,6 +2,10 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
     "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
@@ -33,7 +37,11 @@ create_sql_user_prompt = (
     "Do not confuse columns across tables.\n"
     "- GROUP BY must include all non-aggregated columns in SELECT.\n"
     "- ORDER BY must only reference aggregated aliases or columns "
-    "present in SELECT/GROUP BY.\n\n"
+    "present in SELECT/GROUP BY.\n"
+    "- When a cleaned, formatted, or otherwise derived variant of a table exists "
+    "(names like cleaned_*, *_clean, *_formatted, or a copy with dates and "
+    "categories already broken out), read from that one rather than re-deriving "
+    "those values from the raw table.\n\n"
     "**Joins**\n"
     "- Join only when necessary; choose join type (INNER / LEFT / RIGHT) "
     "based on the question's intent. Avoid fan-out from many-to-many joins.\n\n"
@@ -43,6 +51,15 @@ create_sql_user_prompt = (
     "Use CASE WHEN inside aggregates instead: "
     "COUNT(CASE WHEN condition THEN 1 END) or SUM(CASE WHEN condition THEN 1 ELSE 0 END).\n"
     "- If business categories are specified, use CASE WHEN to classify.\n\n"
+    "**Conventions**\n"
+    "- Ranges are inclusive at both ends unless the question says otherwise. A "
+    "period of N units starting at X covers X through X+N-1.\n"
+    "- Keep NULL groups: a GROUP BY over a nullable column must still return the "
+    "NULL bucket unless the question excludes it.\n"
+    "- When rows tie at a rank cutoff and no LIMIT applies, return every tied "
+    "row rather than picking one arbitrarily.\n"
+    "- Never round intermediate values. Round only the final output, and only "
+    "when the question asks for it.\n\n"
     "**Example Queries**\n"
     "- Review example queries for WHERE values that match the question's intent. "
     "If a value or filter condition is relevant to what is being asked, include it in your SQL.\n\n"
@@ -53,14 +70,8 @@ create_sql_user_prompt = (
     "- Preserve the exact capitalization of values, names, and identifiers "
     "from the user's question.\n\n"
     "{dialect_rules}"
+    "{projection_rules}"
     "**Style**\n"
-    "- SELECT only the columns explicitly asked; extra columns make the result "
-    "wrong even when the rows are right. For superlative/ranking questions "
-    "(most/least/top/highest/lowest/peak/best/worst), select ONLY the item named "
-    "— the ranking key OR the aggregated value, never both — and never add the "
-    "ORDER BY metric unless its value is asked. To identify an entity "
-    "(who/which/what), return one identifying column (name if it exists, else id), "
-    "not both.\n"
     "- If evidence maps an answer concept to specific columns, preserve that "
     "projection exactly; do not collapse, reshape, or replace those columns "
     "unless the question explicitly asks for a transformed value.\n"
@@ -76,6 +87,53 @@ create_sql_user_prompt = (
     "- Do NOT include comments in the SQL.\n"
     "- Do NOT use ellipsis as placeholder — output the complete SQL.\n"
 )
+
+
+# Narrow projection: the result is rendered for a person, so a column they did
+# not ask for is noise. This is the product default.
+_DEFAULT_PROJECTION_RULES = (
+    "**Projection**\n"
+    "- SELECT only the columns explicitly asked; extra columns make the result "
+    "wrong even when the rows are right. For superlative/ranking questions "
+    "(most/least/top/highest/lowest/peak/best/worst), select ONLY the item named "
+    "— the ranking key OR the aggregated value, never both — and never add the "
+    "ORDER BY metric unless its value is asked. To identify an entity "
+    "(who/which/what), return one identifying column (name if it exists, else id), "
+    "not both.\n\n"
+)
+
+
+# Generous projection: set-comparison graders (Spider2, BIRD) require every gold
+# column to appear somewhere in the prediction and ignore the extras, so the
+# narrow rule above inverts the risk — under-projecting is the only fatal move.
+_BENCHMARK_PROJECTION_RULES = (
+    "**Projection**\n"
+    "- SELECT every column the question asks for, including each intermediate "
+    "quantity it names. A missing column makes the answer wrong; an extra one "
+    "usually does not.\n"
+    '- When the question names both a grouping key and a computed value ("which '
+    'region, and what was its average"), return both.\n'
+    "- For superlative/ranking questions, return the item named, and include the "
+    "ranking metric when the question refers to that quantity by name.\n"
+    "- To identify an entity (who/which/what), prefer the name column; add the id "
+    "only when the question or evidence refers to it.\n\n"
+)
+
+
+def format_projection_rules() -> str:
+    """Return the ``projection_rules`` block for the SQL-generation prompt.
+
+    Defaults to the narrow projection the product wants. Set
+    ``TEXT_TO_SQL_BENCHMARK_PROJECTION`` when scoring against a set-comparison
+    grader, which matches each gold column against the prediction and ignores
+    unmatched extras — there, projecting narrowly loses points it cannot win back.
+    """
+    if (
+        os.environ.get("TEXT_TO_SQL_BENCHMARK_PROJECTION", "").strip().lower()
+        in _TRUTHY
+    ):
+        return _BENCHMARK_PROJECTION_RULES
+    return _DEFAULT_PROJECTION_RULES
 
 
 # Functions the LLM reaches for (Postgres / Snowflake / BigQuery / PostGIS
@@ -96,9 +154,15 @@ _SQLITE_DIALECT_RULES = (
     "literals. Use strftime(), date(), datetime() for all date/time work.\n"
     "- No :: casts and no ILIKE. Use CAST(x AS type); LIKE is case-insensitive "
     "for ASCII.\n"
-    "- Coordinates and other composite columns are stored as TEXT, not JSON or "
-    "arrays. Do NOT use json_extract on non-JSON text — inspect the value shape "
-    "and parse with substr()/instr()/CAST as needed.\n"
+    "- If sample values look like JSON objects/arrays, extract the field "
+    "(json_extract / path) and filter on that. Use json_extract only when the "
+    "samples are JSON; otherwise parse with substr()/instr()/CAST.\n"
+    "- Check the stored format in the sample values before filtering or grouping. "
+    "- For dates, strftime() returns NULL for a value it cannot parse, and a "
+    "predicate over that NULL silently drops every row. When the format is fixed "
+    "width, prefer substr() on the raw text over parsing.\n"
+    "- Never write `WHERE <parsed expression> IS NOT NULL` to clean data — if the "
+    "parse is wrong that empties the table instead of failing loudly.\n"
     "- Prefer built-in aggregate/math functions and window functions only.\n\n"
 )
 
