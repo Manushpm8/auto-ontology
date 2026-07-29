@@ -2,6 +2,8 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
     "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
@@ -9,13 +11,26 @@ main_system_prompt_template = (
 )
 
 
-create_sql_user_prompt = (
+def _question_last_enabled() -> bool:
+    """Whether the question and evidence sit at the END of the user prompt.
+
+    Env ``BIRD_PROMPT_ORDER`` (default ``legacy``; ``question_last`` to move
+    them).
+    """
+    return (
+        os.environ.get("BIRD_PROMPT_ORDER", "legacy").strip().lower() == "question_last"
+    )
+
+
+_USER_TASK = (
     "## Task\n"
     "Construct a SQL query that answers the user's question.\n"
     "Dialect: {dialect}.\n\n"
-    "## Question\n"
-    "{main_question}\n"
-    "{observation_block}\n\n"
+)
+
+_USER_QUESTION = "## Question\n{main_question}\n{observation_block}\n\n"
+
+_USER_CONTEXT = (
     "## Available Schema\n"
     "Use ONLY the tables and columns listed below. "
     "Do NOT invent tables, schemas, or columns.\n\n"
@@ -25,6 +40,9 @@ create_sql_user_prompt = (
     "## Conversation History\n"
     "{qa_from_conversations}\n\n"
     "{custom_analyses}"
+)
+
+_USER_RULES = (
     "## Rules\n\n"
     "**Correctness**\n"
     "- Every alias used in SELECT / WHERE / GROUP BY / ORDER BY / HAVING "
@@ -43,6 +61,29 @@ create_sql_user_prompt = (
     "Use CASE WHEN inside aggregates instead: "
     "COUNT(CASE WHEN condition THEN 1 END) or SUM(CASE WHEN condition THEN 1 ELSE 0 END).\n"
     "- If business categories are specified, use CASE WHEN to classify.\n\n"
+    "**Literal Result Fidelity (STRICT)**\n"
+    "- Preserve database row multiplicity. Do NOT add DISTINCT merely to make "
+    "results look cleaner. Use DISTINCT only when the question explicitly asks "
+    "for unique/different values or when deduplication is mathematically required "
+    "at the requested entity grain.\n"
+    "- Return raw stored values unless the question explicitly requests a "
+    "human-readable translation. Do NOT convert code/label values (for example "
+    "'+', '-', status codes, element symbols) into explanatory CASE text.\n"
+    "- Do NOT add plausible filters that are absent from the question/evidence "
+    "(such as record-type/status filters), and do NOT broaden a directed "
+    "relationship into both directions unless requested.\n"
+    "- Match the requested projection exactly: same number and order of output "
+    "columns; do not add helper/ranking/aggregate columns or reorder requested columns.\n"
+    "- Distinguish a stored measure from a row count: if the question asks for a "
+    "number already stored in a measure column for one identified record, SELECT "
+    "that measure; do not SUM/COUNT it unless multiple records must be aggregated.\n"
+    "- For a percentage, multiply the requested numerator/denominator ratio by "
+    "100 unless authoritative evidence explicitly defines a different formula. "
+    "For 'X compared to all other types', the denominator is the non-X group, "
+    "not all rows.\n"
+    "- Prefer the simplest direct SQL that exactly implements the question. Do "
+    "not introduce CTEs, parsing logic, or extra joins when ordinary filters and "
+    "schema joins are sufficient.\n\n"
     "**Example Queries**\n"
     "- Review example queries for WHERE values that match the question's intent. "
     "If a value or filter condition is relevant to what is being asked, include it in your SQL.\n\n"
@@ -76,6 +117,26 @@ create_sql_user_prompt = (
     "- Do NOT include comments in the SQL.\n"
     "- Do NOT use ellipsis as placeholder — output the complete SQL.\n"
 )
+
+
+create_sql_user_prompt = _USER_TASK + _USER_QUESTION + _USER_CONTEXT + _USER_RULES
+
+
+def get_sql_user_prompt() -> str:
+    """The user-prompt template, ordered per ``BIRD_PROMPT_ORDER``.
+
+    Legacy order states the question at char ~85 and then closes with the Rules
+    block, which is 4,096 of the template's 4,450 characters. Since the human
+    message is assembled last, the final thing the model reads before generating
+    is a wall of prohibitions, with the actual task ~14k characters back.
+    ``question_last`` moves the question and its evidence to the end instead, so
+    they are adjacent to generation. It also stops the variable part of the
+    prompt from preceding the stable schema, which is what any prefix cache
+    needs.
+    """
+    if _question_last_enabled():
+        return _USER_TASK + _USER_CONTEXT + _USER_RULES + "\n" + _USER_QUESTION
+    return create_sql_user_prompt
 
 
 # Functions the LLM reaches for (Postgres / Snowflake / BigQuery / PostGIS
@@ -153,11 +214,54 @@ def format_dialect_rules(dialect: str | None) -> str:
     return ""
 
 
+_CAPPED_THOUGHT_SPEC = (
+    "- thought: 1-2 sentence internal reasoning — your approach and key decisions."
+)
+_CAPPED_THOUGHT_EXAMPLE = (
+    "Join sales and customers, filter last full quarter, aggregate by country."
+)
+# The cap and the one-line example beneath it are the only place the prompt
+# demonstrates how much reasoning to do, and a demonstration outweighs an
+# instruction. Two sentences is not enough room to check the query against the
+# rule block above it, so the model commits to a shape before any rule applies.
+_OPEN_THOUGHT_SPEC = (
+    "- thought: work the question out here before writing any SQL. Name the "
+    "tables you need and why, the keys that join them, the exact filter "
+    "literals, the row grain, and the projection. Check the shape against the "
+    "rules above and say what you rejected. Take as much room as the question "
+    "needs."
+)
+_OPEN_THOUGHT_EXAMPLE = """The question asks for revenue per country for the last full quarter, so the
+output grain is one row per country and the projection is (country, revenue).
+Revenue lives in sales.sales_amount but country only exists on customers, so
+these must join on sales.customer_id = customers.customer_id. "Last full
+quarter" is a closed range on sales.order_date, not the current partial one.
+Revenue is a sum over many sales rows per country, so this aggregates rather
+than reading a stored measure. No DISTINCT: duplicate sales rows are real
+revenue, not noise. Country is not a single constant filter, so it stays in
+SELECT."""
+
+
+def _open_reasoning_enabled() -> bool:
+    """Whether the ``thought`` field is uncapped.
+
+    Env ``BIRD_OPEN_REASONING`` (default ``0`` = current 1-2 sentence cap).
+    """
+    return os.environ.get("BIRD_OPEN_REASONING", "0").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+        "",
+    }
+
+
 def create_sql_from_candidates_prompt(
     *,
     dialect: str | None = None,
     target_db: str | None = None,
     has_evidence: bool = False,
+    include_sql_attributes: bool = True,
 ) -> str:
     """System prompt for SQL generation from semantic retrieval candidates.
 
@@ -167,6 +271,12 @@ def create_sql_from_candidates_prompt(
     query to one database (``target_db``) removes only the *database* prefix — the
     schema is still required to resolve the table, so it is never dropped here.
     """
+    open_reasoning = _open_reasoning_enabled()
+    thought_spec = _OPEN_THOUGHT_SPEC if open_reasoning else _CAPPED_THOUGHT_SPEC
+    thought_example = (
+        _OPEN_THOUGHT_EXAMPLE if open_reasoning else _CAPPED_THOUGHT_EXAMPLE
+    )
+
     bare_table_names = (dialect or "").lower() in _SCHEMALESS_DIALECTS
     if bare_table_names:
         table_name_rule = (
@@ -198,6 +308,39 @@ WHERE s.order_date BETWEEN
   AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
 GROUP BY c.country_name
 ORDER BY total_sales DESC;"""
+
+    sql_attributes_rule = (
+        "- SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.\n"
+        "  If one matches the question's intent, incorporate its expression or SQL pattern\n"
+        "  into your query. Treat them like reusable building blocks for calculations.\n"
+        if include_sql_attributes
+        else ""
+    )
+
+    # Six of the system rules restate — in different words — rules the user
+    # prompt already states more specifically. Saying one thing twice in two
+    # voices invites the model to read both as approximate rather than binding,
+    # so the deduped path keeps only the user copy. Every rule dropped here has
+    # a strictly more detailed counterpart in ``_USER_RULES``.
+    duplicated_in_user_rules = (
+        ""
+        if _question_last_enabled()
+        else """- Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
+  RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
+  NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
+- Preserve database row multiplicity. Do NOT add DISTINCT just to make output
+  look cleaner; use it only when uniqueness is explicitly requested or
+  mathematically required at the requested grain.
+- Return raw stored values. Never translate code/label values into explanatory
+  CASE text unless the question explicitly asks for a human-readable label.
+- Do not add unstated filters or broaden directed conditions. Match the exact
+  requested output columns and their order; never add helpful extra columns.
+- If a requested number is already stored in a measure column for one identified
+  record, SELECT it directly instead of SUM/COUNT. For percentages, multiply the
+  requested ratio by 100 unless authoritative evidence defines another formula.
+- Prefer simple direct SQL over speculative CTEs, string parsing, or extra joins.
+"""
+    )
 
     evidence_block = (
         "## Evidence Priority\n"
@@ -234,10 +377,7 @@ ORDER BY total_sales DESC;"""
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,
   trimming only what does not apply. Do NOT copy its aliases.
-- SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.
-  If one matches the question's intent, incorporate its expression or SQL pattern
-  into your query. Treat them like reusable building blocks for calculations.
-- Prefer the fewest joins that still correctly answer the question. If all
+{sql_attributes_rule}- Prefer the fewest joins that still correctly answer the question. If all
   required fields exist in a single table, use only that table. If a shorter
   join path covers the question equally well, choose it over a longer chain.
 - When creating a JOIN, both sides of the ON condition must use columns with
@@ -248,14 +388,11 @@ ORDER BY total_sales DESC;"""
   (first_name/last_name/*_name) and filter there. Join each foreign key to the
   primary key it actually references (e.g. `expense.link_to_member` =
   `member.member_id`, never `event.event_id`).
-- Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
-  RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
-  NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
 - If the question filters by a single constant value on a column,
   do NOT include that column in SELECT — it adds no information since every row has the same value.
-
+{duplicated_in_user_rules}
 Output (fill fields in this exact order):
-- thought: 1-2 sentence internal reasoning — your approach and key decisions.
+{thought_spec}
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
@@ -268,7 +405,7 @@ Output (fill fields in this exact order):
 Example:
 
 thought:
-Join sales and customers, filter last full quarter, aggregate by country.
+{thought_example}
 
 sql_code:
 {example_sql}

@@ -30,6 +30,19 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
+def is_db_probe_high_card() -> bool:
+    """Whether literals on high-cardinality columns are checked too.
+
+    ``_fetch_distinct`` refuses to judge a column with more than
+    ``DB_PROBE_LOW_CARD_THRESHOLD`` distinct values, so name/place/title columns
+    are never validated. With this flag on, such literals get a targeted
+    existence probe (``WHERE col = 'lit' LIMIT 1``) plus a case-insensitive /
+    substring lookup for suggestions — no enumeration, so cost stays bounded.
+    Opt-in via ``DB_PROBE_HIGH_CARD``.
+    """
+    return os.environ.get("DB_PROBE_HIGH_CARD", "").strip().lower() in _TRUTHY
+
+
 def is_db_probe_proactive() -> bool:
     """Whether the *proactive* pre-execution literal check is wired in.
 
@@ -56,8 +69,14 @@ DB_PROBE_MAX_COLS_PER_TABLE = _int_env("DB_PROBE_MAX_COLS_PER_TABLE", 8)
 DB_PROBE_LOW_CARD_THRESHOLD = _int_env("DB_PROBE_LOW_CARD_THRESHOLD", 20)
 
 
+# Max suggestions returned for a literal that is absent from a high-card column.
+DB_PROBE_HIGH_CARD_SUGGESTIONS = _int_env("DB_PROBE_HIGH_CARD_SUGGESTIONS", 5)
+
+
 __all__ = [
     "is_db_probe_proactive",
+    "is_db_probe_high_card",
+    "DB_PROBE_HIGH_CARD_SUGGESTIONS",
     "DB_PROBE_MAX_CALLS",
     "DB_PROBE_MAX_ROWS",
     "DB_PROBE_TIMEOUT_S",

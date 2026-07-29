@@ -92,6 +92,10 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
 def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     """Fetch Column + Table + Schema context for ColumnAttribute IDs.
 
+    Prefers the owning column via HAS_ATTRIBUTE over SEMANTIC_FK sources
+    (FK columns that point at this attribute). Otherwise a shared PK
+    attribute (e.g. CDS Code) can resolve to an FK column non-deterministically.
+
     Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
     col_name, table_id, table_name, schema_name}.
     """
@@ -100,7 +104,10 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     query = """
     UNWIND $attr_ids AS attr_id
     MATCH (attr:ColumnAttribute {id: attr_id})
-    OPTIONAL MATCH (col:Column)-[:SEMANTIC_FK|HAS_ATTRIBUTE]->(attr)
+    OPTIONAL MATCH (own:Column)-[:HAS_ATTRIBUTE]->(attr)
+    OPTIONAL MATCH (fk:Column)-[:SEMANTIC_FK]->(attr)
+    WITH attr, own, collect(DISTINCT fk) AS fk_cols
+    WITH attr, coalesce(own, head(fk_cols)) AS col
     OPTIONAL MATCH (col)<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
     RETURN attr.id AS attr_id, attr.name AS attr_name,
            attr.description AS attr_description,
@@ -203,12 +210,13 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     """Find the shortest semantic join path between two Column nodes.
 
-    SEMANTIC_FK is directional (Column -> ColumnAttribute) and is followed
-    only in that outgoing direction: an FK column points at the attribute it
-    references. Traversing it undirected would hop from one FK column up to a
-    shared target attribute and back down a *different* FK column, fabricating
-    a join between two unrelated columns that merely reference the same target
-    (e.g. two person-id columns). HAS_ATTRIBUTE and CONTAINS stay undirected.
+    SEMANTIC_FK is stored directed (FK Column -> referenced ColumnAttribute),
+    but traversal is **undirected**. Two FK columns that share a target
+    attribute (e.g. ``frpm.CDSCode`` and ``satscores.cds`` both -> CDS Code)
+    must be joinable as ``frpm.CDSCode = satscores.cds``; outgoing-only
+    traversal cannot leave the shared attribute and returns an empty path.
+    HAS_ATTRIBUTE and CONTAINS stay undirected. Schema nodes are excluded
+    (``labelFilter: -Schema``), so cross-table routes require SEMANTIC_FK.
 
     Returns a list of hop dicts:
         [{source_schema, source_table, source_column,
@@ -218,16 +226,14 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     if anchor_col_id == dest_col_id:
         return []
 
-    # apoc.path.expandConfig is used instead of shortestPath because Cypher's
-    # variable-length patterns apply a single direction to every relationship
-    # type, whereas we need SEMANTIC_FK outgoing-only (">") while keeping
-    # HAS_ATTRIBUTE and CONTAINS bidirectional. bfs + limit:1 yields the
-    # shortest path; labelFilter "-Schema" keeps Schema nodes out of the path.
+    # apoc.path.expandConfig: SEMANTIC_FK must be bidirectional so shared-PK
+    # FK pairs connect; HAS_ATTRIBUTE / CONTAINS stay bidirectional.
+    # bfs + limit:1 → shortest path; -Schema blocks table↔table via Schema.
     path_query = """
     MATCH (col_anchor:Column {id: $anchor_col_id})
     MATCH (col_dest:Column {id: $dest_col_id})
     CALL apoc.path.expandConfig(col_anchor, {
-        relationshipFilter: 'SEMANTIC_FK>|HAS_ATTRIBUTE|CONTAINS',
+        relationshipFilter: 'SEMANTIC_FK|HAS_ATTRIBUTE|CONTAINS',
         labelFilter: '-Schema',
         terminatorNodes: [col_dest],
         bfs: true,

@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote, urlparse
@@ -19,6 +21,14 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableType
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 logger = logging.getLogger(__name__)
+
+
+def _exec_timeout_s() -> float:
+    """Wall-clock budget for a single query, ``0`` to disable (the default)."""
+    try:
+        return max(0.0, float(os.environ.get("SQL_EXEC_TIMEOUT_S", "0")))
+    except ValueError:
+        return 0.0
 
 
 def _sqlite_path_from_connection_string(connection_string: str) -> Path:
@@ -85,7 +95,33 @@ class SQLiteDatabase(SQLDatabase):
         return self._database_name
 
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        cur = self._conn.execute(sql, parameters or [])
+        conn = self._conn
+        budget = _exec_timeout_s()
+        if not budget:
+            return self._execute(conn, sql, parameters)
+
+        # SQLite computes rows lazily during fetch, so the handler has to stay
+        # installed across both the execute and the fetch to bound either one.
+        deadline = time.monotonic() + budget
+        conn.set_progress_handler(
+            lambda: 1 if time.monotonic() > deadline else 0, 10_000
+        )
+        try:
+            return self._execute(conn, sql, parameters)
+        except sqlite3.OperationalError as exc:
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"SQLite query exceeded SQL_EXEC_TIMEOUT_S={budget:g}s"
+                ) from exc
+            raise
+        finally:
+            conn.set_progress_handler(None, 0)
+
+    @staticmethod
+    def _execute(
+        conn: sqlite3.Connection, sql: str, parameters: Optional[list]
+    ) -> pd.DataFrame:
+        cur = conn.execute(sql, parameters or [])
         if cur.description is None:
             return pd.DataFrame()
         rows = cur.fetchall()

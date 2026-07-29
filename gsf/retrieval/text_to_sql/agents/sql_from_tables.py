@@ -41,7 +41,7 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_general_prompt,
-    create_sql_user_prompt,
+    get_sql_user_prompt,
     format_dialect_rules,
     format_dual_question_block,
 )
@@ -132,7 +132,7 @@ class SQLFromTablesAgent(BaseAgent):
             observation_block = f"\n{evidence_hints}\n"
 
         # Build user prompt with formatted tables
-        user_prompt = create_sql_user_prompt.format(
+        user_prompt = get_sql_user_prompt().format(
             dialect=dialect,
             dialect_rules=format_dialect_rules(dialect),
             main_question=main_question,

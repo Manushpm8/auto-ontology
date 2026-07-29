@@ -53,6 +53,30 @@ def _is_date_type(data_type: str | None) -> bool:
     return any(token in lowered for token in _DATE_TYPE_TOKENS)
 
 
+def _get_column_samples(
+    col: dict[str, Any],
+    columns_profiling_samples: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Profiled sample values for a column.
+
+    Date/time columns are excluded — concrete dates add no business meaning
+    (to an LLM description prompt, or as a stand-in when no description
+    needed to be generated).
+    """
+    if _is_date_type(col.get("data_type")):
+        return []
+    name = col.get("name", "")
+    samples = (columns_profiling_samples.get(name) or {}).get("sample_values") or []
+    return [str(s) for s in samples]
+
+
+def _add_samples_suffix(text: str, samples: list[str]) -> str:
+    """Append " — samples: v1, v2" to *text* when samples are present."""
+    if not samples:
+        return text
+    return f"{text} — samples: {', '.join(samples)}"
+
+
 def _describe_column_batch(
     columns: list[dict[str, Any]],
     columns_profiling_samples: dict[str, dict[str, Any]],
@@ -64,16 +88,10 @@ def _describe_column_batch(
     lines = []
     for col in columns:
         name = col.get("name", "")
-        dtype = col.get("data_type") or "unknown"
-        # Date/time columns: don't feed sample values into the description —
-        # concrete dates add no business meaning.
-        samples = (columns_profiling_samples.get(name) or {}).get("sample_values") or []
-        if _is_date_type(col.get("data_type")):
-            samples = []
-        sample_str = (
-            f" — samples: {', '.join(str(s) for s in samples)}" if samples else ""
-        )
-        lines.append(f"  - {name} ({dtype}){sample_str}")
+        data_type = col.get("data_type") or "unknown"
+        samples = _get_column_samples(col, columns_profiling_samples)
+        line = _add_samples_suffix(f"  - {name} ({data_type})", samples)
+        lines.append(line)
 
     prompt = "Columns:\n" + "\n".join(lines)
 
@@ -170,24 +188,44 @@ def column_attribute_specs(
         col for col in columns if (name := col.get("name", "")) and name not in fk_cols
     ]
 
+    # Only ask the LLM for columns that don't already have a description
+    cols_with_description = [col for col in candidates if col.get("description")]
+    cols_without_description = [col for col in candidates if not col.get("description")]
     llm_descriptions = _generate_column_descriptions(
-        candidates, columns_profiling_samples
+        cols_without_description, columns_profiling_samples
     )
 
-    specs: list[ColumnAttributeSpec] = []
-    for col in candidates:
+    profiling = columns_profiling_samples or {}
+
+    def _build_column_attribute_spec(
+        col: dict[str, Any], description: str | None
+    ) -> ColumnAttributeSpec:
         name = col["name"]
-        attr_name = _column_to_attr_name(name)
-        specs.append(
-            ColumnAttributeSpec(
-                source_column=name,
-                name=attr_name,
-                datatype=str(col.get("data_type") or ""),
-                description=col.get("description")
-                or llm_descriptions.get(name)
-                or None,
-            )
+        return ColumnAttributeSpec(
+            source_column=name,
+            name=_column_to_attr_name(name),
+            datatype=str(col.get("data_type") or ""),
+            description=description,
         )
+
+    # Columns with an existing description skip the LLM entirely, so unlike
+    # LLM descriptions (which were already generated with the samples as
+    # evidence) their description never saw the sample values — bundle them
+    # in now via the same " — samples: ..." suffix.
+    specs = [
+        _build_column_attribute_spec(
+            col,
+            _add_samples_suffix(
+                col["description"], _get_column_samples(col, profiling)
+            ),
+        )
+        for col in cols_with_description
+    ]
+    # Columns without a description: keep the LLM description as generated
+    specs += [
+        _build_column_attribute_spec(col, llm_descriptions.get(col["name"]))
+        for col in cols_without_description
+    ]
     return specs
 
 

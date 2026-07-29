@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import logging
 import os
+import random
+import threading
+import time
 from typing import TYPE_CHECKING
 
 from nemo_retriever.common.params.models import EmbedParams
@@ -34,11 +37,84 @@ _KEY_ERROR = (
     "Get your key at https://build.nvidia.com"
 )
 
+# Public NIM /v1/embeddings is flaky under parallel eval (502 Bad Gateway).
+# Mirror rerank.py: retry transient failures + optional in-flight cap.
+_RETRY_MAX = max(1, int(os.environ.get("EMBED_RETRY_MAX", "6")))
+_RETRY_BASE_S = float(os.environ.get("EMBED_RETRY_BASE_S", "1.0"))
+_MAX_INFLIGHT = max(1, int(os.environ.get("EMBED_MAX_INFLIGHT", "2")))
+_INFLIGHT = threading.BoundedSemaphore(_MAX_INFLIGHT)
+_HTTP_PATCHED = False
+
+
+def _is_transient_embed_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    markers = (
+        "502",
+        "503",
+        "504",
+        "429",
+        "bad gateway",
+        "gateway timeout",
+        "service unavailable",
+        "too many requests",
+        "connection reset",
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+    )
+    return any(m in text for m in markers)
+
+
+def install_embed_http_retries() -> None:
+    """Monkeypatch nemo_retriever HTTP embed with retry/backoff for 5xx/429."""
+    global _HTTP_PATCHED
+    if _HTTP_PATCHED:
+        return
+    from nemo_retriever.models.inference import main_text_embed as mte
+
+    orig = mte._http_embed_openai_compat
+
+    def _wrapped(prompts, *args, **kwargs):
+        last_err: BaseException | None = None
+        for attempt in range(1, _RETRY_MAX + 1):
+            _INFLIGHT.acquire()
+            try:
+                result = orig(prompts, *args, **kwargs)
+                return result
+            except Exception as err:
+                last_err = err
+                transient = _is_transient_embed_error(err)
+                if not transient or attempt >= _RETRY_MAX:
+                    raise
+                sleep_s = _RETRY_BASE_S * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+                logger.warning(
+                    "Embed HTTP transient failure (attempt %d/%d): %s; retry in %.1fs",
+                    attempt,
+                    _RETRY_MAX,
+                    err,
+                    sleep_s,
+                )
+                time.sleep(sleep_s)
+            finally:
+                _INFLIGHT.release()
+        assert last_err is not None
+        raise last_err
+
+    mte._http_embed_openai_compat = _wrapped  # type: ignore[assignment]
+    _HTTP_PATCHED = True
+    logger.info(
+        "Installed embed HTTP retries (max=%d, inflight=%d) on %s",
+        _RETRY_MAX,
+        _MAX_INFLIGHT,
+        _EMBED_ENDPOINT,
+    )
+
 
 def get_embed_kwargs() -> dict[str, str]:
     """Keyword args for ``Retriever`` embed configuration."""
     if not _EMBED_API_KEY:
         raise EnvironmentError(_KEY_ERROR)
+    install_embed_http_retries()
     return {
         "model_name": _EMBED_MODEL,
         "embed_invoke_url": _EMBED_ENDPOINT,
@@ -49,6 +125,7 @@ def get_embed_kwargs() -> dict[str, str]:
 def get_embed_params() -> EmbedParams:
     if not _EMBED_API_KEY:
         raise EnvironmentError(_KEY_ERROR)
+    install_embed_http_retries()
     return EmbedParams(
         embed_invoke_url=_EMBED_ENDPOINT,
         model_name=_EMBED_MODEL,
@@ -143,3 +220,12 @@ def embed_docs_into_vdb(
         time.time() - before,
     )
     return len(with_embeddings)
+
+
+# Install as soon as this module is imported so query-time retrieval
+# (Retriever → nemo embed HTTP) gets retries even before get_embed_*.
+try:
+    if _EMBED_API_KEY:
+        install_embed_http_retries()
+except Exception:
+    logger.debug("Deferred embed HTTP retry install", exc_info=True)

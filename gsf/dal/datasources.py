@@ -238,6 +238,17 @@ RETURN t.id AS id,
 LIMIT 1
 """
 
+_FETCH_TABLE_BY_NAME_IN_DB = f"""
+MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+      (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{name: $name}})
+RETURN t.id AS id,
+       t.name AS name,
+       s.name AS schema_name,
+       t.description AS description,
+       t.pk as pk
+LIMIT 1
+"""
+
 _FETCH_JOIN_NEIGHBORS = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.JOIN}]-(other:{Labels.TABLE})
 RETURN DISTINCT other.id AS id,
@@ -376,9 +387,17 @@ def fetch_table_by_id(table_id: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
-def fetch_table_by_name(name: str) -> dict[str, Any] | None:
-    """Return the first Table row matching *name*, or None if not found."""
-    rows = get_neo4j_conn().query_read(_FETCH_TABLE_BY_NAME, {"name": name})
+def fetch_table_by_name(
+    name: str, database_name: str | None = None
+) -> dict[str, Any] | None:
+    """Return the first Table row matching *name*, optionally scoped to a DB."""
+    if database_name:
+        rows = get_neo4j_conn().query_read(
+            _FETCH_TABLE_BY_NAME_IN_DB,
+            {"name": name, "database_name": database_name},
+        )
+    else:
+        rows = get_neo4j_conn().query_read(_FETCH_TABLE_BY_NAME, {"name": name})
     return rows[0] if rows else None
 
 
@@ -402,6 +421,78 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
         tables.append(
             {
                 "id": tid,
+                "name": row.get("name") or "",
+                "description": row.get("description") or "",
+                "schema_name": row.get("schema_name") or "",
+                "label": "Table",
+                "columns": cols,
+            }
+        )
+    return tables
+
+
+_FETCH_FK_NEIGHBOUR_TABLES = f"""
+MATCH (db:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(src:{Labels.TABLE})
+WHERE toLower(src.name) IN $table_names
+MATCH (src)-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+      -[:{Edges.FOREIGN_KEY}]-(:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
+WHERE NOT toLower(tbl.name) IN $table_names
+MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+WITH tbl, sch, col ORDER BY col.ordinal_position
+WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
+                         description: {column_description_expr("col")},
+                         sample_values: col.sample_values}}) AS cols
+RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
+       sch.name AS schema_name, cols
+ORDER BY name
+"""
+
+
+def fetch_fk_neighbour_tables(
+    database_name: str, table_names: list[str]
+) -> list[dict[str, Any]]:
+    """Tables one foreign key away from *table_names*, in ``relevant_tables`` shape.
+
+    Retrieval ranks tables by how well their name and description match the
+    question, which systematically misses tables the question never names but
+    the query still has to join through. Following FK edges out of the tables we
+    did find recovers those without resorting to the whole schema.
+
+    *table_names* is matched case-insensitively; the inputs themselves are
+    excluded from the result.
+    """
+    if not database_name or not table_names:
+        return []
+    try:
+        rows = get_neo4j_conn().query_read(
+            _FETCH_FK_NEIGHBOUR_TABLES,
+            {
+                "database_name": database_name,
+                "table_names": [t.lower() for t in table_names],
+            },
+        )
+    except Exception:
+        logger.warning("fetch_fk_neighbour_tables: Neo4j query failed", exc_info=True)
+        return []
+    tables = []
+    for row in rows:
+        if not row.get("id"):
+            continue
+        cols = []
+        for col in row.get("cols") or []:
+            if not col.get("name"):
+                continue
+            # Most descriptions already end in "— samples: ..."; keeping
+            # sample_values as well would print the same values twice and adds
+            # ~30% to the rendered schema block.
+            if "samples:" in (col.get("description") or ""):
+                col.pop("sample_values", None)
+            cols.append(col)
+        tables.append(
+            {
+                "id": row["id"],
                 "name": row.get("name") or "",
                 "description": row.get("description") or "",
                 "schema_name": row.get("schema_name") or "",

@@ -5,17 +5,20 @@
 """
 Candidate Retrieval Agent
 
-Searches both VDBs per extracted entity, applies an LLM intent filter on each
-entity's raw hits, and stores typed results in path_state.
+Searches both VDBs per extracted entity, optionally reranks a larger recall
+pool with the NIM cross-encoder against the full question, applies an LLM
+intent filter on custom/sql hits, and stores typed results in path_state.
 
 Responsibilities:
 - Search the semantic VDB (ontology_retriever) for ColumnAttribute candidates.
 - Search the semantic VDB (semantic_retriever) for CustomAnalysis candidates.
-- Filter each entity's hits by intent using the LLM (full question, not entity).
+- Recall ``BIRD_CAND_RETRIEVE_K`` hits, rerank with NIM (``BIRD_CAND_RERANK``),
+  keep ``BIRD_CAND_KEEP_K_*`` before the LLM filter.
 - Deduplicate across entities and store results in path_state.
 """
 
 import logging
+import os
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
@@ -29,6 +32,7 @@ from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.evidence_hints import evidence_retrieval_phrases
 from gsf.retrieval.text_to_sql.models import (
     CandidateFilterModel,
     ColumnAttributeSpec,
@@ -37,10 +41,62 @@ from gsf.retrieval.text_to_sql.models import (
 )
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
+    get_original_question,
     get_question_for_processing,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+# Embedding recall pool size (before rerank). Keep small enough that NIM
+# rerank latency stays acceptable under parallel eval.
+_CAND_RETRIEVE_K = _env_int("BIRD_CAND_RETRIEVE_K", 12)
+_CAND_KEEP_COL = _env_int("BIRD_CAND_KEEP_K_COL", 3)
+_CAND_KEEP_CUSTOM = _env_int("BIRD_CAND_KEEP_K_CUSTOM", 3)
+_CAND_KEEP_SQL = _env_int("BIRD_CAND_KEEP_K_SQL", 3)
+_CAND_RERANK = os.environ.get("BIRD_CAND_RERANK", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+
+
+def _rerank_hits(
+    question: str,
+    hits: list[dict],
+    *,
+    keep_k: int,
+    label: str,
+) -> list[dict]:
+    """Rerank VDB hits by full-question relevance; keep top *keep_k*.
+
+    Falls back to embedding order (input order after score-sort) when rerank
+    is disabled or the NIM call fails.
+    """
+    if not hits:
+        return []
+    if not _CAND_RERANK or len(hits) <= 1:
+        return hits[:keep_k]
+
+    from gsf.utils.rerank import rerank_passages
+
+    passages = [
+        (h.get("text") or h.get("name") or str(h.get("id") or "")).strip() for h in hits
+    ]
+    ranked = rerank_passages(question, passages, top_n=keep_k)
+    if not ranked:
+        return hits[:keep_k]
+
+    reordered = [hits[idx] for idx, _logit in ranked if 0 <= idx < len(hits)]
+    return reordered
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +386,12 @@ class CandidateRetrievalAgent(BaseAgent):
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
-        entities: list[str] = path_state.get("entities") or []
+        original_question = get_original_question(state) or question
+        entities: list[str] = list(path_state.get("entities") or [])
+        # Evidence phrases (e.g. "frpm", "account.district_id") expand column recall.
+        for phrase in evidence_retrieval_phrases(original_question):
+            if phrase and phrase not in entities:
+                entities.append(phrase)
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
@@ -341,15 +402,19 @@ class CandidateRetrievalAgent(BaseAgent):
 
         if semantic_retriever is not None:
             clean_entities = [e.strip() for e in entities if (e or "").strip()]
+            retrieve_k = _CAND_RETRIEVE_K
+
+            # Prefer original question (includes Evidence) for custom/sql search.
+            search_question = original_question or question
 
             search_tasks: list[tuple[str, Any]] = [
                 (
                     "custom",
                     (
                         semantic_retriever,
-                        question,
+                        search_question,
                         Labels.CUSTOM_ANALYSIS,
-                        3,
+                        retrieve_k,
                         target_db,
                     ),
                 ),
@@ -357,9 +422,9 @@ class CandidateRetrievalAgent(BaseAgent):
                     "sql_attr",
                     (
                         semantic_retriever,
-                        question,
+                        search_question,
                         LABEL_SQL_ATTRIBUTE,
-                        3,
+                        retrieve_k,
                         target_db,
                     ),
                 ),
@@ -370,7 +435,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             semantic_retriever,
                             entity,
                             LABEL_COLUMN_ATTRIBUTE,
-                            2,
+                            retrieve_k,
                             target_db,
                         ),
                     )
@@ -391,15 +456,40 @@ class CandidateRetrievalAgent(BaseAgent):
                     elif key == "sql_attr":
                         all_sql_attr_hits = result
                     else:
-                        all_col_attr_hits.extend(result)
+                        # Per-entity: recall large → rerank by full question →
+                        # keep top-k (preserves multi-entity coverage).
+                        entity = key.split(":", 1)[-1]
+                        kept = _rerank_hits(
+                            search_question,
+                            result,
+                            keep_k=_CAND_KEEP_COL,
+                            label=f"column_attribute:{entity}",
+                        )
+                        all_col_attr_hits.extend(kept)
 
-        all_custom_hits, all_sql_attr_hits = _llm_filter_both(
-            llm, question, all_custom_hits, all_sql_attr_hits
-        )
-
+        # Custom/SQL: dedupe → rerank once against the question → keep.
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
         deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)
+
+        search_question = original_question or question
+        deduped_custom = _rerank_hits(
+            search_question,
+            deduped_custom,
+            keep_k=_CAND_KEEP_CUSTOM,
+            label="custom_analysis",
+        )
+        deduped_sql_attr = _rerank_hits(
+            search_question,
+            deduped_sql_attr,
+            keep_k=_CAND_KEEP_SQL,
+            label="sql_attribute",
+        )
+
+        # LLM intent filter on the (already-shrunk) custom/sql pools.
+        deduped_custom, deduped_sql_attr = _llm_filter_both(
+            llm, search_question, deduped_custom, deduped_sql_attr
+        )
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom
@@ -407,11 +497,13 @@ class CandidateRetrievalAgent(BaseAgent):
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "
-            "and %d SqlAttribute candidates (%d entities queried)",
+            "and %d SqlAttribute candidates (%d entities, recall=%d, rerank=%s)",
             len(deduped_col_attr),
             len(deduped_custom),
             len(deduped_sql_attr),
             len(entities),
+            _CAND_RETRIEVE_K,
+            _CAND_RERANK,
         )
 
         return {"path_state": path_state}

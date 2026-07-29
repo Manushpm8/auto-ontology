@@ -34,6 +34,26 @@ def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
     return sql
 
 
+def _dedupe_columns(df):
+    """Suffix repeated column names so the frame can serialize to records.
+
+    ``SELECT a.id, b.id`` is valid SQL and returns real data, but pandas cannot
+    emit it as records while both columns are called ``id``. Renaming the repeats
+    keeps the rows rather than discarding a successful query.
+    """
+    if not df.columns.duplicated().any():
+        return df
+    seen: dict[Any, int] = {}
+    renamed = []
+    for name in df.columns:
+        count = seen.get(name, 0)
+        seen[name] = count + 1
+        renamed.append(name if count == 0 else f"{name}_{count}")
+    df = df.copy()
+    df.columns = renamed
+    return df
+
+
 def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
     """Execute SQL against the supplied ``connector``.
 
@@ -49,14 +69,22 @@ def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
         dialect = getattr(connector, "dialect", "")
         sql = _sanitize_sql_for_dialect(sql, dialect)
         df = connector.execute(sql)
+        # Serialization has to be inside the guard. A query that succeeds can
+        # still fail to serialize — orient="records" rejects duplicate column
+        # names — and an escaping exception takes down the whole agent, whose
+        # wrapper then returns a state with no "decision" and strands the graph
+        # router on KeyError(''). Losing the question that way is far worse than
+        # reporting an execution error.
+        payload = (
+            _dedupe_columns(df).to_json(
+                orient="records", date_format="iso", default_handler=str
+            )
+            if len(df)
+            else "[]"
+        )
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
         return QueryResponse(result=None, sliced=False, error=str(e))
-    payload = (
-        df.to_json(orient="records", date_format="iso", default_handler=str)
-        if len(df)
-        else "[]"
-    )
     return QueryResponse(result=[payload], sliced=False, error=None)
 
 

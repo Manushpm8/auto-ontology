@@ -92,6 +92,7 @@ class EntitiesExtractionAgent(BaseAgent):
             path_state["entities"] = entities
 
             self.logger.info("Extracted %d entities: %s", len(entities), entities)
+
         except Exception as e:
             self.logger.warning(f"Entity extraction failed: {e}, using fallback values")
             path_state["entities"] = []
