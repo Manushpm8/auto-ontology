@@ -263,7 +263,10 @@ MATCH (tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: {column_description_expr("col")}}}) AS cols
+                         description: {column_description_expr("col")},
+                         sample_values: CASE
+                             WHEN col.sample_values IS NOT NULL AND size(col.sample_values) > 0
+                             THEN col.sample_values ELSE null END}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
        sch.name AS schema_name, cols
 """
