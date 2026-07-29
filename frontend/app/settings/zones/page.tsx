@@ -627,14 +627,7 @@ export default function ZonesSettingsPage() {
 							iconPosition="left"
 							shadow
 						>
-							<svg
-								className="h-4 w-4"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								aria-hidden
-							>
-								<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
-							</svg>
+							<Icon name={IconName.Plus} className="h-4 w-4" />
 							Create new zone
 						</Button>
 					</div>
