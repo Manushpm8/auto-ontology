@@ -29,7 +29,8 @@ export type ConnectionFieldKey =
 	| 'user'
 	| 'password'
 	| 'database'
-	| 'protocol';
+	| 'protocol'
+	| 'schema_contains';
 
 export type ConnectionField = {
 	key: ConnectionFieldKey;
@@ -38,6 +39,8 @@ export type ConnectionField = {
 	secret?: boolean;
 	/** Optional fields are not required to enable Test/Create. */
 	optional?: boolean;
+	/** Sent with the connection test only; stripped before the connection is created. */
+	testOnly?: boolean;
 };
 
 /** Form fields rendered per connector type. `database` is the connection identity. */
@@ -55,6 +58,13 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		},
 		{ key: 'password', label: 'Access token', secret: true },
 		{ key: 'database', label: 'Catalog', placeholder: 'main' },
+		{
+			key: 'schema_contains',
+			label: 'Schema contains',
+			placeholder: 'Filter the schema list, e.g. sales',
+			optional: true,
+			testOnly: true,
+		},
 	],
 	[ConnectionType.POSTGRESQL]: [
 		{ key: 'host', label: 'Host', placeholder: 'localhost' },
