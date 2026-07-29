@@ -8,7 +8,12 @@ import pytest
 from pytest import MonkeyPatch
 
 from gsf.connectors.connection_string_factory import build_connection_string
-from gsf.connectors.databricks import DatabricksDatabase, _parse_connection_string
+from gsf.connectors.databricks import (
+    AUTH_SSO_FEDERATION,
+    AUTH_STORED_TOKEN,
+    DatabricksDatabase,
+    _parse_connection_string,
+)
 from gsf.connectors.registry import create_connector
 
 
@@ -20,7 +25,7 @@ def _connection_string(token: str = "secret") -> str:
 
 
 def test_parse_connection_string() -> None:
-    kwargs, catalog, schema_contains = _parse_connection_string(
+    kwargs, catalog, schema_contains, auth_mode = _parse_connection_string(
         _connection_string("secret/with@chars")
     )
 
@@ -33,6 +38,7 @@ def test_parse_connection_string() -> None:
     }
     assert catalog == "main"
     assert schema_contains is None
+    assert auth_mode == AUTH_STORED_TOKEN
 
 
 def test_build_connection_string() -> None:
@@ -66,7 +72,9 @@ def test_build_connection_string_carries_schema_contains() -> None:
     )
 
     assert connection_string.endswith("&schema_contains=sales%20%26%20co")
-    _kwargs, _catalog, schema_contains = _parse_connection_string(connection_string)
+    _kwargs, _catalog, schema_contains, _auth = _parse_connection_string(
+        connection_string
+    )
     assert schema_contains == "sales & co"
 
 
@@ -232,3 +240,47 @@ def test_live_databricks_connector_end_to_end() -> None:
         assert all(isinstance(frame, pd.DataFrame) for frame in metadata_frames)
     finally:
         database.close()
+
+
+def test_parse_connection_string_marks_sso_federation() -> None:
+    _kwargs, _catalog, _schema, auth_mode = _parse_connection_string(
+        _connection_string() + "&auth=sso"
+    )
+
+    assert auth_mode == AUTH_SSO_FEDERATION
+
+
+def test_build_connection_string_flags_exchanged_token() -> None:
+    """An exchanged token is marked so the connector can log which one it used."""
+    federated = build_connection_string(
+        {
+            "type": "databricks",
+            "host": "example.databricks.com",
+            "http_path": "/sql/1.0/warehouses/w",
+            "password": "stored-pat",
+            "database": "main",
+            "access_token_override": "exchanged",
+        }
+    )
+    stored = build_connection_string(
+        {
+            "type": "databricks",
+            "host": "example.databricks.com",
+            "http_path": "/sql/1.0/warehouses/w",
+            "password": "stored-pat",
+            "database": "main",
+        }
+    )
+
+    assert federated.endswith("&auth=sso")
+    assert "auth=sso" not in stored
+    assert _parse_connection_string(federated)[3] == AUTH_SSO_FEDERATION
+    assert _parse_connection_string(stored)[3] == AUTH_STORED_TOKEN
+
+
+def test_auth_mode_property_reports_credential() -> None:
+    assert DatabricksDatabase(_connection_string()).auth_mode == AUTH_STORED_TOKEN
+    assert (
+        DatabricksDatabase(_connection_string() + "&auth=sso").auth_mode
+        == AUTH_SSO_FEDERATION
+    )

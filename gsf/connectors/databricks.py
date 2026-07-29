@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 # Warnings and errors — including retry/timeout warnings — still come through.
 logging.getLogger("databricks.sql").setLevel(logging.WARNING)
 
+# Which credential a connector is running under, logged with every statement.
+# "SSO federation" means the caller's SSO token was exchanged for a Databricks
+# token, so the query carries that user's own Unity Catalog grants.
+AUTH_SSO_FEDERATION = "the signed-in user (SSO federation)"
+AUTH_STORED_TOKEN = "the stored access token"
+
 
 def _quoted_identifier(name: str) -> str:
     """Return a Databricks-quoted identifier."""
@@ -46,13 +52,13 @@ def _like_literal(value: str) -> str:
 
 def _parse_connection_string(
     connection_string: str,
-) -> tuple[dict[str, Any], str, str | None]:
-    """Parse a Databricks URL into connector kwargs, catalog, and schema filter.
+) -> tuple[dict[str, Any], str, str | None, str]:
+    """Parse a Databricks URL into kwargs, catalog, schema filter, and auth mode.
 
     Expected format::
 
         databricks://token:ACCESS_TOKEN@HOST/CATALOG?http_path=SQL_HTTP_PATH
-            [&schema_contains=SUBSTRING]
+            [&schema_contains=SUBSTRING][&auth=sso]
     """
     parsed = urlparse(connection_string)
     if parsed.scheme.split("+", 1)[0].lower() != "databricks":
@@ -86,6 +92,12 @@ def _parse_connection_string(
 
     schema_contains = unquote(query.get("schema_contains", [""])[0]).strip() or None
 
+    auth_mode = (
+        AUTH_SSO_FEDERATION
+        if query.get("auth", [""])[0].strip().lower() == "sso"
+        else AUTH_STORED_TOKEN
+    )
+
     return (
         {
             "server_hostname": parsed.hostname,
@@ -100,11 +112,16 @@ def _parse_connection_string(
         },
         catalog,
         schema_contains,
+        auth_mode,
     )
 
 
 class DatabricksDatabase(SQLDatabase):
     """Concrete :class:`SQLDatabase` backed by Databricks SQL."""
+
+    # Advertises that ``execute`` honours ``timeout_s``; callers that want a cap
+    # check this rather than assuming every connector supports one.
+    supports_statement_timeout = True
 
     def __init__(
         self,
@@ -115,6 +132,7 @@ class DatabricksDatabase(SQLDatabase):
             self._connect_kwargs,
             self._database_name,
             self._schema_contains,
+            self._auth_mode,
         ) = _parse_connection_string(connection_string)
         self._schema_filter: set[str] | None = (
             {schema.casefold() for schema in schemas if schema.strip()}
@@ -130,9 +148,25 @@ class DatabricksDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._database_name
 
+    @property
+    def auth_mode(self) -> str:
+        """Which credential this connector runs under, for logging.
+
+        Either :data:`AUTH_SSO_FEDERATION` (the caller's SSO token was exchanged
+        for a Databricks token) or :data:`AUTH_STORED_TOKEN`.
+        """
+        return self._auth_mode
+
     @contextmanager
-    def _connect(self) -> Iterator[Connection]:
-        connection = sql.connect(**self._connect_kwargs)
+    def _connect(self, timeout_s: int | None = None) -> Iterator[Connection]:
+        kwargs = dict(self._connect_kwargs)
+        if timeout_s is not None:
+            # Server-side cap: Databricks cancels the statement itself and
+            # returns an error, so a runaway query cannot pin the caller.
+            # It bounds execution only — connect and warehouse scheduling
+            # happen outside it.
+            kwargs["session_configuration"] = {"statement_timeout": int(timeout_s)}
+        connection = sql.connect(**kwargs)
         try:
             yield connection
         finally:
@@ -149,8 +183,19 @@ class DatabricksDatabase(SQLDatabase):
             frame["table_schema"].astype(str).str.casefold().isin(self._schema_filter)
         ]
 
-    def execute(self, sql_text: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        with self._connect() as connection:
+    def execute(
+        self,
+        sql_text: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: int | None = None,
+    ) -> pd.DataFrame:
+        """Run *sql_text*, optionally capping execution at *timeout_s* seconds.
+
+        Ingestion leaves the cap off: metadata scans over a large
+        ``information_schema`` legitimately take minutes.
+        """
+        with self._connect(timeout_s) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(sql_text, parameters)
                 if cursor.description is None:
