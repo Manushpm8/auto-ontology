@@ -37,6 +37,7 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
+    conversation_id: str | None = None
     visualization: bool = Field(
         default=False,
         description=(
