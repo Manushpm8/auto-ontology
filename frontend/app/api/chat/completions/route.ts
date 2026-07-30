@@ -12,7 +12,6 @@
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
 import { getPrisma } from '@/lib/prisma';
-import { isVisualizationEnabled } from '@/lib/configurations';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -81,13 +80,10 @@ const readFinalAnswer = async (
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const payload = parseBody(await req.text());
 
-	// The visualization toggle is an instance-wide setting, so it is resolved
-	// here rather than trusted from the caller — a stale browser tab or a
-	// direct API client cannot opt back into charts once admins turn them off.
-	const body = JSON.stringify({
-		...payload,
-		visualization: await isVisualizationEnabled(),
-	});
+	// Step 1 only: SQL + formatted answer. Charts are a separate, second-step
+	// request (POST /api/chat/visualize) the client makes after this
+	// completes, so the answer never waits on an extra LLM round trip.
+	const body = JSON.stringify(payload);
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',

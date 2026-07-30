@@ -8,6 +8,8 @@ import type {
 	StepEvent,
 	ResultEvent,
 	ErrorEvent,
+	SqlResult,
+	VisualizeResponse,
 } from '@/types/chat';
 
 const getResponseErrorMessage = async (res: Response): Promise<string> => {
@@ -47,8 +49,9 @@ export const streamChat = (
 ): AbortController => {
 	const controller = new AbortController();
 
-	// The visualization flag is resolved server-side from the instance-wide
-	// Agent Settings configuration, so it is deliberately not sent here.
+	// Step 1 only — SQL + formatted answer. Charts are fetched separately via
+	// `fetchCharts` once this stream's `result` event lands (a second step),
+	// so this request never waits on chart generation.
 	const body = JSON.stringify({ question: payload.question });
 
 	(async () => {
@@ -132,4 +135,30 @@ export const streamChat = (
 	})();
 
 	return controller;
+};
+
+/**
+ * Second step: once step 1 (`streamChat`) has returned the SQL and its
+ * executed result, ask the server whether a chart applies. Resolves to
+ * `null` on any failure or when visualization is disabled/skipped, so the
+ * caller can always fall back to a plain table.
+ */
+export const fetchCharts = async (
+	question: string,
+	sql: string | undefined,
+	result: SqlResult | undefined,
+): Promise<Record<string, unknown>[] | null> => {
+	try {
+		const res = await fetch('/api/chat/visualize', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ question, sql: sql ?? '', result }),
+		});
+		if (!res.ok) return null;
+
+		const data = (await res.json()) as VisualizeResponse;
+		return Array.isArray(data.charts) && data.charts.length > 0 ? data.charts : null;
+	} catch {
+		return null;
+	}
 };

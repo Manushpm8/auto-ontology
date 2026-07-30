@@ -38,7 +38,6 @@ from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
 )
 from gsf.retrieval.text_to_sql.agents.intent_validation import IntentValidationAgent
 from gsf.retrieval.text_to_sql.agents.response import ResponseAgent
-from gsf.retrieval.text_to_sql.agents.visualization import VisualizationAgent
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import SQLFromCandidatesAgent
 from gsf.retrieval.text_to_sql.agents.sql_from_tables import SQLFromTablesAgent
@@ -235,7 +234,6 @@ def create_graph():
     sql_execution_agent = SQLExecutionAgent()
     empty_like_result_check_agent = EmptyLikeResultCheckAgent()
     response_agent = ResponseAgent()
-    visualization_agent = VisualizationAgent()
     sql_unconstructable_agent = SQLUnconstructableAgent()
 
     # ==================== CREATE NODES ====================
@@ -293,7 +291,6 @@ def create_graph():
     format_and_respond_node = _make_node(
         "format_and_respond", agent_wrapper(response_agent)
     )
-    visualize_node = _make_node("visualize", agent_wrapper(visualization_agent))
     unconstructable_sql_response_node = _make_node(
         "unconstructable_sql_response", agent_wrapper(sql_unconstructable_agent)
     )
@@ -323,7 +320,6 @@ def create_graph():
     graph.add_node("execute_sql_query", execute_sql_query_node)
     graph.add_node("check_empty_like_result", check_empty_like_result_node)
     graph.add_node("format_and_respond", format_and_respond_node)
-    graph.add_node("visualize", visualize_node)
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
     # Minimal flow using only the defined nodes.
@@ -472,8 +468,10 @@ def create_graph():
     graph.add_edge("reconstruct_sql", "validate_sql_query")
 
     graph.add_edge("unconstructable_sql_response", END)
-    graph.add_edge("format_and_respond", "visualize")
-    graph.add_edge("visualize", END)
+    # SQL + answer ship as soon as they're ready — chart generation is a
+    # separate, second-step call (POST /api/chat/visualize) the client makes
+    # after rendering the answer, not part of this synchronous graph run.
+    graph.add_edge("format_and_respond", END)
 
     return graph
 

@@ -21,18 +21,15 @@ export type StepEvent = {
 	label: string;
 };
 
+/** Shape of the executed SQL result, as returned by `sql_response_from_db`. */
+export type SqlResult = string[] | { [key: string]: string }[];
+
 export type ResultEvent = {
 	type: 'result';
 	answer: {
 		response: string;
 		sql_code?: string;
-		sql_response_from_db?:
-			| string[]
-			| {
-					[key: string]: string;
-			  }[];
-		/** ResultChart specs when visualization succeeded (illumex Message 2). */
-		charts?: Record<string, unknown>[];
+		sql_response_from_db?: SqlResult;
 	};
 };
 
@@ -42,6 +39,21 @@ export type ErrorEvent = {
 };
 
 export type ChatStreamEvent = StepEvent | ResultEvent | ErrorEvent;
+
+/**
+ * Illumex-style step 2: POST /api/chat/visualize takes the question, SQL, and
+ * already-executed result from step 1 and returns ResultChart specs, or an
+ * empty/null list when visualization is disabled or was skipped.
+ */
+export type VisualizeRequest = {
+	question: string;
+	sql: string;
+	result?: SqlResult;
+};
+
+export type VisualizeResponse = {
+	charts: Record<string, unknown>[] | null;
+};
 
 export type GraphStep = {
 	node: string;

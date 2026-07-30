@@ -5,7 +5,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { streamChat } from '@/api/chat';
+import { streamChat, fetchCharts } from '@/api/chat';
 import { conversationsApi } from '@/api/conversations';
 import type { ChatMessage, GraphStep } from '@/types/chat';
 
@@ -44,6 +44,11 @@ export const useChat = () => {
 	const [steps, setSteps] = useState<GraphStep[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const controllerRef = useRef<AbortController | null>(null);
+	// Bumped on every `sendMessage`/`clearConversation` so the async step-2
+	// chart fetch (which isn't tied to `controllerRef`'s AbortController) can
+	// tell it's stale and skip mutating state after the user stopped/started
+	// a new turn while it was still in flight.
+	const requestIdRef = useRef(0);
 
 	const appendAssistantMessage = useCallback(
 		(
@@ -103,6 +108,13 @@ export const useChat = () => {
 			// message is never persisted, keeping the chat history clean.
 			setSteps([]);
 			setIsLoading(true);
+			const requestId = ++requestIdRef.current;
+
+			const finishLoading = () => {
+				setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
+				setIsLoading(false);
+				controllerRef.current = null;
+			};
 
 			const controller = streamChat(
 				{ question: text },
@@ -134,47 +146,68 @@ export const useChat = () => {
 							response,
 							sql_code: sqlCode,
 							sql_response_from_db: sqlResponseFromDb,
-							charts,
 						} = event.answer;
 						const sqlResponse = stringifySqlResponse(sqlResponseFromDb);
 						const prose = stripChartFences(response ?? '');
-						const chartContent =
-							Array.isArray(charts) && charts.length > 0
-								? chartsToFencedContent(charts)
-								: null;
 
-						// Illumex-style split:
-						// Message 1 — text + SQL
-						// Message 2 — charts (if built) OR table (viz off / viz failed)
+						// Step 1 — text + SQL, shown as soon as the SQL pipeline
+						// resolves. Charts are not computed yet.
 						const hasMessage1Content = Boolean(prose) || Boolean(sqlCode);
 						if (hasMessage1Content) {
 							appendAssistantMessage(conversationId, prose, { sql: sqlCode });
 						}
 
-						if (chartContent) {
-							appendAssistantMessage(conversationId, chartContent);
-						} else if (sqlResponse) {
-							appendAssistantMessage(conversationId, '', { sqlResponse });
-						} else if (!hasMessage1Content) {
-							// Nothing at all came back — surface something rather than
-							// silently leaving the user without a reply.
-							appendAssistantMessage(conversationId, GENERIC_ERROR_MESSAGE);
+						if (!sqlResponseFromDb) {
+							// No executed result to visualize — nothing to build in
+							// step 2, so wrap up here.
+							if (!hasMessage1Content) {
+								appendAssistantMessage(conversationId, GENERIC_ERROR_MESSAGE);
+							}
+							finishLoading();
+							return;
 						}
 
-						setSteps((prev) =>
-							prev.map((s) => ({ ...s, status: 'completed' as const })),
-						);
-						setIsLoading(false);
-						controllerRef.current = null;
+						// Step 2 — a separate request decides whether a chart applies
+						// to the already-executed result. Keep the "thinking"
+						// indicator up with its own step label while this resolves,
+						// then render Message 2 as a chart or fall back to a plain
+						// table.
+						setSteps((prev) => [
+							...prev.map((s) => ({ ...s, status: 'completed' as const })),
+							{
+								node: 'visualize',
+								label: 'Building charts',
+								status: 'active' as const,
+							},
+						]);
+
+						fetchCharts(text, sqlCode, sqlResponseFromDb)
+							.then((charts) => {
+								if (requestId !== requestIdRef.current) return;
+								if (charts && charts.length > 0) {
+									appendAssistantMessage(
+										conversationId,
+										chartsToFencedContent(charts),
+									);
+								} else if (sqlResponse) {
+									appendAssistantMessage(conversationId, '', { sqlResponse });
+								}
+							})
+							.catch(() => {
+								if (requestId !== requestIdRef.current) return;
+								if (sqlResponse) {
+									appendAssistantMessage(conversationId, '', { sqlResponse });
+								}
+							})
+							.finally(() => {
+								if (requestId !== requestIdRef.current) return;
+								finishLoading();
+							});
 					},
 
 					onError() {
 						appendAssistantMessage(conversationId, GENERIC_ERROR_MESSAGE);
-						setSteps((prev) =>
-							prev.map((s) => ({ ...s, status: 'completed' as const })),
-						);
-						setIsLoading(false);
-						controllerRef.current = null;
+						finishLoading();
 					},
 				},
 			);
@@ -185,6 +218,7 @@ export const useChat = () => {
 	);
 
 	const clearConversation = useCallback(() => {
+		requestIdRef.current++;
 		controllerRef.current?.abort();
 		controllerRef.current = null;
 		setMessages([]);
