@@ -22,12 +22,11 @@ import { stringifySqlResponse } from '@/lib/sqlResponse';
 export const GENERIC_ANSWER_ERROR =
 	'Something went wrong. Please try again, and if the issue persists, contact our support';
 
-/** The agent keeps prose in `response` and chart specs in a separate array. */
+/** The agent's answer: prose in `response`, plus the SQL it ran and its result. */
 export type AgentAnswer = {
 	response?: string | null;
 	sql_code?: string | null;
 	sql_response_from_db?: unknown;
-	charts?: unknown;
 };
 
 export type AnswerMessage = {
@@ -35,6 +34,8 @@ export type AnswerMessage = {
 	sql?: string;
 	sqlResponse?: string;
 };
+
+const CHART_FENCE = '```chart';
 
 /** Strip ```chart / ```chart-carousel fences so Message 1 stays prose-only. */
 export const stripChartFences = (markdown: string): string =>
@@ -45,6 +46,19 @@ export const stripChartFences = (markdown: string): string =>
 
 export const chartsToFencedContent = (charts: Record<string, unknown>[]): string =>
 	charts.map((spec) => `\`\`\`chart\n${JSON.stringify(spec)}\n\`\`\``).join('\n\n');
+
+/**
+ * Whether `message` is a Message 2 — the bubble carrying the charts or the
+ * result table. Recognising it is what tells "this turn is fully written" from
+ * "Message 2 is still on its way" when polling history for a finished run.
+ */
+export const isResultMessage = (message: {
+	role: string;
+	content: string;
+	sqlResponse?: string | null;
+}): boolean =>
+	message.role === 'assistant' &&
+	(message.sqlResponse != null || message.content.startsWith(CHART_FENCE));
 
 /** Message 1 — prose + SQL, ready the moment the agent's answer lands. */
 export const buildProseMessage = (answer: AgentAnswer): AnswerMessage | null => {
@@ -62,22 +76,17 @@ export const buildProseMessage = (answer: AgentAnswer): AnswerMessage | null => 
 };
 
 /**
- * Message 2 — the charts returned by the visualize step, or the raw result
+ * Message 2 — the `charts` the visualize step came back with, or the raw result
  * table when that step is disabled, fails, or finds nothing worth plotting.
- * `charts` overrides `answer.charts` so callers can pass the specs the second
- * request just returned.
+ * `charts` is required (and may be null): the agent's answer no longer carries
+ * chart specs of its own, so there is nothing to fall back to and an absent
+ * argument would silently mean "table" for a turn that does have charts.
  */
-export const buildResultMessage = (answer: AgentAnswer, charts?: unknown): AnswerMessage | null => {
-	const specs = charts ?? answer.charts;
-	if (Array.isArray(specs) && specs.length > 0) {
-		return { content: chartsToFencedContent(specs as Record<string, unknown>[]) };
+export const buildResultMessage = (answer: AgentAnswer, charts: unknown): AnswerMessage | null => {
+	if (Array.isArray(charts) && charts.length > 0) {
+		return { content: chartsToFencedContent(charts as Record<string, unknown>[]) };
 	}
 
 	const sqlResponse = stringifySqlResponse(answer.sql_response_from_db);
 	return sqlResponse ? { content: '', sqlResponse } : null;
 };
-
-export const buildAnswerMessages = (answer: AgentAnswer, charts?: unknown): AnswerMessage[] =>
-	[buildProseMessage(answer), buildResultMessage(answer, charts)].filter(
-		(msg): msg is AnswerMessage => msg !== null,
-	);

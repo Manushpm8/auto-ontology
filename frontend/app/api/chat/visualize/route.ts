@@ -11,6 +11,11 @@
 // result table when there are none), because that bubble only exists once the
 // chart step resolves — the completions proxy has long since written Message 1
 // and cannot know how this one turns out.
+//
+// Only the client that submitted the question calls this, so one turn produces
+// exactly one request and one Message 2 — no dedupe needed here. A tab watching
+// someone else's run (via /api/chat/watch) deliberately stops after Message 1
+// and picks this bubble up from history on the next load.
 
 import { NextResponse } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
@@ -25,6 +30,8 @@ const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+type ChartSpecs = Record<string, unknown>[] | null;
 
 const parseBody = (rawBody: string): Record<string, unknown> => {
 	try {
@@ -49,27 +56,35 @@ const resolveOwnedConversation = async (
 	return findOwnedConversation(user, conversationId);
 };
 
-// Two clients can watch the same run (a second tab that got 409 and reattached
-// via /chat/watch), and each asks for charts when the answer lands. Only the
-// first should write Message 2, so skip when the turn already ends in one.
-const turnAlreadyHasResultMessage = async (conversationId: string): Promise<boolean> => {
-	const last = await getPrisma().message.findFirst({
-		where: { conversationId },
-		orderBy: { createdAt: 'desc' },
-		select: { role: true, content: true, sqlResponse: true },
+// The instance-wide toggle is resolved here, not trusted from the caller, so a
+// stale tab can't opt back into charts once admins turn the setting off. Note
+// it only gates chart *generation* — the result table still renders (and
+// persists) when it is off.
+const generateCharts = async (payload: Record<string, unknown>): Promise<ChartSpecs> => {
+	if (!(await isVisualizationEnabled())) return null;
+
+	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/visualize`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload),
 	});
-	if (last?.role !== 'assistant') return false;
-	return last.sqlResponse !== null || last.content.startsWith('```chart');
+
+	// Soft-fail: the chart is a nice-to-have, so fall through to "no chart"
+	// rather than an error the UI would have to special-case.
+	if (!upstream.ok) return null;
+	const { charts } = (await upstream.json()) as { charts?: unknown };
+	return Array.isArray(charts) && charts.length > 0
+		? (charts as Record<string, unknown>[])
+		: null;
 };
 
 const persistResultMessage = async (
 	conversationId: string,
 	result: unknown,
-	charts: unknown,
+	charts: ChartSpecs,
 ): Promise<void> => {
 	const message = buildResultMessage({ sql_response_from_db: result }, charts);
 	if (!message) return;
-	if (await turnAlreadyHasResultMessage(conversationId)) return;
 
 	const prisma = getPrisma();
 	await prisma.message.create({
@@ -88,29 +103,11 @@ const persistResultMessage = async (
 };
 
 // Same permission as the chat completions route: every chat user may trigger
-// this, not just admins. The instance-wide toggle is resolved here, not
-// trusted from the caller, so a stale tab can't opt back into charts once
-// admins turn the setting off. Note the toggle only gates chart *generation* —
-// the result table still renders (and persists) when it is off.
+// this, not just admins.
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const payload = parseBody(await req.text());
 	const conversation = await resolveOwnedConversation(user, payload.conversation_id);
-
-	const charts = await (async (): Promise<unknown> => {
-		if (!(await isVisualizationEnabled())) return null;
-
-		const upstream = await fetch(`${PYTHON_API_URL}/api/chat/visualize`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(payload),
-		});
-
-		// Soft-fail: the chart is a nice-to-have, so fall through to "no chart"
-		// rather than an error the UI would have to special-case.
-		if (!upstream.ok) return null;
-		const data = (await upstream.json()) as { charts?: unknown };
-		return data.charts ?? null;
-	})().catch(() => null);
+	const charts = await generateCharts(payload).catch(() => null);
 
 	if (conversation) {
 		try {

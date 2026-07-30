@@ -9,6 +9,7 @@ import type {
 	ResultEvent,
 	ErrorEvent,
 	SqlResult,
+	VisualizeRequest,
 	VisualizeResponse,
 } from '@/types/chat';
 
@@ -178,16 +179,18 @@ export const fetchCharts = async (
 	result: SqlResult | undefined,
 	conversationId: string | null,
 ): Promise<Record<string, unknown>[] | null> => {
+	const payload: VisualizeRequest = {
+		question,
+		sql: sql ?? '',
+		result,
+		conversation_id: conversationId ?? undefined,
+	};
+
 	try {
 		const res = await fetch('/api/chat/visualize', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				question,
-				sql: sql ?? '',
-				result,
-				conversation_id: conversationId ?? undefined,
-			}),
+			body: JSON.stringify(payload),
 		});
 		if (!res.ok) return null;
 

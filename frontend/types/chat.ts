@@ -45,11 +45,17 @@ export type ChatStreamEvent = StepEvent | ResultEvent | ErrorEvent;
  * Illumex-style step 2: POST /api/chat/visualize takes the question, SQL, and
  * already-executed result from step 1 and returns ResultChart specs, or an
  * empty/null list when visualization is disabled or was skipped.
+ *
+ * Snake-cased because it is the FastAPI payload, which the Next proxy forwards
+ * as-is; `conversation_id` is read by the proxy alone, to persist the bubble
+ * this step produces and to keep two clients on one run from computing (and
+ * writing) it twice.
  */
 export type VisualizeRequest = {
 	question: string;
 	sql: string;
 	result?: SqlResult;
+	conversation_id?: string;
 };
 
 export type VisualizeResponse = {

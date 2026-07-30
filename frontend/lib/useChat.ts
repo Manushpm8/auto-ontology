@@ -7,14 +7,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cancelChat, fetchCharts, streamChat, watchChat } from '@/api/chat';
 import { conversationsApi, toConversation } from '@/api/conversations';
-import { buildProseMessage, buildResultMessage } from '@/lib/answerMessages';
+import {
+	GENERIC_ANSWER_ERROR,
+	buildProseMessage,
+	buildResultMessage,
+	isResultMessage,
+} from '@/lib/answerMessages';
 import type { ChatMessage, GraphStep, ResultEvent } from '@/types/chat';
 
 let nextId = 0;
 const uid = () => `msg-${Date.now()}-${nextId++}`;
-
-const GENERIC_ERROR_MESSAGE =
-	'Something went wrong. Please try again, and if the issue persists, contact our support';
 
 const CONVERSATION_IN_PROGRESS = 'Conversation in progress';
 
@@ -87,6 +89,10 @@ export const useChat = () => {
 	// already-executed result, falling back to the plain table. The route it
 	// calls also persists this bubble, so history and the live view agree.
 	// Keeps the "thinking" indicator up under its own label while it resolves.
+	//
+	// Only the tab that submitted the question runs this, which keeps that route
+	// to a single writer per turn. A tab watching someone else's run therefore
+	// won't show Message 2 until the conversation is reloaded.
 	const appendResultMessage = useCallback(
 		async (
 			answer: ResultEvent['answer'],
@@ -114,6 +120,13 @@ export const useChat = () => {
 		[appendAssistantMessage],
 	);
 
+	// Picks up the assistant turn a run that finished just before we attached
+	// left behind. Adopts every snapshot it reads, so the prose shows up as soon
+	// as it is committed, but keeps polling until the turn is complete: the two
+	// bubbles are written by different routes, so a transcript ending in Message
+	// 1 may still be waiting on Message 2. Turns without an executed result have
+	// no Message 2 at all, and simply run out of attempts with the transcript
+	// already up to date.
 	const pollForPersistedAssistant = useCallback(
 		async (conversationId: string, watchController: AbortController) => {
 			for (let attempt = 0; attempt < REFETCH_ATTEMPTS; attempt += 1) {
@@ -125,10 +138,10 @@ export const useChat = () => {
 					const detail = await conversationsApi.get(conversationId);
 					const conv = toConversation(detail);
 					const last = conv.messages[conv.messages.length - 1];
-					if (last?.role === 'assistant') {
-						setMessages(conv.messages);
-						return;
-					}
+					if (last?.role !== 'assistant') continue;
+
+					setMessages(conv.messages);
+					if (isResultMessage(last)) return;
 				} catch {
 					// ignore fetch errors and retry
 				}
@@ -188,7 +201,9 @@ export const useChat = () => {
 
 			resumeControllerRef.current?.abort();
 			setSteps([]);
-			const requestId = (requestIdRef.current += 1);
+			// Supersedes any chart fetch still in flight from this tab's own
+			// previous send, so its bubble can't land on top of this run.
+			requestIdRef.current += 1;
 			let sawActivity = false;
 
 			const controller = watchChat(conversationId, {
@@ -208,37 +223,17 @@ export const useChat = () => {
 					});
 				},
 
+				// Message 1 only. The chart step belongs to the tab that
+				// submitted the question — it is the one that knows which
+				// question the answer belongs to, and keeping it the only caller
+				// keeps the visualize route a single writer per turn. Whatever it
+				// persists shows up here on the next reload.
 				onResult(event) {
 					appendProseMessage(event.answer);
 					activeRunConvIdRef.current = null;
 					resumeControllerRef.current = null;
-
-					const finishWatch = () => {
-						setSteps((prev) =>
-							prev.map((s) => ({ ...s, status: 'completed' as const })),
-						);
-						setIsLoading(false);
-					};
-
-					if (!event.answer.sql_response_from_db) {
-						finishWatch();
-						return;
-					}
-
-					// The tab that started this run may be gone, so nobody has
-					// asked for its charts — do it here so a reattached tab (and
-					// the persisted history) still gets Message 2.
-					const question =
-						[...messagesRef.current].reverse().find((m) => m.role === 'user')
-							?.content ?? '';
-					void appendResultMessage(
-						event.answer,
-						question,
-						conversationId,
-						requestId,
-					).finally(() => {
-						if (requestId === requestIdRef.current) finishWatch();
-					});
+					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
+					setIsLoading(false);
 				},
 
 				onError(event) {
@@ -251,7 +246,7 @@ export const useChat = () => {
 						resumeControllerRef.current = null;
 						return;
 					}
-					const message = event.message.trim() || GENERIC_ERROR_MESSAGE;
+					const message = event.message.trim() || GENERIC_ANSWER_ERROR;
 					appendAssistantMessage(message);
 					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 					setIsLoading(false);
@@ -280,12 +275,7 @@ export const useChat = () => {
 
 			resumeControllerRef.current = controller;
 		},
-		[
-			appendProseMessage,
-			appendResultMessage,
-			appendAssistantMessage,
-			pollForPersistedAssistant,
-		],
+		[appendProseMessage, appendAssistantMessage, pollForPersistedAssistant],
 	);
 
 	// Resolves true once the backend accepted the question, false if it was
@@ -375,7 +365,7 @@ export const useChat = () => {
 					},
 
 					onError(event) {
-						const message = event.message.trim() || GENERIC_ERROR_MESSAGE;
+						const message = event.message.trim() || GENERIC_ANSWER_ERROR;
 						finishRun();
 
 						// Another stream already owns this conversation (a second tab,
