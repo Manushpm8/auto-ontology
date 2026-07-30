@@ -468,9 +468,7 @@ def create_graph():
     graph.add_edge("reconstruct_sql", "validate_sql_query")
 
     graph.add_edge("unconstructable_sql_response", END)
-    # SQL + answer ship as soon as they're ready — chart generation is a
-    # separate, second-step call (POST /api/chat/visualize) the client makes
-    # after rendering the answer, not part of this synchronous graph run.
+
     graph.add_edge("format_and_respond", END)
 
     return graph
