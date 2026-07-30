@@ -36,6 +36,9 @@ _RETRYABLE_TOKENS = (
     "503",
     "ResourceExhausted",
     "Service Unavailable",
+    "timed out",
+    "APITimeoutError",
+    "ReadTimeout",
 )
 
 
@@ -207,6 +210,43 @@ def invoke_text(llm: BaseChatModel, prompt: str) -> str:
     response = llm.invoke([HumanMessage(content=prompt)])
     content = getattr(response, "content", response)
     return content if isinstance(content, str) else str(content)
+
+
+def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
+    """invoke_text with retry/backoff for 503/429 and the inflight semaphore."""
+    messages = [HumanMessage(content=prompt)]
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            with _INFLIGHT:
+                response = llm.invoke(messages)
+            content = getattr(response, "content", response)
+            return content if isinstance(content, str) else str(content)
+        except _requests.exceptions.ReadTimeout:
+            logger.error(
+                "LLM invoke timed out after %ds on attempt %d/%d",
+                LLM_INVOKE_TIMEOUT_S,
+                attempt + 1,
+                RETRY_MAX_ATTEMPTS,
+            )
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                time.sleep(2 ** (attempt + 1) + random.uniform(0, 1))
+                continue
+            raise
+        except Exception as e:
+            is_retryable = any(tok in str(e) for tok in _RETRYABLE_TOKENS)
+            if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                logger.warning(
+                    "Retryable LLM error on attempt %d/%d — retrying in %.1fs: %s",
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                    wait,
+                    str(e)[:120],
+                )
+                time.sleep(wait)
+                continue
+            raise
+    raise RuntimeError("safe_invoke_text exhausted retries")
 
 
 def safe_invoke_with_structured_output(

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+from gsf.utils.llm_invoke import safe_invoke_text
+
 logger = logging.getLogger(__name__)
 
 _GROUNDING_PROMPT = """\
@@ -22,7 +24,7 @@ def ground_external_knowledge(question: str, formatted_kg: str, llm) -> str:
     if not formatted_kg:
         return ""
     prompt = _GROUNDING_PROMPT.format(question=question, formatted_kg=formatted_kg)
-    response = llm.invoke(prompt).content.strip()
+    response = safe_invoke_text(llm, prompt).strip()
     logger.info("Grounding — response: %s", response[:200])
     if response.upper() == "NONE":
         return ""

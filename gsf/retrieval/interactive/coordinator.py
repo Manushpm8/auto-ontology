@@ -14,6 +14,7 @@ from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
+from gsf.utils.llm_invoke import safe_invoke_text
 
 
 # ── Message classifier ──────────────────────────────────────────────────────
@@ -134,7 +135,7 @@ def _resolve_cross_phase_entities(
         p1_question=p1_question,
         p1_sql=p1_sql[:800],
     )
-    response = _get_llm().invoke(prompt).content.strip()
+    response = safe_invoke_text(_get_llm(), prompt).strip()
     if not response or response.upper() == "NONE":
         return ""
     logger.info("Cross-phase resolution: %s", response[:200])
@@ -161,15 +162,16 @@ def _generate_evidence(question: str, grounded_kg: str) -> str:
     if not grounded_kg:
         return ""
     prompt = _EVIDENCE_PROMPT.format(question=question, grounded_kg=grounded_kg)
-    response = _get_fast_llm().invoke(prompt).content.strip()
+    response = safe_invoke_text(_get_fast_llm(), prompt).strip()
     if not response or response.upper() == "NONE":
         return ""
-    # Reject prose and aggregate-only lines — valid output must be "Term = <expression>"
-    # where the right-hand side is a computation, not a bare SQL aggregate call.
-    _AGG_ONLY = re.compile(r"^\w+\s*=\s*(STDDEV|AVG|COUNT|SUM|MIN|MAX)\s*\(", re.IGNORECASE)
+    # Valid output is "Term = <expression>" anchored at the start of the line.
+    # The old "=" in l" check passed long prose lines that contained "=" anywhere.
+    _FORMULA_LINE = re.compile(r"^\s*[\w][\w\s/()-]*\s*=\s*\S")
+    _AGG_ONLY = re.compile(r"^\s*[\w][\w\s/()-]*\s*=\s*(STDDEV|AVG|COUNT|SUM|MIN|MAX)\s*\(", re.IGNORECASE)
     valid_lines = [
         l for l in response.splitlines()
-        if "=" in l and not l.lstrip().startswith("#") and not _AGG_ONLY.match(l.strip())
+        if _FORMULA_LINE.match(l) and not l.lstrip().startswith("#") and not _AGG_ONLY.match(l)
     ]
     if not valid_lines:
         logger.warning("SQL gen — Evidence generation returned prose, discarding: %s", response[:100])
@@ -203,6 +205,8 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
 
     # Build Evidence from the union of: Phase 1 carry-over + cross-phase resolution
     # + all this-phase KB turns + debug extra.
+    # VDB resolved hits are column descriptions, not formulas — the SQL generator
+    # rediscovers schema mappings via its own VDB; they only benefit the decide-LLM prompt.
     combined_kg = "\n".join(filter(None, [session.phase1_grounded_kg, cross_phase, session.cumulative_grounded_kg, extra_kg]))
     question = session.working_question
     evidence = _generate_evidence(question, combined_kg)
@@ -340,7 +344,7 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
         merged = merge_clarification(
             session.working_question,
             session.clarify_history[-1],
-            _get_llm(),
+            _get_fast_llm(),
             relevant_kg=session._grounded_kg or "",
         )
         if merged:

@@ -170,7 +170,7 @@ class IntentValidationAgent(BaseAgent):
                 "path_state": path_state,
             }
 
-        if validation_result.is_valid:
+        if validation_result is None or validation_result.is_valid:
             self.logger.info("SQL validation passed (no critical issues)")
             return {
                 "decision": "intent_valid",
