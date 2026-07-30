@@ -5,9 +5,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { streamChat, fetchCharts } from '@/api/chat';
-import { conversationsApi } from '@/api/conversations';
-import type { ChatMessage, GraphStep } from '@/types/chat';
+import { cancelChat, fetchCharts, streamChat, watchChat } from '@/api/chat';
+import { conversationsApi, toConversation } from '@/api/conversations';
+import { buildAnswerMessages, chartsToFencedContent, stripChartFences } from '@/lib/answerMessages';
+import { stringifySqlResponse } from '@/lib/sqlResponse';
+import type { ChatMessage, GraphStep, ResultEvent } from '@/types/chat';
 
 let nextId = 0;
 const uid = () => `msg-${Date.now()}-${nextId++}`;
@@ -15,47 +17,49 @@ const uid = () => `msg-${Date.now()}-${nextId++}`;
 const GENERIC_ERROR_MESSAGE =
 	'Something went wrong. Please try again, and if the issue persists, contact our support';
 
-// The agent returns the executed-DB rows under `sql_response_from_db`. It can
-// be a stringified markdown/CSV table or a structured ``list[dict]`` payload.
-// Normalise both shapes into a single string so DB persistence and parsing in
-// `DynamicTable` stay simple (compact JSON for objects → cheap to re-parse).
-const stringifySqlResponse = (value: unknown): string | undefined => {
-	if (value == null) return undefined;
-	if (typeof value === 'string') return value.trim() ? value : undefined;
-	try {
-		return JSON.stringify(value);
-	} catch {
-		return undefined;
-	}
-};
+const CONVERSATION_IN_PROGRESS = 'Conversation in progress';
 
-/** Strip ```chart / ```chart-carousel fences so Message 1 stays prose-only. */
-const stripChartFences = (markdown: string): string =>
-	markdown
-		.replace(/(^|\n)```(?:chart|chart-carousel)\b[\s\S]*?```/g, '\n')
-		.replace(/\n{3,}/g, '\n\n')
-		.trim();
+const REFETCH_DELAY_MS = 1000;
+const REFETCH_ATTEMPTS = 3;
 
-const chartsToFencedContent = (charts: Record<string, unknown>[]): string =>
-	charts.map((spec) => `\`\`\`chart\n${JSON.stringify(spec)}\n\`\`\``).join('\n\n');
+const sleep = (ms: number) =>
+	new Promise<void>((resolve) => {
+		setTimeout(resolve, ms);
+	});
 
 export const useChat = () => {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [steps, setSteps] = useState<GraphStep[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const controllerRef = useRef<AbortController | null>(null);
-	// Bumped on every `sendMessage`/`clearConversation` so the async step-2
-	// chart fetch (which isn't tied to `controllerRef`'s AbortController) can
-	// tell it's stale and skip mutating state after the user stopped/started
-	// a new turn while it was still in flight.
+	// Bumped on every `sendMessage`/`stopGeneration`/`clearConversation` so the
+	// async step-2 chart fetch (which isn't tied to `controllerRef`'s
+	// AbortController) can tell it's stale and skip mutating state after the
+	// user stopped/started a new turn while it was still in flight.
 	const requestIdRef = useRef(0);
+	// Tracks a `resumeIfRunning` watch, separately from `controllerRef` (the
+	// user's own in-flight send) so switching conversations or sending a new
+	// message never gets tangled up with a background resume attempt.
+	const resumeControllerRef = useRef<AbortController | null>(null);
+	// The conversation whose run this hook is currently attached to, so Stop
+	// can cancel it server-side without the caller having to pass it back in.
+	const activeRunConvIdRef = useRef<string | null>(null);
+	// In-flight cancel from Stop — the next send awaits this so it doesn't race
+	// the server still holding the conversation slot (and get a 409).
+	const cancelInFlightRef = useRef<Promise<void> | null>(null);
+	// Mirrors `messages` for the async watch callbacks, which need the current
+	// transcript without re-creating `resumeIfRunning` on every new message.
+	const messagesRef = useRef(messages);
+	useEffect(() => {
+		messagesRef.current = messages;
+	}, [messages]);
 
+	// Purely local UI state — the chat proxy route persists both the user's
+	// and the assistant's turns to the conversation server-side (so history
+	// stays correct even if this component unmounts mid-stream), so there is
+	// no DB write to do here.
 	const appendAssistantMessage = useCallback(
-		(
-			conversationId: string | null,
-			content: string,
-			extras?: { sql?: string; sqlResponse?: string },
-		) => {
+		(content: string, extras?: { sql?: string; sqlResponse?: string }) => {
 			const assistantMsg: ChatMessage = {
 				id: uid(),
 				role: 'assistant',
@@ -65,20 +69,44 @@ export const useChat = () => {
 				timestamp: Date.now(),
 			};
 			setMessages((prev) => [...prev, assistantMsg]);
+		},
+		[],
+	);
 
-			if (!conversationId) return;
+	// Renders one agent answer the same way the completions proxy persists it,
+	// so a reloaded conversation matches what the user watched arrive. Shared
+	// by the live send and the resume watch.
+	const appendAnswer = useCallback(
+		(answer: ResultEvent['answer']) => {
+			buildAnswerMessages(answer).forEach((msg) => {
+				appendAssistantMessage(msg.content, {
+					sql: msg.sql,
+					sqlResponse: msg.sqlResponse,
+				});
+			});
+		},
+		[appendAssistantMessage],
+	);
 
-			// Persist the assistant turn to the conversation history. Analytics
-			// is captured server-side in the chat proxy route, so there is no
-			// analytics work to do here.
-			conversationsApi
-				.addMessage(conversationId, {
-					role: 'assistant',
-					content,
-					sqlCode: extras?.sql ?? null,
-					sqlResponse: extras?.sqlResponse ?? null,
-				})
-				.catch(() => {});
+	const pollForPersistedAssistant = useCallback(
+		async (conversationId: string, watchController: AbortController) => {
+			for (let attempt = 0; attempt < REFETCH_ATTEMPTS; attempt += 1) {
+				if (watchController.signal.aborted || controllerRef.current) return;
+				await sleep(REFETCH_DELAY_MS);
+				if (watchController.signal.aborted || controllerRef.current) return;
+
+				try {
+					const detail = await conversationsApi.get(conversationId);
+					const conv = toConversation(detail);
+					const last = conv.messages[conv.messages.length - 1];
+					if (last?.role === 'assistant') {
+						setMessages(conv.messages);
+						return;
+					}
+				} catch {
+					// ignore fetch errors and retry
+				}
+			}
 		},
 		[],
 	);
@@ -87,12 +115,133 @@ export const useChat = () => {
 		() => () => {
 			controllerRef.current?.abort();
 			controllerRef.current = null;
+			resumeControllerRef.current?.abort();
+			resumeControllerRef.current = null;
 		},
 		[],
 	);
 
+	// Detaches this tab from the run. `cancel` additionally aborts the run
+	// server-side, which is what the Stop button wants: the agent holds the
+	// conversation's slot until it finishes, so merely dropping the stream
+	// would leave the next question rejected with 409.
+	const stopGeneration = useCallback((cancel = true) => {
+		requestIdRef.current += 1;
+		controllerRef.current?.abort();
+		controllerRef.current = null;
+		resumeControllerRef.current?.abort();
+		resumeControllerRef.current = null;
+
+		const conversationId = activeRunConvIdRef.current;
+		activeRunConvIdRef.current = null;
+		if (cancel && conversationId) {
+			const pending = cancelChat(conversationId).catch(() => {});
+			cancelInFlightRef.current = pending;
+			void pending.finally(() => {
+				if (cancelInFlightRef.current === pending) {
+					cancelInFlightRef.current = null;
+				}
+			});
+		}
+
+		setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
+		setIsLoading(false);
+	}, []);
+
+	// Reattaches to a run already in progress for `conversationId`, if any —
+	// e.g. after a page reload or reopening the browser mid-response. The
+	// backend replays every step buffered since the run started, so this
+	// rebuilds `steps`/`isLoading` exactly as if this tab had been watching
+	// the whole time, then appends the final answer once it lands. If
+	// nothing is running, `watchChat` closes immediately with no events and
+	// this is a silent no-op — no loading flash, no stray messages.
+	const resumeIfRunning = useCallback(
+		(conversationId: string) => {
+			// Never disturb an active local send.
+			if (controllerRef.current) return;
+
+			resumeControllerRef.current?.abort();
+			setSteps([]);
+			let sawActivity = false;
+
+			const controller = watchChat(conversationId, {
+				onStep(event) {
+					sawActivity = true;
+					activeRunConvIdRef.current = conversationId;
+					setIsLoading(true);
+					setSteps((prev) => {
+						const completed = prev.map((s) => ({
+							...s,
+							status: 'completed' as const,
+						}));
+						return [
+							...completed,
+							{ node: event.node, label: event.label, status: 'active' },
+						];
+					});
+				},
+
+				onResult(event) {
+					appendAnswer(event.answer);
+					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
+					setIsLoading(false);
+					activeRunConvIdRef.current = null;
+					resumeControllerRef.current = null;
+				},
+
+				onError(event) {
+					activeRunConvIdRef.current = null;
+					if (!sawActivity) {
+						// The watch connection itself failed before we ever confirmed
+						// a run was in progress — likely a network blip while probing
+						// an idle conversation. Stay silent rather than injecting an
+						// error bubble for something that may never have been running.
+						resumeControllerRef.current = null;
+						return;
+					}
+					const message = event.message.trim() || GENERIC_ERROR_MESSAGE;
+					appendAssistantMessage(message);
+					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
+					setIsLoading(false);
+					resumeControllerRef.current = null;
+				},
+
+				onDone() {
+					activeRunConvIdRef.current = null;
+					if (sawActivity) {
+						resumeControllerRef.current = null;
+						return;
+					}
+
+					resumeControllerRef.current = null;
+
+					// Watch closed with nothing to replay. If the loaded history ends
+					// on a user turn, the run most likely just finished and the
+					// completions route's `after()` hook hasn't committed the assistant
+					// row yet — poll briefly before giving up.
+					const last = messagesRef.current[messagesRef.current.length - 1];
+					if (last?.role === 'user') {
+						void pollForPersistedAssistant(conversationId, controller);
+					}
+				},
+			});
+
+			resumeControllerRef.current = controller;
+		},
+		[appendAnswer, appendAssistantMessage, pollForPersistedAssistant],
+	);
+
+	// Resolves true once the backend accepted the question, false if it was
+	// refused before the stream started — the caller uses that to decide
+	// whether the typed text can be discarded.
 	const sendMessage = useCallback(
-		(text: string, conversationId: string | null) => {
+		async (text: string, conversationId: string | null): Promise<boolean> => {
+			// A background resume may still be tailing this conversation (its
+			// `isLoading` only flips on the first step, so the input isn't locked).
+			// Drop it — this send supersedes it.
+			resumeControllerRef.current?.abort();
+			resumeControllerRef.current = null;
+
 			const userMsg: ChatMessage = {
 				id: uid(),
 				role: 'user',
@@ -100,32 +249,39 @@ export const useChat = () => {
 				timestamp: Date.now(),
 			};
 
-			// Lock the input immediately so the Send button morphs into Stop and
-			// duplicate sends are ignored — but DO NOT add the user message to
-			// the conversation yet. We only commit it (UI + DB) once the backend
-			// accepts the request via the `onStart` callback below; on 409
-			// "Conversation in progress" (or any other pre-stream error) the
-			// message is never persisted, keeping the chat history clean.
+			// Show the user turn immediately — waiting for `onStart` made the
+			// bubble lag behind a post-cancel worker cold-start, so the input
+			// looked empty for a noticeable beat. On a pre-stream refusal we
+			// roll it back so the transcript still matches what was persisted.
+			setMessages((prev) => [...prev, userMsg]);
 			setSteps([]);
 			setIsLoading(true);
-			const requestId = ++requestIdRef.current;
+			const requestId = (requestIdRef.current += 1);
+			activeRunConvIdRef.current = conversationId;
 
-			const finishLoading = () => {
+			const finishRun = () => {
 				setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 				setIsLoading(false);
+				activeRunConvIdRef.current = null;
 				controllerRef.current = null;
 			};
 
+			// Wait out a Stop's cancel so we don't POST into a slot that's still
+			// held for a few hundred ms (which would 409 and leave the question
+			// looking like it never sent).
+			const pendingCancel = cancelInFlightRef.current;
+			if (pendingCancel) await pendingCancel;
+
+			let settle: (accepted: boolean) => void = () => {};
+			const accepted = new Promise<boolean>((resolve) => {
+				settle = resolve;
+			});
+
 			const controller = streamChat(
-				{ question: text },
+				{ question: text, conversationId },
 				{
 					onStart() {
-						setMessages((prev) => [...prev, userMsg]);
-						if (conversationId) {
-							conversationsApi
-								.addMessage(conversationId, { role: 'user', content: text })
-								.catch(() => {});
-						}
+						settle(true);
 					},
 
 					onStep(event) {
@@ -150,20 +306,20 @@ export const useChat = () => {
 						const sqlResponse = stringifySqlResponse(sqlResponseFromDb);
 						const prose = stripChartFences(response ?? '');
 
-						// Step 1 — text + SQL, shown as soon as the SQL pipeline
+						// Message 1 — prose + SQL, shown as soon as the SQL pipeline
 						// resolves. Charts are not computed yet.
 						const hasMessage1Content = Boolean(prose) || Boolean(sqlCode);
 						if (hasMessage1Content) {
-							appendAssistantMessage(conversationId, prose, { sql: sqlCode });
+							appendAssistantMessage(prose, { sql: sqlCode });
 						}
 
 						if (!sqlResponseFromDb) {
 							// No executed result to visualize — nothing to build in
 							// step 2, so wrap up here.
 							if (!hasMessage1Content) {
-								appendAssistantMessage(conversationId, GENERIC_ERROR_MESSAGE);
+								appendAssistantMessage(GENERIC_ERROR_MESSAGE);
 							}
-							finishLoading();
+							finishRun();
 							return;
 						}
 
@@ -185,46 +341,57 @@ export const useChat = () => {
 							.then((charts) => {
 								if (requestId !== requestIdRef.current) return;
 								if (charts && charts.length > 0) {
-									appendAssistantMessage(
-										conversationId,
-										chartsToFencedContent(charts),
-									);
+									appendAssistantMessage(chartsToFencedContent(charts));
 								} else if (sqlResponse) {
-									appendAssistantMessage(conversationId, '', { sqlResponse });
+									appendAssistantMessage('', { sqlResponse });
 								}
 							})
 							.catch(() => {
 								if (requestId !== requestIdRef.current) return;
 								if (sqlResponse) {
-									appendAssistantMessage(conversationId, '', { sqlResponse });
+									appendAssistantMessage('', { sqlResponse });
 								}
 							})
 							.finally(() => {
 								if (requestId !== requestIdRef.current) return;
-								finishLoading();
+								finishRun();
 							});
 					},
 
-					onError() {
-						appendAssistantMessage(conversationId, GENERIC_ERROR_MESSAGE);
-						finishLoading();
+					onError(event) {
+						const message = event.message.trim() || GENERIC_ERROR_MESSAGE;
+						finishRun();
+
+						// Another stream already owns this conversation (a second tab,
+						// or a run we stopped watching but couldn't cancel). Nothing
+						// was submitted, so roll back the optimistic user turn, keep
+						// the question in the input, and attach to the live run.
+						if (message === CONVERSATION_IN_PROGRESS && conversationId) {
+							setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+							settle(false);
+							resumeIfRunning(conversationId);
+							return;
+						}
+
+						appendAssistantMessage(message);
+						settle(true);
 					},
 				},
 			);
 
 			controllerRef.current = controller;
+			return accepted;
 		},
-		[appendAssistantMessage],
+		[appendAssistantMessage, resumeIfRunning],
 	);
 
+	// Leaves the run alone server-side: it keeps streaming into the buffer and
+	// persists its answer, so reopening the conversation picks it back up.
 	const clearConversation = useCallback(() => {
-		requestIdRef.current++;
-		controllerRef.current?.abort();
-		controllerRef.current = null;
+		stopGeneration(false);
 		setMessages([]);
 		setSteps([]);
-		setIsLoading(false);
-	}, []);
+	}, [stopGeneration]);
 
 	return {
 		messages,
@@ -232,6 +399,8 @@ export const useChat = () => {
 		steps,
 		isLoading,
 		sendMessage,
+		resumeIfRunning,
+		stopGeneration,
 		clearConversation,
 	};
 };
