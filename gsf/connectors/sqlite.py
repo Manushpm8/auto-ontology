@@ -10,7 +10,7 @@ import logging
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 from urllib.parse import unquote, urlparse
 
 import pandas as pd
@@ -58,6 +58,7 @@ class SQLiteDatabase(SQLDatabase):
         self._local = threading.local()
         self._all_conns: list[sqlite3.Connection] = []
         self._conns_lock = threading.Lock()
+        self._broken_view_names: set[str] | None = None
         # Open eagerly on the constructing thread to surface connection errors early.
         self._conn
         logger.debug(
@@ -93,10 +94,40 @@ class SQLiteDatabase(SQLDatabase):
             [dict(row) for row in rows], columns=[col[0] for col in cur.description]
         )
 
+    def _broken_views(self) -> set[str]:
+        """Return views whose declared columns SQLite cannot resolve.
+
+        SQLite permits a view to reference missing columns and reports the
+        problem only when the view is inspected or queried. Such a view must
+        not prevent unrelated, valid tables from being ingested.
+        """
+        if self._broken_view_names is not None:
+            return self._broken_view_names
+
+        views = self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'view' ORDER BY name"
+        ).fetchall()
+        broken: set[str] = set()
+        for (view_name,) in views:
+            try:
+                self._conn.execute(
+                    f'PRAGMA table_info("{view_name}")'
+                ).fetchall()
+            except sqlite3.DatabaseError as exc:
+                broken.add(view_name)
+                logger.warning(
+                    "Skipping invalid SQLite view %s.%s: %s",
+                    self._database_name,
+                    view_name,
+                    exc,
+                )
+        self._broken_view_names = broken
+        return broken
+
     def get_tables(self) -> pd.DataFrame:
         view_type = TableTypes.VIEW
         base_table_type = TableTypes.BASE_TABLE
-        return self.execute(
+        tables = self.execute(
             f"""
             SELECT
                 'main' AS table_schema,
@@ -111,6 +142,15 @@ class SQLiteDatabase(SQLDatabase):
             ORDER BY name
             """
         )
+        broken_views = self._broken_views()
+        if broken_views:
+            tables = cast(
+                pd.DataFrame,
+                tables[
+                    ~tables["table_name"].isin(list(broken_views))
+                ].reset_index(drop=True),
+            )
+        return tables
 
     def get_columns(self) -> pd.DataFrame:
         tables = self.get_tables()
@@ -134,7 +174,7 @@ class SQLiteDatabase(SQLDatabase):
         return pd.DataFrame(columns=["end_time", "query_text"])
 
     def get_views(self) -> pd.DataFrame:
-        return self.execute(
+        views = self.execute(
             """
             SELECT
                 'main' AS table_schema,
@@ -145,6 +185,15 @@ class SQLiteDatabase(SQLDatabase):
             ORDER BY name
             """
         )
+        broken_views = self._broken_views()
+        if broken_views:
+            views = cast(
+                pd.DataFrame,
+                views[
+                    ~views["table_name"].isin(list(broken_views))
+                ].reset_index(drop=True),
+            )
+        return views
 
     def get_pks(self) -> pd.DataFrame:
         tables = self.get_tables()
