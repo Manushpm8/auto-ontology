@@ -6,9 +6,19 @@
 // the client already has the SQL + executed result from step 1
 // (POST /api/chat/completions). Kept as a separate, non-streaming request so
 // the answer never waits on an extra LLM round trip just to pick a chart.
+//
+// This route also persists the assistant bubble it produces (charts, or the
+// result table when there are none), because that bubble only exists once the
+// chart step resolves — the completions proxy has long since written Message 1
+// and cannot know how this one turns out.
 
 import { NextResponse } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
+import { userCan } from '@/auth/permissions';
+import type { ResolvedUser } from '@/auth/resolve-user';
+import { getPrisma } from '@/lib/prisma';
+import { findOwnedConversation } from '@/lib/chatConversations';
+import { buildResultMessage } from '@/lib/answerMessages';
 import { isVisualizationEnabled } from '@/lib/configurations';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
@@ -27,29 +37,88 @@ const parseBody = (rawBody: string): Record<string, unknown> => {
 	}
 };
 
+// Mirrors the completions proxy: a bad/absent conversation_id degrades to
+// "don't persist" rather than failing the request, so direct API callers that
+// never send one still get their charts.
+const resolveOwnedConversation = async (
+	user: ResolvedUser,
+	conversationId: unknown,
+): Promise<{ id: string } | null> => {
+	if (typeof conversationId !== 'string' || !conversationId.trim()) return null;
+	if (!userCan(user, { conversation: ['write'] })) return null;
+	return findOwnedConversation(user, conversationId);
+};
+
+// Two clients can watch the same run (a second tab that got 409 and reattached
+// via /chat/watch), and each asks for charts when the answer lands. Only the
+// first should write Message 2, so skip when the turn already ends in one.
+const turnAlreadyHasResultMessage = async (conversationId: string): Promise<boolean> => {
+	const last = await getPrisma().message.findFirst({
+		where: { conversationId },
+		orderBy: { createdAt: 'desc' },
+		select: { role: true, content: true, sqlResponse: true },
+	});
+	if (last?.role !== 'assistant') return false;
+	return last.sqlResponse !== null || last.content.startsWith('```chart');
+};
+
+const persistResultMessage = async (
+	conversationId: string,
+	result: unknown,
+	charts: unknown,
+): Promise<void> => {
+	const message = buildResultMessage({ sql_response_from_db: result }, charts);
+	if (!message) return;
+	if (await turnAlreadyHasResultMessage(conversationId)) return;
+
+	const prisma = getPrisma();
+	await prisma.message.create({
+		data: {
+			conversationId,
+			role: 'assistant',
+			content: message.content,
+			sqlCode: null,
+			sqlResponse: message.sqlResponse ?? null,
+		},
+	});
+	await prisma.conversation.update({
+		where: { id: conversationId },
+		data: { updatedAt: new Date() },
+	});
+};
+
 // Same permission as the chat completions route: every chat user may trigger
 // this, not just admins. The instance-wide toggle is resolved here, not
 // trusted from the caller, so a stale tab can't opt back into charts once
-// admins turn the setting off.
-export const POST = withPermission({ chat: ['use'] })(async (req) => {
-	if (!(await isVisualizationEnabled())) {
-		return NextResponse.json({ charts: null });
-	}
-
+// admins turn the setting off. Note the toggle only gates chart *generation* —
+// the result table still renders (and persists) when it is off.
+export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const payload = parseBody(await req.text());
+	const conversation = await resolveOwnedConversation(user, payload.conversation_id);
 
-	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/visualize`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(payload),
-	});
+	const charts = await (async (): Promise<unknown> => {
+		if (!(await isVisualizationEnabled())) return null;
 
-	if (!upstream.ok) {
-		// Soft-fail: the chart is a nice-to-have, so surface "no chart" rather
-		// than an error the UI would have to special-case.
-		return NextResponse.json({ charts: null });
+		const upstream = await fetch(`${PYTHON_API_URL}/api/chat/visualize`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload),
+		});
+
+		// Soft-fail: the chart is a nice-to-have, so fall through to "no chart"
+		// rather than an error the UI would have to special-case.
+		if (!upstream.ok) return null;
+		const data = (await upstream.json()) as { charts?: unknown };
+		return data.charts ?? null;
+	})().catch(() => null);
+
+	if (conversation) {
+		try {
+			await persistResultMessage(conversation.id, payload.result, charts);
+		} catch {
+			// Best-effort persistence — never fail the response over history.
+		}
 	}
 
-	const data = await upstream.json();
-	return NextResponse.json(data);
+	return NextResponse.json({ charts });
 });

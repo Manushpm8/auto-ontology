@@ -6,10 +6,16 @@
 // Message 1 — prose + SQL; Message 2 — charts, or the raw result table when
 // visualization is off or produced nothing.
 //
-// The split lives here because two places have to agree on it exactly:
-// `useChat.ts` renders it live, and the chat-completions proxy persists it in
-// `after()`. If they disagreed, reloading a conversation would show a
-// different layout than watching the answer arrive did.
+// The two bubbles land at different times, because charts are a separate
+// second step (POST /api/chat/visualize) rather than part of the agent's
+// answer: Message 1 ships as soon as the SQL pipeline resolves, Message 2 once
+// the chart step reports back. Each is therefore persisted by the route that
+// produces it — the chat-completions proxy writes Message 1 in `after()`, the
+// visualize proxy writes Message 2 — so history matches the live view.
+//
+// The split lives here because those routes and `useChat.ts` (which renders it
+// live) all have to agree on it exactly. If they disagreed, reloading a
+// conversation would show a different layout than watching the answer arrive.
 
 import { stringifySqlResponse } from '@/lib/sqlResponse';
 
@@ -40,30 +46,38 @@ export const stripChartFences = (markdown: string): string =>
 export const chartsToFencedContent = (charts: Record<string, unknown>[]): string =>
 	charts.map((spec) => `\`\`\`chart\n${JSON.stringify(spec)}\n\`\`\``).join('\n\n');
 
-export const buildAnswerMessages = (answer: AgentAnswer): AnswerMessage[] => {
-	const { response, sql_code: sqlCode, sql_response_from_db: sqlResponseFromDb, charts } = answer;
-	const sqlResponse = stringifySqlResponse(sqlResponseFromDb);
+/** Message 1 — prose + SQL, ready the moment the agent's answer lands. */
+export const buildProseMessage = (answer: AgentAnswer): AnswerMessage | null => {
+	const { response, sql_code: sqlCode } = answer;
 	const prose = stripChartFences(response ?? '');
-	const chartContent =
-		Array.isArray(charts) && charts.length > 0
-			? chartsToFencedContent(charts as Record<string, unknown>[])
-			: null;
 
-	const messages: AnswerMessage[] = [];
+	if (prose || sqlCode) return { content: prose, sql: sqlCode ?? undefined };
 
-	if (prose || sqlCode) {
-		messages.push({ content: prose, sql: sqlCode ?? undefined });
+	// Nothing to say and no executed result for Message 2 to fall back on —
+	// surface something rather than leaving the user without a reply.
+	if (stringifySqlResponse(answer.sql_response_from_db) === undefined) {
+		return { content: GENERIC_ANSWER_ERROR };
 	}
-
-	if (chartContent) {
-		messages.push({ content: chartContent });
-	} else if (sqlResponse) {
-		messages.push({ content: '', sqlResponse });
-	} else if (messages.length === 0) {
-		// Nothing at all came back — surface something rather than silently
-		// leaving the user without a reply.
-		messages.push({ content: GENERIC_ANSWER_ERROR });
-	}
-
-	return messages;
+	return null;
 };
+
+/**
+ * Message 2 — the charts returned by the visualize step, or the raw result
+ * table when that step is disabled, fails, or finds nothing worth plotting.
+ * `charts` overrides `answer.charts` so callers can pass the specs the second
+ * request just returned.
+ */
+export const buildResultMessage = (answer: AgentAnswer, charts?: unknown): AnswerMessage | null => {
+	const specs = charts ?? answer.charts;
+	if (Array.isArray(specs) && specs.length > 0) {
+		return { content: chartsToFencedContent(specs as Record<string, unknown>[]) };
+	}
+
+	const sqlResponse = stringifySqlResponse(answer.sql_response_from_db);
+	return sqlResponse ? { content: '', sqlResponse } : null;
+};
+
+export const buildAnswerMessages = (answer: AgentAnswer, charts?: unknown): AnswerMessage[] =>
+	[buildProseMessage(answer), buildResultMessage(answer, charts)].filter(
+		(msg): msg is AnswerMessage => msg !== null,
+	);

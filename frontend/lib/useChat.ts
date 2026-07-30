@@ -7,8 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cancelChat, fetchCharts, streamChat, watchChat } from '@/api/chat';
 import { conversationsApi, toConversation } from '@/api/conversations';
-import { buildAnswerMessages, chartsToFencedContent, stripChartFences } from '@/lib/answerMessages';
-import { stringifySqlResponse } from '@/lib/sqlResponse';
+import { buildProseMessage, buildResultMessage } from '@/lib/answerMessages';
 import type { ChatMessage, GraphStep, ResultEvent } from '@/types/chat';
 
 let nextId = 0;
@@ -73,17 +72,44 @@ export const useChat = () => {
 		[],
 	);
 
-	// Renders one agent answer the same way the completions proxy persists it,
-	// so a reloaded conversation matches what the user watched arrive. Shared
-	// by the live send and the resume watch.
-	const appendAnswer = useCallback(
+	// Message 1 — prose + SQL, rendered as soon as the SQL pipeline resolves.
+	// Built with the same helper the completions proxy persists with, so a
+	// reloaded conversation matches what the user watched arrive.
+	const appendProseMessage = useCallback(
 		(answer: ResultEvent['answer']) => {
-			buildAnswerMessages(answer).forEach((msg) => {
-				appendAssistantMessage(msg.content, {
-					sql: msg.sql,
-					sqlResponse: msg.sqlResponse,
-				});
-			});
+			const msg = buildProseMessage(answer);
+			if (msg) appendAssistantMessage(msg.content, { sql: msg.sql });
+		},
+		[appendAssistantMessage],
+	);
+
+	// Message 2 — a separate request decides whether a chart applies to the
+	// already-executed result, falling back to the plain table. The route it
+	// calls also persists this bubble, so history and the live view agree.
+	// Keeps the "thinking" indicator up under its own label while it resolves.
+	const appendResultMessage = useCallback(
+		async (
+			answer: ResultEvent['answer'],
+			question: string,
+			conversationId: string | null,
+			requestId: number,
+		) => {
+			setSteps((prev) => [
+				...prev.map((s) => ({ ...s, status: 'completed' as const })),
+				{ node: 'visualize', label: 'Building charts', status: 'active' as const },
+			]);
+
+			const charts = await fetchCharts(
+				question,
+				answer.sql_code,
+				answer.sql_response_from_db,
+				conversationId,
+			).catch(() => null);
+
+			if (requestId !== requestIdRef.current) return;
+
+			const msg = buildResultMessage(answer, charts);
+			if (msg) appendAssistantMessage(msg.content, { sqlResponse: msg.sqlResponse });
 		},
 		[appendAssistantMessage],
 	);
@@ -162,6 +188,7 @@ export const useChat = () => {
 
 			resumeControllerRef.current?.abort();
 			setSteps([]);
+			const requestId = (requestIdRef.current += 1);
 			let sawActivity = false;
 
 			const controller = watchChat(conversationId, {
@@ -182,11 +209,36 @@ export const useChat = () => {
 				},
 
 				onResult(event) {
-					appendAnswer(event.answer);
-					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
-					setIsLoading(false);
+					appendProseMessage(event.answer);
 					activeRunConvIdRef.current = null;
 					resumeControllerRef.current = null;
+
+					const finishWatch = () => {
+						setSteps((prev) =>
+							prev.map((s) => ({ ...s, status: 'completed' as const })),
+						);
+						setIsLoading(false);
+					};
+
+					if (!event.answer.sql_response_from_db) {
+						finishWatch();
+						return;
+					}
+
+					// The tab that started this run may be gone, so nobody has
+					// asked for its charts — do it here so a reattached tab (and
+					// the persisted history) still gets Message 2.
+					const question =
+						[...messagesRef.current].reverse().find((m) => m.role === 'user')
+							?.content ?? '';
+					void appendResultMessage(
+						event.answer,
+						question,
+						conversationId,
+						requestId,
+					).finally(() => {
+						if (requestId === requestIdRef.current) finishWatch();
+					});
 				},
 
 				onError(event) {
@@ -228,7 +280,12 @@ export const useChat = () => {
 
 			resumeControllerRef.current = controller;
 		},
-		[appendAnswer, appendAssistantMessage, pollForPersistedAssistant],
+		[
+			appendProseMessage,
+			appendResultMessage,
+			appendAssistantMessage,
+			pollForPersistedAssistant,
+		],
 	);
 
 	// Resolves true once the backend accepted the question, false if it was
@@ -298,64 +355,23 @@ export const useChat = () => {
 					},
 
 					onResult(event) {
-						const {
-							response,
-							sql_code: sqlCode,
-							sql_response_from_db: sqlResponseFromDb,
-						} = event.answer;
-						const sqlResponse = stringifySqlResponse(sqlResponseFromDb);
-						const prose = stripChartFences(response ?? '');
+						appendProseMessage(event.answer);
 
-						// Message 1 — prose + SQL, shown as soon as the SQL pipeline
-						// resolves. Charts are not computed yet.
-						const hasMessage1Content = Boolean(prose) || Boolean(sqlCode);
-						if (hasMessage1Content) {
-							appendAssistantMessage(prose, { sql: sqlCode });
-						}
-
-						if (!sqlResponseFromDb) {
-							// No executed result to visualize — nothing to build in
-							// step 2, so wrap up here.
-							if (!hasMessage1Content) {
-								appendAssistantMessage(GENERIC_ERROR_MESSAGE);
-							}
+						if (!event.answer.sql_response_from_db) {
+							// No executed result to visualize — nothing for step 2
+							// to build, so wrap up here.
 							finishRun();
 							return;
 						}
 
-						// Step 2 — a separate request decides whether a chart applies
-						// to the already-executed result. Keep the "thinking"
-						// indicator up with its own step label while this resolves,
-						// then render Message 2 as a chart or fall back to a plain
-						// table.
-						setSteps((prev) => [
-							...prev.map((s) => ({ ...s, status: 'completed' as const })),
-							{
-								node: 'visualize',
-								label: 'Building charts',
-								status: 'active' as const,
-							},
-						]);
-
-						fetchCharts(text, sqlCode, sqlResponseFromDb)
-							.then((charts) => {
-								if (requestId !== requestIdRef.current) return;
-								if (charts && charts.length > 0) {
-									appendAssistantMessage(chartsToFencedContent(charts));
-								} else if (sqlResponse) {
-									appendAssistantMessage('', { sqlResponse });
-								}
-							})
-							.catch(() => {
-								if (requestId !== requestIdRef.current) return;
-								if (sqlResponse) {
-									appendAssistantMessage('', { sqlResponse });
-								}
-							})
-							.finally(() => {
-								if (requestId !== requestIdRef.current) return;
-								finishRun();
-							});
+						void appendResultMessage(
+							event.answer,
+							text,
+							conversationId,
+							requestId,
+						).finally(() => {
+							if (requestId === requestIdRef.current) finishRun();
+						});
 					},
 
 					onError(event) {
@@ -382,7 +398,7 @@ export const useChat = () => {
 			controllerRef.current = controller;
 			return accepted;
 		},
-		[appendAssistantMessage, resumeIfRunning],
+		[appendAssistantMessage, appendProseMessage, appendResultMessage, resumeIfRunning],
 	);
 
 	// Leaves the run alone server-side: it keeps streaming into the buffer and

@@ -167,17 +167,27 @@ export const streamChat = (
  * executed result, ask the server whether a chart applies. Resolves to
  * `null` on any failure or when visualization is disabled/skipped, so the
  * caller can always fall back to a plain table.
+ *
+ * `conversationId` lets the route persist the bubble this step produces —
+ * the chart, or the table it falls back to — since the completions proxy
+ * already wrote the prose bubble and cannot know how this resolves.
  */
 export const fetchCharts = async (
 	question: string,
 	sql: string | undefined,
 	result: SqlResult | undefined,
+	conversationId: string | null,
 ): Promise<Record<string, unknown>[] | null> => {
 	try {
 		const res = await fetch('/api/chat/visualize', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ question, sql: sql ?? '', result }),
+			body: JSON.stringify({
+				question,
+				sql: sql ?? '',
+				result,
+				conversation_id: conversationId ?? undefined,
+			}),
 		});
 		if (!res.ok) return null;
 
