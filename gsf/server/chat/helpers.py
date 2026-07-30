@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 # Maps LangGraph node names from
@@ -28,7 +30,6 @@ NODE_LABELS: dict[str, str] = {
     "validate_intent": "Validating intent",
     "execute_sql_query": "Executing SQL",
     "format_and_respond": "Formatting response",
-    "visualize": "Building charts",
     "unconstructable_sql_response": "SQL could not be constructed",
 }
 
@@ -38,12 +39,22 @@ class ChatRequest(BaseModel):
 
     question: str = Field(..., min_length=1)
     conversation_id: str | None = None
-    visualization: bool = Field(
-        default=False,
+
+
+class VisualizeRequest(BaseModel):
+    """Payload for the second step: chart generation.
+
+    Sent by the client once it already has the SQL and its executed result
+    from step 1 (``ChatRequest`` / ``/chat/completions``).
+    """
+
+    question: str = Field(..., min_length=1)
+    sql: str = Field(default="")
+    result: Any = Field(
+        default=None,
         description=(
-            "When true, append ResultChart specs after formatting the answer. "
-            "The web app's proxy route sets this from the instance-wide "
-            "`visualization_enabled` configuration; direct API callers may "
-            "send it themselves and default to disabled."
+            "The executed SQL result, i.e. the `sql_response_from_db` from the "
+            "step 1 answer — either a one-item list containing a JSON-records "
+            "string, or a list of row dicts."
         ),
     )

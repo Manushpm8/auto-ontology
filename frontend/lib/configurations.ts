@@ -8,12 +8,13 @@ import { getPrisma } from '@/lib/prisma';
 export const VISUALIZATION_ENABLED_KEY = 'visualization_enabled';
 
 /**
- * Global "Visualize SQL Results" flag. A missing row counts as disabled, so the
- * feature stays off until an admin opts in from Settings > Agent Settings.
+ * Global "Visualize SQL Results" flag. A missing row counts as enabled, so the
+ * feature is on by default until an admin turns it off from
+ * Settings > Agent Settings.
  */
 export async function isVisualizationEnabled(): Promise<boolean> {
 	const row = await getPrisma().configuration.findUnique({
 		where: { key: VISUALIZATION_ENABLED_KEY },
 	});
-	return row?.value === 'true';
+	return row?.value !== 'false';
 }

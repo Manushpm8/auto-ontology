@@ -53,18 +53,37 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Generator
+from typing import Any, Generator
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from gsf.dal.terms import semantic_layer_calculated
-from gsf.server.chat.helpers import NODE_LABELS, ChatRequest
+from gsf.retrieval.text_to_sql.visualization import analyze_and_visualize
+from gsf.server.chat.helpers import NODE_LABELS, ChatRequest, VisualizeRequest
 from gsf.server.chat.worker import PrewarmedWorker, get_pool
+from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Built once at import time, same fallback order as the main agent pipeline
+# (gsf.retrieval.text_to_sql.main): prefer the cheaper non-reasoning model,
+# fall back to the main reasoning model. Neither client does I/O at
+# construction time, so this is safe to build eagerly; a missing API key
+# just leaves the client as ``None`` and the endpoint soft-fails per request.
+try:
+    _non_reasoning_llm = get_non_reasoning_llm_client(max_tokens=2048)
+except (ValueError, EnvironmentError) as e:
+    logger.warning("Chat visualize: failed to init non-reasoning LLM: %s", e)
+    _non_reasoning_llm = None
+
+try:
+    _reasoning_llm = get_llm_client()
+except (ValueError, EnvironmentError) as e:
+    logger.warning("Chat visualize: failed to init reasoning LLM: %s", e)
+    _reasoning_llm = None
 
 # Returned as the 409 detail when a chat is attempted before the semantic
 # layer has been built.
@@ -288,7 +307,7 @@ async def chat_completions(
         displaced.cancelled.set()
         _release(displaced)
 
-    worker.submit(request.question, visualization=request.visualization)
+    worker.submit(request.question)
     threading.Thread(target=_pump, args=(slot,), daemon=True).start()
     asyncio.create_task(_watch_disconnect(http_request, slot))
 
@@ -367,3 +386,28 @@ async def chat_cancel(conversation_id: str) -> dict[str, bool]:
     slot.cancelled.set()
     _release(slot)
     return {"cancelled": True}
+
+
+@router.post("/chat/visualize")
+async def chat_visualize(request: VisualizeRequest) -> dict[str, Any]:
+    """Second step: recommend a chart for an already-executed SQL result.
+
+    Runs outside the ``WarmPool`` subprocess — unlike the main agent
+    pipeline, this is one or two short LLM calls with no DB/retriever
+    dependency, so it doesn't need process-level cancellation isolation.
+    The blocking LLM calls are offloaded to a thread so they don't block
+    the event loop.
+    """
+    llm = _non_reasoning_llm or _reasoning_llm
+    if llm is None:
+        logger.warning("No LLM available for chat visualize — skipping")
+        return {"charts": None}
+
+    specs = await asyncio.to_thread(
+        analyze_and_visualize,
+        llm=llm,
+        question=request.question,
+        sql=request.sql,
+        sql_response_from_db=request.result,
+    )
+    return {"charts": specs}

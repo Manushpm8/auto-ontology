@@ -52,7 +52,7 @@ model Prompt {
 //   semantic_compilation_enabled — "true"/"false", Settings > Semantic Compilation
 //   visualization_enabled        — "true"/"false", Settings > Agent Settings
 //                                  (auto-generate visualizations for SQL results;
-//                                   a missing row means disabled)
+//                                   a missing row means enabled)
 model Configuration {
   key       String   @id
   value     String

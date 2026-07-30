@@ -6,22 +6,27 @@
 // Message 1 — prose + SQL; Message 2 — charts, or the raw result table when
 // visualization is off or produced nothing.
 //
-// The split lives here because two places have to agree on it exactly:
-// `useChat.ts` renders it live, and the chat-completions proxy persists it in
-// `after()`. If they disagreed, reloading a conversation would show a
-// different layout than watching the answer arrive did.
+// The two bubbles land at different times, because charts are a separate
+// second step (POST /api/chat/visualize) rather than part of the agent's
+// answer: Message 1 ships as soon as the SQL pipeline resolves, Message 2 once
+// the chart step reports back. Each is therefore persisted by the route that
+// produces it — the chat-completions proxy writes Message 1 in `after()`, the
+// visualize proxy writes Message 2 — so history matches the live view.
+//
+// The split lives here because those routes and `useChat.ts` (which renders it
+// live) all have to agree on it exactly. If they disagreed, reloading a
+// conversation would show a different layout than watching the answer arrive.
 
 import { stringifySqlResponse } from '@/lib/sqlResponse';
 
 export const GENERIC_ANSWER_ERROR =
 	'Something went wrong. Please try again, and if the issue persists, contact our support';
 
-/** The agent keeps prose in `response` and chart specs in a separate array. */
+/** The agent's answer: prose in `response`, plus the SQL it ran and its result. */
 export type AgentAnswer = {
 	response?: string | null;
 	sql_code?: string | null;
 	sql_response_from_db?: unknown;
-	charts?: unknown;
 };
 
 export type AnswerMessage = {
@@ -29,6 +34,9 @@ export type AnswerMessage = {
 	sql?: string;
 	sqlResponse?: string;
 };
+
+const hasChartFence = (content: string): boolean =>
+	/(^|\n)```(?:chart|chart-carousel)\b/.test(content);
 
 /** Strip ```chart / ```chart-carousel fences so Message 1 stays prose-only. */
 export const stripChartFences = (markdown: string): string =>
@@ -40,30 +48,45 @@ export const stripChartFences = (markdown: string): string =>
 export const chartsToFencedContent = (charts: Record<string, unknown>[]): string =>
 	charts.map((spec) => `\`\`\`chart\n${JSON.stringify(spec)}\n\`\`\``).join('\n\n');
 
-export const buildAnswerMessages = (answer: AgentAnswer): AnswerMessage[] => {
-	const { response, sql_code: sqlCode, sql_response_from_db: sqlResponseFromDb, charts } = answer;
-	const sqlResponse = stringifySqlResponse(sqlResponseFromDb);
+/**
+ * Whether `message` is a Message 2 — the bubble carrying the charts or the
+ * result table. Recognising it is what tells "this turn is fully written" from
+ * "Message 2 is still on its way" when polling history for a finished run.
+ */
+export const isResultMessage = (message: {
+	role: string;
+	content: string;
+	sqlResponse?: string | null;
+}): boolean =>
+	message.role === 'assistant' && (message.sqlResponse != null || hasChartFence(message.content));
+
+/** Message 1 — prose + SQL, ready the moment the agent's answer lands. */
+export const buildSqlAnswerMessage = (answer: AgentAnswer): AnswerMessage | null => {
+	const { response, sql_code: sqlCode } = answer;
 	const prose = stripChartFences(response ?? '');
-	const chartContent =
-		Array.isArray(charts) && charts.length > 0
-			? chartsToFencedContent(charts as Record<string, unknown>[])
-			: null;
 
-	const messages: AnswerMessage[] = [];
+	if (prose || sqlCode) return { content: prose, sql: sqlCode ?? undefined };
 
-	if (prose || sqlCode) {
-		messages.push({ content: prose, sql: sqlCode ?? undefined });
+	// Nothing to say and no executed result for Message 2 to fall back on —
+	// surface something rather than leaving the user without a reply.
+	if (stringifySqlResponse(answer.sql_response_from_db) === undefined) {
+		return { content: GENERIC_ANSWER_ERROR };
+	}
+	return null;
+};
+
+/**
+ * Message 2 — the `charts` the visualize step came back with, or the raw result
+ * table when that step is disabled, fails, or finds nothing worth plotting.
+ * `charts` is required (and may be null): the agent's answer no longer carries
+ * chart specs of its own, so there is nothing to fall back to and an absent
+ * argument would silently mean "table" for a turn that does have charts.
+ */
+export const buildResultMessage = (answer: AgentAnswer, charts: unknown): AnswerMessage | null => {
+	if (Array.isArray(charts) && charts.length > 0) {
+		return { content: chartsToFencedContent(charts as Record<string, unknown>[]) };
 	}
 
-	if (chartContent) {
-		messages.push({ content: chartContent });
-	} else if (sqlResponse) {
-		messages.push({ content: '', sqlResponse });
-	} else if (messages.length === 0) {
-		// Nothing at all came back — surface something rather than silently
-		// leaving the user without a reply.
-		messages.push({ content: GENERIC_ANSWER_ERROR });
-	}
-
-	return messages;
+	const sqlResponse = stringifySqlResponse(answer.sql_response_from_db);
+	return sqlResponse ? { content: '', sqlResponse } : null;
 };

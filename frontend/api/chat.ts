@@ -8,6 +8,9 @@ import type {
 	StepEvent,
 	ResultEvent,
 	ErrorEvent,
+	SqlResult,
+	VisualizeRequest,
+	VisualizeResponse,
 } from '@/types/chat';
 
 const getResponseErrorMessage = async (res: Response): Promise<string> => {
@@ -121,6 +124,9 @@ export const streamChat = (
 ): AbortController => {
 	const controller = new AbortController();
 
+	// Step 1 only — SQL + formatted answer. Charts are fetched separately via
+	// `fetchCharts` once this stream's `result` event lands (a second step),
+	// so this request never waits on chart generation.
 	const body = JSON.stringify({
 		question: payload.question,
 		conversation_id: payload.conversationId ?? undefined,
@@ -155,6 +161,44 @@ export const streamChat = (
 	})();
 
 	return controller;
+};
+
+/**
+ * Second step: once step 1 (`streamChat`) has returned the SQL and its
+ * executed result, ask the server whether a chart applies. Resolves to
+ * `null` on any failure or when visualization is disabled/skipped, so the
+ * caller can always fall back to a plain table.
+ *
+ * `conversationId` lets the route persist the bubble this step produces —
+ * the chart, or the table it falls back to — since the completions proxy
+ * already wrote the prose bubble and cannot know how this resolves.
+ */
+export const fetchCharts = async (
+	question: string,
+	sql: string | undefined,
+	result: SqlResult | undefined,
+	conversationId: string | null,
+): Promise<unknown> => {
+	const payload: VisualizeRequest = {
+		question,
+		sql: sql ?? '',
+		result,
+		conversation_id: conversationId ?? undefined,
+	};
+
+	try {
+		const res = await fetch('/api/chat/visualize', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload),
+		});
+		if (!res.ok) return null;
+
+		const data = (await res.json()) as VisualizeResponse;
+		return Array.isArray(data.charts) && data.charts.length > 0 ? data.charts : null;
+	} catch {
+		return null;
+	}
 };
 
 /**

@@ -24,8 +24,7 @@ import { userCan } from '@/auth/permissions';
 import type { ResolvedUser } from '@/auth/resolve-user';
 import { getPrisma } from '@/lib/prisma';
 import { findOwnedConversation } from '@/lib/chatConversations';
-import { buildAnswerMessages, type AgentAnswer, type AnswerMessage } from '@/lib/answerMessages';
-import { isVisualizationEnabled } from '@/lib/configurations';
+import { buildSqlAnswerMessage, type AgentAnswer, type AnswerMessage } from '@/lib/answerMessages';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -67,10 +66,14 @@ type ChatStreamResultEvent = {
 };
 
 // Consume a teed copy of the SSE stream, returning the final answer (as the
-// assistant bubbles it renders into), the analytics fields, and — on a
+// assistant bubble it renders into), the analytics fields, and — on a
 // mid-stream agent failure — the raw error message. Mirrors the parsing the
 // browser does in `frontend/api/chat.ts` (data: lines, `[DONE]` sentinel,
 // JSON `result`/`error` events).
+//
+// Only Message 1 comes out of this stream: charts are a separate second step,
+// so the bubble carrying them (or the result table) is written by
+// `/api/chat/visualize` once that step reports back.
 const readFinalAnswer = async (
 	stream: ReadableStream<Uint8Array>,
 ): Promise<{
@@ -94,7 +97,8 @@ const readFinalAnswer = async (
 			if (event.type === 'result') {
 				response = event.answer?.response ?? null;
 				sql = event.answer?.sql_code ?? null;
-				answerMessages = event.answer ? buildAnswerMessages(event.answer) : [];
+				const sqlAnswer = event.answer ? buildSqlAnswerMessage(event.answer) : null;
+				answerMessages = sqlAnswer ? [sqlAnswer] : [];
 			} else if (event.type === 'error') {
 				errorMessage = event.message ?? null;
 			}
@@ -125,13 +129,10 @@ const readFinalAnswer = async (
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const payload = parseBody(await req.text());
 
-	// The visualization toggle is an instance-wide setting, so it is resolved
-	// here rather than trusted from the caller — a stale browser tab or a
-	// direct API client cannot opt back into charts once admins turn them off.
-	const body = JSON.stringify({
-		...payload,
-		visualization: await isVisualizationEnabled(),
-	});
+	// Step 1 only: SQL + formatted answer. Charts are a separate, second-step
+	// request (POST /api/chat/visualize) the client makes after this
+	// completes, so the answer never waits on an extra LLM round trip.
+	const body = JSON.stringify(payload);
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',
@@ -213,13 +214,13 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 			});
 
 			if (conversation) {
-				// A result persists the same bubbles the browser rendered (prose +
-				// SQL, then charts or the result table) so reopening the
-				// conversation looks identical to watching it stream. A mid-stream
-				// agent failure persists the real error text instead, paired with
-				// the already-persisted user turn. A stream that closed with
-				// neither (e.g. the upstream connection dropped) has nothing
-				// meaningful to save.
+				// A result persists the prose + SQL bubble the browser rendered,
+				// so reopening the conversation looks identical to watching it
+				// stream; `/api/chat/visualize` adds the chart/table bubble when
+				// the second step lands. A mid-stream agent failure persists the
+				// real error text instead, paired with the already-persisted user
+				// turn. A stream that closed with neither (e.g. the upstream
+				// connection dropped) has nothing meaningful to save.
 				const rows: AnswerMessage[] =
 					answerMessages.length > 0
 						? answerMessages

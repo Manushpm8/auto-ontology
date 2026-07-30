@@ -5,16 +5,18 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { cancelChat, streamChat, watchChat } from '@/api/chat';
+import { cancelChat, fetchCharts, streamChat, watchChat } from '@/api/chat';
 import { conversationsApi, toConversation } from '@/api/conversations';
-import { buildAnswerMessages } from '@/lib/answerMessages';
+import {
+	GENERIC_ANSWER_ERROR,
+	buildSqlAnswerMessage,
+	buildResultMessage,
+	isResultMessage,
+} from '@/lib/answerMessages';
 import type { ChatMessage, GraphStep, ResultEvent } from '@/types/chat';
 
 let nextId = 0;
 const uid = () => `msg-${Date.now()}-${nextId++}`;
-
-const GENERIC_ERROR_MESSAGE =
-	'Something went wrong. Please try again, and if the issue persists, contact our support';
 
 const CONVERSATION_IN_PROGRESS = 'Conversation in progress';
 
@@ -31,6 +33,11 @@ export const useChat = () => {
 	const [steps, setSteps] = useState<GraphStep[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const controllerRef = useRef<AbortController | null>(null);
+	// Bumped on every `sendMessage`/`stopGeneration`/`clearConversation` so the
+	// async step-2 chart fetch (which isn't tied to `controllerRef`'s
+	// AbortController) can tell it's stale and skip mutating state after the
+	// user stopped/started a new turn while it was still in flight.
+	const requestIdRef = useRef(0);
 	// Tracks a `resumeIfRunning` watch, separately from `controllerRef` (the
 	// user's own in-flight send) so switching conversations or sending a new
 	// message never gets tangled up with a background resume attempt.
@@ -67,21 +74,59 @@ export const useChat = () => {
 		[],
 	);
 
-	// Renders one agent answer the same way the completions proxy persists it,
-	// so a reloaded conversation matches what the user watched arrive. Shared
-	// by the live send and the resume watch.
-	const appendAnswer = useCallback(
+	// Message 1 — prose + SQL, rendered as soon as the SQL pipeline resolves.
+	// Built with the same helper the completions proxy persists with, so a
+	// reloaded conversation matches what the user watched arrive.
+	const appendSqlAnswerMessage = useCallback(
 		(answer: ResultEvent['answer']) => {
-			buildAnswerMessages(answer).forEach((msg) => {
-				appendAssistantMessage(msg.content, {
-					sql: msg.sql,
-					sqlResponse: msg.sqlResponse,
-				});
-			});
+			const msg = buildSqlAnswerMessage(answer);
+			if (msg) appendAssistantMessage(msg.content, { sql: msg.sql });
 		},
 		[appendAssistantMessage],
 	);
 
+	// Message 2 — a separate request decides whether a chart applies to the
+	// already-executed result, falling back to the plain table. The route it
+	// calls also persists this bubble, so history and the live view agree.
+	// Keeps the "thinking" indicator up under its own label while it resolves.
+	//
+	// Only the tab that submitted the question runs this, which keeps that route
+	// to a single writer per turn. A tab watching someone else's run therefore
+	// won't show Message 2 until the conversation is reloaded.
+	const appendResultMessage = useCallback(
+		async (
+			answer: ResultEvent['answer'],
+			question: string,
+			conversationId: string | null,
+			requestId: number,
+		) => {
+			setSteps((prev) => [
+				...prev.map((s) => ({ ...s, status: 'completed' as const })),
+				{ node: 'visualize', label: 'Building charts', status: 'active' as const },
+			]);
+
+			const charts = await fetchCharts(
+				question,
+				answer.sql_code,
+				answer.sql_response_from_db,
+				conversationId,
+			).catch(() => null);
+
+			if (requestId !== requestIdRef.current) return;
+
+			const msg = buildResultMessage(answer, charts);
+			if (msg) appendAssistantMessage(msg.content, { sqlResponse: msg.sqlResponse });
+		},
+		[appendAssistantMessage],
+	);
+
+	// Picks up the assistant turn a run that finished just before we attached
+	// left behind. Adopts every snapshot it reads, so the prose shows up as soon
+	// as it is committed, but keeps polling until the turn is complete: the two
+	// bubbles are written by different routes, so a transcript ending in Message
+	// 1 may still be waiting on Message 2. Turns without an executed result have
+	// no Message 2 at all, and simply run out of attempts with the transcript
+	// already up to date.
 	const pollForPersistedAssistant = useCallback(
 		async (conversationId: string, watchController: AbortController) => {
 			for (let attempt = 0; attempt < REFETCH_ATTEMPTS; attempt += 1) {
@@ -93,10 +138,10 @@ export const useChat = () => {
 					const detail = await conversationsApi.get(conversationId);
 					const conv = toConversation(detail);
 					const last = conv.messages[conv.messages.length - 1];
-					if (last?.role === 'assistant') {
-						setMessages(conv.messages);
-						return;
-					}
+					if (last?.role !== 'assistant') continue;
+
+					setMessages(conv.messages);
+					if (isResultMessage(last)) return;
 				} catch {
 					// ignore fetch errors and retry
 				}
@@ -120,6 +165,7 @@ export const useChat = () => {
 	// conversation's slot until it finishes, so merely dropping the stream
 	// would leave the next question rejected with 409.
 	const stopGeneration = useCallback((cancel = true) => {
+		requestIdRef.current += 1;
 		controllerRef.current?.abort();
 		controllerRef.current = null;
 		resumeControllerRef.current?.abort();
@@ -155,6 +201,9 @@ export const useChat = () => {
 
 			resumeControllerRef.current?.abort();
 			setSteps([]);
+			// Supersedes any chart fetch still in flight from this tab's own
+			// previous send, so its bubble can't land on top of this run.
+			requestIdRef.current += 1;
 			let sawActivity = false;
 
 			const controller = watchChat(conversationId, {
@@ -174,12 +223,17 @@ export const useChat = () => {
 					});
 				},
 
+				// Message 1 only. The chart step belongs to the tab that
+				// submitted the question — it is the one that knows which
+				// question the answer belongs to, and keeping it the only caller
+				// keeps the visualize route a single writer per turn. Whatever it
+				// persists shows up here on the next reload.
 				onResult(event) {
-					appendAnswer(event.answer);
-					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
-					setIsLoading(false);
+					appendSqlAnswerMessage(event.answer);
 					activeRunConvIdRef.current = null;
 					resumeControllerRef.current = null;
+					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
+					setIsLoading(false);
 				},
 
 				onError(event) {
@@ -192,7 +246,7 @@ export const useChat = () => {
 						resumeControllerRef.current = null;
 						return;
 					}
-					const message = event.message.trim() || GENERIC_ERROR_MESSAGE;
+					const message = event.message.trim() || GENERIC_ANSWER_ERROR;
 					appendAssistantMessage(message);
 					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 					setIsLoading(false);
@@ -221,7 +275,7 @@ export const useChat = () => {
 
 			resumeControllerRef.current = controller;
 		},
-		[appendAnswer, appendAssistantMessage, pollForPersistedAssistant],
+		[appendSqlAnswerMessage, appendAssistantMessage, pollForPersistedAssistant],
 	);
 
 	// Resolves true once the backend accepted the question, false if it was
@@ -249,7 +303,15 @@ export const useChat = () => {
 			setMessages((prev) => [...prev, userMsg]);
 			setSteps([]);
 			setIsLoading(true);
+			const requestId = (requestIdRef.current += 1);
 			activeRunConvIdRef.current = conversationId;
+
+			const finishRun = () => {
+				setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
+				setIsLoading(false);
+				activeRunConvIdRef.current = null;
+				controllerRef.current = null;
+			};
 
 			// Wait out a Stop's cancel so we don't POST into a slot that's still
 			// held for a few hundred ms (which would 409 and leave the question
@@ -283,23 +345,28 @@ export const useChat = () => {
 					},
 
 					onResult(event) {
-						appendAnswer(event.answer);
-						setSteps((prev) =>
-							prev.map((s) => ({ ...s, status: 'completed' as const })),
-						);
-						setIsLoading(false);
-						activeRunConvIdRef.current = null;
-						controllerRef.current = null;
+						appendSqlAnswerMessage(event.answer);
+
+						if (!event.answer.sql_response_from_db) {
+							// No executed result to visualize — nothing for step 2
+							// to build, so wrap up here.
+							finishRun();
+							return;
+						}
+
+						void appendResultMessage(
+							event.answer,
+							text,
+							conversationId,
+							requestId,
+						).finally(() => {
+							if (requestId === requestIdRef.current) finishRun();
+						});
 					},
 
 					onError(event) {
-						const message = event.message.trim() || GENERIC_ERROR_MESSAGE;
-						setSteps((prev) =>
-							prev.map((s) => ({ ...s, status: 'completed' as const })),
-						);
-						setIsLoading(false);
-						activeRunConvIdRef.current = null;
-						controllerRef.current = null;
+						const message = event.message.trim() || GENERIC_ANSWER_ERROR;
+						finishRun();
 
 						// Another stream already owns this conversation (a second tab,
 						// or a run we stopped watching but couldn't cancel). Nothing
@@ -321,7 +388,7 @@ export const useChat = () => {
 			controllerRef.current = controller;
 			return accepted;
 		},
-		[appendAnswer, appendAssistantMessage, resumeIfRunning],
+		[appendAssistantMessage, appendSqlAnswerMessage, appendResultMessage, resumeIfRunning],
 	);
 
 	// Leaves the run alone server-side: it keeps streaming into the buffer and
