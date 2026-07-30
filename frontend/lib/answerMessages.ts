@@ -35,7 +35,8 @@ export type AnswerMessage = {
 	sqlResponse?: string;
 };
 
-const CHART_FENCE = '```chart';
+const hasChartFence = (content: string): boolean =>
+	/(^|\n)```(?:chart|chart-carousel)\b/.test(content);
 
 /** Strip ```chart / ```chart-carousel fences so Message 1 stays prose-only. */
 export const stripChartFences = (markdown: string): string =>
@@ -57,11 +58,10 @@ export const isResultMessage = (message: {
 	content: string;
 	sqlResponse?: string | null;
 }): boolean =>
-	message.role === 'assistant' &&
-	(message.sqlResponse != null || message.content.startsWith(CHART_FENCE));
+	message.role === 'assistant' && (message.sqlResponse != null || hasChartFence(message.content));
 
 /** Message 1 — prose + SQL, ready the moment the agent's answer lands. */
-export const buildProseMessage = (answer: AgentAnswer): AnswerMessage | null => {
+export const buildSqlAnswerMessage = (answer: AgentAnswer): AnswerMessage | null => {
 	const { response, sql_code: sqlCode } = answer;
 	const prose = stripChartFences(response ?? '');
 

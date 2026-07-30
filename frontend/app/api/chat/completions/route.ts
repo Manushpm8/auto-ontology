@@ -24,7 +24,7 @@ import { userCan } from '@/auth/permissions';
 import type { ResolvedUser } from '@/auth/resolve-user';
 import { getPrisma } from '@/lib/prisma';
 import { findOwnedConversation } from '@/lib/chatConversations';
-import { buildProseMessage, type AgentAnswer, type AnswerMessage } from '@/lib/answerMessages';
+import { buildSqlAnswerMessage, type AgentAnswer, type AnswerMessage } from '@/lib/answerMessages';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -97,8 +97,8 @@ const readFinalAnswer = async (
 			if (event.type === 'result') {
 				response = event.answer?.response ?? null;
 				sql = event.answer?.sql_code ?? null;
-				const prose = event.answer ? buildProseMessage(event.answer) : null;
-				answerMessages = prose ? [prose] : [];
+				const sqlAnswer = event.answer ? buildSqlAnswerMessage(event.answer) : null;
+				answerMessages = sqlAnswer ? [sqlAnswer] : [];
 			} else if (event.type === 'error') {
 				errorMessage = event.message ?? null;
 			}

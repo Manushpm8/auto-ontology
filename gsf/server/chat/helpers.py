@@ -35,12 +35,7 @@ NODE_LABELS: dict[str, str] = {
 
 
 class ChatRequest(BaseModel):
-    """Payload sent by the frontend to start a chat completion.
-
-    Step 1 only: returns the SQL + formatted answer. Charts are a separate,
-    second step — see :class:`VisualizeRequest` — so the answer isn't held up
-    waiting on an extra LLM round trip to pick a chart.
-    """
+    """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
     conversation_id: str | None = None

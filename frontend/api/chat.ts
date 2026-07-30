@@ -178,7 +178,7 @@ export const fetchCharts = async (
 	sql: string | undefined,
 	result: SqlResult | undefined,
 	conversationId: string | null,
-): Promise<Record<string, unknown>[] | null> => {
+): Promise<unknown> => {
 	const payload: VisualizeRequest = {
 		question,
 		sql: sql ?? '',

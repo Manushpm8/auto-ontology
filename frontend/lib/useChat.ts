@@ -9,7 +9,7 @@ import { cancelChat, fetchCharts, streamChat, watchChat } from '@/api/chat';
 import { conversationsApi, toConversation } from '@/api/conversations';
 import {
 	GENERIC_ANSWER_ERROR,
-	buildProseMessage,
+	buildSqlAnswerMessage,
 	buildResultMessage,
 	isResultMessage,
 } from '@/lib/answerMessages';
@@ -77,9 +77,9 @@ export const useChat = () => {
 	// Message 1 — prose + SQL, rendered as soon as the SQL pipeline resolves.
 	// Built with the same helper the completions proxy persists with, so a
 	// reloaded conversation matches what the user watched arrive.
-	const appendProseMessage = useCallback(
+	const appendSqlAnswerMessage = useCallback(
 		(answer: ResultEvent['answer']) => {
-			const msg = buildProseMessage(answer);
+			const msg = buildSqlAnswerMessage(answer);
 			if (msg) appendAssistantMessage(msg.content, { sql: msg.sql });
 		},
 		[appendAssistantMessage],
@@ -229,7 +229,7 @@ export const useChat = () => {
 				// keeps the visualize route a single writer per turn. Whatever it
 				// persists shows up here on the next reload.
 				onResult(event) {
-					appendProseMessage(event.answer);
+					appendSqlAnswerMessage(event.answer);
 					activeRunConvIdRef.current = null;
 					resumeControllerRef.current = null;
 					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
@@ -275,7 +275,7 @@ export const useChat = () => {
 
 			resumeControllerRef.current = controller;
 		},
-		[appendProseMessage, appendAssistantMessage, pollForPersistedAssistant],
+		[appendSqlAnswerMessage, appendAssistantMessage, pollForPersistedAssistant],
 	);
 
 	// Resolves true once the backend accepted the question, false if it was
@@ -345,7 +345,7 @@ export const useChat = () => {
 					},
 
 					onResult(event) {
-						appendProseMessage(event.answer);
+						appendSqlAnswerMessage(event.answer);
 
 						if (!event.answer.sql_response_from_db) {
 							// No executed result to visualize — nothing for step 2
@@ -388,7 +388,7 @@ export const useChat = () => {
 			controllerRef.current = controller;
 			return accepted;
 		},
-		[appendAssistantMessage, appendProseMessage, appendResultMessage, resumeIfRunning],
+		[appendAssistantMessage, appendSqlAnswerMessage, appendResultMessage, resumeIfRunning],
 	);
 
 	// Leaves the run alone server-side: it keeps streaming into the buffer and
