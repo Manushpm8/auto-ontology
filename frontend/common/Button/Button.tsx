@@ -19,9 +19,7 @@ const themeClasses: Record<ButtonTheme, string> = {
 		'border border-red-500 bg-white text-red-600 hover:bg-red-600 hover:text-white dark:border-red-500 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-600 disabled:border-zinc-300 disabled:bg-white disabled:text-zinc-400 dark:disabled:border-zinc-600 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500',
 	[ButtonTheme.DangerSubtle]:
 		'border border-red-300 bg-white text-red-600 hover:bg-red-50 dark:border-red-800 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950/30 disabled:border-zinc-300 disabled:bg-white disabled:text-zinc-400 dark:disabled:border-zinc-600 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500',
-	[ButtonTheme.Teal]:
-		'border border-transparent bg-teal-600 text-white hover:bg-teal-700 disabled:bg-zinc-100 disabled:text-zinc-400 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500',
-	[ButtonTheme.Ghost]:
+	[ButtonTheme.Minimal]:
 		'border border-transparent bg-transparent text-zinc-600 hover:bg-[#76b900]/10 hover:text-[#5e9400] dark:text-zinc-300 dark:hover:bg-[#76b900]/20 dark:hover:text-[#a3d63a] disabled:text-zinc-400 dark:disabled:text-zinc-500',
 	[ButtonTheme.Icon]:
 		'border border-transparent bg-transparent text-zinc-400 hover:bg-[#76b900]/10 hover:text-[#5e9400] dark:hover:bg-[#76b900]/20 dark:hover:text-[#a3d63a] disabled:text-zinc-400 dark:disabled:text-zinc-600',

@@ -10,8 +10,8 @@ export enum ButtonTheme {
 	DangerOutline = 'danger-outline',
 	/** Pale bordered danger button (subtler than DangerOutline's solid hover-invert). */
 	DangerSubtle = 'danger-subtle',
-	Teal = 'teal',
-	Ghost = 'ghost',
+	/** Low-emphasis text button: no fill or border, brand-accent tint on hover. */
+	Minimal = 'minimal',
 	/** Icon-only button with brand-accent hover (green tint). */
 	Icon = 'icon',
 	/** Icon-only button with a neutral gray hover, for generic utility controls (close, dots, expand/collapse…). */

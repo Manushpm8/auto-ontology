@@ -86,7 +86,7 @@ export const UserMenu = ({ version }: { version?: string }) => {
 					</div>
 					<div className="border-t border-zinc-100 p-1 dark:border-zinc-800">
 						<Button
-							theme={ButtonTheme.Ghost}
+							theme={ButtonTheme.Minimal}
 							size={Size.SMALL}
 							onClick={handleSignOut}
 							disabled={signingOut}

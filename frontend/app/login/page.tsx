@@ -112,7 +112,7 @@ const LoginForm = () => {
 					</Button>
 				))}
 				<Button
-					theme={ButtonTheme.Ghost}
+					theme={ButtonTheme.Minimal}
 					size={Size.SMALL}
 					type="button"
 					onClick={() => {
@@ -177,7 +177,7 @@ const LoginForm = () => {
 
 			{ssoEnabled ? (
 				<Button
-					theme={ButtonTheme.Ghost}
+					theme={ButtonTheme.Minimal}
 					size={Size.SMALL}
 					type="button"
 					onClick={() => {
