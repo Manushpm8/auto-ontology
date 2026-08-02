@@ -6,7 +6,9 @@
 
 import { useMemo, useState } from 'react';
 import type { ParsedTable, TableRow } from '@/lib/parseSqlResponse';
+import { EmptyState } from '@/common/EmptyState';
 import { Table } from '@/common/Table';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import type { TableColumn } from '@/types/table';
 
 const PAGE_SIZE = 10;
@@ -42,7 +44,7 @@ export const DynamicTable = ({ table }: DynamicTableProps) => {
 	);
 
 	if (columns.length === 0 || rows.length === 0) {
-		return <p className="text-xs text-zinc-400">No data available</p>;
+		return <EmptyState variant={EmptyStateVariant.Inline} title="No data available" />;
 	}
 
 	return (

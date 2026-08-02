@@ -4,9 +4,11 @@
 
 'use client';
 
-import { Placeholders } from '@/assets/images/placeholders';
 import { ConnectionInfoCard } from '@/components/connectionsPage/ConnectionInfoCard';
+import { EmptyState } from '@/common/EmptyState';
+import { IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import type { Connection } from '@/types/connection';
 
 type ConnectionsInfoCardViewProps = {
@@ -32,9 +34,11 @@ export const ConnectionsInfoCardView = ({
 
 	if (connections.length === 0) {
 		return (
-			<div className="flex w-full flex-col items-center justify-center py-12">
-				<Placeholders.NoResults />
-			</div>
+			<EmptyState
+				variant={EmptyStateVariant.Borderless}
+				icon={IconName.Connection}
+				title="No Results"
+			/>
 		);
 	}
 

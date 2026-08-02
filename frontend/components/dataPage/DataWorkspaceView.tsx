@@ -7,7 +7,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
+import { EmptyState } from '@/common/EmptyState';
+import { IconName } from '@/common/icons';
 import { SkeletonBlock, SkeletonCard, SkeletonRows } from '@/common/Skeleton';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
@@ -260,11 +263,11 @@ export function DataWorkspaceView() {
 
 	if (!workspaceDb) {
 		return (
-			<div className="flex h-full flex-1 items-center justify-center">
-				<p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-					No Databases found
-				</p>
-			</div>
+			<EmptyState
+				variant={EmptyStateVariant.Borderless}
+				icon={IconName.Database}
+				title="No Databases found"
+			/>
 		);
 	}
 

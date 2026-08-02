@@ -12,8 +12,10 @@ import { ModalWithSteps, ConfirmModal } from '@/common/modal';
 import { ColorPicker } from '@/components/settings/ColorPicker';
 import type { ColorOption } from '@/components/settings/ColorPicker';
 import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { Toggle } from '@/common/Toggle';
 import { Size, ButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { PopoverMenu } from '@/common/PopoverMenu';
@@ -675,9 +677,12 @@ export default function ZonesSettingsPage() {
 						))}
 					</div>
 				) : (
-					<div className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-6 py-10 text-center text-sm text-zinc-500 dark:border-zinc-600 dark:bg-zinc-900/30 dark:text-zinc-400">
-						No zones found.
-					</div>
+					<EmptyState
+						variant={EmptyStateVariant.Inline}
+						icon={IconName.Key}
+						title="No zones found"
+						className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
+					/>
 				)}
 			</div>
 			<ModalWithSteps

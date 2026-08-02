@@ -19,6 +19,7 @@ import { CertificationStatus } from '@/enums/certification';
 import { fieldStatus } from '@/lib/certification';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import { CertificationSelect } from '@/common/CertificationSelect';
+import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
 import { TagInput } from '@/common/TagInput';
 import { Table } from '@/common/Table';
@@ -961,21 +962,18 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 					<main className="min-h-0 min-w-0 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 						{sections.length === 0 ? (
-							<div className="flex min-h-[14rem] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-8 py-12 text-center dark:border-zinc-600 dark:bg-zinc-900/30">
-								<div
-									className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
-									aria-hidden
-								>
-									◇
-								</div>
-								<p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-									Nothing selected yet
-								</p>
-								<p className="max-w-sm text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-									Pick a database, schema, table, column, or field in the explorer
-									to load metadata, descriptions, and related entities.
-								</p>
-							</div>
+							<EmptyState
+								illustration={
+									<div
+										className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
+										aria-hidden
+									>
+										◇
+									</div>
+								}
+								title="Nothing selected yet"
+								description="Pick a database, schema, table, column, or field in the explorer to load metadata, descriptions, and related entities."
+							/>
 						) : (
 							<div className="space-y-5">
 								{showContentHeader ? (

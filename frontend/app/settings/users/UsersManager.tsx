@@ -142,6 +142,7 @@ export const UsersManager = () => {
 						rows={users}
 						rowKey={(user) => user.id}
 						layout="auto"
+						emptyMessage="No users found"
 					/>
 				)}
 			</div>

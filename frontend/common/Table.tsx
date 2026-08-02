@@ -12,6 +12,8 @@ import {
 	PaginationRoot,
 } from '@nvidia/foundations-react-core';
 
+import { EmptyState } from '@/common/EmptyState';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import type { TableColumn, TableProps } from '@/types/table';
 
 const DEFAULT_CONTAINER =
@@ -79,9 +81,7 @@ export const Table = <T,>({
 	if (rows.length === 0) {
 		return (
 			<div className={cx(containerClassName ?? DEFAULT_CONTAINER, className)}>
-				<p className="p-4 text-sm italic text-zinc-500 dark:text-zinc-400">
-					{emptyMessage ?? '—'}
-				</p>
+				<EmptyState variant={EmptyStateVariant.Inline} title={emptyMessage ?? '—'} />
 			</div>
 		);
 	}

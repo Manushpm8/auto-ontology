@@ -8,7 +8,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
 import { Button, SelectButton } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { formatDate } from '@/common/date';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonRows } from '@/common/Skeleton';
@@ -215,9 +217,10 @@ export const ChatSidebar = ({
 							<SkeletonRows rows={8} />
 						</div>
 					) : conversations.length === 0 ? (
-						<p className="px-2 py-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
-							No conversations yet
-						</p>
+						<EmptyState
+							variant={EmptyStateVariant.Inline}
+							title="No conversations yet"
+						/>
 					) : (
 						<ul className="space-y-0.5">
 							{conversations.map((conv) => (

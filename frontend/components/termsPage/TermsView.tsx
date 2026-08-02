@@ -10,6 +10,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Placeholders } from '@/assets/images/placeholders';
 import { Breadcrumbs } from '@/common/Breadcrumbs';
 import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
@@ -1432,14 +1433,14 @@ export const TermsView = () => {
 				)}
 
 				{!loading && error == null && terms.length === 0 && (
-					<div className="flex h-full min-h-[40dvh] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300/80 bg-white/60 p-12 text-center dark:border-zinc-600 dark:bg-zinc-950/40">
-						<Placeholders.NoTerms />
-						<p className="mt-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-							{debouncedSearchQuery
+					<EmptyState
+						illustration={<Placeholders.NoTerms />}
+						title={
+							debouncedSearchQuery
 								? 'No Terms Match Your Search'
-								: 'No Terms Created Yet'}
-						</p>
-					</div>
+								: 'No Terms Created Yet'
+						}
+					/>
 				)}
 
 				{!loading && error == null && terms.length > 0 && (

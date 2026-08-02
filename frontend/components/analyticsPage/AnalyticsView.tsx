@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 
 import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonTable } from '@/common/Skeleton';
@@ -166,19 +167,11 @@ export const AnalyticsView = () => {
 				)}
 
 				{!loading && error == null && rows.length === 0 && (
-					<div className="flex h-full min-h-[40dvh] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300/80 bg-white/60 p-12 text-center dark:border-zinc-600 dark:bg-zinc-950/40">
-						<Icon
-							name={IconName.ChartLine}
-							className="h-8 w-8 text-zinc-300 dark:text-zinc-600"
-						/>
-						<p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-							No analytics recorded yet
-						</p>
-						<p className="text-xs text-zinc-500 dark:text-zinc-500">
-							Analytics are captured automatically when you send messages in a
-							conversation.
-						</p>
-					</div>
+					<EmptyState
+						icon={IconName.ChartLine}
+						title="No analytics recorded yet"
+						description="Analytics are captured automatically when you send messages in a conversation."
+					/>
 				)}
 
 				{!loading && error == null && rows.length > 0 && (

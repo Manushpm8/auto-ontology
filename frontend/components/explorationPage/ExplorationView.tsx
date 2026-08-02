@@ -11,7 +11,9 @@ import type { Core } from 'cytoscape';
 import { explorationApi } from '@/api/exploration';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { SelectButton } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { SelectButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { SearchInput } from '@/common/SearchInput';
 import {
@@ -324,13 +326,20 @@ export const ExplorationView = () => {
 			)}
 
 			{!loading && error == null && graph.nodes.length === 0 && (
-				<div className="flex h-full items-center justify-center text-sm text-zinc-500">
-					{noZoneAccess
-						? 'You do not have access to any data. Contact an administrator to request access.'
-						: layer === ExplorationLayer.Semantic
-							? 'No Terms Created Yet'
-							: 'No Data Objects Found'}
-				</div>
+				<EmptyState
+					variant={EmptyStateVariant.Borderless}
+					icon={IconName.Exploration}
+					title={
+						noZoneAccess
+							? 'You do not have access to any data'
+							: layer === ExplorationLayer.Semantic
+								? 'No Terms Created Yet'
+								: 'No Data Objects Found'
+					}
+					description={
+						noZoneAccess ? 'Contact an administrator to request access.' : undefined
+					}
+				/>
 			)}
 
 			{!loading && error == null && graph.nodes.length > 0 && (
