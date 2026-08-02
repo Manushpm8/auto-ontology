@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { semanticCompilationApi } from '@/api/settings';
 import { Toast } from '@/common/Toast';
+import { Toggle } from '@/common/Toggle';
 
 export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: boolean }) => {
 	// Seeded from the server (see page.tsx) so the correct state renders on first
@@ -61,23 +62,12 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 							{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
 						</span>
 					</div>
-					<button
-						type="button"
-						role="switch"
-						aria-checked={enabled}
+					<Toggle
+						checked={enabled}
 						aria-label="Enable semantic compilation"
 						disabled={saving}
-						onClick={handleToggle}
-						className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-							enabled ? 'bg-[#76b900]' : 'bg-zinc-300 dark:bg-zinc-600'
-						}`}
-					>
-						<span
-							className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-								enabled ? 'translate-x-5' : 'translate-x-0.5'
-							}`}
-						/>
-					</button>
+						onChange={handleToggle}
+					/>
 				</div>
 			</div>
 

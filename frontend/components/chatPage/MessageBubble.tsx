@@ -4,8 +4,9 @@
 
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { ChatMessage } from '@/types/chat';
+import { CopyButton } from '@/common/Button';
 import { formatDate } from '@/common/date';
 import { parseSqlResponse, type ParsedTable } from '@/lib/parseSqlResponse';
 import { SqlBlock } from '@/common/SqlBlock';
@@ -13,27 +14,6 @@ import { DynamicTable } from './DynamicTable';
 import { FormattedContent } from './FormattedContent';
 
 type SingleCellResult = { column: string; value: string };
-
-const RawCopyButton = ({ text }: { text: string }) => {
-	const [copied, setCopied] = useState(false);
-
-	const handleCopy = useCallback(() => {
-		navigator.clipboard.writeText(text).then(() => {
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
-		});
-	}, [text]);
-
-	return (
-		<button
-			type="button"
-			onClick={handleCopy}
-			className="absolute top-2 right-2 rounded bg-zinc-700 px-2 py-1 text-xs text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-zinc-600"
-		>
-			{copied ? 'Copied!' : 'Copy'}
-		</button>
-	);
-};
 
 type QueryResultsSectionProps = {
 	sqlResponse: string | undefined;
@@ -68,7 +48,7 @@ const QueryResultsSection = ({
 			<div className="group relative overflow-hidden rounded-lg bg-zinc-900 dark:bg-zinc-950">
 				<div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1.5">
 					<span className="text-xs font-medium text-zinc-400">Raw</span>
-					<RawCopyButton text={sqlResponse} />
+					<CopyButton text={sqlResponse} />
 				</div>
 				<pre className="overflow-x-auto p-3 text-xs leading-relaxed text-zinc-100">
 					<code>{sqlResponse}</code>

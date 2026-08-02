@@ -6,6 +6,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Placeholders } from '@/assets/images/placeholders';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { ConnectionsInfoCardView } from '@/components/connectionsPage/ConnectionsInfoCardView';
 import { NewConnectionsModal } from '@/components/connectionsPage/NewConnectionsModal';
 import { ConfirmModal } from '@/common/modal';
@@ -99,16 +101,17 @@ export const ConnectionsView = () => {
 		return (
 			<div className="flex h-full w-full flex-1 flex-col items-center justify-center gap-3 px-6">
 				<p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-				<button
+				<Button
+					theme={ButtonTheme.Secondary}
+					size={Size.REGULAR}
 					type="button"
 					onClick={() => {
 						setLoading(true);
 						void fetchConnections().finally(() => setLoading(false));
 					}}
-					className="cursor-pointer rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
 				>
 					Retry
-				</button>
+				</Button>
 			</div>
 		);
 	}
@@ -124,26 +127,34 @@ export const ConnectionsView = () => {
 					<h2 className="mt-6 text-base font-semibold text-zinc-900 dark:text-zinc-100">
 						No Connections Created Yet
 					</h2>
-					<button
-						type="button"
-						onClick={handleCreateConnection}
-						className="mt-6 flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#6aa500]"
-					>
-						<Icon name={IconName.Database} className="h-4 w-4" />
-						Create New Connection
-					</button>
+					<div className="mt-6">
+						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.REGULAR}
+							type="button"
+							onClick={handleCreateConnection}
+							iconPosition="left"
+							shadow
+						>
+							<Icon name={IconName.Database} className="h-4 w-4" />
+							Create New Connection
+						</Button>
+					</div>
 				</div>
 			) : (
 				<div className="flex w-full flex-col items-start gap-5">
 					<div className="flex w-full justify-end">
-						<button
+						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.REGULAR}
 							type="button"
 							onClick={handleCreateConnection}
-							className="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#6aa500]"
+							iconPosition="left"
+							shadow
 						>
 							<Icon name={IconName.Database} className="h-4 w-4" />
 							Create New Connection
-						</button>
+						</Button>
 					</div>
 					<ConnectionsInfoCardView
 						connections={connections}

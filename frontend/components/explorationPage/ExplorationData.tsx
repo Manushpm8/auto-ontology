@@ -6,7 +6,9 @@
 
 import { useState } from 'react';
 
-import { Icon } from '@/common/icons';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
+import { Icon, IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { getTableType } from '@/components/dataPage/get-table-type';
 import { ExplorationLayer } from '@/enums/exploration';
@@ -104,10 +106,12 @@ export const ActiveDataCard = ({
 					Showing info on this Data Object
 				</p>
 				<div className="flex items-center gap-1">
-					<button
+					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={() => setMinimized((value) => !value)}
-						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 						aria-label={
 							minimized
 								? 'Expand data object details'
@@ -115,15 +119,17 @@ export const ActiveDataCard = ({
 						}
 					>
 						{minimized ? '+' : '−'}
-					</button>
-					<button
+					</Button>
+					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={onClose}
-						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 						aria-label="Close data object details"
 					>
-						×
-					</button>
+						<Icon name={IconName.Close} className="h-4 w-4" />
+					</Button>
 				</div>
 			</header>
 			{!minimized && (
@@ -145,13 +151,14 @@ export const ActiveDataCard = ({
 							</p>
 						</div>
 						<div className="flex shrink-0 items-center gap-1">
-							<button
+							<Button
+								theme={ButtonTheme.Primary}
+								size={Size.SMALL}
 								type="button"
 								onClick={onView}
-								className="cursor-pointer rounded-lg bg-[#76b900] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#5e9400]"
 							>
 								View in Data
-							</button>
+							</Button>
 						</div>
 					</div>
 					<div className="grid grid-cols-2 gap-2">

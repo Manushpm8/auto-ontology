@@ -11,6 +11,8 @@ import NextLink from 'next/link';
 import { datasources } from '@/api/datasources';
 import { explorationApi } from '@/api/exploration';
 import { Icon, IconName } from '@/common/icons';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import type { Column } from '@/types/datasources';
 import type { TableExplorationDetails } from '@/types/exploration';
@@ -195,14 +197,16 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 						{target?.name} ({title})
 					</h2>
 				</div>
-				<button
+				<Button
+					theme={ButtonTheme.IconNeutral}
+					size={Size.SMALL}
+					iconOnly
 					type="button"
 					onClick={onClose}
-					className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 					aria-label={`Close ${title}`}
 				>
-					×
-				</button>
+					<Icon name={IconName.Close} className="h-4 w-4" />
+				</Button>
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">
 				{loading ? (

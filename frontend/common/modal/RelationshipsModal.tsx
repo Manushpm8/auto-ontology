@@ -12,6 +12,8 @@ import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import type { ExplorationNode } from '@/types/exploration';
 import type { TableColumn } from '@/types/table';
 import { Icon, IconName } from '@/common/icons';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { Table } from '@/common/Table';
 import { Modal } from './Modal';
 
@@ -82,13 +84,14 @@ export const RelationshipsModal = ({ node, rows, onClose, onFocus }: Relationshi
 			header: 'Focus',
 			width: 'w-20',
 			cell: (row) => (
-				<button
+				<Button
+					theme={ButtonTheme.Secondary}
+					size={Size.SMALL}
 					type="button"
 					onClick={() => onFocus(row.id)}
-					className="cursor-pointer rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:border-[#76b900] hover:text-[#76b900] dark:border-zinc-700 dark:text-zinc-300"
 				>
 					Focus
-				</button>
+				</Button>
 			),
 		},
 	];
@@ -102,14 +105,16 @@ export const RelationshipsModal = ({ node, rows, onClose, onFocus }: Relationshi
 						{node?.name} — Related Entities ({rows.length})
 					</h2>
 				</div>
-				<button
+				<Button
+					theme={ButtonTheme.IconNeutral}
+					size={Size.SMALL}
+					iconOnly
 					type="button"
 					onClick={onClose}
-					className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 					aria-label="Close related entities"
 				>
-					×
-				</button>
+					<Icon name={IconName.Close} className="h-4 w-4" />
+				</Button>
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">
 				<Table
