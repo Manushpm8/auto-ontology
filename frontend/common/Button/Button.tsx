@@ -80,31 +80,6 @@ export type ButtonProps = {
 	shadow?: boolean;
 };
 
-/** Button styling as a bare class string, for elements that can't be a `<button>` (e.g. a link). */
-export const buttonClassName = ({
-	theme = ButtonTheme.Primary,
-	size = Size.REGULAR,
-	iconPosition,
-	iconOnly = false,
-	noPadding = false,
-	rounded = false,
-	full = false,
-	shadow = false,
-}: ButtonProps = {}): string =>
-	[
-		'inline-flex cursor-pointer items-center justify-center whitespace-nowrap font-medium transition-colors disabled:cursor-default disabled:opacity-100',
-		themeClasses[theme],
-		sizeClasses[size],
-		rounded ? 'rounded-full' : radiusClasses[size],
-		iconOnly ? iconOnlySizeClasses[size] : setPaddingClasses(size, iconPosition, noPadding),
-		iconOnly && 'p-0',
-		iconPosition && 'gap-1.5',
-		full && 'w-full',
-		shadow && 'shadow-sm',
-	]
-		.filter(Boolean)
-		.join(' ');
-
 export const Button = forwardRef<
 	HTMLButtonElement,
 	ButtonProps & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'>
@@ -133,16 +108,21 @@ export const Button = forwardRef<
 			type={type}
 			disabled={disabled || loading}
 			aria-busy={loading || undefined}
-			className={buttonClassName({
-				theme,
-				size,
-				iconPosition,
-				iconOnly,
-				noPadding,
-				rounded,
-				full,
-				shadow,
-			})}
+			className={[
+				'inline-flex cursor-pointer items-center justify-center whitespace-nowrap font-medium transition-colors disabled:cursor-default disabled:opacity-100',
+				themeClasses[theme],
+				sizeClasses[size],
+				rounded ? 'rounded-full' : radiusClasses[size],
+				iconOnly
+					? iconOnlySizeClasses[size]
+					: setPaddingClasses(size, iconPosition, noPadding),
+				iconOnly && 'p-0',
+				iconPosition && 'gap-1.5',
+				full && 'w-full',
+				shadow && 'shadow-sm',
+			]
+				.filter(Boolean)
+				.join(' ')}
 		>
 			{children}
 		</button>

@@ -2,6 +2,6 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export { Button, buttonClassName, type ButtonProps } from './Button';
+export { Button, type ButtonProps } from './Button';
 export { CopyButton, type CopyButtonProps } from './CopyButton';
 export { SelectButton, type SelectButtonProps } from './SelectButton';

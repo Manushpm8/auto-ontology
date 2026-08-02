@@ -3,23 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from 'react';
-import Link from 'next/link';
 
-import { Button, buttonClassName } from '@/common/Button';
+import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { ButtonTheme, Size } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 
-type EmptyStateActionBase = {
+export type EmptyStateAction = {
 	label: string;
 	icon?: IconName;
+	onClick: () => void;
 	theme?: ButtonTheme;
+	disabled?: boolean;
 };
-
-/** The action is either a button that runs a handler, or a link that navigates away. */
-export type EmptyStateAction =
-	| (EmptyStateActionBase & { onClick: () => void; disabled?: boolean; href?: never })
-	| (EmptyStateActionBase & { href: string; onClick?: never; disabled?: never });
 
 export type EmptyStateProps = {
 	title: ReactNode;
@@ -108,34 +104,20 @@ export const EmptyState = ({
 			{description && (
 				<p className={`max-w-sm leading-relaxed ${styles.description}`}>{description}</p>
 			)}
-			{action &&
-				(action.href != null ? (
-					<Link
-						data-testid="empty-state-action"
-						href={action.href}
-						className={buttonClassName({
-							theme: action.theme,
-							size: Size.REGULAR,
-							iconPosition,
-							shadow: true,
-						})}
-					>
-						{actionContent}
-					</Link>
-				) : (
-					<Button
-						data-testid="empty-state-action"
-						theme={action.theme ?? ButtonTheme.Primary}
-						size={Size.REGULAR}
-						type="button"
-						onClick={action.onClick}
-						disabled={action.disabled}
-						iconPosition={iconPosition}
-						shadow
-					>
-						{actionContent}
-					</Button>
-				))}
+			{action && (
+				<Button
+					data-testid="empty-state-action"
+					theme={action.theme ?? ButtonTheme.Primary}
+					size={Size.REGULAR}
+					type="button"
+					onClick={action.onClick}
+					disabled={action.disabled}
+					iconPosition={iconPosition}
+					shadow
+				>
+					{actionContent}
+				</Button>
+			)}
 		</div>
 	);
 };
