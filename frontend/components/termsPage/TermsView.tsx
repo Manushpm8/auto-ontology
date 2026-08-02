@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
+import { Breadcrumbs } from '@/common/Breadcrumbs';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
@@ -293,18 +294,6 @@ export const TermsView = () => {
 		},
 		[router],
 	);
-
-	const handleBack = useCallback(() => {
-		router.push('/terms');
-	}, [router]);
-
-	const handleBackToTerm = useCallback(() => {
-		if (focusId == null) {
-			handleBack();
-			return;
-		}
-		router.push(`/terms?focus=${encodeURIComponent(focusId)}`);
-	}, [focusId, handleBack, router]);
 
 	const handleSqlAttrCreated = useCallback((attribute: SqlAttribute) => {
 		setSqlAttrs((prev) => [...prev, attribute]);
@@ -1082,30 +1071,16 @@ export const TermsView = () => {
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<Button
-						theme={ButtonTheme.Ghost}
-						size={Size.SMALL}
-						type="button"
-						onClick={handleBack}
-						iconPosition="left"
-						aria-label="Back to terms list"
-					>
-						<Icon name={IconName.Terms} className="h-4 w-4" />
-						Terms
-					</Button>
-					<span className="text-zinc-300 dark:text-zinc-600">/</span>
-					<Button
-						theme={ButtonTheme.Ghost}
-						size={Size.SMALL}
-						type="button"
-						onClick={handleBackToTerm}
-					>
-						{termTitle}
-					</Button>
-					<span className="text-zinc-300 dark:text-zinc-600">/</span>
-					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-						{sqlAttrTitle}
-					</span>
+					<Breadcrumbs
+						items={[
+							{ label: 'Terms', href: '/terms' },
+							{
+								label: termTitle,
+								href: `/terms?focus=${encodeURIComponent(focusId)}`,
+							},
+							{ label: sqlAttrTitle },
+						]}
+					/>
 					<div className="ml-auto flex shrink-0 items-center gap-1">
 						{sqlAttrEditing ? null : (
 							<>
@@ -1242,30 +1217,16 @@ export const TermsView = () => {
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<Button
-						theme={ButtonTheme.Ghost}
-						size={Size.SMALL}
-						type="button"
-						onClick={handleBack}
-						iconPosition="left"
-						aria-label="Back to terms list"
-					>
-						<Icon name={IconName.Terms} className="h-4 w-4" />
-						Terms
-					</Button>
-					<span className="text-zinc-300 dark:text-zinc-600">/</span>
-					<Button
-						theme={ButtonTheme.Ghost}
-						size={Size.SMALL}
-						type="button"
-						onClick={handleBackToTerm}
-					>
-						{termTitle}
-					</Button>
-					<span className="text-zinc-300 dark:text-zinc-600">/</span>
-					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-						{colAttrTitle}
-					</span>
+					<Breadcrumbs
+						items={[
+							{ label: 'Terms', href: '/terms' },
+							{
+								label: termTitle,
+								href: `/terms?focus=${encodeURIComponent(focusId)}`,
+							},
+							{ label: colAttrTitle },
+						]}
+					/>
 					<div className="ml-auto flex shrink-0 items-center gap-1">
 						{columnAttrEditing ? null : (
 							<Button
@@ -1324,21 +1285,9 @@ export const TermsView = () => {
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<Button
-						theme={ButtonTheme.Ghost}
-						size={Size.SMALL}
-						type="button"
-						onClick={handleBack}
-						iconPosition="left"
-						aria-label="Back to terms list"
-					>
-						<Icon name={IconName.Terms} className="h-4 w-4" />
-						Terms
-					</Button>
-					<span className="text-zinc-300 dark:text-zinc-600">/</span>
-					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-						{termTitle}
-					</span>
+					<Breadcrumbs
+						items={[{ label: 'Terms', href: '/terms' }, { label: termTitle }]}
+					/>
 					<CertificationBadge status={termCertificationStatus} />
 					<div className="ml-auto flex items-center gap-2">
 						{termEditing ? null : (
