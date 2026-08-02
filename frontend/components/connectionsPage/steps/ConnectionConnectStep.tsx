@@ -71,7 +71,6 @@ export const ConnectionConnectStep = ({
 								onChange={onChange}
 								placeholder={field.placeholder}
 								autoComplete={field.secret ? 'new-password' : 'off'}
-								data-testid={`connection-field-${field.key}`}
 								className="rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-900 outline-none focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
 							/>
 						</label>
@@ -84,7 +83,6 @@ export const ConnectionConnectStep = ({
 						theme={ButtonTheme.Outline}
 						size={Size.REGULAR}
 						type="button"
-						data-testid="stepper-button-Test Connection"
 						onClick={onTestConnection}
 						disabled={testButtonDisabled}
 					>

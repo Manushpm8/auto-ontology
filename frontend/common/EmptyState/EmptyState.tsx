@@ -84,7 +84,6 @@ export const EmptyState = ({
 
 	return (
 		<div
-			data-testid="empty-state"
 			className={[
 				'flex w-full flex-col items-center justify-center gap-3 text-center',
 				styles.container,
@@ -106,7 +105,6 @@ export const EmptyState = ({
 			)}
 			{action && (
 				<Button
-					data-testid="empty-state-action"
 					theme={action.theme ?? ButtonTheme.Primary}
 					size={Size.REGULAR}
 					type="button"

@@ -119,10 +119,7 @@ export const ConnectionsView = () => {
 	}
 
 	return (
-		<div
-			data-testid="connections-page"
-			className="flex h-full w-full min-w-0 flex-1 flex-col items-start"
-		>
+		<div className="flex h-full w-full min-w-0 flex-1 flex-col items-start">
 			{connections.length === 0 ? (
 				<EmptyState
 					variant={EmptyStateVariant.Borderless}
