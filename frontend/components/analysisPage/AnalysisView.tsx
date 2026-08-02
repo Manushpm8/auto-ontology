@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 
 import { Button, SelectButton } from '@/common/Button';
-import { Size, ButtonTheme, SelectButtonVariant } from '@/enums/button';
+import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
@@ -292,11 +292,6 @@ export const AnalysisView = () => {
 		setModalOpen(false);
 	};
 
-	const modeButtonClass = (target: AnalysisMode) =>
-		mode === target
-			? ''
-			: 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200';
-
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
@@ -306,18 +301,16 @@ export const AnalysisView = () => {
 				</h1>
 				<div className="ml-4 flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
 					<SelectButton
-						variant={SelectButtonVariant.Segmented}
+						theme={SelectButtonTheme.Switcher}
 						selected={mode === 'sql'}
 						onClick={() => setMode('sql')}
-						className={modeButtonClass('sql')}
 					>
 						SQL
 					</SelectButton>
 					<SelectButton
-						variant={SelectButtonVariant.Segmented}
+						theme={SelectButtonTheme.Switcher}
 						selected={mode === 'pql'}
 						onClick={() => setMode('pql')}
-						className={modeButtonClass('pql')}
 					>
 						PQL
 					</SelectButton>

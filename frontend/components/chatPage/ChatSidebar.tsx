@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
 import { Button, SelectButton } from '@/common/Button';
-import { Size, ButtonTheme, SelectButtonVariant } from '@/enums/button';
+import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
 import { formatDate } from '@/common/date';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonRows } from '@/common/Skeleton';
@@ -88,14 +88,9 @@ function ConversationItem({
 	return (
 		<li className="group relative">
 			<SelectButton
-				variant={SelectButtonVariant.ListItem}
+				theme={SelectButtonTheme.ListItemTwoLine}
 				selected={isActive}
 				onClick={onSelect}
-				className={`flex-col items-start rounded-lg px-3 py-2 pr-8 ${
-					isActive
-						? ''
-						: 'text-zinc-700 hover:bg-zinc-100 hover:text-black dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
-				}`}
 			>
 				<span className="line-clamp-1">{conv.title}</span>
 				<span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">

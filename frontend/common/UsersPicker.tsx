@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { User } from '@/types/auth';
 import { SelectButton } from '@/common/Button';
-import { SelectButtonVariant } from '@/enums/button';
+import { SelectButtonTheme } from '@/enums/button';
 
 const getInitials = (name: string): string => {
 	const parts = name.trim().split(/\s+/);
@@ -68,11 +68,7 @@ export const UsersPicker = ({ allUsers, selectedIds, onChange, loading }: UsersP
 			</label>
 
 			{/* Trigger */}
-			<SelectButton
-				variant={SelectButtonVariant.Trigger}
-				onClick={() => setOpen((v) => !v)}
-				className="min-h-[38px] gap-2 focus:border-[#76b900] focus:outline-none focus:ring-2 focus:ring-[#76b900]/30"
-			>
+			<SelectButton theme={SelectButtonTheme.SelectField} onClick={() => setOpen((v) => !v)}>
 				{loading ? (
 					<span className="text-zinc-400">Loading users…</span>
 				) : selectedUsers.length === 0 ? (
@@ -143,12 +139,9 @@ export const UsersPicker = ({ allUsers, selectedIds, onChange, loading }: UsersP
 								return (
 									<SelectButton
 										key={user.id}
-										variant={SelectButtonVariant.ListItem}
+										theme={SelectButtonTheme.ListItem}
 										selected={checked}
 										onClick={() => toggle(user.id)}
-										className={`gap-2.5 rounded-md px-2 py-1.5 ${
-											checked ? '' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'
-										}`}
 									>
 										<UserAvatar user={user} />
 										<span className="min-w-0 flex-1">

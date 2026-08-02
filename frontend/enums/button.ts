@@ -28,11 +28,15 @@ export enum Size {
 	LARGE = 'large',
 }
 
-export enum SelectButtonVariant {
+export enum SelectButtonTheme {
 	Avatar = 'avatar',
-	Card = 'card',
 	ListItem = 'list-item',
-	Segmented = 'segmented',
-	Swatch = 'swatch',
-	Trigger = 'trigger',
+	/** Row that navigates elsewhere: label on the left, link icon on the right. */
+	ListItemLink = 'list-item-link',
+	/** Row with a title over a caption, leaving room for a trailing action. */
+	ListItemTwoLine = 'list-item-two-line',
+	/** Field showing the current selection and opening a dropdown when clicked. */
+	SelectField = 'select-field',
+	/** One option of a mode switcher sitting inside a shared container. */
+	Switcher = 'switcher',
 }

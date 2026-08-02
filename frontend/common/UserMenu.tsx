@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { signOut, useSession } from '@/auth/auth-client';
 import { Button, SelectButton } from '@/common/Button';
-import { Size, ButtonTheme, SelectButtonVariant } from '@/enums/button';
+import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
 
 export const UserMenu = ({ version }: { version?: string }) => {
 	const { data } = useSession();
@@ -55,12 +55,11 @@ export const UserMenu = ({ version }: { version?: string }) => {
 	return (
 		<div ref={menuRef} className="relative">
 			<SelectButton
-				variant={SelectButtonVariant.Avatar}
+				theme={SelectButtonTheme.Avatar}
 				onClick={() => setOpen((value) => !value)}
 				aria-haspopup="menu"
 				aria-expanded={open}
 				aria-label="User menu"
-				className="h-7 w-7"
 			>
 				{initial}
 			</SelectButton>

@@ -6,7 +6,7 @@
 
 import { Icon, IconName } from '@/common/icons';
 import { Button, SelectButton } from '@/common/Button';
-import { Size, ButtonTheme, SelectButtonVariant } from '@/enums/button';
+import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
 import { Modal } from './Modal';
 
 /** Minimal Term reference — decoupled from any specific page's node/row shape. */
@@ -66,9 +66,8 @@ export const SemanticRelationshipModal = ({
 								</span>
 							</div>
 							<SelectButton
-								variant={SelectButtonVariant.ListItem}
+								theme={SelectButtonTheme.ListItemLink}
 								onClick={() => term != null && onView(term.id)}
-								className="justify-between gap-2 rounded-md px-4 py-3 text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/40"
 							>
 								<span className="flex min-w-0 items-center gap-1.5">
 									<Icon

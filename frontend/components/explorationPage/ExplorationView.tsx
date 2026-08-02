@@ -11,7 +11,7 @@ import type { Core } from 'cytoscape';
 import { explorationApi } from '@/api/exploration';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { SelectButton } from '@/common/Button';
-import { SelectButtonVariant } from '@/enums/button';
+import { SelectButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SearchInput } from '@/common/SearchInput';
 import {
@@ -283,12 +283,11 @@ export const ExplorationView = () => {
 								{filteredNodes.map((node) => (
 									<li key={node.id}>
 										<SelectButton
-											variant={SelectButtonVariant.ListItem}
+											theme={SelectButtonTheme.ListItem}
 											onClick={() => {
 												setSearch('');
 												handleSelectNode(node.id);
 											}}
-											className="gap-2 rounded-md px-3 py-2 text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
 										>
 											<Icon
 												name={

@@ -6,8 +6,8 @@
 
 import { useState } from 'react';
 import { semanticCompilationApi } from '@/api/settings';
-import { ToggleButton } from '@/common/Button';
 import { Toast } from '@/common/Toast';
+import { Toggle } from '@/common/Toggle';
 
 export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: boolean }) => {
 	// Seeded from the server (see page.tsx) so the correct state renders on first
@@ -62,11 +62,11 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 							{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
 						</span>
 					</div>
-					<ToggleButton
+					<Toggle
 						checked={enabled}
 						aria-label="Enable semantic compilation"
 						disabled={saving}
-						onClick={handleToggle}
+						onChange={handleToggle}
 					/>
 				</div>
 			</div>

@@ -5,4 +5,3 @@
 export { Button, type ButtonProps } from './Button';
 export { CopyButton, type CopyButtonProps } from './CopyButton';
 export { SelectButton, type SelectButtonProps } from './SelectButton';
-export { ToggleButton, type ToggleButtonProps } from './ToggleButton';

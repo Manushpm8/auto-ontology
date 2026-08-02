@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { SelectButton } from '@/common/Button';
-import { SelectButtonVariant } from '@/enums/button';
+import { SelectButtonTheme } from '@/enums/button';
 import { createPortal } from 'react-dom';
 
 export type PopoverMenuItem = {
@@ -83,18 +83,13 @@ export const PopoverMenu = ({ items, trigger, className = '' }: PopoverMenuProps
 					>
 						{items.map((item) => (
 							<SelectButton
-								variant={SelectButtonVariant.ListItem}
+								theme={SelectButtonTheme.ListItem}
 								danger={item.danger}
 								key={item.label}
 								onClick={() => {
 									setMenu(null);
 									item.onClick();
 								}}
-								className={
-									item.danger
-										? 'gap-2 rounded-md px-3 py-1.5'
-										: 'gap-2 rounded-md px-3 py-1.5 text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700'
-								}
 							>
 								{item.icon}
 								{item.label}

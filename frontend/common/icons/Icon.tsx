@@ -11,6 +11,7 @@ import TrashSvg from './svg/trash.svg';
 import SendSvg from './svg/send.svg';
 import StopSvg from './svg/stop.svg';
 import CheckSvg from './svg/check.svg';
+import CopySvg from './svg/copy.svg';
 import ChatBubbleSvg from './svg/chat-bubble.svg';
 import ChevronRightSvg from './svg/chevron-right.svg';
 import NvidiaLogoSvg from './svg/nvidia-logo.svg';
@@ -44,6 +45,7 @@ export enum IconName {
 	Send = 'send',
 	Stop = 'stop',
 	Check = 'check',
+	Copy = 'copy',
 	ChatBubble = 'chat-bubble',
 	ChevronRight = 'chevron-right',
 	NvidiaLogo = 'nvidia-logo',
@@ -76,6 +78,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Send]: SendSvg,
 	[IconName.Stop]: StopSvg,
 	[IconName.Check]: CheckSvg,
+	[IconName.Copy]: CopySvg,
 	[IconName.ChatBubble]: ChatBubbleSvg,
 	[IconName.ChevronRight]: ChevronRightSvg,
 	[IconName.NvidiaLogo]: NvidiaLogoSvg,

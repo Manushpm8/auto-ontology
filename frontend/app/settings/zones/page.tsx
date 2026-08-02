@@ -9,9 +9,10 @@ import type { Database } from '@/types/datasources';
 import { zonesApi } from '@/api/zones';
 import { datasources } from '@/api/datasources';
 import { ModalWithSteps, ConfirmModal } from '@/common/modal';
-import { ColorPicker } from '@/common/ColorPicker';
-import type { ColorOption } from '@/common/ColorPicker';
-import { Button, ToggleButton } from '@/common/Button';
+import { ColorPicker } from '@/components/settings/ColorPicker';
+import type { ColorOption } from '@/components/settings/ColorPicker';
+import { Button } from '@/common/Button';
+import { Toggle } from '@/common/Toggle';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard, SkeletonRows } from '@/common/Skeleton';
@@ -23,12 +24,12 @@ import { useSession } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
 
 const ZONE_COLORS: readonly ColorOption[] = [
-	{ value: '#0ea5e9', label: 'Sky', swatchClassName: 'bg-sky-500' },
-	{ value: '#8b5cf6', label: 'Violet', swatchClassName: 'bg-violet-500' },
-	{ value: '#ec4899', label: 'Pink', swatchClassName: 'bg-pink-500' },
-	{ value: '#f97316', label: 'Orange', swatchClassName: 'bg-orange-500' },
-	{ value: '#14b8a6', label: 'Teal', swatchClassName: 'bg-teal-500' },
-	{ value: '#eab308', label: 'Amber', swatchClassName: 'bg-yellow-500' },
+	{ value: '#0ea5e9', label: 'Sky', colorClass: 'bg-sky-500' },
+	{ value: '#8b5cf6', label: 'Violet', colorClass: 'bg-violet-500' },
+	{ value: '#ec4899', label: 'Pink', colorClass: 'bg-pink-500' },
+	{ value: '#f97316', label: 'Orange', colorClass: 'bg-orange-500' },
+	{ value: '#14b8a6', label: 'Teal', colorClass: 'bg-teal-500' },
+	{ value: '#eab308', label: 'Amber', colorClass: 'bg-yellow-500' },
 ];
 const DEFAULT_ZONE_COLOR = '#0ea5e9';
 
@@ -184,11 +185,11 @@ const ZoneCard = ({
 			</div>
 			<div className="flex shrink-0 items-start gap-2">
 				{isAdmin ? (
-					<ToggleButton
+					<Toggle
 						checked={zone.enabled}
 						aria-label={zone.enabled ? `Disable ${zone.name}` : `Enable ${zone.name}`}
 						disabled={toggling}
-						onClick={() => onToggleEnabled(zone)}
+						onChange={() => onToggleEnabled(zone)}
 					/>
 				) : null}
 				<div className="relative">
@@ -759,7 +760,7 @@ export default function ZonesSettingsPage() {
 								colors={ZONE_COLORS}
 								value={color}
 								onChange={setColor}
-								fallbackSwatchClassName="bg-sky-500"
+								fallbackColorClass="bg-sky-500"
 							/>
 						</div>
 						<div>
