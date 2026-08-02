@@ -20,10 +20,8 @@
 
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
-import { userCan } from '@/auth/permissions';
-import type { ResolvedUser } from '@/auth/resolve-user';
 import { getPrisma } from '@/lib/prisma';
-import { findOwnedConversation } from '@/lib/chatConversations';
+import { resolveOrCreateOwnedConversation } from '@/lib/chatConversations';
 import { buildSqlAnswerMessage, type AgentAnswer, type AnswerMessage } from '@/lib/answerMessages';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
@@ -41,22 +39,6 @@ const parseBody = (rawBody: string): Record<string, unknown> => {
 	} catch {
 		return {};
 	}
-};
-
-// Resolves `conversationId` to a conversation this user actually owns, gated
-// on the same `conversation: ['write']` permission the messages endpoint
-// enforces. Returns null (never throws) for any reason persistence should be
-// skipped — missing id, not found/not owned, or lacking permission — so a
-// bad/absent conversation_id degrades to "don't persist" rather than failing
-// the chat request itself (this also preserves today's behavior for direct
-// API/NAT-plugin callers that never send a conversation_id).
-const resolveOwnedConversation = async (
-	user: ResolvedUser,
-	conversationId: string | null,
-): Promise<{ id: string } | null> => {
-	if (!conversationId) return null;
-	if (!userCan(user, { conversation: ['write'] })) return null;
-	return findOwnedConversation(user, conversationId);
 };
 
 type ChatStreamResultEvent = {
@@ -188,12 +170,13 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 			? payload.conversation_id
 			: null;
 
+	const title = question.slice(0, 50) || 'New conversation';
 	const prisma = getPrisma();
 	const [row, conversation] = await Promise.all([
 		prisma.conversationAnalytics.create({
 			data: { question, source, userId: user.id },
 		}),
-		resolveOwnedConversation(user, conversationId),
+		resolveOrCreateOwnedConversation(user, conversationId, title),
 	]);
 
 	if (conversation) {

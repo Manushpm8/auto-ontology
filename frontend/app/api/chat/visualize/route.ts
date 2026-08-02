@@ -19,8 +19,6 @@
 
 import { NextResponse } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
-import { userCan } from '@/auth/permissions';
-import type { ResolvedUser } from '@/auth/resolve-user';
 import { getPrisma } from '@/lib/prisma';
 import { findOwnedConversation } from '@/lib/chatConversations';
 import { buildResultMessage } from '@/lib/answerMessages';
@@ -42,18 +40,6 @@ const parseBody = (rawBody: string): Record<string, unknown> => {
 	} catch {
 		return {};
 	}
-};
-
-// Mirrors the completions proxy: a bad/absent conversation_id degrades to
-// "don't persist" rather than failing the request, so direct API callers that
-// never send one still get their charts.
-const resolveOwnedConversation = async (
-	user: ResolvedUser,
-	conversationId: unknown,
-): Promise<{ id: string } | null> => {
-	if (typeof conversationId !== 'string' || !conversationId.trim()) return null;
-	if (!userCan(user, { conversation: ['write'] })) return null;
-	return findOwnedConversation(user, conversationId);
 };
 
 // The instance-wide toggle is resolved here, not trusted from the caller, so a
@@ -104,9 +90,20 @@ const persistResultMessage = async (
 
 // Same permission as the chat completions route: every chat user may trigger
 // this, not just admins.
+//
+// Unlike the completions route, this one never creates a conversation: by the
+// time step 2 runs, step 1 (or `POST /api/conversations`) has already created
+// it. Falling back to create-on-missing here would leave an orphan
+// conversation — just the chart/table bubble, with no question or Message 1
+// ahead of it — whenever this is called with an id that never got that far
+// (e.g. a standalone API caller skipping the completions step).
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const payload = parseBody(await req.text());
-	const conversation = await resolveOwnedConversation(user, payload.conversation_id);
+	const conversationId =
+		typeof payload.conversation_id === 'string' && payload.conversation_id.trim()
+			? payload.conversation_id
+			: null;
+	const conversation = conversationId ? await findOwnedConversation(user, conversationId) : null;
 	const charts = await generateCharts(payload).catch(() => null);
 
 	if (conversation) {
