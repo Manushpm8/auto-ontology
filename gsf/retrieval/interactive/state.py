@@ -31,6 +31,10 @@ class InteractiveSessionState:
     phase1_grounded_kg: str = ""  # snapshot of cumulative_grounded_kg at Phase 1 PROCEED, carried into Phase 2
     cumulative_grounded_kg: str = ""  # union of all _grounded_kg values seen this phase (never replaced, only grows)
     _vdb_resolved_hits: str = ""  # KB-formatted confident VDB resolutions (score<=0.63) for evidence
+    incomplete_formula_terms: list = field(default_factory=list)  # [(term, what_is_missing)]
+    persistent_unresolved: list[str] = field(default_factory=list)  # terms never resolved by KB/VDB; pruned after each answered turn
+    resolved_persistent: set[str] = field(default_factory=set)  # terms pruned from persistent; blocked from re-accumulation
+    external_kg_children_map: dict[str, list[str]] = field(default_factory=dict)  # parent entry name → [full child texts]
     data_retriever: Any = None
     semantic_retriever: Any = None
     connectors: list = field(default_factory=list)

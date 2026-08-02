@@ -21,9 +21,12 @@ Rewrite the current question to incorporate the new clarification. Rules:
 - If the new clarification defines or renames a metric, use that name consistently everywhere \
   in the rewritten question — including in aggregations (average, median, count) that reference it.
 - If the answer provides an EXPLICIT formula (exact operator, exact column names, exact constants), \
-  embed it verbatim in SQL-friendly notation using the user's exact terms only.
-- If the answer describes a calculation vaguely (no exact operator or constants), reflect the \
-  description using the user's words — do NOT invent a specific formula or add a guessed example.
+  embed it using the user's exact natural-language terms and phrasing — preserve the formula \
+  structure but write variable names as natural-language phrases, not as snake_case or SQL \
+  function calls (e.g. write "total point count, defaulting to 1,000,000 when unavailable" \
+  rather than "COALESCE(total_point_count, 1000000)").
+- If the answer describes a calculation vaguely (no exact operator or constants), or indicates a misunderstanding has occured,\
+  reflect the description using the user's words — do NOT invent a specific formula or add a guessed example.
 - Do NOT introduce external definitions, formulas, or example expressions beyond what the user \
   explicitly stated in the answer above.
 - Do NOT invent column names. If a metric is a computed expression (e.g. defined in external \

@@ -66,6 +66,8 @@ create_sql_user_prompt = (
     "unless the question explicitly asks for a transformed value.\n"
     "- Time windows: 'last week/month/year' means the most recent "
     "completed calendar period, not a rolling window.\n"
+    "- When an ORDER BY clause is included and the question or evidence does not "
+    "specify a sort direction, default to DESC.\n"
     "- Infer LIMIT from the question's intent: "
     "if a superlative (most/least/highest/lowest/best/worst/top/bottom) "
     "is paired with a number, add LIMIT with that number; "
@@ -139,8 +141,12 @@ _SCHEMALESS_DIALECTS = {"sqlite", "duckdb"}
 _POSTGRES_DIALECT_RULES = (
     "**PostgreSQL-specific (STRICT — these will error at execution)**\n"
     "- GROUP BY cannot reference SELECT aliases. Repeat the full expression "
-    "(including CASE WHEN blocks) in GROUP BY, or wrap the query in a subquery/CTE.\n\n"
+    "(including CASE WHEN blocks) in GROUP BY, or wrap the query in a subquery/CTE.\n"
+    "- LOG(x) is natural log (same as LN). For base-10 use LOG(10, x). "
+    "- ROUND() requires numeric input — cast with ::numeric if needed.\n"
+    "- Integer division truncates — cast numerator or denominator with ::numeric when computing ratios or percentages (e.g. vendsucccount::numeric / vendtxcount).\n\n"
 )
+
 
 
 def format_dialect_rules(dialect: str | None) -> str:

@@ -9,7 +9,10 @@ logger = logging.getLogger(__name__)
 # NOTE: get_agent_response_with_state and TextToSQLPayload are imported lazily
 # inside _run_sql_generation to avoid triggering LLM client initialisation at
 # import time (which requires NVIDIA_API_KEY to be set).
-from .clarify import should_clarify, refresh_grounded_kg, _STUCK_PHRASES
+from concurrent.futures import ThreadPoolExecutor
+
+from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, expand_kg_with_children, _STUCK_PHRASES
+from .completeness import detect_incomplete_formulas
 from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
@@ -61,21 +64,18 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
 
 
 def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> None:
-    """Prepare session for Phase 2: new question, soft-seed Phase 1 result."""
+    """Prepare session for Phase 2: new question, carry Phase 1 context for SQL gen."""
     follow_up_q = _extract_followup_question(message)
 
-    # Soft-seed: expose Phase 1 Q+SQL as similar_questions [[question, sql]] format
-    p1_sql = session.path_state.get("sql_code", "")
-    p1_question = session.phase1_question or session.working_question
-    if p1_sql and p1_question:
-        session.path_state["similar_questions"] = [[p1_question, p1_sql]]
-
-    # Clear Phase 1 SQL artifacts; keep relevant_tables as merge hints
+    # Clear Phase 1 SQL artifacts; keep relevant_tables as merge hints.
+    # Also clear similar_questions so Phase 1 VDB-retrieved examples don't bleed in —
+    # Phase 1 context is injected explicitly via the follow-up instruction block instead.
     for key in (
         "normalized_question", "sql_code", "sql_generation_result",
         "error", "sql_attempts", "reconstruction_count",
         "error_analysis_done", "_resume_from",
         "final_response", "sql_response_from_db",
+        "similar_questions",
     ):
         session.path_state.pop(key, None)
 
@@ -144,17 +144,31 @@ def _resolve_cross_phase_entities(
 
 # ── SQL generation ──────────────────────────────────────────────────────────
 
+_FOLLOW_UP_INSTRUCTION = """\
+
+[Follow-up context]
+This question is a follow-up on the same database. The previous question and its SQL \
+are provided for reference — use them as directly relevant or as background context \
+depending on what this question asks.
+
+Previous question: {p1_question}
+Previous SQL:
+{p1_sql}"""
+
 _EVIDENCE_PROMPT = """\
 Working question: {question}
 
 Relevant external knowledge (one entry per term):
 {grounded_kg}
 
-Extract only the formulas or calculation rules that are directly needed to answer \
-the working question above. For each such entry, output one line in SQL-friendly notation:
-  TermName = <formula using column names>
-Skip any entry whose formula is not required by the working question. \
-If no formulas are needed, output: NONE"""
+Extract the formulas, calculation rules, and threshold/filter conditions that are \
+directly needed to answer the working question above. For each such entry, output one \
+line in SQL-friendly notation:
+  TermName = <formula, threshold, or filter condition using column names and values>
+Only include conditions expressible with specific column names and values — skip \
+natural-language qualifiers with no clear SQL translation. \
+Skip any entry not required by the working question. \
+If nothing applies, output: NONE"""
 
 
 def _generate_evidence(question: str, grounded_kg: str) -> str:
@@ -188,8 +202,9 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     # For normal turns, cumulative_grounded_kg already has everything from clarification.
     extra_kg = ""
     if session._grounded_kg_for != session.working_question:
+        expanded_kg = expand_kg_with_children(session.external_kg, session.external_kg_children_map)
         extra_kg = ground_external_knowledge(
-            session.working_question, session.external_kg, _get_fast_llm()
+            session.working_question, expanded_kg, _get_fast_llm()
         )
 
     # Cross-phase resolution: map unresolved Phase 2 entities to Phase 1 formulas.
@@ -213,6 +228,15 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     if evidence:
         question = f"{question}\n\nEvidence: {evidence}"
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence[:200])
+
+    # For Phase 2, append an explicit follow-up instruction block so the SQL generator
+    # knows to extend or filter Phase 1's SQL rather than starting from scratch.
+    if p1_sql and p1_question:
+        question = question + _FOLLOW_UP_INSTRUCTION.format(
+            p1_question=p1_question,
+            p1_sql=p1_sql,
+        )
+        logger.info("[%s] SQL gen — follow-up instruction injected (p1 sql %d chars)", session.task_id, len(p1_sql))
 
     payload: TextToSQLPayload = {
         "question": question,
@@ -270,6 +294,7 @@ def create_session(
     semantic_retriever: Any,
     connectors: list,
     max_clarify_turns: int = 5,
+    external_kg_children_map: dict | None = None,
 ) -> InteractiveSessionState:
     return InteractiveSessionState(
         session_id=session_id,
@@ -280,6 +305,7 @@ def create_session(
         original_question=question,
         working_question=question,
         max_clarify_turns=max_clarify_turns,
+        external_kg_children_map=external_kg_children_map or {},
         data_retriever=data_retriever,
         semantic_retriever=semantic_retriever,
         connectors=connectors,
@@ -341,21 +367,46 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
     answer_lower = answer.lower()
     user_could_not_answer = any(phrase in answer_lower for phrase in _STUCK_PHRASES)
     if not user_could_not_answer:
-        merged = merge_clarification(
-            session.working_question,
-            session.clarify_history[-1],
-            _get_fast_llm(),
-            relevant_kg=session._grounded_kg or "",
-        )
+        last_turn = session.clarify_history[-1]
+        relevant_kg = session._grounded_kg or ""
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            merge_future = pool.submit(
+                merge_clarification,
+                session.working_question,
+                last_turn,
+                _get_fast_llm(),
+                relevant_kg=relevant_kg,
+            )
+            completeness_future = pool.submit(
+                detect_incomplete_formulas,
+                session.working_question,
+                last_turn,
+                relevant_kg,
+                list(session.incomplete_formula_terms),
+                _get_llm(),
+            )
+            prune_future = pool.submit(
+                prune_resolved_terms,
+                list(session.persistent_unresolved),
+                last_turn,
+                _get_fast_llm(),
+            )
+            merged = merge_future.result()
+            gaps = completeness_future.result()
+            pruned = prune_future.result()
+            newly_resolved = set(session.persistent_unresolved) - set(pruned)
+            session.resolved_persistent.update(newly_resolved)
+            session.persistent_unresolved = pruned
+
         if merged:
             session.working_question = merged
         else:
             logger.warning("[%s] merge_clarification returned empty; keeping previous question", session.task_id)
-        logger.info(
-            "[%s] Merged question: %s",
-            session.task_id,
-            session.working_question,
-        )
+        logger.info("[%s] Merged question: %s", session.task_id, session.working_question)
+
+        session.incomplete_formula_terms = gaps
+        logger.info("[%s] Incomplete formula terms: %s", session.task_id, gaps)
 
 
 def apply_submit_result(session: InteractiveSessionState, result: dict) -> None:

@@ -20,6 +20,16 @@ from gsf.utils.llm_invoke import invoke_with_structured_output, get_llm_client, 
 QUESTIONS = [
     "Classify signals by their score level, and for each group, show the classification, "
     "signal count, average BFR measure, and the standard deviation of the anomaly metric.",
+    # alien_8 turn-2 merged question — does "narrowband profiles" survive as an entity?
+    "Could you scan our database for potential signals matching narrowband profiles? "
+    "I need the signal identifiers, central frequency, drift rate, Bandwidth-Frequency Ratio (BFR), "
+    "and the classification of NTM categories based on signal stability. "
+    "Use the formula for BFR as BFR = BwHz/(CenterFreqMhz * 10^6), where narrow ratios (<0.001) "
+    "often indicate technological signals. "
+    "Classify NTM categories considering the spectral characteristics — specifically the "
+    "Bandwidth-Frequency Ratio and frequency drift stability — without filtering by modulation type. "
+    "The NTM classification tiers are: 'Strong NTM' (BFR < 0.0001 AND FreqDriftHzs < 0.1), "
+    "'Moderate NTM' (BFR < 0.0005 AND FreqDriftHzs < 0.5), and 'Not NTM' (all other signals).",
 ]
 
 
