@@ -19,6 +19,6 @@ export const SemanticNotReady = () => (
 			</div>
 		}
 		title="Semantic layer not ready"
-		description="The semantic layer hasn't been created yet, so I can't answer questions. An administrator can turn it on in Settings → Semantic Compilation."
+		description="The semantic layer hasn't been created yet, so I can't answer questions."
 	/>
 );
