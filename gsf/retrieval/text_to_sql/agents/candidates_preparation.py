@@ -93,6 +93,21 @@ def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
     return result
 
 
+def _anchor_description_text(context: dict) -> str:
+    """Format the resolved semantic descriptions used to choose an anchor."""
+    descriptions = [
+        ("attribute", context.get("attr_description")),
+        ("column", context.get("column_description")),
+        ("table", context.get("table_description")),
+    ]
+    parts = [
+        f"{label}: {str(description).strip()}"
+        for label, description in descriptions
+        if description and str(description).strip()
+    ]
+    return f" — {'; '.join(parts)}" if parts else ""
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -617,7 +632,7 @@ class CandidatePreparationAgent(BaseAgent):
         attrs_block = "\n".join(
             f"- id: {aid} | {ctx['attr_name']} "
             f"(table: {ctx.get('table_name', '?')}, column: {ctx.get('col_name', '?')})"
-            + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
+            + _anchor_description_text(ctx)
             for aid, ctx in contexts.items()
         )
         messages = [

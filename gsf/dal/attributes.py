@@ -16,6 +16,7 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.cypher_fragments import column_description_expr, table_description_expr
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_TERM,
@@ -137,19 +138,23 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     """Fetch Column + Table + Schema context for ColumnAttribute IDs.
 
     Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
-    col_name, table_id, table_name, schema_name}.
+    col_name, column_description, table_id, table_name, table_description,
+    schema_name}.
     """
     if not attr_ids:
         return {}
-    query = """
+    query = f"""
     UNWIND $attr_ids AS attr_id
-    MATCH (attr:ColumnAttribute {id: attr_id})
+    MATCH (attr:ColumnAttribute {{id: attr_id}})
     OPTIONAL MATCH (col:Column)-[:SEMANTIC_FK|HAS_ATTRIBUTE]->(attr)
     OPTIONAL MATCH (col)<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
     RETURN attr.id AS attr_id, attr.name AS attr_name,
            attr.description AS attr_description,
            col.id AS col_id, col.name AS col_name,
-           tbl.id AS table_id, tbl.name AS table_name, sch.name AS schema_name
+           {column_description_expr("col")} AS column_description,
+           tbl.id AS table_id, tbl.name AS table_name,
+           {table_description_expr("tbl")} AS table_description,
+           sch.name AS schema_name
     """
     try:
         rows = get_neo4j_conn().query_read(query, {"attr_ids": attr_ids})
@@ -166,8 +171,10 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
             "attr_description": row.get("attr_description") or "",
             "col_id": row.get("col_id"),
             "col_name": row.get("col_name") or "",
+            "column_description": row.get("column_description") or "",
             "table_id": row.get("table_id"),
             "table_name": row.get("table_name") or "",
+            "table_description": row.get("table_description") or "",
             "schema_name": row.get("schema_name") or "",
         }
     return result
