@@ -14,6 +14,8 @@ import {
 	type ClipboardEvent,
 	type KeyboardEvent,
 } from 'react';
+import { TruncatedText } from '@/common/TruncatedText';
+
 export type TagInputHandle = {
 	/** Forces any pending text in the input to be committed as a tag. */
 	flush: () => string[];
@@ -180,11 +182,9 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 					// Tags must allow duplicates conceptually, but we dedup. Use `tag-idx`
 					// as a stable-ish key while still tolerating repeated text content.
 					key={`${tag}-${idx}`}
-					className="inline-flex max-w-full items-center gap-1 rounded-md border border-[#76b900]/40 bg-[#76b900]/10 px-2 py-0.5 text-xs font-medium text-[#3f6b00] dark:border-[#76b900]/40 dark:bg-[#76b900]/15 dark:text-[#cdeb86]"
+					className="inline-flex max-w-[min(24rem,100%)] items-center gap-1 rounded-md border border-[#76b900]/40 bg-[#76b900]/10 px-2 py-0.5 text-xs font-medium text-[#3f6b00] dark:border-[#76b900]/40 dark:bg-[#76b900]/15 dark:text-[#cdeb86]"
 				>
-					<span className="max-w-[24rem] truncate" title={tag}>
-						{tag}
-					</span>
+					<TruncatedText text={tag} />
 					{!disabled && (
 						<button
 							type="button"

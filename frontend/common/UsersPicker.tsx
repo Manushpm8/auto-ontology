@@ -8,8 +8,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { User } from '@/types/auth';
 import { SelectButton } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
+import { TruncatedText } from '@/common/TruncatedText';
 import { SelectButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
+import { TextVariant } from '@/enums/text';
 
 const getInitials = (name: string): string => {
 	const parts = name.trim().split(/\s+/);
@@ -146,13 +148,15 @@ export const UsersPicker = ({ allUsers, selectedIds, onChange, loading }: UsersP
 										onClick={() => toggle(user.id)}
 									>
 										<UserAvatar user={user} />
-										<span className="min-w-0 flex-1">
-											<span className="block truncate font-medium text-zinc-800 dark:text-zinc-200">
-												{user.name}
-											</span>
-											<span className="block truncate text-xs text-zinc-400">
-												{user.email}
-											</span>
+										<span className="min-w-0 flex-1 text-zinc-800 dark:text-zinc-200">
+											<TruncatedText
+												text={user.name}
+												variant={TextVariant.Strong}
+											/>
+											<TruncatedText
+												text={user.email}
+												variant={TextVariant.Caption}
+											/>
 										</span>
 										{checked && (
 											<svg

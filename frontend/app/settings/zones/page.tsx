@@ -19,6 +19,8 @@ import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { PopoverMenu } from '@/common/PopoverMenu';
+import { TruncatedText } from '@/common/TruncatedText';
+import { TextVariant } from '@/enums/text';
 import { ZonesDataTree } from '@/components/settings/ZonesDataTree';
 import { mergeSchemasIntoDatabase, mergeTablesIntoSchema } from '@/lib/data/datasource-tree-merge';
 import type { Zone, ZoneCreated, ZoneUpdateInput } from '@/types/zones';
@@ -174,9 +176,7 @@ const ZoneCard = ({
 		<div className="flex items-start justify-between gap-4">
 			<div className="min-w-0">
 				<div className="flex items-center gap-2">
-					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-						{zone.name}
-					</h2>
+					<TruncatedText as="h2" text={zone.name} variant={TextVariant.Heading} />
 					{!zone.enabled ? (
 						<span className="shrink-0 rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-medium tracking-wide text-zinc-600 uppercase dark:bg-zinc-700 dark:text-zinc-300">
 							Disabled

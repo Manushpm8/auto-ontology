@@ -10,6 +10,8 @@ import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { DetailLinkButton } from '@/common/DetailLinkButton';
+import { TruncatedText } from '@/common/TruncatedText';
+import { TextVariant } from '@/enums/text';
 import { ExplorationLayer } from '@/enums/exploration';
 import { Label } from '@/common/Label';
 import type {
@@ -95,18 +97,19 @@ export const ActiveTermCard = ({
 							name={IconName.Terms}
 							className="mt-0.5 h-5 w-5 shrink-0 text-[#76b900]"
 						/>
-						<div className="min-w-0 flex-1">
-							<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-								{node.name}
-							</h2>
+						<div className="min-w-0 flex-1 space-y-1">
+							<TruncatedText as="h2" text={node.name} variant={TextVariant.Heading} />
 							{node.synonyms.length > 0 && (
-								<p className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
+								<TruncatedText as="p" variant={TextVariant.Caption}>
 									Synonyms: {node.synonyms.join(', ')}
-								</p>
+								</TruncatedText>
 							)}
-							<p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-								{node.description || 'No Description'}
-							</p>
+							<TruncatedText
+								as="p"
+								text={node.description || 'No Description'}
+								lines={2}
+								variant={TextVariant.Detail}
+							/>
 						</div>
 						<div className="shrink-0">
 							<Button

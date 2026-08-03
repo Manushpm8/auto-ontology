@@ -33,6 +33,7 @@ import { Toast } from '@/common/Toast';
 import { Label } from '@/common/Label';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
+import { TextVariant } from '@/enums/text';
 
 export type ComposerEditValue = string | string[];
 
@@ -43,7 +44,7 @@ export const LabelList = ({ values }: { values: string[] }) => {
 		<ul className="flex flex-wrap gap-1">
 			{nonEmptyValues.map((v, i) => (
 				<li key={`${v}-${i}`}>
-					<Label label={v} maxWidthClass="max-w-[16rem]" />
+					<Label label={v} />
 				</li>
 			))}
 		</ul>
@@ -339,7 +340,7 @@ const ReadOnlyTagList = ({
 				<ul className="mt-3 flex flex-wrap gap-1.5">
 					{nonEmptyValues.map((v, i) => (
 						<li key={`${v}-${i}`}>
-							<Label label={v} maxWidthClass="max-w-[24rem]" />
+							<Label label={v} />
 						</li>
 					))}
 				</ul>
@@ -389,7 +390,7 @@ function renderComposerSection(
 			return (
 				<div
 					id={section.id === 'description' ? 'description-section' : undefined}
-					className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+					className="space-y-3 rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
 				>
 					<div className="flex items-start justify-between gap-3">
 						<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -402,9 +403,12 @@ function renderComposerSection(
 							/>
 						) : null}
 					</div>
-					<p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
-						{section.body}
-					</p>
+					<TruncatedText
+						as="p"
+						text={section.body}
+						lines={3}
+						variant={TextVariant.Body}
+					/>
 				</div>
 			);
 		case ComposerSectionKind.TAG_LIST:
@@ -462,12 +466,18 @@ function renderComposerSection(
 									: col.align === 'right'
 										? 'text-right'
 										: undefined;
+							const textColumn =
+								col.type == null || col.type === ComposerColumnType.TEXT
+									? col
+									: undefined;
 							return {
 								key: col.key,
 								header: col.label,
 								width: col.width,
 								headerClassName: alignClass,
 								className: alignClass,
+								truncate: textColumn?.truncate,
+								maxWidthClass: textColumn?.maxWidthClass,
 								cell: (row: Record<string, string | string[]>) => {
 									const value = row[col.key];
 									if (col.type === ComposerColumnType.TAGS) {
@@ -517,15 +527,7 @@ function renderComposerSection(
 										);
 									}
 									const text = typeof value === 'string' ? value : '';
-									if (!text) return '—';
-									return col.truncate ? (
-										<TruncatedText
-											text={text}
-											maxWidthClass={col.maxWidthClass}
-										/>
-									) : (
-										text
-									);
+									return text || '—';
 								},
 							};
 						})}
@@ -577,7 +579,6 @@ function renderComposerSection(
 								<li key={term.id}>
 									<Label
 										label={term.name}
-										title={term.description ?? undefined}
 										onClick={
 											onTermClick ? () => onTermClick(term.id) : undefined
 										}
@@ -602,7 +603,6 @@ function renderComposerSection(
 								<li key={entity.id}>
 									<Label
 										label={entity.name}
-										title={entity.name}
 										onClick={
 											onEntityClick
 												? () => onEntityClick(entity.focusId)
@@ -960,7 +960,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						</aside>
 					) : null}
 
-					<main className="min-h-0 min-w-0 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
+					<main className="min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 						{sections.length === 0 ? (
 							<EmptyState
 								illustration={
@@ -994,9 +994,11 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													aria-label="Name"
 												/>
 											) : (
-												<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-													{title}
-												</h1>
+												<TruncatedText
+													as="h1"
+													text={title}
+													variant={TextVariant.PageTitle}
+												/>
 											)}
 										</div>
 										{headerCertification ? (

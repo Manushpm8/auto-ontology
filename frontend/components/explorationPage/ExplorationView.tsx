@@ -16,6 +16,7 @@ import { SelectButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { SearchInput } from '@/common/SearchInput';
+import { TruncatedText } from '@/common/TruncatedText';
 import {
 	ColumnAttributesModal,
 	DataDetailsModal,
@@ -303,7 +304,7 @@ export const ExplorationView = () => {
 														: 'text-[#3b82b6]'
 												}`}
 											/>
-											<span className="truncate">{node.name}</span>
+											<TruncatedText text={node.name} />
 										</SelectButton>
 									</li>
 								))}

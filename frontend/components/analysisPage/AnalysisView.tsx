@@ -14,6 +14,8 @@ import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
+import { TruncatedText } from '@/common/TruncatedText';
+import { TextVariant } from '@/enums/text';
 import { analyses } from '@/api/analyses';
 import { pqlAnalyses } from '@/api/pqlAnalyses';
 
@@ -370,9 +372,11 @@ export const AnalysisView = () => {
 								className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
 							>
 								<div className="flex items-start justify-between gap-3">
-									<h2 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-										{a.name}
-									</h2>
+									<TruncatedText
+										as="h2"
+										text={a.name}
+										variant={TextVariant.CardTitle}
+									/>
 									<div className="flex shrink-0 items-center gap-1">
 										<Button
 											theme={ButtonTheme.Icon}
@@ -397,9 +401,14 @@ export const AnalysisView = () => {
 									</div>
 								</div>
 								{a.description.trim() !== '' && (
-									<p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-										{a.description}
-									</p>
+									<div className="mt-2">
+										<TruncatedText
+											as="p"
+											text={a.description}
+											lines={3}
+											variant={TextVariant.Body}
+										/>
+									</div>
 								)}
 								{a.code.trim() !== '' && (
 									<SqlBlock

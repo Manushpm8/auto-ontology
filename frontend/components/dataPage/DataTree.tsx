@@ -14,6 +14,8 @@ import { datasources } from '@/api/datasources';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { splitId } from '@/lib/data/catalog-ids';
+import { TruncatedText } from '@/common/TruncatedText';
+import { TextVariant } from '@/enums/text';
 import {
 	catalogStructureFingerprint,
 	mergeColumnsIntoTable,
@@ -143,7 +145,7 @@ function Row({
 		</span>
 	);
 
-	const nameEl = <span className="min-w-0 flex-1 truncate font-medium">{name}</span>;
+	const nameEl = <TruncatedText text={name} variant={TextVariant.Strong} fill />;
 
 	const inner = (
 		<>

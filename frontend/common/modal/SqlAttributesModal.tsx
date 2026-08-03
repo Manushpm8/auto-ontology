@@ -15,6 +15,8 @@ import { Size, ButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import type { SqlAttribute } from '@/types/terms';
 import { SqlBlock } from '@/common/SqlBlock';
+import { TruncatedText } from '@/common/TruncatedText';
+import { TextVariant } from '@/enums/text';
 import { Modal } from './Modal';
 
 /** Minimal Term reference — decoupled from any specific page's node/row shape. */
@@ -28,31 +30,16 @@ type SqlAttributesModalProps = {
 	onClose: () => void;
 };
 
-// Description text is width-constrained by the caller and truncated; hovering
-// reveals the full text in a floating popover instead of relying on the
-// native `title` tooltip.
+// The caller constrains the width; `TruncatedText` clips to one line and
+// reveals the full text in a popover on hover.
 const TruncatedDescription = ({ text }: { text: string | null }) => {
-	const [hovered, setHovered] = useState(false);
 	const value = text?.trim() ?? '';
 
 	if (value === '') {
 		return <span className="italic text-zinc-400 dark:text-zinc-500">No Description</span>;
 	}
 
-	return (
-		<span
-			className="relative inline-block max-w-full"
-			onMouseEnter={() => setHovered(true)}
-			onMouseLeave={() => setHovered(false)}
-		>
-			<span className="block truncate">{value}</span>
-			{hovered && (
-				<span className="absolute left-0 top-full z-40 mt-1 block w-72 max-w-[min(22rem,90vw)] whitespace-normal rounded-lg border border-zinc-200 bg-white p-2.5 text-xs leading-5 text-zinc-600 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-					{value}
-				</span>
-			)}
-		</span>
-	);
+	return <TruncatedText text={value} />;
 };
 
 /** Generic modal listing a Term's SQL Attributes. Reusable from any page that has a term id. */
@@ -89,9 +76,9 @@ export const SqlAttributesModal = ({ term, onClose }: SqlAttributesModalProps) =
 			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex min-w-0 items-center gap-2">
 					<Icon name={IconName.Link} className="h-5 w-5 shrink-0 text-[#76b900]" />
-					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					<TruncatedText as="h2" variant={TextVariant.Heading}>
 						{term?.name} — SQL Attributes ({attributes.length})
-					</h2>
+					</TruncatedText>
 				</div>
 				<Button
 					theme={ButtonTheme.IconNeutral}
@@ -120,9 +107,11 @@ export const SqlAttributesModal = ({ term, onClose }: SqlAttributesModalProps) =
 								key={attr.id}
 								className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700"
 							>
-								<h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-									{attr.name}
-								</h3>
+								<TruncatedText
+									as="h3"
+									text={attr.name}
+									variant={TextVariant.Heading}
+								/>
 								<div className="mt-1 max-w-md text-xs text-zinc-500 dark:text-zinc-400">
 									<TruncatedDescription text={attr.description} />
 								</div>

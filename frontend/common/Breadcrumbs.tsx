@@ -7,6 +7,7 @@
 import Link from 'next/link';
 import { Fragment } from 'react';
 import { Icon, IconName } from '@/common/icons';
+import { TruncatedText } from '@/common/TruncatedText';
 
 export type BreadcrumbItem = {
 	label: string;
@@ -17,9 +18,17 @@ type BreadcrumbsProps = {
 	items: BreadcrumbItem[];
 };
 
+const CRUMB_MAX_WIDTH = 'max-w-64';
+
+/**
+ * `min-w-0` on the trail lets it shrink inside the header row instead of
+ * pushing the actions beside it off the edge, and the per-crumb width cap stops
+ * one long entity name from claiming the whole bar while there is still room
+ * for it.
+ */
 export const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
 	return (
-		<nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm">
+		<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-sm">
 			{items.map((item, i) => {
 				const isLast = i === items.length - 1;
 
@@ -32,15 +41,17 @@ export const Breadcrumbs = ({ items }: BreadcrumbsProps) => {
 							/>
 						)}
 						{isLast || !item.href ? (
-							<span className="truncate text-zinc-900 dark:text-zinc-100">
-								{item.label}
+							<span
+								className={`min-w-0 ${CRUMB_MAX_WIDTH} text-zinc-900 dark:text-zinc-100`}
+							>
+								<TruncatedText text={item.label} />
 							</span>
 						) : (
 							<Link
 								href={item.href}
-								className="truncate text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+								className={`min-w-0 ${CRUMB_MAX_WIDTH} text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100`}
 							>
-								{item.label}
+								<TruncatedText text={item.label} />
 							</Link>
 						)}
 					</Fragment>

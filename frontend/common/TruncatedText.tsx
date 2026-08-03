@@ -4,63 +4,151 @@
 
 'use client';
 
-import { useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { TooltipContent, TooltipRoot, TooltipTrigger } from '@nvidia/foundations-react-core';
+import { TextVariant } from '@/enums/text';
+
+type TruncatedTextElement = 'span' | 'p' | 'div' | 'h1' | 'h2' | 'h3' | 'h4';
 
 type TruncatedTextProps = {
-	text: string;
-	/** Tailwind width-constraining class applied to the truncated line. Defaults to `max-w-sm`. */
-	maxWidthClass?: string;
-	className?: string;
+	/**
+	 * Value revealed in the tooltip. Defaults to the rendered text content, so
+	 * it only has to be passed when the two differ — a cell that renders a badge
+	 * but should reveal the raw value, for instance. An empty string counts as
+	 * not passed, since callers routinely default it to one.
+	 */
+	text?: string;
+	/** Rendered on the truncated line. Defaults to `text`. */
+	children?: ReactNode;
+	/**
+	 * Visible lines before the value is clipped. `1` (the default) keeps it on a
+	 * single line; higher values let it wrap and clamp at the given line count.
+	 */
+	lines?: 1 | 2 | 3;
+	/** Element to render, for headings and paragraphs that need their own tag. */
+	as?: TruncatedTextElement;
+	/** Role the value plays on the page. Defaults to the surrounding typography. */
+	variant?: TextVariant;
+	/** Claims the free space of a flex row, for a value followed by trailing controls. */
+	fill?: boolean;
+	/**
+	 * Puts a clipped line in the tab order so its tooltip can be opened without
+	 * a pointer. Off by default because the line is usually already inside a
+	 * button or a link, where a focusable child is both a redundant tab stop
+	 * and invalid content.
+	 */
+	focusable?: boolean;
 };
 
-/**
- * Single-line truncated text that shows a popover with the full value on
- * hover — but only when the text is actually clipped (`scrollWidth` exceeds
- * `clientWidth`). Short values that already fit never trigger the popover.
- *
- * The popover is rendered via a portal into `document.body` and positioned
- * with `fixed` coordinates instead of living inside the table's scroll
- * container — an `absolute` popover nested in an `overflow-auto` ancestor
- * would otherwise expand that ancestor's scrollable area and cause the
- * whole table to jump/scroll on hover.
- */
+// Tailwind only emits utilities it can see spelled out in the source, so these
+// cannot be assembled from `lines` or `variant` at runtime.
+//
+// Wrapped values keep their own line breaks and break mid-word, because a
+// clamped paragraph is where pasted URLs and identifiers end up.
+const CLAMP_CLASS = {
+	1: 'block truncate',
+	2: 'line-clamp-2 whitespace-pre-wrap wrap-anywhere',
+	3: 'line-clamp-3 whitespace-pre-wrap wrap-anywhere',
+} as const;
+
+const VARIANT_CLASS: Record<TextVariant, string> = {
+	[TextVariant.Inherit]: '',
+	[TextVariant.PageTitle]:
+		'text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100',
+	[TextVariant.CardTitle]:
+		'text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100',
+	[TextVariant.Heading]: 'text-sm font-semibold text-zinc-900 dark:text-zinc-100',
+	[TextVariant.Subheading]: 'text-sm font-medium text-zinc-900 dark:text-zinc-100',
+	[TextVariant.Body]: 'text-sm text-zinc-600 dark:text-zinc-300',
+	[TextVariant.Strong]: 'font-medium',
+	[TextVariant.Caption]: 'text-xs text-zinc-400 dark:text-zinc-500',
+	[TextVariant.Detail]: 'text-xs leading-5 text-zinc-500 dark:text-zinc-400',
+	[TextVariant.Label]: 'text-xs font-semibold text-zinc-500 dark:text-zinc-400',
+	[TextVariant.Overline]:
+		'text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400',
+};
+const TOOLTIP_CLASS =
+	'z-[1000] block max-h-[60vh] max-w-[min(500px,90vw)] overflow-y-auto whitespace-pre-wrap wrap-anywhere rounded-lg border border-zinc-200 bg-white p-2 text-xs leading-5 text-zinc-600 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300';
+
+const cx = (...classes: (string | false | undefined)[]) => classes.filter(Boolean).join(' ');
 export const TruncatedText = ({
 	text,
-	maxWidthClass = 'max-w-sm',
-	className = '',
+	children,
+	lines = 1,
+	as = 'span',
+	variant = TextVariant.Inherit,
+	fill = false,
+	focusable = false,
 }: TruncatedTextProps) => {
-	const spanRef = useRef<HTMLSpanElement>(null);
-	const [popover, setPopover] = useState<{ top: number; left: number } | null>(null);
+	const elementRef = useRef<HTMLSpanElement | null>(null);
+	const [tooltip, setTooltip] = useState('');
+	// Every supported tag renders a plain `HTMLElement`, so narrowing the union
+	// to one member spares JSX from reconciling their prop types.
+	const Element = as as 'span';
 
-	const handleMouseEnter = () => {
-		const el = spanRef.current;
-		if (el == null || el.scrollWidth <= el.clientWidth) return;
-		const rect = el.getBoundingClientRect();
-		setPopover({ top: rect.bottom + 4, left: rect.left });
-	};
+	const measure = useCallback(() => {
+		const el = elementRef.current;
+		if (el == null) return;
+		// A clamped value overflows downwards rather than sideways. The
+		// one-pixel slack absorbs sub-pixel line heights, which otherwise
+		// report every clamped element as overflowing.
+		const clipped =
+			lines > 1 ? el.scrollHeight > el.clientHeight + 1 : el.scrollWidth > el.clientWidth;
+		setTooltip(clipped ? text?.trim() || el.textContent || '' : '');
+	}, [text, lines]);
+
+	// Measured as the node attaches, so the tooltip parts are only mounted
+	// around a value that has something to reveal, and again on the way in,
+	// because the column can have been resized — or a webfont swapped in —
+	// since that first reading. Measuring on entry is what makes an observer
+	// unnecessary: the answer is only ever needed under the pointer, and there
+	// it is always taken fresh.
+	const attach = useCallback(
+		(el: HTMLSpanElement | null) => {
+			elementRef.current = el;
+			if (el != null) measure();
+		},
+		[measure],
+	);
+
+	const line = (
+		<Element
+			ref={attach}
+			onPointerEnter={measure}
+			onFocus={measure}
+			// An intact line has nothing to reveal, so it stays out of the tab
+			// order even when the caller asks for focus.
+			tabIndex={focusable && tooltip !== '' ? 0 : undefined}
+			className={cx('min-w-0', fill && 'flex-1', CLAMP_CLASS[lines], VARIANT_CLASS[variant])}
+		>
+			{children ?? text}
+		</Element>
+	);
+
+	// An intact value renders as a bare element. Wrapping it anyway would cost
+	// a tooltip root, a popper and a portal per line, and most of the lines on
+	// a page — tree rows, tags, headings, table cells that comfortably fit —
+	// are never clipped.
+	if (tooltip === '') return line;
 
 	return (
-		<>
-			<span
-				ref={spanRef}
-				className={`block truncate ${maxWidthClass} ${className}`}
-				onMouseEnter={handleMouseEnter}
-				onMouseLeave={() => setPopover(null)}
+		// Composed from the design system's parts rather than its `Tooltip`
+		// wrapper, which hard-codes a `data-testid` onto both the trigger and
+		// the panel; passing `undefined` for it here is what drops them. The
+		// wrapper also falls back to a local `TooltipProvider`, so going
+		// without it relies on the one the root layout puts around the app.
+		<TooltipRoot>
+			<TooltipTrigger asChild data-testid={undefined}>
+				{line}
+			</TooltipTrigger>
+			<TooltipContent
+				side="bottom"
+				align="start"
+				className={TOOLTIP_CLASS}
+				data-testid={undefined}
 			>
-				{text}
-			</span>
-			{popover != null &&
-				createPortal(
-					<span
-						role="tooltip"
-						style={{ top: popover.top, left: popover.left }}
-						className="fixed z-[1000] block w-72 max-w-[min(22rem,90vw)] whitespace-normal rounded-lg border border-zinc-200 bg-white p-2.5 text-xs leading-5 text-zinc-600 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-					>
-						{text}
-					</span>,
-					document.body,
-				)}
-		</>
+				{tooltip}
+			</TooltipContent>
+		</TooltipRoot>
 	);
 };

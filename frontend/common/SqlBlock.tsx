@@ -20,7 +20,7 @@ export const SqlBlock = ({ sql, label = 'SQL', className }: SqlBlockProps) => (
 			<span className="text-xs font-medium text-zinc-400">{label}</span>
 			<CopyButton text={sql} />
 		</div>
-		<pre className="p-3 text-xs leading-relaxed whitespace-pre-wrap break-words text-[#76b900]">
+		<pre className="p-3 text-xs leading-relaxed whitespace-pre-wrap wrap-anywhere text-[#76b900]">
 			<code>{sql}</code>
 		</pre>
 	</div>

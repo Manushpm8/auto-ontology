@@ -21,7 +21,12 @@ import type { TableExplorationDetails } from '@/types/exploration';
 import type { TableColumn } from '@/types/table';
 import { SqlBlock } from '@/common/SqlBlock';
 import { Table } from '@/common/Table';
+import { TruncatedText } from '@/common/TruncatedText';
+import { TextVariant } from '@/enums/text';
+import { usePagination } from '@/hooks/usePagination';
 import { Modal } from './Modal';
+
+const PAGE_SIZE = 10;
 
 export type DataDetailsKind = 'columns' | 'queries' | 'terms';
 
@@ -48,6 +53,10 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 	});
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	// Both lists are paged from here rather than from `renderTable`, where the
+	// hooks would sit behind the `kind` branch.
+	const columnsPage = usePagination(columns, PAGE_SIZE, target?.id ?? null);
+	const termsPage = usePagination(details.terms, PAGE_SIZE, target?.id ?? null);
 
 	useEffect(() => {
 		if (target == null || kind == null) return undefined;
@@ -116,10 +125,10 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 			return (
 				<Table
 					columns={tableColumns}
-					rows={columns}
+					rows={columnsPage.pageRows}
 					rowKey={(row) => row.id}
+					pagination={columnsPage.pagination}
 					containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
-					scrollClassName="max-h-[28rem] overflow-auto"
 					emptyMessage="No columns"
 				/>
 			);
@@ -168,10 +177,10 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 		return (
 			<Table
 				columns={termColumns}
-				rows={details.terms}
+				rows={termsPage.pageRows}
 				rowKey={(row) => row.id}
+				pagination={termsPage.pagination}
 				containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
-				scrollClassName="max-h-[28rem] overflow-auto"
 				emptyMessage="No Terms"
 			/>
 		);
@@ -191,9 +200,9 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 						}
 						className="h-5 w-5 shrink-0 text-[#76b900]"
 					/>
-					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					<TruncatedText as="h2" variant={TextVariant.Heading}>
 						{target?.name} ({title})
-					</h2>
+					</TruncatedText>
 				</div>
 				<Button
 					theme={ButtonTheme.IconNeutral}
