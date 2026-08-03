@@ -983,6 +983,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "hvac" },
+    { name = "kumoai" },
     { name = "langchain-openai" },
     { name = "langchain-postgres" },
     { name = "nemo-retriever", extra = ["tabular"] },
@@ -1012,6 +1013,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "hvac", specifier = ">=2.4.0" },
+    { name = "kumoai", specifier = ">=2.22.0" },
     { name = "langchain-openai", specifier = ">=1.3.0" },
     { name = "langchain-postgres", specifier = ">=0.0.17" },
     { name = "nemo-retriever", extras = ["tabular"], git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever" },
@@ -1385,6 +1387,34 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/25/a5/452b2ee152b569c631127ab484ed6af9482d160c21691d5ef9ac9b8e2a5b/kumo_api-0.92.0-py3-none-any.whl", hash = "sha256:f5abcf0df6fa8fd22897004a9a19c123e101705a0d4c09451e8376e76026acc8", size = 94736, upload-time = "2026-06-16T22:00:22.222Z" },
+]
+
+[[package]]
+name = "kumoai"
+version = "2.22.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "jinja2" },
+    { name = "kumo-api" },
+    { name = "pandas" },
+    { name = "plotly" },
+    { name = "pyarrow" },
+    { name = "pydantic" },
+    { name = "requests" },
+    { name = "rich" },
+    { name = "tqdm" },
+    { name = "typing-extensions" },
+    { name = "urllib3" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/ab/08f35a54247efe7fc5c92c1e2af463018015764d033cb751eabf3953ec1f/kumoai-2.22.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:5e82f48416f23cccf182ebabfdc8cb1d577049b9d97f04b85d23eb1f0e7c2545", size = 387161, upload-time = "2026-05-11T13:28:54.773Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/c1/14064f82b606257bd5d5935d9220c0869e0785500dcc410a13f9c8ea12ce/kumoai-2.22.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:23a0085aa12739dac562f56c35871c2b8877852ae36b177d561ca6919dcd4a0e", size = 404431, upload-time = "2026-05-11T13:28:55.902Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/c8/1758d58c38880c554fe6469ee3bad92a516deccf48ea7dcdb3e3e62e9ca4/kumoai-2.22.0-cp312-cp312-win_amd64.whl", hash = "sha256:ab3d812a42b16b09b51a13785f17fae1e433e2547672b08c4a84c73ce7a6f896", size = 387745, upload-time = "2026-05-11T13:28:57.229Z" },
+    { url = "https://files.pythonhosted.org/packages/53/ec/fc8653ac47d695c450b0969e97fbc2c9b159b62d693809dc31a98869004e/kumoai-2.22.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:5492057eba218d696ec3d2d522ffe609b15b78166cb2dc7d6cac683a1a381093", size = 387226, upload-time = "2026-05-11T13:28:58.52Z" },
+    { url = "https://files.pythonhosted.org/packages/80/b0/e25f55fad64d92fdf7e3d166940d4292a2460ab8da481875273120ceff1e/kumoai-2.22.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7fc350d636d1dda5d12a04ece40897f3f1eb7408db07b8714a72680ccbf204cd", size = 404335, upload-time = "2026-05-11T13:28:59.903Z" },
+    { url = "https://files.pythonhosted.org/packages/29/4f/cfbfc043e905fc1d8cde183a71e05c7bbe630e4fd9acf76d6fee0c65e9db/kumoai-2.22.0-cp313-cp313-win_amd64.whl", hash = "sha256:a29096c2a2c6f63fa17b94eb6f9eeb9b36f688fcff2c42df46fde6443fc1bcc3", size = 387745, upload-time = "2026-05-11T13:29:01.49Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/37/49f20c94079b95c6f90682b9e9aea7a08dac83c0c43135cec919b7ad3304/kumoai-2.22.0-py3-none-any.whl", hash = "sha256:406d974334220baf4375acb8082ad24bd1bcd6fef6433a89ea5d6d3f2ff209de", size = 295414, upload-time = "2026-05-11T13:29:06.956Z" },
 ]
 
 [[package]]
@@ -1890,8 +1920,17 @@ wheels = [
 ]
 
 [[package]]
+name = "narwhals"
+version = "2.24.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/1d/58946e5aab18393e793bd4add6985b95d0e01c3a2d832f38f54468b10dcd/narwhals-2.24.0.tar.gz", hash = "sha256:b5c0f684ccd9d7475b564111e319a4964abcf2baf79d3cf6b1003d06ac9b828d", size = 661143, upload-time = "2026-07-13T10:49:19.086Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/85/a5bfaebfd305ac18b57b0854d74e37e586809061a91fda62f0bd50c8518e/narwhals-2.24.0-py3-none-any.whl", hash = "sha256:42fdedf44e5b2ca7505630d45b4ac3058f38d8485cba9fe1652ca23152df7489", size = 461030, upload-time = "2026-07-13T10:49:17.571Z" },
+]
+
+[[package]]
 name = "nemo-retriever"
-version = "2026.7.26.dev20260726130349"
+version = "2026.7.1.dev20260701220559"
 source = { git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever#ee3230910b7d25a267386a11a8a4fec2882ac324" }
 dependencies = [
     { name = "backoff" },
@@ -2389,6 +2428,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/9f/4a/0883b8e3802965322523f0b200ecf33d31f10991d0401162f4b23c698b42/platformdirs-4.9.6.tar.gz", hash = "sha256:3bfa75b0ad0db84096ae777218481852c0ebc6c727b3168c1b9e0118e458cf0a", size = 29400, upload-time = "2026-04-09T00:04:10.812Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/75/a6/a0a304dc33b49145b21f4808d763822111e67d1c3a32b524a1baf947b6e1/platformdirs-4.9.6-py3-none-any.whl", hash = "sha256:e61adb1d5e5cb3441b4b7710bea7e4c12250ca49439228cc1021c00dcfac0917", size = 21348, upload-time = "2026-04-09T00:04:09.463Z" },
+]
+
+[[package]]
+name = "plotly"
+version = "6.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "narwhals" },
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/96/07/795c79dbce40c39bece88e69d049babbd23ffa95b5d117f248db8ea03abb/plotly-6.9.0.tar.gz", hash = "sha256:967ad33e8c704fed051800d11d985eb206a9c795c14206b30a6f463ed9c67d0d", size = 6919903, upload-time = "2026-07-09T14:55:59.982Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/18/d8544811ab076f876c4892b3714f5b0dad335e1dc33aef826df431b8325d/plotly-6.9.0-py3-none-any.whl", hash = "sha256:36bebe2f1bb13884774fe61689c329071446f6ce4a8927fb1f0d6fb24f581236", size = 9909646, upload-time = "2026-07-09T14:55:55.421Z" },
 ]
 
 [[package]]
