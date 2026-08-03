@@ -22,11 +22,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _STUCK_PHRASES = frozenset([
-    "not sure", "don't understand", "dont understand",
-    "don't know", "dont know", "unclear", "i'm confused",
-    "no idea", "not certain", "i don't", "i dont",
-    "out of scope", "cannot answer", "can't answer", "unable to answer",
-    "not able to answer", "i cannot", "i can't",
+    "out of scope", "not certain", "uncertain","cannot answer",
+    "can't answer", "unable to answer", "not able to answer",
 ])
 
 _CLARIFY_PROMPT = """\
@@ -59,7 +56,8 @@ Formulas or conditions whose exact specification is still missing, ranked most-c
 {turns_hint}
 
 STRICT RULES — follow every one of these exactly:
-1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', or 'schema'. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?"
+1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', or 'schema'. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
+1a. Exception to rule 1: if "Formulas or conditions whose exact specification is still missing" flags that column names for a user-defined formula are unknown, you MAY ask the user to name those specific identifiers — e.g. "What are the exact column names for battery life and battery capacity in your formula?" This is asking the user to complete their own formula specification, not asking about the database structure.
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, or history: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
 3. Never re-ask about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED") — not even rephrased. You MAY ask follow-up questions on topics the user did answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 4. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
@@ -485,9 +483,24 @@ def _find_unresolvable_entities(
     if not search_entities:
         return [], [], relevant_kg_text, all_norms
 
-    unresolvable: list[tuple[str, str | None]] = []
+    # Standalone generic terms (single token, no domain meaning) reliably produce
+    # false-positive VDB matches via substring coincidence (e.g. "id" → "idle power").
+    # Compound entities like "customer id" are multi-token and pass through normally.
+    _GENERIC_STANDALONE = frozenset({
+        "id", "ids", "key", "keys", "value", "values",
+        "code", "codes", "type", "types",
+    })
+    vdb_entities = [e for e in search_entities if e not in _GENERIC_STANDALONE]
+    skipped = [e for e in search_entities if e in _GENERIC_STANDALONE]
+    if skipped:
+        logger.info("Clarify — skipping VDB for generic standalone terms: %s", skipped)
+    unresolvable: list[tuple[str, str | None]] = [(e, None) for e in skipped]
     resolved_hits: list[tuple[str, str, float]] = []  # (entity, hit_text, score)
-    with ThreadPoolExecutor(max_workers=len(search_entities)) as pool:
+
+    if not vdb_entities:
+        return unresolvable, resolved_hits, relevant_kg_text, all_norms
+
+    with ThreadPoolExecutor(max_workers=len(vdb_entities)) as pool:
         futures = {
             pool.submit(
                 search_semantic_index,
@@ -497,7 +510,7 @@ def _find_unresolvable_entities(
                 2,
                 db_name,
             ): norm
-            for norm in search_entities
+            for norm in vdb_entities
         }
         for future in as_completed(futures):
             norm = futures[future]
@@ -650,7 +663,9 @@ def should_clarify(
     sort_ambiguous = _ambiguous_sort_direction(session.working_question)
     sort_direction_note = (
         "IMPORTANT: The question mentions sorting/ordering but does not specify "
-        "ascending or descending. You MUST ask the user for the sort direction before proceeding."
+        "ascending or descending. You MUST ask the user for the sort direction before proceeding. "
+        "If the query groups or filters by multiple fields, also consider whether a secondary sort key "
+        "is needed and ask about it if it would meaningfully affect the result order."
         if sort_ambiguous else ""
     )
     if sort_ambiguous:

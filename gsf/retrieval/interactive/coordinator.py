@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 from concurrent.futures import ThreadPoolExecutor
 
 from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, expand_kg_with_children, _STUCK_PHRASES
+from gsf.retrieval.data_access.semantic_search import search_semantic_index
+from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from .completeness import detect_incomplete_formulas
 from .grounding import ground_external_knowledge
 from .merge import merge_clarification
@@ -171,6 +173,61 @@ Skip any entry not required by the working question. \
 If nothing applies, output: NONE"""
 
 
+# Matches a column name in parentheses: (battlifeh), (pwractmw)
+_PAREN_COL_RE = re.compile(r'\(([a-zA-Z][a-zA-Z0-9_]*)\)')
+# Matches explicit "column <name>" or 'column "name"' or "column 'name'"
+_KEYWORD_COL_RE = re.compile(r'\bcolumns?\s+["\']?([a-zA-Z][a-zA-Z0-9_]+)["\']?', re.IGNORECASE)
+# Strict score threshold for exact column name lookup (lower = closer match)
+_NAMED_COL_SCORE_THRESHOLD = 0.45
+
+
+def _detect_and_resolve_named_columns(session: InteractiveSessionState, answer: str) -> None:
+    """Extract explicit column names from a user answer and resolve them to schema entries.
+
+    Detects two patterns:
+    - Parenthetical: "battery life in hours (battlifeh)"
+    - Keyword: "stored in the column dogs" / 'column "pwractmw"'
+
+    For each candidate, runs a VDB lookup. On a confident hit, injects a direct
+    "column_name → <schema description>" line into session._named_column_evidence
+    so the SQL generator knows which table the column belongs to.
+    """
+    if session.semantic_retriever is None:
+        return
+
+    candidates: set[str] = set()
+    for m in _PAREN_COL_RE.finditer(answer):
+        candidates.add(m.group(1))
+    for m in _KEYWORD_COL_RE.finditer(answer):
+        candidates.add(m.group(1))
+
+    if not candidates:
+        return
+
+    already = session._named_column_evidence
+    for col in candidates:
+        if col in already:
+            continue
+        try:
+            hits = search_semantic_index(
+                session.semantic_retriever, col, [LABEL_COLUMN_ATTRIBUTE], 1, session.db_name
+            )
+        except Exception:
+            continue
+        if not hits:
+            continue
+        score = hits[0].get("score", 1.0)
+        if score > _NAMED_COL_SCORE_THRESHOLD:
+            continue
+        hit_text = hits[0].get("text", "")
+        entry = f"{col} → {hit_text}"
+        logger.info("Named column resolved: %r (score=%.3f) → %s", col, score, hit_text[:120])
+        session._named_column_evidence = (
+            already + "\n" + entry if already else entry
+        )
+        already = session._named_column_evidence
+
+
 def _generate_evidence(question: str, grounded_kg: str) -> str:
     """Convert grounded KB text into a short Evidence string for the SQL generator."""
     if not grounded_kg:
@@ -225,6 +282,8 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     combined_kg = "\n".join(filter(None, [session.phase1_grounded_kg, cross_phase, session.cumulative_grounded_kg, extra_kg]))
     question = session.working_question
     evidence = _generate_evidence(question, combined_kg)
+    if session._named_column_evidence:
+        evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
     if evidence:
         question = f"{question}\n\nEvidence: {evidence}"
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence[:200])
@@ -398,6 +457,8 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
             newly_resolved = set(session.persistent_unresolved) - set(pruned)
             session.resolved_persistent.update(newly_resolved)
             session.persistent_unresolved = pruned
+
+        _detect_and_resolve_named_columns(session, last_turn["a"])
 
         if merged:
             session.working_question = merged
