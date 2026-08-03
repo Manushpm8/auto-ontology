@@ -5,15 +5,17 @@
 """
 Candidate Retrieval Agent
 
-Searches the semantic VDB, reranks each search independently, and stores typed
-results in path_state.
+Batch-embeds all query texts once, searches the semantic VDB per label bucket,
+reranks each bucket independently, and stores typed results in path_state.
 
 Responsibilities:
-- Search the semantic VDB (ontology_retriever) for ColumnAttribute candidates.
-- Search the semantic VDB (semantic_retriever) for CustomAnalysis candidates.
-- Rerank each entity's ColumnAttribute hits against that entity.
+- Embed the question and every entity in a single HTTP round-trip.
+- Search CustomAnalysis / SqlAttribute with the question vector.
+- Search ColumnAttribute once per entity (batched under one label filter).
 - Rerank CustomAnalysis and SqlAttribute hits against the full question.
-- Deduplicate ColumnAttribute hits across entities and store results in path_state.
+- Merge and deduplicate all entity ColumnAttribute hits, then rerank them once
+  against a query containing the full question and all entities.
+- Store the resulting candidates in path_state.
 """
 
 import logging
@@ -26,13 +28,13 @@ from nemo_retriever.operators.rerank import rerank_hits
 
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
 
-from gsf.retrieval.data_access.semantic_search import search_semantic_index
+from gsf.retrieval.data_access.semantic_search import search_semantic_index_by_vectors
 from gsf.retrieval.text_to_sql.base import BaseAgent
-from gsf.retrieval.text_to_sql.models import ColumnAttributeSpec
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
+from gsf.utils.embedding import embed_query_texts
 from gsf.utils.rerank import get_rerank_kwargs
 
 logger = logging.getLogger(__name__)
@@ -40,145 +42,59 @@ logger = logging.getLogger(__name__)
 
 _CAND_RETRIEVE_K = 10
 _CAND_KEEP_K = 3
-_RRF_K = 60
+_MAX_VECTOR_DISTANCE = 0.7
 
 
 # ---------------------------------------------------------------------------
-# Search / dedup helpers
+# Search / rerank helpers
 # ---------------------------------------------------------------------------
 
 
-def _search_by_label(
-    retriever: object,
-    entity: str,
+def _task_tag(label: str, search_query: str) -> str:
+    """Short identifier for log lines, since tasks run concurrently."""
+    query = search_query if len(search_query) <= 40 else f"{search_query[:37]}…"
+    return f"{label}/{query!r}"
+
+
+def _column_attribute_rerank_query(question: str, entities: list[str]) -> str:
+    """Build the single query used to rerank all ColumnAttribute hits."""
+    return f"Question: {question}\nEntities: {', '.join(entities)}"
+
+
+def _rerank_hits(
+    hits: list[dict],
+    search_query: str,
     label: str,
-    k: int,
-    database_name: str | None = None,
+    keep_k: int,
 ) -> list[dict]:
-    """Return up to *k* VDB hits for *label*."""
+    """Rerank pre-fetched hits once and keep the best *keep_k*."""
+    tag = _task_tag(label, search_query)
+    if len(hits) <= 2:
+        logger.info(
+            "%s rerank skipped — only %d hit(s), keeping vector order",
+            tag,
+            len(hits),
+        )
+        return hits[:keep_k]
+
     try:
-        return list(
-            search_semantic_index(
-                retriever,
-                entity,
-                label_filter=[label],
-                per_label_k=k,
-                database_name=database_name,
+        ranked: list[dict] | None = list(
+            rerank_hits(
+                search_query,
+                hits,
+                top_n=len(hits),
+                **get_rerank_kwargs(),
             )
         )
     except Exception:
-        logger.warning("%s search failed for entity %r", label, entity, exc_info=True)
-        return []
-
-
-def _search_and_rerank(
-    retriever: object,
-    search_query: str,
-    label: str,
-    retrieve_k: int,
-    keep_k: int,
-    database_name: str | None = None,
-    question: str | None = None,
-) -> list[dict]:
-    """Search one label and keep the best reranked hits.
-
-    When *question* is set, *search_query* is treated as the entity text:
-    rerank the retrieved set independently against the entity and against the
-    question, then combine ranks with equal-weight Reciprocal Rank Fusion.
-    Otherwise rerank once against *search_query* alone.
-    """
-    hits = _search_by_label(
-        retriever,
-        search_query,
-        label,
-        retrieve_k,
-        database_name,
-    )
-    if not hits:
-        return []
-
-    def _rerank(rerank_query: str) -> list[dict] | None:
-        try:
-            return list(
-                rerank_hits(
-                    rerank_query,
-                    hits,
-                    top_n=len(hits),
-                    **get_rerank_kwargs(),
-                )
-            )
-        except Exception:
-            logger.warning(
-                "%s rerank failed for query %r",
-                label,
-                rerank_query,
-                exc_info=True,
-            )
-            return None
-
-    if question is None:
-        ranked = _rerank(search_query)
-        return (ranked or hits)[:keep_k]
-
-    entity = search_query
-    entity_ranked = _rerank(entity)
-    question_ranked = _rerank(question)
-    if entity_ranked is None and question_ranked is None:
         logger.warning(
-            "%s entity/question reranks failed — keeping top %d vector hit(s)",
+            "%s rerank failed for query %r",
             label,
-            keep_k,
+            search_query,
+            exc_info=True,
         )
-        return hits[:keep_k]
-    if entity_ranked is None:
-        assert question_ranked is not None
-        return question_ranked[:keep_k]
-    if question_ranked is None:
-        return entity_ranked[:keep_k]
-
-    entity_by_id = {
-        str(hit["id"]): (rank, hit)
-        for rank, hit in enumerate(entity_ranked, start=1)
-        if hit.get("id") is not None
-    }
-    question_by_id = {
-        str(hit["id"]): (rank, hit)
-        for rank, hit in enumerate(question_ranked, start=1)
-        if hit.get("id") is not None
-    }
-
-    fused: list[dict] = []
-    for hit_id in entity_by_id.keys() | question_by_id.keys():
-        entity_entry = entity_by_id.get(hit_id)
-        question_entry = question_by_id.get(hit_id)
-        entity_score = (
-            float(entity_entry[1].get("_rerank_score"))
-            if entity_entry and entity_entry[1].get("_rerank_score") is not None
-            else None
-        )
-        question_score = (
-            float(question_entry[1].get("_rerank_score"))
-            if question_entry and question_entry[1].get("_rerank_score") is not None
-            else None
-        )
-        rrf_score = (1 / (_RRF_K + entity_entry[0]) if entity_entry else 0) + (
-            1 / (_RRF_K + question_entry[0]) if question_entry else 0
-        )
-        source_hit = entity_entry[1] if entity_entry is not None else question_entry[1]
-        fused_hit = dict(source_hit)
-        fused_hit["_entity_rerank_score"] = entity_score
-        fused_hit["_question_rerank_score"] = question_score
-        fused_hit["_rerank_score"] = rrf_score
-        fused.append(fused_hit)
-
-    return sorted(
-        fused,
-        key=lambda hit: (
-            -float(hit["_rerank_score"]),
-            float(hit["score"]) if hit.get("score") is not None else float("inf"),
-            str(hit.get("id") or ""),
-        ),
-    )[:keep_k]
+        ranked = None
+    return (ranked or hits)[:keep_k]
 
 
 def _dedupe_best_score(hits: list[dict]) -> list[dict]:
@@ -198,6 +114,108 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         best.values(),
         key=lambda h: float(h.get("score") or float("inf")),
     )
+
+
+def _merge_column_attribute_hits(
+    hits_per_entity: list[list[dict]],
+    entities: list[str],
+) -> tuple[list[dict], dict[str, set[str]]]:
+    """Deduplicate hits while retaining which entities retrieved each hit."""
+    matched_entities: dict[str, set[str]] = {}
+    all_hits: list[dict] = []
+    for entity, hits in zip(entities, hits_per_entity, strict=False):
+        for hit in hits:
+            hit_id = hit.get("id")
+            if hit_id is None:
+                continue
+            matched_entities.setdefault(str(hit_id), set()).add(entity)
+            all_hits.append(hit)
+    return _dedupe_best_score(all_hits), matched_entities
+
+
+def _select_column_attributes_with_entity_coverage(
+    ranked_hits: list[dict],
+    matched_entities: dict[str, set[str]],
+    entities: list[str],
+    keep_k: int,
+) -> list[dict]:
+    """Keep one distinct candidate per entity when possible, then fill by rank."""
+    selected: list[dict] = []
+    selected_ids: set[str] = set()
+
+    for entity in entities:
+        candidate = next(
+            (
+                hit
+                for hit in ranked_hits
+                if str(hit.get("id")) not in selected_ids
+                and entity in matched_entities.get(str(hit.get("id")), set())
+            ),
+            None,
+        )
+        if candidate is not None:
+            selected.append(candidate)
+            selected_ids.add(str(candidate.get("id")))
+
+    target_count = max(keep_k, len(selected))
+    for hit in ranked_hits:
+        hit_id = str(hit.get("id"))
+        if hit_id not in selected_ids:
+            selected.append(hit)
+            selected_ids.add(hit_id)
+        if len(selected) >= target_count:
+            break
+
+    for hit in selected:
+        hit["_matched_entities"] = sorted(
+            matched_entities.get(str(hit.get("id")), set())
+        )
+    return selected
+
+
+def _search_label_bucket(
+    retriever: object,
+    vectors: list[list[float]],
+    label: str,
+    top_k: int,
+    database_name: str | None,
+) -> list[list[dict]]:
+    """Run one pgvector search for *vectors* under a single label filter."""
+    try:
+        results = search_semantic_index_by_vectors(
+            retriever,
+            vectors,
+            label=label,
+            top_k=top_k,
+            database_name=database_name,
+        )
+    except Exception:
+        logger.warning(
+            "%s vector search failed for %d quer(y/ies)",
+            label,
+            len(vectors),
+            exc_info=True,
+        )
+        return [[] for _ in vectors]
+
+    filtered_results: list[list[dict]] = []
+    for hits in results:
+        kept = [
+            hit
+            for hit in hits
+            if float(hit.get("score", float("inf"))) <= _MAX_VECTOR_DISTANCE
+        ]
+        if not kept and hits and label == LABEL_COLUMN_ATTRIBUTE:
+            # Per-entity coverage takes precedence over the distance threshold:
+            # preserve the closest vector hit when an entity has no hit <= 0.7.
+            kept = [
+                min(
+                    hits,
+                    key=lambda hit: float(hit.get("score", float("inf"))),
+                )
+            ]
+        filtered_results.append(kept)
+    return filtered_results
 
 
 # ---------------------------------------------------------------------------
@@ -239,77 +257,128 @@ class CandidateRetrievalAgent(BaseAgent):
         all_custom_hits: list[dict] = []
         all_sql_attr_hits: list[dict] = []
 
-        if semantic_retriever is not None:
+        if semantic_retriever is not None and question:
             clean_entities = [e.strip() for e in entities if (e or "").strip()]
 
-            search_tasks: list[tuple[str, Any]] = [
-                (
-                    "custom",
-                    (
-                        semantic_retriever,
-                        question,
-                        Labels.CUSTOM_ANALYSIS,
-                        _CAND_RETRIEVE_K,
-                        _CAND_KEEP_K,
-                        target_db,
-                    ),
-                ),
-                (
-                    "sql_attr",
-                    (
-                        semantic_retriever,
-                        question,
-                        LABEL_SQL_ATTRIBUTE,
-                        _CAND_RETRIEVE_K,
-                        _CAND_KEEP_K,
-                        target_db,
-                    ),
-                ),
-                *[
-                    (
-                        f"col_attr:{entity}",
-                        (
-                            semantic_retriever,
-                            entity,
-                            LABEL_COLUMN_ATTRIBUTE,
-                            _CAND_RETRIEVE_K,
-                            _CAND_KEEP_K,
-                            target_db,
-                            question,
-                        ),
+            # Phase 1: one embed round-trip for the question + every entity.
+            # Identical strings are deduped inside embed_query_texts, so the
+            # question is not paid twice when CustomAnalysis and SqlAttribute
+            # both need it.
+            embed_texts = [question, *clean_entities]
+            try:
+                vectors = embed_query_texts(embed_texts)
+            except Exception:
+                self.logger.warning(
+                    "Batch query embed failed — skipping candidate retrieval",
+                    exc_info=True,
+                )
+                vectors = []
+
+            if vectors:
+                question_vector = vectors[0]
+                entity_vectors = vectors[1:]
+
+                # Phase 2: three label-filtered pgvector searches. Entity
+                # ColumnAttribute queries share a filter so they ride one call.
+                search_jobs: list[tuple[str, list[list[float]], str]] = [
+                    ("custom", [question_vector], Labels.CUSTOM_ANALYSIS),
+                    ("sql_attr", [question_vector], LABEL_SQL_ATTRIBUTE),
+                ]
+                if entity_vectors:
+                    search_jobs.append(
+                        ("col_attr", entity_vectors, LABEL_COLUMN_ATTRIBUTE)
                     )
-                    for entity in clean_entities
-                ],
-            ]
 
-            with ThreadPoolExecutor(max_workers=len(search_tasks) or 1) as pool:
-                futures = {
-                    pool.submit(_search_and_rerank, *args): key
-                    for key, args in search_tasks
-                }
-                for future in as_completed(futures):
-                    key = futures[future]
-                    result = future.result()
-                    if key == "custom":
-                        all_custom_hits = result
-                    elif key == "sql_attr":
-                        all_sql_attr_hits = result
-                    else:
-                        all_col_attr_hits.extend(result)
+                bucket_hits: dict[str, list[list[dict]]] = {}
 
-        # ColumnAttributes are searched per entity and merged, so the same
-        # id can appear more than once; keep the best score. CustomAnalysis
-        # and SqlAttribute are searched once each — no cross-query duplicates.
-        deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
+                with ThreadPoolExecutor(max_workers=len(search_jobs) or 1) as pool:
+                    futures = {
+                        pool.submit(
+                            _search_label_bucket,
+                            semantic_retriever,
+                            vecs,
+                            label,
+                            _CAND_RETRIEVE_K,
+                            target_db,
+                        ): key
+                        for key, vecs, label in search_jobs
+                    }
+                    for future in as_completed(futures):
+                        bucket_hits[futures[future]] = future.result()
 
-        path_state["retrieved_column_attributes"] = deduped_col_attr
+                custom_raw = (bucket_hits.get("custom") or [[]])[0]
+                sql_attr_raw = (bucket_hits.get("sql_attr") or [[]])[0]
+                col_attr_raw_per_entity = bucket_hits.get("col_attr") or [
+                    [] for _ in clean_entities
+                ]
+
+                # Phase 3: merge the per-entity ColumnAttribute buckets and
+                # deduplicate before one global rerank. The combined query
+                # carries both the user's intent and every extracted entity.
+                merged_col_attr_raw, col_attr_matched_entities = (
+                    _merge_column_attribute_hits(
+                        col_attr_raw_per_entity,
+                        clean_entities,
+                    )
+                )
+                col_attr_query = _column_attribute_rerank_query(
+                    question, clean_entities
+                )
+                rerank_jobs: list[tuple[str, Any]] = [
+                    (
+                        "custom",
+                        (custom_raw, question, Labels.CUSTOM_ANALYSIS, _CAND_KEEP_K),
+                    ),
+                    (
+                        "sql_attr",
+                        (
+                            sql_attr_raw,
+                            question,
+                            LABEL_SQL_ATTRIBUTE,
+                            _CAND_KEEP_K,
+                        ),
+                    ),
+                    (
+                        "col_attr",
+                        (
+                            merged_col_attr_raw,
+                            col_attr_query,
+                            LABEL_COLUMN_ATTRIBUTE,
+                            len(merged_col_attr_raw),
+                        ),
+                    ),
+                ]
+
+                with ThreadPoolExecutor(max_workers=len(rerank_jobs) or 1) as pool:
+                    futures = {
+                        pool.submit(_rerank_hits, *args): key
+                        for key, args in rerank_jobs
+                    }
+                    for future in as_completed(futures):
+                        key = futures[future]
+                        result = future.result()
+                        if key == "custom":
+                            all_custom_hits = result
+                        elif key == "sql_attr":
+                            all_sql_attr_hits = result
+                        else:
+                            all_col_attr_hits = (
+                                _select_column_attributes_with_entity_coverage(
+                                    result,
+                                    col_attr_matched_entities,
+                                    clean_entities,
+                                    _CAND_KEEP_K,
+                                )
+                            )
+
+        path_state["retrieved_column_attributes"] = all_col_attr_hits
         path_state["retrieved_custom_analyses"] = all_custom_hits
         path_state["retrieved_sql_attributes"] = all_sql_attr_hits
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "
             "and %d SqlAttribute candidates (%d entities queried)",
-            len(deduped_col_attr),
+            len(all_col_attr_hits),
             len(all_custom_hits),
             len(all_sql_attr_hits),
             len(entities),

@@ -283,3 +283,50 @@ def search_semantic_index(
     return _hits_to_semantic_rows(
         all_hits, label_filter=allowed_labels, per_label_k=per_label_k
     )
+
+
+def search_semantic_index_by_vectors(
+    retriever: "Retriever",
+    vectors: list[list[float]],
+    *,
+    label: str | None = None,
+    top_k: int = PER_LABEL_LIMIT,
+    database_name: str | None = None,
+    schema_name: str | None = None,
+) -> list[list[dict]]:
+    """Search the plugged-in VDB with precomputed query vectors.
+
+    One result list is returned per input vector, preserving order. All
+    vectors share the same metadata filter (``label`` / ``database_name`` /
+    ``schema_name``), so callers that need different filters must make
+    separate calls — typically one per label bucket.
+
+    This skips the Retriever's per-query embed step; use
+    :func:`gsf.utils.embedding.embed_query_texts` once up front when several
+    searches share query text.
+    """
+    if not vectors:
+        return []
+
+    vdb = (getattr(retriever, "vdb_kwargs", None) or {}).get("vdb")
+    if vdb is None:
+        raise ValueError(
+            "Retriever has no plugged-in VDB (expected vdb_kwargs['vdb']); "
+            "cannot search by precomputed vectors."
+        )
+
+    fmt = _metadata_filter_format(retriever)
+    where_clause = _build_metadata_where_clause(
+        labels=[label] if label else None,
+        database_name=database_name,
+        schema_name=schema_name,
+        fmt=fmt,
+    )
+    retrieval_kwargs: dict = {"where": where_clause} if where_clause else {}
+    raw_hits = vdb.retrieval(vectors, top_k=int(top_k), **retrieval_kwargs)
+
+    label_filter = {str(label)} if label is not None else None
+    return [
+        _hits_to_semantic_rows(hits, label_filter=label_filter, per_label_k=top_k)
+        for hits in raw_hits
+    ]

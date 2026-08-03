@@ -44,7 +44,7 @@ def test_embed_and_rerank_models_ignore_shared_chat_model(
     assert (
         model
         == {
-            "EMBED": "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2",
+            "EMBED": "nvidia/nvidia/llama-3.2-nv-embedqa-1b-v2",
             "RERANK": "nvidia/nvidia/llama-3.2-nv-rerankqa-1b-v2",
         }[prefix]
     )
