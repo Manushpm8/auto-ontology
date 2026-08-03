@@ -118,12 +118,6 @@ def _format_semantic_context(
             "cannot answer the question. Use only the hops you need:"
         )
         for entry in attribute_join_paths:
-            attr_name = entry.get("attr_name", "")
-            col_name = entry.get("col_name", "")
-            schema = entry.get("schema_name", "")
-            table = entry.get("table_name", "")
-            full_table = f"{schema}.{table}" if schema else table
-            lines.append(f"  {attr_name}: {full_table}.{col_name}")
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
