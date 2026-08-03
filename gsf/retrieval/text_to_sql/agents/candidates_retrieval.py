@@ -5,13 +5,14 @@
 """
 Candidate Retrieval Agent
 
-Searches both VDBs per extracted entity, applies an LLM intent filter on each
-entity's raw hits, and stores typed results in path_state.
+Searches the semantic VDB per extracted entity, applies an LLM intent filter on
+each entity's raw hits, and stores typed results in path_state.
 
 Responsibilities:
-- Search the semantic VDB (ontology_retriever) for ColumnAttribute candidates.
-- Search the semantic VDB (semantic_retriever) for CustomAnalysis candidates.
-- Filter each entity's hits by intent using the LLM (full question, not entity).
+- Search the semantic VDB for ColumnAttribute candidates (top-5 per entity).
+- Search the semantic VDB for CustomAnalysis candidates.
+- Do not retrieve SqlAttribute candidates.
+- Filter CustomAnalysis hits by intent using the LLM (full question).
 - Deduplicate across entities and store results in path_state.
 """
 
@@ -24,7 +25,7 @@ from langchain_core.messages import SystemMessage
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
-from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
+from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 
 from gsf.dal.attributes import fetch_column_attribute_fk_counts
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
@@ -73,7 +74,7 @@ def _search_by_label(
 
 
 def _dedupe_best_score(hits: list[dict]) -> list[dict]:
-    """Deduplicate by id, keeping the hit with the most FK connections (then lowest score)."""
+    """Deduplicate and rank by semantic score, using FK count as a tie-break."""
     best: dict[str, dict] = {}
     for hit in hits:
         hid = hit.get("id")
@@ -88,13 +89,13 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
             prev_fk = int(prev.get("fk_count") or 0)
             cur_score = float(hit.get("score") or float("inf"))
             prev_score = float(prev.get("score") or float("inf"))
-            if (cur_fk, -cur_score) > (prev_fk, -prev_score):
+            if (cur_score, -cur_fk) < (prev_score, -prev_fk):
                 best[key] = hit
     return sorted(
         best.values(),
         key=lambda h: (
-            -int(h.get("fk_count") or 0),
             float(h.get("score") or float("inf")),
+            -int(h.get("fk_count") or 0),
         ),
     )
 
@@ -314,16 +315,16 @@ def _build_column_attribute_spec(hit: dict) -> ColumnAttributeSpec | None:
 
 
 class CandidateRetrievalAgent(BaseAgent):
-    """Retrieve ColumnAttribute, CustomAnalysis, and SqlAttribute candidates.
+    """Retrieve ColumnAttribute and CustomAnalysis candidates.
 
-    - ColumnAttributes: searched per entity from the semantic VDB.
+    - ColumnAttributes: searched per entity from the semantic VDB (top-5 each).
     - CustomAnalysis: searched once with the full question from the semantic VDB.
-    - SqlAttribute: searched once with the full question from the semantic VDB.
+    - SqlAttribute retrieval is disabled; ``retrieved_sql_attributes`` is always empty.
 
     Deduplicate across entities and store:
     - ``path_state["retrieved_column_attributes"]``: ``list[dict]``
     - ``path_state["retrieved_custom_analyses"]``:   ``list[dict]``
-    - ``path_state["retrieved_sql_attributes"]``:    ``list[dict]``
+    - ``path_state["retrieved_sql_attributes"]``:    ``list[dict]`` (always ``[]``)
     """
 
     def __init__(self):
@@ -362,16 +363,6 @@ class CandidateRetrievalAgent(BaseAgent):
                         target_db,
                     ),
                 ),
-                (
-                    "sql_attr",
-                    (
-                        semantic_retriever,
-                        question,
-                        LABEL_SQL_ATTRIBUTE,
-                        3,
-                        target_db,
-                    ),
-                ),
                 *[
                     (
                         f"col_attr:{entity}",
@@ -379,7 +370,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             semantic_retriever,
                             entity,
                             LABEL_COLUMN_ATTRIBUTE,
-                            2,
+                            5,
                             target_db,
                         ),
                     )
@@ -397,11 +388,11 @@ class CandidateRetrievalAgent(BaseAgent):
                     result = future.result()
                     if key == "custom":
                         all_custom_hits = result
-                    elif key == "sql_attr":
-                        all_sql_attr_hits = result
                     else:
                         all_col_attr_hits.extend(result)
 
+        # SqlAttribute candidates are not retrieved; keep the combined filter
+        # call so CustomAnalysis filtering stays unchanged.
         all_custom_hits, all_sql_attr_hits = _llm_filter_both(
             llm, question, all_custom_hits, all_sql_attr_hits
         )
