@@ -10,6 +10,10 @@ import type { Core } from 'cytoscape';
 
 import { explorationApi } from '@/api/exploration';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { SelectButton } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { SelectButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { SearchInput } from '@/common/SearchInput';
 import {
@@ -280,13 +284,12 @@ export const ExplorationView = () => {
 							<ul className="absolute top-12 max-h-[calc(100dvh-8.5rem)] w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
 								{filteredNodes.map((node) => (
 									<li key={node.id}>
-										<button
-											type="button"
+										<SelectButton
+											theme={SelectButtonTheme.ListItem}
 											onClick={() => {
 												setSearch('');
 												handleSelectNode(node.id);
 											}}
-											className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
 										>
 											<Icon
 												name={
@@ -301,7 +304,7 @@ export const ExplorationView = () => {
 												}`}
 											/>
 											<span className="truncate">{node.name}</span>
-										</button>
+										</SelectButton>
 									</li>
 								))}
 							</ul>
@@ -323,13 +326,20 @@ export const ExplorationView = () => {
 			)}
 
 			{!loading && error == null && graph.nodes.length === 0 && (
-				<div className="flex h-full items-center justify-center text-sm text-zinc-500">
-					{noZoneAccess
-						? 'You do not have access to any data. Contact an administrator to request access.'
-						: layer === ExplorationLayer.Semantic
-							? 'No Terms Created Yet'
-							: 'No Data Objects Found'}
-				</div>
+				<EmptyState
+					variant={EmptyStateVariant.Borderless}
+					icon={IconName.Exploration}
+					title={
+						noZoneAccess
+							? 'You do not have access to any data'
+							: layer === ExplorationLayer.Semantic
+								? 'No Terms Created Yet'
+								: 'No Data Objects Found'
+					}
+					description={
+						noZoneAccess ? 'Contact an administrator to request access.' : undefined
+					}
+				/>
 			)}
 
 			{!loading && error == null && graph.nodes.length > 0 && (

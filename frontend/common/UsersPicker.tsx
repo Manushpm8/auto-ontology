@@ -6,6 +6,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { User } from '@/types/auth';
+import { SelectButton } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { SelectButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 
 const getInitials = (name: string): string => {
 	const parts = name.trim().split(/\s+/);
@@ -66,11 +70,7 @@ export const UsersPicker = ({ allUsers, selectedIds, onChange, loading }: UsersP
 			</label>
 
 			{/* Trigger */}
-			<button
-				type="button"
-				onClick={() => setOpen((v) => !v)}
-				className="flex min-h-[38px] w-full items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm text-zinc-700 transition-colors hover:border-zinc-400 focus:border-[#76b900] focus:outline-none focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
-			>
+			<SelectButton theme={SelectButtonTheme.SelectField} onClick={() => setOpen((v) => !v)}>
 				{loading ? (
 					<span className="text-zinc-400">Loading users…</span>
 				) : selectedUsers.length === 0 ? (
@@ -100,7 +100,7 @@ export const UsersPicker = ({ allUsers, selectedIds, onChange, loading }: UsersP
 						clipRule="evenodd"
 					/>
 				</svg>
-			</button>
+			</SelectButton>
 
 			{/* Dropdown */}
 			{open && (
@@ -134,16 +134,16 @@ export const UsersPicker = ({ allUsers, selectedIds, onChange, loading }: UsersP
 							Users
 						</p>
 						{filtered.length === 0 ? (
-							<p className="px-3 py-2 text-sm text-zinc-400">No users found</p>
+							<EmptyState variant={EmptyStateVariant.Inline} title="No users found" />
 						) : (
 							filtered.map((user) => {
 								const checked = selectedIds.has(user.id);
 								return (
-									<button
+									<SelectButton
 										key={user.id}
-										type="button"
+										theme={SelectButtonTheme.ListItem}
+										selected={checked}
 										onClick={() => toggle(user.id)}
-										className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
 									>
 										<UserAvatar user={user} />
 										<span className="min-w-0 flex-1">
@@ -168,7 +168,7 @@ export const UsersPicker = ({ allUsers, selectedIds, onChange, loading }: UsersP
 												/>
 											</svg>
 										)}
-									</button>
+									</SelectButton>
 								);
 							})
 						)}

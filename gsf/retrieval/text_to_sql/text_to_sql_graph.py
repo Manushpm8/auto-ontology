@@ -468,6 +468,7 @@ def create_graph():
     graph.add_edge("reconstruct_sql", "validate_sql_query")
 
     graph.add_edge("unconstructable_sql_response", END)
+
     graph.add_edge("format_and_respond", END)
 
     return graph

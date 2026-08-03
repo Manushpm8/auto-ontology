@@ -5,6 +5,8 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { SelectButton } from '@/common/Button';
+import { SelectButtonTheme } from '@/enums/button';
 import { createPortal } from 'react-dom';
 
 export type PopoverMenuItem = {
@@ -80,22 +82,18 @@ export const PopoverMenu = ({ items, trigger, className = '' }: PopoverMenuProps
 						className="fixed z-[1000] w-max min-w-32 whitespace-nowrap rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
 					>
 						{items.map((item) => (
-							<button
+							<SelectButton
+								theme={SelectButtonTheme.ListItem}
+								danger={item.danger}
 								key={item.label}
-								type="button"
 								onClick={() => {
 									setMenu(null);
 									item.onClick();
 								}}
-								className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
-									item.danger
-										? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40'
-										: 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700'
-								}`}
 							>
 								{item.icon}
 								{item.label}
-							</button>
+							</SelectButton>
 						))}
 					</div>,
 					document.body,

@@ -8,10 +8,21 @@
 // We use a hand-rolled handler (instead of Next.js `rewrites`) because the
 // dev-server rewrites buffer streaming responses — the browser would receive
 // nothing until the upstream connection closed, defeating SSE.
+//
+// This route is also the single writer of `Message` rows for chat turns —
+// the user's turn is persisted synchronously below, the assistant's inside
+// `after()`. Persisting here rather than letting the browser call
+// `/api/conversations/[id]/messages` means a full turn is saved even if the
+// user navigates away mid-stream — the agent keeps running server-side
+// regardless (the analytics tee below keeps the upstream connection alive),
+// so persistence should not depend on the browser still being around to see
+// it finish.
 
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
 import { getPrisma } from '@/lib/prisma';
+import { resolveOrCreateOwnedConversation } from '@/lib/chatConversations';
+import { buildSqlAnswerMessage, type AgentAnswer, type AnswerMessage } from '@/lib/answerMessages';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -19,37 +30,59 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 const SOURCE_HEADER = 'x-gsf-source';
 
-const extractQuestion = (rawBody: string): string => {
+const parseBody = (rawBody: string): Record<string, unknown> => {
 	try {
-		const parsed = JSON.parse(rawBody) as { question?: unknown };
-		return typeof parsed.question === 'string' ? parsed.question : '';
+		const parsed: unknown = JSON.parse(rawBody);
+		return typeof parsed === 'object' && parsed !== null
+			? (parsed as Record<string, unknown>)
+			: {};
 	} catch {
-		return '';
+		return {};
 	}
 };
 
-// Consume a teed copy of the SSE stream, returning the final answer's response
-// text and SQL. Mirrors the parsing the browser does in `frontend/api/chat.ts`
-// (data: lines, `[DONE]` sentinel, JSON `result`/`error` events).
+type ChatStreamResultEvent = {
+	type?: string;
+	answer?: AgentAnswer;
+	message?: string;
+};
+
+// Consume a teed copy of the SSE stream, returning the final answer (as the
+// assistant bubble it renders into), the analytics fields, and — on a
+// mid-stream agent failure — the raw error message. Mirrors the parsing the
+// browser does in `frontend/api/chat.ts` (data: lines, `[DONE]` sentinel,
+// JSON `result`/`error` events).
+//
+// Only Message 1 comes out of this stream: charts are a separate second step,
+// so the bubble carrying them (or the result table) is written by
+// `/api/chat/visualize` once that step reports back.
 const readFinalAnswer = async (
 	stream: ReadableStream<Uint8Array>,
-): Promise<{ response: string | null; sql: string | null }> => {
+): Promise<{
+	response: string | null;
+	sql: string | null;
+	answerMessages: AnswerMessage[];
+	errorMessage: string | null;
+}> => {
 	const reader = stream.getReader();
 	const decoder = new TextDecoder();
 	let buffer = '';
 	let response: string | null = null;
 	let sql: string | null = null;
+	let answerMessages: AnswerMessage[] = [];
+	let errorMessage: string | null = null;
 
 	const handleData = (data: string): void => {
 		if (!data || data === '[DONE]') return;
 		try {
-			const event = JSON.parse(data) as {
-				type?: string;
-				answer?: { response?: string; sql_code?: string };
-			};
+			const event = JSON.parse(data) as ChatStreamResultEvent;
 			if (event.type === 'result') {
 				response = event.answer?.response ?? null;
 				sql = event.answer?.sql_code ?? null;
+				const sqlAnswer = event.answer ? buildSqlAnswerMessage(event.answer) : null;
+				answerMessages = sqlAnswer ? [sqlAnswer] : [];
+			} else if (event.type === 'error') {
+				errorMessage = event.message ?? null;
 			}
 		} catch {
 			// Skip heartbeats / malformed lines.
@@ -72,11 +105,16 @@ const readFinalAnswer = async (
 		reader.releaseLock();
 	}
 
-	return { response, sql };
+	return { response, sql, answerMessages, errorMessage };
 };
 
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
-	const body = await req.text();
+	const payload = parseBody(await req.text());
+
+	// Step 1 only: SQL + formatted answer. Charts are a separate, second-step
+	// request (POST /api/chat/visualize) the client makes after this
+	// completes, so the answer never waits on an extra LLM round trip.
+	const body = JSON.stringify(payload);
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',
@@ -120,29 +158,78 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 		'X-Accel-Buffering': 'no',
 	};
 
-	// Single writer for analytics, for every caller. Create the row up front,
-	// then tee the stream — one branch flows to the client untouched, the other
-	// is parsed after the response to backfill the final answer. `user` is the
-	// resolved GSF user (session or SSO bearer), injected by withPermission.
-	const question = extractQuestion(body);
+	// Single writer for analytics and conversation history, for every caller.
+	// Create the analytics row and persist the user's turn up front, then tee
+	// the stream — one branch flows to the client untouched, the other is
+	// parsed after the response to backfill the final answer and persist the
+	// assistant's turn. `user` is the resolved GSF user (session or SSO
+	// bearer), injected by withPermission.
+	const question = typeof payload.question === 'string' ? payload.question : '';
+	const conversationId =
+		typeof payload.conversation_id === 'string' && payload.conversation_id.trim()
+			? payload.conversation_id
+			: null;
 
+	const title = question.slice(0, 50) || 'New conversation';
 	const prisma = getPrisma();
-	const row = await prisma.conversationAnalytics.create({
-		data: { question, source, userId: user.id },
-	});
+	const [row, conversation] = await Promise.all([
+		prisma.conversationAnalytics.create({
+			data: { question, source, userId: user.id },
+		}),
+		resolveOrCreateOwnedConversation(user, conversationId, title),
+	]);
+
+	if (conversation) {
+		await prisma.message.create({
+			data: { conversationId: conversation.id, role: 'user', content: question },
+		});
+	}
 
 	const [toClient, toCapture] = upstream.body.tee();
 
 	after(async () => {
 		try {
-			const { response, sql } = await readFinalAnswer(toCapture);
+			const { response, sql, answerMessages, errorMessage } =
+				await readFinalAnswer(toCapture);
 			await prisma.conversationAnalytics.update({
 				where: { id: row.id },
 				data: { response, sql, responseTimestamp: new Date() },
 			});
+
+			if (conversation) {
+				// A result persists the prose + SQL bubble the browser rendered,
+				// so reopening the conversation looks identical to watching it
+				// stream; `/api/chat/visualize` adds the chart/table bubble when
+				// the second step lands. A mid-stream agent failure persists the
+				// real error text instead, paired with the already-persisted user
+				// turn. A stream that closed with neither (e.g. the upstream
+				// connection dropped) has nothing meaningful to save.
+				const rows: AnswerMessage[] =
+					answerMessages.length > 0
+						? answerMessages
+						: errorMessage != null
+							? [{ content: errorMessage }]
+							: [];
+
+				if (rows.length > 0) {
+					await prisma.message.createMany({
+						data: rows.map((msg) => ({
+							conversationId: conversation.id,
+							role: 'assistant',
+							content: msg.content,
+							sqlCode: msg.sql ?? null,
+							sqlResponse: msg.sqlResponse ?? null,
+						})),
+					});
+					await prisma.conversation.update({
+						where: { id: conversation.id },
+						data: { updatedAt: new Date() },
+					});
+				}
+			}
 		} catch {
-			// Best-effort analytics — never let capture failures affect the
-			// already-delivered chat response.
+			// Best-effort analytics/persistence — never let capture failures
+			// affect the already-delivered chat response.
 		}
 	});
 

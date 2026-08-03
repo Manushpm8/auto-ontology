@@ -9,6 +9,10 @@ import { Spinner } from '@nvidia/foundations-react-core';
 
 import { termsApi } from '@/api/terms';
 import { Icon, IconName } from '@/common/icons';
+import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { Size, ButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import type { SqlAttribute } from '@/types/terms';
 import { SqlBlock } from '@/common/SqlBlock';
 import { Modal } from './Modal';
@@ -89,14 +93,16 @@ export const SqlAttributesModal = ({ term, onClose }: SqlAttributesModalProps) =
 						{term?.name} — SQL Attributes ({attributes.length})
 					</h2>
 				</div>
-				<button
+				<Button
+					theme={ButtonTheme.IconNeutral}
+					size={Size.SMALL}
+					iconOnly
 					type="button"
 					onClick={onClose}
-					className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 					aria-label="Close SQL attributes"
 				>
-					×
-				</button>
+					<Icon name={IconName.Close} className="h-4 w-4" />
+				</Button>
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">
 				{loading ? (
@@ -106,9 +112,7 @@ export const SqlAttributesModal = ({ term, onClose }: SqlAttributesModalProps) =
 				) : error != null ? (
 					<p className="text-sm text-red-600 dark:text-red-300">{error}</p>
 				) : attributes.length === 0 ? (
-					<p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-						No SQL attributes
-					</p>
+					<EmptyState variant={EmptyStateVariant.Inline} title="No SQL attributes" />
 				) : (
 					<ul className="space-y-4">
 						{attributes.map((attr) => (

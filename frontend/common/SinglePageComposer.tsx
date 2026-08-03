@@ -19,6 +19,7 @@ import { CertificationStatus } from '@/enums/certification';
 import { fieldStatus } from '@/lib/certification';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import { CertificationSelect } from '@/common/CertificationSelect';
+import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
 import { TagInput } from '@/common/TagInput';
 import { Table } from '@/common/Table';
@@ -30,6 +31,8 @@ import type { NodePatch } from '@/api/types';
 import type { TermZone } from '@/types/terms';
 import { Toast } from '@/common/Toast';
 import { Label } from '@/common/Label';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 
 export type ComposerEditValue = string | string[];
 
@@ -173,13 +176,14 @@ const DescriptionSuggestion = ({
 					Description Suggestion
 				</h3>
 				{suggestion != null && (
-					<button
+					<Button
+						theme={ButtonTheme.Soft}
+						size={Size.SMALL}
 						type="button"
 						onClick={() => onApply(suggestion)}
-						className="shrink-0 cursor-pointer rounded-md border border-[#76b900]/60 bg-white px-2.5 py-1 text-xs font-medium text-[#4d7a00] transition-colors hover:bg-[#76b900]/10 dark:border-[#76b900]/50 dark:bg-zinc-950 dark:text-[#a3d63a] dark:hover:bg-[#76b900]/15"
 					>
 						Apply as Description
-					</button>
+					</Button>
 				)}
 			</div>
 			<div className="mt-2 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
@@ -252,11 +256,13 @@ const EditableTextCard = ({
 			)}
 			{onSave != null && (
 				<div className="mt-3 flex justify-end">
-					<button
+					<Button
+						theme={ButtonTheme.Primary}
+						size={Size.SMALL}
 						type="button"
 						disabled={saving}
 						onClick={onSave}
-						className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
+						iconPosition="left"
 					>
 						{saving ? (
 							<>
@@ -266,7 +272,7 @@ const EditableTextCard = ({
 						) : (
 							'Save'
 						)}
-					</button>
+					</Button>
 				</div>
 			)}
 		</div>
@@ -615,7 +621,10 @@ function renderComposerSection(
 					{isEditingActive && section.editable === true && (
 						<div className="mb-3 flex justify-end">
 							<div className="flex shrink-0 items-center gap-1">
-								<button
+								<Button
+									theme={ButtonTheme.Icon}
+									size={Size.SMALL}
+									iconOnly
 									type="button"
 									onClick={() => {
 										if (onEditSql) {
@@ -626,10 +635,9 @@ function renderComposerSection(
 									}}
 									aria-label={`Edit ${section.title}`}
 									title="Edit"
-									className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
 								>
 									<Icon name={IconName.Pencil} className="h-4 w-4" />
-								</button>
+								</Button>
 							</div>
 						</div>
 					)}
@@ -839,13 +847,16 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						))}
 					</ol>
 					{handleIsPDF ? (
-						<button
-							type="button"
-							className="self-start rounded-md bg-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
-							onClick={() => handleIsPDF(false)}
-						>
-							Close PDF preview
-						</button>
+						<div className="self-start">
+							<Button
+								theme={ButtonTheme.Secondary}
+								size={Size.REGULAR}
+								type="button"
+								onClick={() => handleIsPDF(false)}
+							>
+								Close PDF preview
+							</Button>
+						</div>
 					) : null}
 				</div>
 			);
@@ -866,22 +877,26 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				((hasEditableSections && entityId && !isEditingActive) || isEditingActive) ? (
 					<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
 						{hasEditableSections && entityId && !isEditingActive && (
-							<button
+							<Button
+								theme={ButtonTheme.Primary}
+								size={Size.REGULAR}
 								type="button"
 								onClick={() => {
 									pendingEditsRef.current = {};
 									setSaveError(null);
 									setLocalEditingMode(true);
 								}}
-								className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
+								iconPosition="left"
 							>
 								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
 								Edit
-							</button>
+							</Button>
 						)}
 						{isEditingActive && (
 							<div className="flex items-center gap-2">
-								<button
+								<Button
+									theme={ButtonTheme.Secondary}
+									size={Size.REGULAR}
 									type="button"
 									disabled={saving}
 									onClick={() => {
@@ -890,18 +905,19 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										setSaveError(null);
 										onCancel?.();
 									}}
-									className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
 								>
 									Cancel
-								</button>
+								</Button>
 								{inlineSaveSectionId == null && (
-									<button
+									<Button
+										theme={ButtonTheme.Primary}
+										size={Size.REGULAR}
 										type="button"
 										disabled={saving}
 										onClick={() => {
 											void handleSave();
 										}}
-										className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
+										iconPosition="left"
 									>
 										{saving ? (
 											<>
@@ -914,7 +930,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										) : (
 											'Save'
 										)}
-									</button>
+									</Button>
 								)}
 							</div>
 						)}
@@ -946,21 +962,18 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 					<main className="min-h-0 min-w-0 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 						{sections.length === 0 ? (
-							<div className="flex min-h-[14rem] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-8 py-12 text-center dark:border-zinc-600 dark:bg-zinc-900/30">
-								<div
-									className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
-									aria-hidden
-								>
-									◇
-								</div>
-								<p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-									Nothing selected yet
-								</p>
-								<p className="max-w-sm text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-									Pick a database, schema, table, column, or field in the explorer
-									to load metadata, descriptions, and related entities.
-								</p>
-							</div>
+							<EmptyState
+								illustration={
+									<div
+										className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
+										aria-hidden
+									>
+										◇
+									</div>
+								}
+								title="Nothing selected yet"
+								description="Pick a database, schema, table, column, or field in the explorer to load metadata, descriptions, and related entities."
+							/>
 						) : (
 							<div className="space-y-5">
 								{showContentHeader ? (

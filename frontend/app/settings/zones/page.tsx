@@ -9,8 +9,13 @@ import type { Database } from '@/types/datasources';
 import { zonesApi } from '@/api/zones';
 import { datasources } from '@/api/datasources';
 import { ModalWithSteps, ConfirmModal } from '@/common/modal';
-import { ColorPicker } from '@/common/ColorPicker';
-import type { ColorOption } from '@/common/ColorPicker';
+import { ColorPicker } from '@/components/settings/ColorPicker';
+import type { ColorOption } from '@/components/settings/ColorPicker';
+import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { Toggle } from '@/common/Toggle';
+import { Size, ButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { PopoverMenu } from '@/common/PopoverMenu';
@@ -21,12 +26,12 @@ import { useSession } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
 
 const ZONE_COLORS: readonly ColorOption[] = [
-	{ value: '#0ea5e9', label: 'Sky', swatchClassName: 'bg-sky-500' },
-	{ value: '#8b5cf6', label: 'Violet', swatchClassName: 'bg-violet-500' },
-	{ value: '#ec4899', label: 'Pink', swatchClassName: 'bg-pink-500' },
-	{ value: '#f97316', label: 'Orange', swatchClassName: 'bg-orange-500' },
-	{ value: '#14b8a6', label: 'Teal', swatchClassName: 'bg-teal-500' },
-	{ value: '#eab308', label: 'Amber', swatchClassName: 'bg-yellow-500' },
+	{ value: '#0ea5e9', label: 'Sky', colorClass: 'bg-sky-500' },
+	{ value: '#8b5cf6', label: 'Violet', colorClass: 'bg-violet-500' },
+	{ value: '#ec4899', label: 'Pink', colorClass: 'bg-pink-500' },
+	{ value: '#f97316', label: 'Orange', colorClass: 'bg-orange-500' },
+	{ value: '#14b8a6', label: 'Teal', colorClass: 'bg-teal-500' },
+	{ value: '#eab308', label: 'Amber', colorClass: 'bg-yellow-500' },
 ];
 const DEFAULT_ZONE_COLOR = '#0ea5e9';
 
@@ -182,23 +187,12 @@ const ZoneCard = ({
 			</div>
 			<div className="flex shrink-0 items-start gap-2">
 				{isAdmin ? (
-					<button
-						type="button"
-						role="switch"
-						aria-checked={zone.enabled}
+					<Toggle
+						checked={zone.enabled}
 						aria-label={zone.enabled ? `Disable ${zone.name}` : `Enable ${zone.name}`}
 						disabled={toggling}
-						onClick={() => onToggleEnabled(zone)}
-						className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-							zone.enabled ? 'bg-[#76b900]' : 'bg-zinc-300 dark:bg-zinc-600'
-						}`}
-					>
-						<span
-							className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-								zone.enabled ? 'translate-x-5' : 'translate-x-0.5'
-							}`}
-						/>
-					</button>
+						onChange={() => onToggleEnabled(zone)}
+					/>
 				) : null}
 				<div className="relative">
 					<PopoverMenu
@@ -216,14 +210,16 @@ const ZoneCard = ({
 							},
 						]}
 						trigger={({ toggle }) => (
-							<button
+							<Button
+								theme={ButtonTheme.IconNeutral}
+								size={Size.SMALL}
+								iconOnly
 								type="button"
 								onClick={toggle}
-								className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
 								aria-label="Zone actions"
 							>
 								<Icon name={IconName.DotsVertical} className="h-4 w-4" />
-							</button>
+							</Button>
 						)}
 					/>
 				</div>
@@ -625,21 +621,19 @@ export default function ZonesSettingsPage() {
 					<h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
 						Zones
 					</h1>
-					<button
-						type="button"
-						onClick={openCreateModal}
-						className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
-					>
-						<svg
-							className="h-4 w-4"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-							aria-hidden
+					<div className="ml-auto">
+						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.REGULAR}
+							type="button"
+							onClick={openCreateModal}
+							iconPosition="left"
+							shadow
 						>
-							<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
-						</svg>
-						Create new zone
-					</button>
+							<Icon name={IconName.Plus} className="h-4 w-4" />
+							Create new zone
+						</Button>
+					</div>
 				</div>
 
 				{error ? (
@@ -683,9 +677,12 @@ export default function ZonesSettingsPage() {
 						))}
 					</div>
 				) : (
-					<div className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-6 py-10 text-center text-sm text-zinc-500 dark:border-zinc-600 dark:bg-zinc-900/30 dark:text-zinc-400">
-						No zones found.
-					</div>
+					<EmptyState
+						variant={EmptyStateVariant.Inline}
+						icon={IconName.Key}
+						title="No zones found"
+						className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
+					/>
 				)}
 			</div>
 			<ModalWithSteps
@@ -768,7 +765,7 @@ export default function ZonesSettingsPage() {
 								colors={ZONE_COLORS}
 								value={color}
 								onChange={setColor}
-								fallbackSwatchClassName="bg-sky-500"
+								fallbackColorClass="bg-sky-500"
 							/>
 						</div>
 						<div>

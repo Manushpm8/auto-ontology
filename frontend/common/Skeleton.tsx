@@ -1,15 +1,20 @@
+import { SkeletonVariant } from '@/enums/skeleton';
+
 type SkeletonBlockProps = {
 	className?: string;
-	variant?: 'circle' | 'rectangle' | 'text';
+	variant?: SkeletonVariant;
 };
 
-export const SkeletonBlock = ({ className = '', variant = 'text' }: SkeletonBlockProps) => (
+export const SkeletonBlock = ({
+	className = '',
+	variant = SkeletonVariant.TEXT,
+}: SkeletonBlockProps) => (
 	<div
 		aria-hidden
 		className={`animate-pulse bg-zinc-100 dark:bg-zinc-800/70 ${
-			variant === 'circle'
+			variant === SkeletonVariant.CIRCLE
 				? 'rounded-full'
-				: variant === 'rectangle'
+				: variant === SkeletonVariant.RECTANGLE
 					? 'rounded-lg'
 					: 'rounded-md'
 		} ${className}`}
@@ -27,7 +32,7 @@ export const SkeletonCard = ({ className = '', rows = 3 }: SkeletonCardProps) =>
 		className={`rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900/50 ${className}`}
 	>
 		<div className="flex items-center gap-3">
-			<SkeletonBlock variant="circle" className="h-10 w-10 shrink-0" />
+			<SkeletonBlock variant={SkeletonVariant.CIRCLE} className="h-10 w-10 shrink-0" />
 			<div className="flex-1 space-y-2">
 				<SkeletonBlock className="h-4 w-2/5" />
 				<SkeletonBlock className="h-3 w-3/5" />
@@ -101,7 +106,7 @@ export const SkeletonDetail = () => (
 				</div>
 			))}
 		</div>
-		<SkeletonBlock variant="rectangle" className="h-36 w-full" />
+		<SkeletonBlock variant={SkeletonVariant.RECTANGLE} className="h-36 w-full" />
 		<SkeletonTable columns={3} rows={4} />
 	</div>
 );

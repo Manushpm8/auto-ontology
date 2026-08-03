@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 # Maps LangGraph node names from
@@ -36,3 +38,23 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
+    conversation_id: str | None = None
+
+
+class VisualizeRequest(BaseModel):
+    """Payload for the second step: chart generation.
+
+    Sent by the client once it already has the SQL and its executed result
+    from step 1 (``ChatRequest`` / ``/chat/completions``).
+    """
+
+    question: str = Field(..., min_length=1)
+    sql: str = Field(default="")
+    result: Any = Field(
+        default=None,
+        description=(
+            "The executed SQL result, i.e. the `sql_response_from_db` from the "
+            "step 1 answer — either a one-item list containing a JSON-records "
+            "string, or a list of row dicts."
+        ),
+    )
