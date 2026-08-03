@@ -57,7 +57,24 @@ class SemanticScheduler(IntervalScheduler):
             return
 
         logger.info("semantic: starting (%d database(s))", len(databases))
-        for database_name in databases:
+        for index, database_name in enumerate(databases):
+            # Checked per database rather than once per pass, so a stop request
+            # or a disable ends the run at the next boundary instead of after
+            # every database. The database in flight always finishes: its work
+            # runs in a thread that cannot be interrupted.
+            if self.aborting:
+                logger.info(
+                    "semantic: stopped on request; %d database(s) not compiled",
+                    len(databases) - index,
+                )
+                return
+            if not is_semantic_compilation_enabled():
+                logger.info(
+                    "semantic: disabled mid-run; %d database(s) not compiled",
+                    len(databases) - index,
+                )
+                return
+
             try:
                 tables_processed = await asyncio.to_thread(
                     run_semantic_compilation, database_name

@@ -9,15 +9,13 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
-from pydantic import BaseModel
-
-from gsf.ingestion_service.ingest import trigger_ingest, trigger_ingest_delete
+from gsf.ingestion_service.ingest import (
+    trigger_delete_ingest,
+    trigger_ingest,
+    trigger_reset_semantic,
+)
 
 router = APIRouter()
-
-
-class DatabaseRef(BaseModel):
-    database_name: str
 
 
 @router.get("/health")
@@ -33,14 +31,39 @@ async def ingest_connection(connection: dict[str, Any] = Body(...)) -> dict[str,
 
 
 @router.post("/ingest/delete", status_code=202)
-async def delete_ingest(ref: DatabaseRef) -> dict[str, str]:
-    """Trigger a non-blocking teardown of a database's ingested data."""
-    trigger_ingest_delete(ref.database_name)
+async def ingest_delete(database_name: str) -> dict[str, str]:
+    """Trigger a non-blocking reset of a database's ingested data.
+
+    ``database_name`` is required: this endpoint always targets one database.
+    """
+    trigger_delete_ingest(database_name)
+    return {"status": "accepted"}
+
+
+@router.post("/semantic/reset", status_code=202)
+async def semantic_reset(
+    request: Request, database_name: str | None = None
+) -> dict[str, str]:
+    """Trigger a non-blocking reset of a database's semantic layer.
+
+    Deletes the semantic nodes and embeddings, then asks for a compilation pass
+    so the layer is rebuilt without waiting for the scheduler's next run.
+    Omitting ``database_name`` resets every database. The deletion runs on its
+    own thread while the compilation pass runs on the scheduler's task, so the
+    two overlap.
+    """
+    trigger_reset_semantic(database_name)
+
+    scheduler = request.app.state.semantic_scheduler
+
+    scheduler.abort()
+    if not scheduler.start():
+        scheduler.trigger()
     return {"status": "accepted"}
 
 
 @router.post("/semantic/compile", status_code=202)
-async def trigger_semantic_compile(request: Request) -> dict[str, str]:
+async def semantic_compile(request: Request) -> dict[str, str]:
     """Trigger a non-blocking semantic compilation pass.
 
     Ensures the scheduler is running first (``start()`` is idempotent), so this
@@ -54,4 +77,16 @@ async def trigger_semantic_compile(request: Request) -> dict[str, str]:
     # run and the trigger would compile twice.
     if not scheduler.start():
         scheduler.trigger()
+    return {"status": "accepted"}
+
+
+@router.post("/semantic/stop", status_code=202)
+async def semantic_stop(request: Request) -> dict[str, str]:
+    """Ask the in-flight semantic compilation pass to stop.
+
+    The database being compiled finishes first — that work runs in a thread that
+    cannot be interrupted — so the pass ends at the next database boundary. The
+    scheduler stays alive and its next automatic run happens on schedule.
+    """
+    request.app.state.semantic_scheduler.abort()
     return {"status": "accepted"}
