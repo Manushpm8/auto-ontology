@@ -12,6 +12,10 @@ can supply the shared endpoint/key/model for all of them. Each field also falls
 back to its legacy pre-triplet env var name (``NVIDIA_API_KEY`` / ``BASE_URL`` /
 ``MODEL_NAME``) for backward compatibility.
 
+``EMBED`` and ``RERANK`` are excluded from the shared ``MODEL`` fallback: that
+value names a chat model, which an embedding or reranking endpoint cannot serve.
+Set ``EMBED_MODEL`` / ``RERANK_MODEL`` to override their built-in defaults.
+
 When even ``DEFAULT_MODELS_<FIELD>`` is unset, a built-in default is used. There
 are two sets — one for ``sk-`` inference-api keys and one for ``nvapi-``
 integrate/build.nvidia.com keys — and the set is chosen from the API key that
@@ -36,7 +40,7 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
         "EMBED_ENDPOINT": "https://inference-api.nvidia.com/v1",
         "EMBED_MODEL": "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2",
         "RERANK_ENDPOINT": "https://inference-api.nvidia.com/v1/rerank",
-        "RERANK_MODEL": "nvidia/nvidia/llama-nemotron-rerank-vl-1b-v2",
+        "RERANK_MODEL": "nvidia/nvidia/llama-3.2-nv-rerankqa-1b-v2",
     },
     # integrate.api.nvidia.com / build.nvidia.com (nvapi-... keys).
     "nvapi-": {
@@ -66,6 +70,9 @@ _LEGACY_ENV: dict[str, str] = {
     "MODEL": "MODEL_NAME",
 }
 
+# Triplets whose MODEL must not inherit the shared default.
+_PREFIXES_WITHOUT_SHARED_MODEL = frozenset({"EMBED", "RERANK"})
+
 
 def _default(field: str) -> str:
     """Shared default for *field*: ``DEFAULT_MODELS_<field>`` then the legacy name."""
@@ -94,7 +101,13 @@ def resolve(prefix: str, field: str) -> str:
 
     Order of precedence: the ``<prefix>_<field>`` env var, then the shared
     ``DEFAULT_MODELS_<field>``, then a built-in default chosen by whether the
-    triplet's API key is an ``sk-`` or ``nvapi-`` key.
+    triplet's API key is an ``sk-`` or ``nvapi-`` key. The shared step is skipped
+    for the ``MODEL`` of :data:`_PREFIXES_WITHOUT_SHARED_MODEL`.
     """
     key = f"{prefix}_{field}"
-    return os.environ.get(key, "") or _default(field) or _builtin_default(prefix, key)
+    explicit = os.environ.get(key, "")
+    if explicit:
+        return explicit
+    if field == "MODEL" and prefix in _PREFIXES_WITHOUT_SHARED_MODEL:
+        return _builtin_default(prefix, key)
+    return _default(field) or _builtin_default(prefix, key)

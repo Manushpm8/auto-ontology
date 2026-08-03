@@ -5,14 +5,15 @@
 """
 Candidate Retrieval Agent
 
-Searches both VDBs per extracted entity, applies an LLM intent filter on each
-entity's raw hits, and stores typed results in path_state.
+Searches the semantic VDB, reranks each search independently, and stores typed
+results in path_state.
 
 Responsibilities:
 - Search the semantic VDB (ontology_retriever) for ColumnAttribute candidates.
 - Search the semantic VDB (semantic_retriever) for CustomAnalysis candidates.
-- Filter each entity's hits by intent using the LLM (full question, not entity).
-- Deduplicate across entities and store results in path_state.
+- Rerank each entity's ColumnAttribute hits against that entity.
+- Rerank CustomAnalysis and SqlAttribute hits against the full question.
+- Deduplicate ColumnAttribute hits across entities and store results in path_state.
 """
 
 import logging
@@ -20,27 +21,26 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
-from langchain_core.messages import SystemMessage
-
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from nemo_retriever.operators.rerank import rerank_hits
 
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
 
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
-from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
-from gsf.retrieval.text_to_sql.models import (
-    CandidateFilterModel,
-    ColumnAttributeSpec,
-    CombinedCandidateFilterModel,
-    CustomAnalysisFilterModel,
-)
+from gsf.retrieval.text_to_sql.models import ColumnAttributeSpec
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
+from gsf.utils.rerank import get_rerank_kwargs
 
 logger = logging.getLogger(__name__)
+
+
+_CAND_RETRIEVE_K = 10
+_CAND_KEEP_K = 3
+_RRF_K = 60
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +71,116 @@ def _search_by_label(
         return []
 
 
+def _search_and_rerank(
+    retriever: object,
+    search_query: str,
+    label: str,
+    retrieve_k: int,
+    keep_k: int,
+    database_name: str | None = None,
+    question: str | None = None,
+) -> list[dict]:
+    """Search one label and keep the best reranked hits.
+
+    When *question* is set, *search_query* is treated as the entity text:
+    rerank the retrieved set independently against the entity and against the
+    question, then combine ranks with equal-weight Reciprocal Rank Fusion.
+    Otherwise rerank once against *search_query* alone.
+    """
+    hits = _search_by_label(
+        retriever,
+        search_query,
+        label,
+        retrieve_k,
+        database_name,
+    )
+    if not hits:
+        return []
+
+    def _rerank(rerank_query: str) -> list[dict] | None:
+        try:
+            return list(
+                rerank_hits(
+                    rerank_query,
+                    hits,
+                    top_n=len(hits),
+                    **get_rerank_kwargs(),
+                )
+            )
+        except Exception:
+            logger.warning(
+                "%s rerank failed for query %r",
+                label,
+                rerank_query,
+                exc_info=True,
+            )
+            return None
+
+    if question is None:
+        ranked = _rerank(search_query)
+        return (ranked or hits)[:keep_k]
+
+    entity = search_query
+    entity_ranked = _rerank(entity)
+    question_ranked = _rerank(question)
+    if entity_ranked is None and question_ranked is None:
+        logger.warning(
+            "%s entity/question reranks failed — keeping top %d vector hit(s)",
+            label,
+            keep_k,
+        )
+        return hits[:keep_k]
+    if entity_ranked is None:
+        assert question_ranked is not None
+        return question_ranked[:keep_k]
+    if question_ranked is None:
+        return entity_ranked[:keep_k]
+
+    entity_by_id = {
+        str(hit["id"]): (rank, hit)
+        for rank, hit in enumerate(entity_ranked, start=1)
+        if hit.get("id") is not None
+    }
+    question_by_id = {
+        str(hit["id"]): (rank, hit)
+        for rank, hit in enumerate(question_ranked, start=1)
+        if hit.get("id") is not None
+    }
+
+    fused: list[dict] = []
+    for hit_id in entity_by_id.keys() | question_by_id.keys():
+        entity_entry = entity_by_id.get(hit_id)
+        question_entry = question_by_id.get(hit_id)
+        entity_score = (
+            float(entity_entry[1].get("_rerank_score"))
+            if entity_entry and entity_entry[1].get("_rerank_score") is not None
+            else None
+        )
+        question_score = (
+            float(question_entry[1].get("_rerank_score"))
+            if question_entry and question_entry[1].get("_rerank_score") is not None
+            else None
+        )
+        rrf_score = (1 / (_RRF_K + entity_entry[0]) if entity_entry else 0) + (
+            1 / (_RRF_K + question_entry[0]) if question_entry else 0
+        )
+        source_hit = entity_entry[1] if entity_entry is not None else question_entry[1]
+        fused_hit = dict(source_hit)
+        fused_hit["_entity_rerank_score"] = entity_score
+        fused_hit["_question_rerank_score"] = question_score
+        fused_hit["_rerank_score"] = rrf_score
+        fused.append(fused_hit)
+
+    return sorted(
+        fused,
+        key=lambda hit: (
+            -float(hit["_rerank_score"]),
+            float(hit["score"]) if hit.get("score") is not None else float("inf"),
+            str(hit.get("id") or ""),
+        ),
+    )[:keep_k]
+
+
 def _dedupe_best_score(hits: list[dict]) -> list[dict]:
     """Deduplicate by id, keeping the hit with the lowest score."""
     best: dict[str, dict] = {}
@@ -91,215 +201,6 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# LLM intent filter
-# ---------------------------------------------------------------------------
-
-_FILTER_PROMPT_TEMPLATE = """\
-You are selecting the single best candidate that matches a user's question.
-
-User question: {question}
-Entity being searched: {entity}
-
-Candidates:
-{candidates_block}
-
-Return the ID of the single best matching candidate.
-Return null if none genuinely match the intent of the question.
-"""
-
-
-def _llm_filter(llm, question: str, entity: str, candidates: list[dict]) -> list[str]:
-    """Use the LLM to pick the single best candidate by relevance to *question*.
-
-    Each candidate must have an ``id`` field in its metadata.
-    Returns a list with the single best ID, or all IDs on LLM failure.
-    """
-    if not candidates:
-        return []
-
-    all_ids = [str(c.get("id") or "") for c in candidates if c.get("id")]
-
-    candidates_block = "\n".join(
-        f"- id: {c.get('id')} | {c.get('text', '')}" for c in candidates if c.get("id")
-    )
-
-    messages = [
-        SystemMessage(
-            content=_FILTER_PROMPT_TEMPLATE.format(
-                question=question,
-                entity=entity,
-                candidates_block=candidates_block,
-            )
-        )
-    ]
-
-    result = invoke_with_structured_output(llm, messages, CandidateFilterModel)
-    if result is None or not result.best_id:
-        return all_ids
-
-    return [result.best_id]
-
-
-_CANDIDATE_FILTER_PROMPT = """\
-You are filtering candidate {candidate_type} for relevance to a user question.
-Keep only candidates that could meaningfully contribute to answering the question.
-Remove any that share no common domain, idea, or intent with the question.
-
-User question: {question}
-
-Candidates:
-{candidates_block}
-
-Return the list of IDs to KEEP. If none are relevant, return an empty list.
-"""
-
-_COMBINED_FILTER_PROMPT = """\
-You are filtering two sets of candidates for relevance to a user question.
-Keep only candidates that could meaningfully contribute to answering the question.
-Remove any that share no common domain, idea, or intent with the question.
-
-User question: {question}
-
-Custom analyses:
-{custom_block}
-
-SQL attributes:
-{sql_attr_block}
-
-Return the IDs to KEEP for each set separately. Use empty lists if none are relevant.
-"""
-
-
-def _llm_filter_candidates(
-    llm, question: str, candidates: list[dict], candidate_type: str
-) -> list[dict]:
-    """Keep only candidates relevant to *question* via LLM.
-
-    Falls back to the original list on LLM failure.
-    """
-    if not candidates:
-        return []
-
-    candidates_block = "\n".join(
-        f"- id: {c.get('id')} | {c.get('text', '')}" for c in candidates if c.get("id")
-    )
-
-    messages = [
-        SystemMessage(
-            content=_CANDIDATE_FILTER_PROMPT.format(
-                candidate_type=candidate_type,
-                question=question,
-                candidates_block=candidates_block,
-            )
-        )
-    ]
-
-    result = invoke_with_structured_output(llm, messages, CustomAnalysisFilterModel)
-    if result is None:
-        return candidates
-
-    kept_ids = set(result.kept_ids)
-    filtered = [c for c in candidates if str(c.get("id") or "") in kept_ids]
-    logger.debug(
-        "%s filter: %d → %d (kept ids: %s)",
-        candidate_type,
-        len(candidates),
-        len(filtered),
-        kept_ids,
-    )
-    return filtered
-
-
-def _llm_filter_both(
-    llm,
-    question: str,
-    custom_hits: list[dict],
-    sql_attr_hits: list[dict],
-) -> tuple[list[dict], list[dict]]:
-    """Filter custom analyses and SQL attributes in a single LLM call.
-
-    Falls back to the original lists on LLM failure.
-    """
-    if not custom_hits and not sql_attr_hits:
-        return [], []
-
-    def _fmt(candidates: list[dict]) -> str:
-        lines = [
-            f"- id: {c.get('id')} | {c.get('text', '')}"
-            for c in candidates
-            if c.get("id")
-        ]
-        return "\n".join(lines) if lines else "(none)"
-
-    messages = [
-        SystemMessage(
-            content=_COMBINED_FILTER_PROMPT.format(
-                question=question,
-                custom_block=_fmt(custom_hits),
-                sql_attr_block=_fmt(sql_attr_hits),
-            )
-        )
-    ]
-
-    result = invoke_with_structured_output(llm, messages, CombinedCandidateFilterModel)
-    if result is None:
-        return custom_hits, sql_attr_hits
-
-    kept_custom = set(result.custom_analysis_ids)
-    kept_sql = set(result.sql_attribute_ids)
-    filtered_custom = [c for c in custom_hits if str(c.get("id") or "") in kept_custom]
-    filtered_sql = [c for c in sql_attr_hits if str(c.get("id") or "") in kept_sql]
-
-    logger.debug(
-        "combined filter: custom %d→%d, sql_attr %d→%d",
-        len(custom_hits),
-        len(filtered_custom),
-        len(sql_attr_hits),
-        len(filtered_sql),
-    )
-    return filtered_custom, filtered_sql
-
-
-# ---------------------------------------------------------------------------
-# ColumnAttributeSpec builder
-# ---------------------------------------------------------------------------
-
-
-def _build_column_attribute_spec(hit: dict) -> ColumnAttributeSpec | None:
-    """Build a :class:`ColumnAttributeSpec` from a raw VDB hit dict.
-
-    Expects the hit (or its ``metadata`` sub-dict) to contain ``name`` and
-    ``source_column``. Returns ``None`` when required fields are absent.
-    """
-    # The hit may carry fields directly or nested under ``metadata``.
-    meta: dict = hit.get("metadata") or {}
-    if isinstance(meta, str):
-        import json as _json
-
-        try:
-            meta = _json.loads(meta)
-        except Exception:
-            meta = {}
-
-    def _get(key: str) -> Any:
-        return hit.get(key) or meta.get(key)
-
-    name = _get("name") or (hit.get("text") or "").strip() or None
-    source_column = _get("source_column")
-
-    if not name or not source_column:
-        return None
-
-    return ColumnAttributeSpec(
-        name=name,
-        source_column=source_column,
-        display_name=_get("display_name") or "",
-        datatype=_get("datatype") or "",
-        description=_get("description"),
-    )
-
-
-# ---------------------------------------------------------------------------
 # Agent
 # ---------------------------------------------------------------------------
 
@@ -311,7 +212,7 @@ class CandidateRetrievalAgent(BaseAgent):
     - CustomAnalysis: searched once with the full question from the semantic VDB.
     - SqlAttribute: searched once with the full question from the semantic VDB.
 
-    Deduplicate across entities and store:
+    Deduplicate ColumnAttributes across entities and store:
     - ``path_state["retrieved_column_attributes"]``: ``list[dict]``
     - ``path_state["retrieved_custom_analyses"]``:   ``list[dict]``
     - ``path_state["retrieved_sql_attributes"]``:    ``list[dict]``
@@ -331,7 +232,6 @@ class CandidateRetrievalAgent(BaseAgent):
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
         entities: list[str] = path_state.get("entities") or []
-        llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
 
@@ -349,7 +249,8 @@ class CandidateRetrievalAgent(BaseAgent):
                         semantic_retriever,
                         question,
                         Labels.CUSTOM_ANALYSIS,
-                        3,
+                        _CAND_RETRIEVE_K,
+                        _CAND_KEEP_K,
                         target_db,
                     ),
                 ),
@@ -359,7 +260,8 @@ class CandidateRetrievalAgent(BaseAgent):
                         semantic_retriever,
                         question,
                         LABEL_SQL_ATTRIBUTE,
-                        3,
+                        _CAND_RETRIEVE_K,
+                        _CAND_KEEP_K,
                         target_db,
                     ),
                 ),
@@ -370,8 +272,10 @@ class CandidateRetrievalAgent(BaseAgent):
                             semantic_retriever,
                             entity,
                             LABEL_COLUMN_ATTRIBUTE,
-                            2,
+                            _CAND_RETRIEVE_K,
+                            _CAND_KEEP_K,
                             target_db,
+                            question,
                         ),
                     )
                     for entity in clean_entities
@@ -380,7 +284,7 @@ class CandidateRetrievalAgent(BaseAgent):
 
             with ThreadPoolExecutor(max_workers=len(search_tasks) or 1) as pool:
                 futures = {
-                    pool.submit(_search_by_label, *args): key
+                    pool.submit(_search_and_rerank, *args): key
                     for key, args in search_tasks
                 }
                 for future in as_completed(futures):
@@ -393,24 +297,21 @@ class CandidateRetrievalAgent(BaseAgent):
                     else:
                         all_col_attr_hits.extend(result)
 
-        all_custom_hits, all_sql_attr_hits = _llm_filter_both(
-            llm, question, all_custom_hits, all_sql_attr_hits
-        )
-
+        # ColumnAttributes are searched per entity and merged, so the same
+        # id can appear more than once; keep the best score. CustomAnalysis
+        # and SqlAttribute are searched once each — no cross-query duplicates.
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
-        deduped_custom = _dedupe_best_score(all_custom_hits)
-        deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
-        path_state["retrieved_custom_analyses"] = deduped_custom
-        path_state["retrieved_sql_attributes"] = deduped_sql_attr
+        path_state["retrieved_custom_analyses"] = all_custom_hits
+        path_state["retrieved_sql_attributes"] = all_sql_attr_hits
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "
             "and %d SqlAttribute candidates (%d entities queried)",
             len(deduped_col_attr),
-            len(deduped_custom),
-            len(deduped_sql_attr),
+            len(all_custom_hits),
+            len(all_sql_attr_hits),
             len(entities),
         )
 
