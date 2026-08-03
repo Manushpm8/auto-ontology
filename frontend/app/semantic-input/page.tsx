@@ -8,7 +8,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
 import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { ModalCreateNewItem, ConfirmModal } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { acronymsApi, promptsApi, type Acronym, type Prompt } from '@/api/settings';
@@ -284,22 +286,16 @@ const AcronymsSection = () => {
 					</table>
 				</div>
 			) : (
-				<div className="mt-4 flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-8 py-10 dark:border-zinc-600 dark:bg-zinc-900/30">
-					<p className="text-sm text-zinc-400 dark:text-zinc-500">
-						No Glossary definitions created yet
-					</p>
-					<Button
-						theme={ButtonTheme.Primary}
-						size={Size.REGULAR}
-						type="button"
-						onClick={openAddModal}
-						iconPosition="left"
-						shadow
-					>
-						<Icon name={IconName.ChatBubble} className="h-4 w-4" />
-						Add Definition
-					</Button>
-				</div>
+				<EmptyState
+					variant={EmptyStateVariant.Inline}
+					title="No Glossary definitions created yet"
+					action={{
+						label: 'Add Definition',
+						icon: IconName.ChatBubble,
+						onClick: openAddModal,
+					}}
+					className="mt-4 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
+				/>
 			)}
 
 			<ModalCreateNewItem
@@ -439,13 +435,12 @@ const SettingsSection = ({
 					<SkeletonBlock variant={SkeletonVariant.RECTANGLE} className="h-24 w-full" />
 				</div>
 			) : (
-				<div className="flex flex-col items-center justify-center gap-2 rounded-b-lg bg-zinc-50/80 px-8 py-10 dark:bg-zinc-900/30">
-					<Icon
-						name={IconName.ChatBubble}
-						className="h-8 w-8 text-zinc-300 dark:text-zinc-600"
-					/>
-					<p className="text-sm text-zinc-400 dark:text-zinc-500">No Prompt</p>
-				</div>
+				<EmptyState
+					variant={EmptyStateVariant.Inline}
+					icon={IconName.ChatBubble}
+					title="No Prompt"
+					className="rounded-b-lg bg-zinc-50/80 dark:bg-zinc-900/30"
+				/>
 			)}
 		</div>
 	);

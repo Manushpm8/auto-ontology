@@ -8,7 +8,9 @@ import { useState } from 'react';
 
 import { Icon, IconName } from '@/common/icons';
 import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import type { ExplorationForeignKey, ExplorationLink } from '@/types/exploration';
 import { LabelList } from '@/common/SinglePageComposer';
 import { SqlBlock } from '@/common/SqlBlock';
@@ -32,10 +34,12 @@ const ForeignKeyColumnsPanel = ({
 }) => {
 	if (foreignKeys.length === 0) {
 		return (
-			<p className="text-sm text-zinc-500 dark:text-zinc-400">
-				These tables share a foreign key relationship; no stored SQL query references both
-				of them together.
-			</p>
+			<EmptyState
+				variant={EmptyStateVariant.Inline}
+				icon={IconName.Link}
+				title="No stored SQL query"
+				description="These tables share a foreign key relationship, but no stored query references both of them together."
+			/>
 		);
 	}
 

@@ -7,7 +7,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Placeholders } from '@/assets/images/placeholders';
 import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { ConnectionsInfoCardView } from '@/components/connectionsPage/ConnectionsInfoCardView';
 import { NewConnectionsModal } from '@/components/connectionsPage/NewConnectionsModal';
 import { ConfirmModal } from '@/common/modal';
@@ -117,30 +119,18 @@ export const ConnectionsView = () => {
 	}
 
 	return (
-		<div
-			data-testid="connections-page"
-			className="flex h-full w-full min-w-0 flex-1 flex-col items-start"
-		>
+		<div className="flex h-full w-full min-w-0 flex-1 flex-col items-start">
 			{connections.length === 0 ? (
-				<div className="flex w-full flex-1 flex-col items-center justify-center py-16">
-					<Placeholders.NoConnections />
-					<h2 className="mt-6 text-base font-semibold text-zinc-900 dark:text-zinc-100">
-						No Connections Created Yet
-					</h2>
-					<div className="mt-6">
-						<Button
-							theme={ButtonTheme.Primary}
-							size={Size.REGULAR}
-							type="button"
-							onClick={handleCreateConnection}
-							iconPosition="left"
-							shadow
-						>
-							<Icon name={IconName.Database} className="h-4 w-4" />
-							Create New Connection
-						</Button>
-					</div>
-				</div>
+				<EmptyState
+					variant={EmptyStateVariant.Borderless}
+					illustration={<Placeholders.NoConnections />}
+					title="No Connections Created Yet"
+					action={{
+						label: 'Create New Connection',
+						icon: IconName.Database,
+						onClick: handleCreateConnection,
+					}}
+				/>
 			) : (
 				<div className="flex w-full flex-col items-start gap-5">
 					<div className="flex w-full justify-end">

@@ -7,7 +7,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { User } from '@/types/auth';
 import { SelectButton } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { SelectButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 
 const getInitials = (name: string): string => {
 	const parts = name.trim().split(/\s+/);
@@ -132,7 +134,7 @@ export const UsersPicker = ({ allUsers, selectedIds, onChange, loading }: UsersP
 							Users
 						</p>
 						{filtered.length === 0 ? (
-							<p className="px-3 py-2 text-sm text-zinc-400">No users found</p>
+							<EmptyState variant={EmptyStateVariant.Inline} title="No users found" />
 						) : (
 							filtered.map((user) => {
 								const checked = selectedIds.has(user.id);

@@ -12,7 +12,9 @@ import { datasources } from '@/api/datasources';
 import { explorationApi } from '@/api/exploration';
 import { Icon, IconName } from '@/common/icons';
 import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import type { Column } from '@/types/datasources';
 import type { TableExplorationDetails } from '@/types/exploration';
@@ -125,11 +127,7 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 
 		if (kind === 'queries') {
 			if (details.queries.length === 0) {
-				return (
-					<p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-						No SQL queries
-					</p>
-				);
+				return <EmptyState variant={EmptyStateVariant.Inline} title="No SQL queries" />;
 			}
 			return (
 				<ul className="space-y-4">

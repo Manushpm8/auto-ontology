@@ -152,7 +152,6 @@ export const ModalWithSteps = ({
 						return (
 							<Button
 								key={action.label}
-								data-testid={`stepper-button-${action.label}`}
 								onClick={action.onClick}
 								loading={action.loading}
 								disabled={action.disabled}

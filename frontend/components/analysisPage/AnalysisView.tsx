@@ -7,7 +7,9 @@
 import { useEffect, useState } from 'react';
 
 import { Button, SelectButton } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
@@ -354,11 +356,10 @@ export const AnalysisView = () => {
 				)}
 
 				{!loading && error == null && items.length === 0 && (
-					<div className="flex h-full flex-1 items-center justify-center">
-						<p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-							No {MODE_LABEL[mode]} Analyses found
-						</p>
-					</div>
+					<EmptyState
+						variant={EmptyStateVariant.Borderless}
+						title={`No ${MODE_LABEL[mode]} Analyses found`}
+					/>
 				)}
 
 				{!loading && error == null && items.length > 0 && (
