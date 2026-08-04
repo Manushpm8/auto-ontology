@@ -44,7 +44,7 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
     get_relevant_tables_from_candidates,
 )
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
@@ -70,6 +70,12 @@ def _qualified_name(t: dict) -> str:
 
 
 logger = logging.getLogger(__name__)
+
+# Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
+# (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
+# so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
+# right step event and ``NODE_LABELS`` entry.
+_GRAPH_NODE_NAME = "prepare_candidates"
 
 
 class CandidatePreparationAgent(BaseAgent):
@@ -173,8 +179,12 @@ class CandidatePreparationAgent(BaseAgent):
             term_synonyms = fetch_term_synonyms(attr_ids)
             self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
-            anchor_id = self._identify_anchor(state, question, attr_contexts)
+            anchor_id, anchor_reasoning = self._identify_anchor(
+                state, question, attr_contexts
+            )
             self.logger.info("Anchor attribute id: %s", anchor_id)
+            if anchor_reasoning:
+                record_thought(path_state, _GRAPH_NODE_NAME, anchor_reasoning)
 
             if anchor_id and anchor_id in attr_contexts:
                 anchor_ctx = attr_contexts[anchor_id]
@@ -344,6 +354,8 @@ class CandidatePreparationAgent(BaseAgent):
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
+        if table_relevance_reasoning:
+            record_thought(path_state, _GRAPH_NODE_NAME, table_relevance_reasoning)
 
         return {
             "path_state": {
@@ -561,13 +573,17 @@ class CandidatePreparationAgent(BaseAgent):
         state: "AgentState",
         question: str,
         contexts: dict[str, dict],
-    ) -> str | None:
-        """Use the LLM to pick the primary (anchor) ColumnAttribute for the question."""
+    ) -> tuple[str | None, str]:
+        """Use the LLM to pick the primary (anchor) ColumnAttribute for the question.
+
+        Returns ``(anchor_id, reasoning)`` — reasoning is empty when no LLM
+        call was needed (0 or 1 candidates) or the call failed.
+        """
         ids = list(contexts.keys())
         if not ids:
-            return None
+            return None, ""
         if len(ids) == 1:
-            return ids[0]
+            return ids[0], ""
 
         try:
             llm = state["llm"]
@@ -575,7 +591,7 @@ class CandidatePreparationAgent(BaseAgent):
             self.logger.warning(
                 "_identify_anchor: no LLM in state — using first attribute"
             )
-            return ids[0]
+            return ids[0], ""
 
         attrs_block = "\n".join(
             f"- id: {aid} | {ctx['attr_name']} "
@@ -609,18 +625,18 @@ class CandidatePreparationAgent(BaseAgent):
                 "_identify_anchor: LLM call failed — using first attribute",
                 exc_info=True,
             )
-            return ids[0]
+            return ids[0], ""
 
         if result and result.anchor_id and result.anchor_id in contexts:
             self.logger.info(
                 "Anchor column identified: %s (%s)", result.anchor_id, result.reasoning
             )
-            return result.anchor_id
+            return result.anchor_id, (result.reasoning or "").strip()
 
         self.logger.warning(
             "_identify_anchor: LLM returned invalid id — using first attribute"
         )
-        return ids[0]
+        return ids[0], ""
 
     def _build_custom_analyses_str(self, relevant_queries: list[dict]) -> list[str]:
         """Build string representation of custom analyses for prompts."""
