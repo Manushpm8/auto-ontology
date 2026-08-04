@@ -49,8 +49,3 @@ def test_deduplicate_inferred_links_prefers_destination_primary_key_name() -> No
         _Edge("JOB_OUTCOMES", "job_id", "JOBS"),
         _Edge("JOBS", "project_id", "PROJECTS"),
     ]
-
-
-
-
-
