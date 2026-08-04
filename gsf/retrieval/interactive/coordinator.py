@@ -57,7 +57,17 @@ def _extract_followup_question(message: str) -> str:
 def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
     """Prepare path_state to resume at reconstruct_sql with Bird's error as context."""
     session.path_state["_resume_from"] = "reconstruct_sql"
-    session.path_state["error"] = message
+    if "Your SQL is not executable:" in message:
+        # Extract the actual DB error from Bird's message and inject it for reconstruction.
+        after = message.split("Your SQL is not executable:", 1)[1].strip()
+        actual_error = after.split("\n")[0].strip()
+        session.path_state["error"] = actual_error
+        logger.info("Debug seed: execution error → %s", actual_error[:200])
+    else:
+        # SQL ran but results didn't match — no execution error detail available.
+        # Set a minimal placeholder so sql_reconstruction passes validation and runs.
+        session.path_state["error"] = "SQL returned incorrect results."
+        logger.info("Debug seed: wrong results (no execution error to inject)")
     session.path_state["sql_attempts"] = 0
     session.path_state["reconstruction_count"] = 0
     session.path_state["error_analysis_done"] = False
@@ -476,8 +486,8 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
 def apply_submit_result(session: InteractiveSessionState, result: dict) -> None:
     """Update session with Bird's submit response for future debug seeding."""
     session.latest_feedback = result.get("message", "")
-    session.path_state["error"] = session.latest_feedback
-    # Save Phase 1 context for follow-up soft seed (only once)
-    if session.phase1_question is None:
+    # Save Phase 1 artifacts only on successful completion so they don't
+    # contaminate Phase 1 debug turns with follow-up instruction / cross-phase logic.
+    if session.phase1_question is None and result.get("phase_completed") == 1:
         session.phase1_question = session.working_question
         session.phase1_sql = session.path_state.get("sql_code", "")
