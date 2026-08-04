@@ -68,7 +68,7 @@ export const ThinkingMessage = ({ steps }: ThinkingMessageProps) => {
 					</ul>
 				)}
 
-				<div className="flex items-start gap-2">
+				<div className="flex flex-col items-start gap-2">
 					{activeStep && (
 						<span className="text-sm text-zinc-800 dark:text-zinc-100">
 							<span>{activeStep.label}</span>
@@ -79,7 +79,7 @@ export const ThinkingMessage = ({ steps }: ThinkingMessageProps) => {
 							)}
 						</span>
 					)}
-					<span className="flex items-end gap-1 pb-0.5">
+					<span className="flex items-end gap-1">
 						<Dot delay="0s" />
 						<Dot delay="0.2s" />
 						<Dot delay="0.4s" />
