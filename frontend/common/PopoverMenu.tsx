@@ -4,100 +4,64 @@
 
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { SelectButton } from '@/common/Button';
+import { Popover } from '@/common/Popover';
 import { SelectButtonTheme } from '@/enums/button';
-import { createPortal } from 'react-dom';
 
 export type PopoverMenuItem = {
 	label: string;
 	icon?: ReactNode;
 	onClick: () => void;
 	danger?: boolean;
+	disabled?: boolean;
 };
 
 type PopoverMenuProps = {
 	items: PopoverMenuItem[];
 	trigger: (props: { open: boolean; toggle: (e: React.MouseEvent) => void }) => ReactNode;
+	/**
+	 * Non-interactive block above the items, for a menu that has to name what
+	 * its actions apply to. Its own width sets the menu's, since the panel
+	 * otherwise shrinks to the widest item.
+	 */
+	header?: ReactNode;
 	className?: string;
 };
 
 /**
- * Dropdown menu anchored under the right edge of its trigger.
- *
- * The menu is rendered via a portal into `document.body` and positioned with
- * `fixed` coordinates rather than as an `absolute` child of the trigger: an
- * absolutely positioned menu is clipped by any `overflow-hidden`/`overflow-auto`
- * ancestor, which hid it entirely when the trigger lived inside a scrolling
- * table (see the certification column in `SinglePageComposer`'s data table).
- * `TruncatedText` portals its popover for the same reason.
+ * List of actions anchored under the right edge of its trigger. See `Popover`
+ * for the positioning and dismissal it is built on.
  */
-export const PopoverMenu = ({ items, trigger, className = '' }: PopoverMenuProps) => {
-	// Coordinates are captured together with `open` so the menu never paints a
-	// frame at a previous trigger's position.
-	const [menu, setMenu] = useState<{ top: number; right: number } | null>(null);
-	const anchorRef = useRef<HTMLDivElement>(null);
-	const menuRef = useRef<HTMLDivElement>(null);
-	const open = menu != null;
-
-	useEffect(() => {
-		if (!open) return;
-
-		const handleMouseDown = (e: MouseEvent) => {
-			const target = e.target as Node;
-			if (anchorRef.current?.contains(target)) return;
-			if (menuRef.current?.contains(target)) return;
-			setMenu(null);
-		};
-		// Fixed coordinates don't follow the trigger, so dismiss instead of
-		// letting the menu drift away from it. Capture phase catches scrolling
-		// in nested containers, not just the window.
-		const handleReflow = () => setMenu(null);
-		document.addEventListener('mousedown', handleMouseDown);
-		window.addEventListener('scroll', handleReflow, true);
-		window.addEventListener('resize', handleReflow);
-		return () => {
-			document.removeEventListener('mousedown', handleMouseDown);
-			window.removeEventListener('scroll', handleReflow, true);
-			window.removeEventListener('resize', handleReflow);
-		};
-	}, [open]);
-
-	const toggle = (e: React.MouseEvent) => {
-		e.stopPropagation();
-		const rect = e.currentTarget.getBoundingClientRect();
-		setMenu((prev) =>
-			prev != null ? null : { top: rect.bottom + 4, right: window.innerWidth - rect.right },
-		);
-	};
-
-	return (
-		<div ref={anchorRef} className={className}>
-			{trigger({ open, toggle })}
-			{menu != null &&
-				createPortal(
-					<div
-						ref={menuRef}
-						style={{ top: menu.top, right: menu.right }}
-						className="fixed z-[1000] w-max min-w-32 whitespace-nowrap rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
-					>
-						{items.map((item) => (
-							<SelectButton
-								theme={SelectButtonTheme.ListItem}
-								danger={item.danger}
-								key={item.label}
-								onClick={() => {
-									setMenu(null);
-									item.onClick();
-								}}
-							>
-								{item.icon}
-								{item.label}
-							</SelectButton>
-						))}
-					</div>,
-					document.body,
+export const PopoverMenu = ({ items, trigger, header, className = '' }: PopoverMenuProps) => (
+	<Popover
+		trigger={trigger}
+		className={className}
+		panelClassName="w-max min-w-32 whitespace-nowrap py-1"
+	>
+		{({ close }) => (
+			<>
+				{header != null && (
+					<div className="mb-1 border-b border-zinc-100 pb-1 dark:border-zinc-800">
+						{header}
+					</div>
 				)}
-		</div>
-	);
-};
+				{items.map((item) => (
+					<SelectButton
+						theme={SelectButtonTheme.ListItem}
+						danger={item.danger}
+						disabled={item.disabled}
+						key={item.label}
+						onClick={() => {
+							close();
+							item.onClick();
+						}}
+					>
+						{item.icon}
+						{item.label}
+					</SelectButton>
+				))}
+			</>
+		)}
+	</Popover>
+);

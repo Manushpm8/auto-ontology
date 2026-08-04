@@ -16,6 +16,7 @@ import { Icon, IconName } from '@/common/icons';
 import { SkeletonRows } from '@/common/Skeleton';
 import { ConfirmModal } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
+import { Text } from '@/common/Text';
 
 type ChatSidebarProps = {
 	conversations: Conversation[];
@@ -94,7 +95,7 @@ function ConversationItem({
 				selected={isActive}
 				onClick={onSelect}
 			>
-				<span className="line-clamp-1">{conv.title}</span>
+				<Text text={conv.title} />
 				<span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">
 					{formatDate(conv.createdAt, '(DD.MM.YY)')}
 				</span>

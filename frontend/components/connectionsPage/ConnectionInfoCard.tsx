@@ -8,6 +8,8 @@ import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { PopoverMenu } from '@/common/PopoverMenu';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import type { Connection } from '@/types/connection';
 
 export type ConnectionInfoCardProps = {
@@ -28,9 +30,11 @@ export const ConnectionInfoCard = ({
 			<header className="flex w-full items-center justify-between gap-2 px-4 py-5">
 				<div className="flex min-w-0 items-center gap-1">
 					<Icon name={IconName.Database} className="h-5 w-5 shrink-0 text-[#76b900]" />
-					<h3 className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-						{connection.database_name}
-					</h3>
+					<Text
+						as="h3"
+						text={connection.database_name}
+						variant={TextVariant.Subheading}
+					/>
 				</div>
 				<div className="relative shrink-0">
 					{menuDisabled ? (

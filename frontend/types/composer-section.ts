@@ -39,24 +39,40 @@ export type ComposerInfoGridSection = {
 	items: { label: string; value: string }[];
 };
 
-export type ComposerDataTableColumn = {
+type ComposerDataTableColumnBase = {
 	key: string;
 	label: string;
-	/**
-	 * Renders the cell as a list of read-only pills (`TAGS`) or an icon-only
-	 * certification badge (`CERTIFICATION`, cell value is a `CertificationStatus`)
-	 * instead of plain text. Defaults to `TEXT`.
-	 */
-	type?: ComposerColumnType;
-	/** Clips long text to one line and shows the full value in a popover on hover, only when clipped. */
-	truncate?: boolean;
-	/** Tailwind max-width class applied when `truncate` is set. Defaults to `max-w-sm`. */
-	maxWidthClass?: string;
 	/** Horizontal alignment of the header and cell content. Defaults to `left`. */
 	align?: 'left' | 'center' | 'right';
 	/** Tailwind width class for the column (e.g. `w-44`). Best paired with a fixed table `layout`. */
 	width?: string;
 };
+
+/**
+ * Clipping is offered on text columns only. Pills clip and reveal themselves
+ * chip by chip, and a badge is an icon, so a cell-wide tooltip over either
+ * would be a second tooltip on top of the value's own one.
+ */
+export type ComposerDataTableColumn =
+	| (ComposerDataTableColumnBase & {
+			/** Renders the cell as plain text. The default when omitted. */
+			type?: ComposerColumnType.TEXT;
+			/** Clips long text to one line and shows the full value in a popover on hover, only when clipped. */
+			truncate?: boolean;
+			/**
+			 * Tailwind max-width class applied to the cell when `truncate` is set.
+			 * Defaults to `max-w-0`, which lets the line fill the whole column.
+			 */
+			maxWidthClass?: string;
+	  })
+	| (ComposerDataTableColumnBase & {
+			/**
+			 * Renders the cell as a list of read-only pills (`TAGS`) or an icon-only
+			 * certification badge (`CERTIFICATION`, cell value is a
+			 * `CertificationStatus`) instead of plain text.
+			 */
+			type: ComposerColumnType.TAGS | ComposerColumnType.CERTIFICATION;
+	  });
 
 export type ComposerDataTableSection = {
 	type: ComposerSectionKind.DATA_TABLE;
@@ -96,7 +112,6 @@ export type ComposerZonesSection = {
 export type ComposerRelatedTermChip = {
 	id: string;
 	name: string;
-	description: string | null;
 };
 
 export type ComposerRelatedTermsSection = {

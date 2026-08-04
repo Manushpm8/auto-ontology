@@ -14,6 +14,8 @@ import { EmptyStateVariant } from '@/enums/emptyState';
 import type { ExplorationForeignKey, ExplorationLink } from '@/types/exploration';
 import { LabelList } from '@/common/SinglePageComposer';
 import { SqlBlock } from '@/common/SqlBlock';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import { Modal } from './Modal';
 
 type QueryCarouselModalProps = {
@@ -55,17 +57,17 @@ const ForeignKeyColumnsPanel = ({
 					className="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 p-3 sm:grid-cols-2 dark:border-zinc-700"
 				>
 					<div className="min-w-0">
-						<p className="truncate text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+						<Text as="p" variant={TextVariant.Overline}>
 							{sourceName}.{fk.sourceColumn}
-						</p>
+						</Text>
 						<div className="mt-1.5">
 							<LabelList values={fk.sourceSampleValues ?? []} />
 						</div>
 					</div>
 					<div className="min-w-0">
-						<p className="truncate text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+						<Text as="p" variant={TextVariant.Overline}>
 							{targetName}.{fk.targetColumn}
-						</p>
+						</Text>
 						<div className="mt-1.5">
 							<LabelList values={fk.targetSampleValues ?? []} />
 						</div>
@@ -104,9 +106,9 @@ export const QueryCarouselModal = ({
 								</span>
 							)}
 						</div>
-						<p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+						<Text as="p" variant={TextVariant.Detail}>
 							{sourceName} ↔ {targetName}
-						</p>
+						</Text>
 					</div>
 				</div>
 				<div className="flex items-center gap-3">

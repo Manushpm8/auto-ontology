@@ -11,9 +11,12 @@ import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
+import { PopoverMenu } from '@/common/PopoverMenu';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import { analyses } from '@/api/analyses';
 import { pqlAnalyses } from '@/api/pqlAnalyses';
 
@@ -370,36 +373,58 @@ export const AnalysisView = () => {
 								className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
 							>
 								<div className="flex items-start justify-between gap-3">
-									<h2 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-										{a.name}
-									</h2>
-									<div className="flex shrink-0 items-center gap-1">
-										<Button
-											theme={ButtonTheme.Icon}
-											size={Size.SMALL}
-											iconOnly
-											onClick={() => openEditModal(a)}
-											aria-label={`Edit ${a.name}`}
-											title="Edit"
-										>
-											<Icon name={IconName.Pencil} className="h-4 w-4" />
-										</Button>
-										<Button
-											theme={ButtonTheme.IconDanger}
-											size={Size.SMALL}
-											iconOnly
-											onClick={() => openDeleteModal(a)}
-											aria-label={`Delete ${a.name}`}
-											title="Delete"
-										>
-											<Icon name={IconName.Trash} className="h-4 w-4" />
-										</Button>
-									</div>
+									<Text as="h2" text={a.name} variant={TextVariant.CardTitle} />
+									<PopoverMenu
+										className="shrink-0"
+										items={[
+											{
+												label: 'Edit',
+												icon: (
+													<Icon
+														name={IconName.Pencil}
+														className="h-3.5 w-3.5"
+													/>
+												),
+												onClick: () => openEditModal(a),
+											},
+											{
+												label: 'Delete',
+												icon: (
+													<Icon
+														name={IconName.Trash}
+														className="h-3.5 w-3.5"
+													/>
+												),
+												onClick: () => openDeleteModal(a),
+												danger: true,
+											},
+										]}
+										trigger={({ toggle }) => (
+											<Button
+												theme={ButtonTheme.IconNeutral}
+												size={Size.SMALL}
+												iconOnly
+												type="button"
+												onClick={toggle}
+												aria-label={`Actions for ${a.name}`}
+											>
+												<Icon
+													name={IconName.DotsVertical}
+													className="h-4 w-4"
+												/>
+											</Button>
+										)}
+									/>
 								</div>
 								{a.description.trim() !== '' && (
-									<p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-										{a.description}
-									</p>
+									<div className="mt-2">
+										<Text
+											as="p"
+											text={a.description}
+											lines={3}
+											variant={TextVariant.Body}
+										/>
+									</div>
 								)}
 								{a.code.trim() !== '' && (
 									<SqlBlock

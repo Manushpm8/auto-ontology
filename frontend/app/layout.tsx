@@ -4,6 +4,7 @@
 
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
+import { TooltipProvider } from '@nvidia/foundations-react-core';
 import { NavRail } from '@/common/NavRail';
 import { AppTopBar } from '@/common/AppTopBar';
 import { BreadcrumbProvider } from '@/contexts/BreadcrumbContext';
@@ -48,17 +49,31 @@ export default async function RootLayout({
 			className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
 		>
 			<body className="flex h-full flex-col bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-				{session ? (
-					<BreadcrumbProvider>
-						<AppTopBar version={appVersion} />
-						<div className="flex min-h-0 flex-1">
-							<NavRail isAdmin={isAdmin} />
-							<div className="min-w-0 flex-1">{children}</div>
-						</div>
-					</BreadcrumbProvider>
-				) : (
-					children
-				)}
+				{/*
+				 * One provider app-wide: without it every `Tooltip` mounts its
+				 * own and each would carry its own delays.
+				 *
+				 * The design system opens after 100ms and, for 300ms after a
+				 * tooltip closes, opens the next trigger with no delay at all.
+				 * Neighbouring triggers are the norm here — a row of clipped
+				 * table cells — so that pair of defaults turns a pointer passing
+				 * over a table into a train of tooltips. A resting pointer is
+				 * what should be answered, hence the longer delay, and no
+				 * trigger is exempt from it.
+				 */}
+				<TooltipProvider openDelayDuration={400} skipDelayDuration={0}>
+					{session ? (
+						<BreadcrumbProvider>
+							<AppTopBar version={appVersion} />
+							<div className="flex min-h-0 flex-1">
+								<NavRail isAdmin={isAdmin} />
+								<div className="min-w-0 flex-1">{children}</div>
+							</div>
+						</BreadcrumbProvider>
+					) : (
+						children
+					)}
+				</TooltipProvider>
 			</body>
 		</html>
 	);
