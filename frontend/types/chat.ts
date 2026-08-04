@@ -8,6 +8,7 @@ export type ChatMessage = {
 	content: string;
 	sql?: string;
 	sqlResponse?: string;
+	thoughts?: string;
 	timestamp: number;
 };
 
@@ -22,6 +23,7 @@ export type StepEvent = {
 	type: 'step';
 	node: string;
 	label: string;
+	thought?: string | null;
 };
 
 /** Shape of the executed SQL result, as returned by `sql_response_from_db`. */
@@ -33,6 +35,7 @@ export type ResultEvent = {
 		response: string;
 		sql_code?: string;
 		sql_response_from_db?: SqlResult;
+		thoughts?: string;
 	};
 };
 
@@ -67,6 +70,7 @@ export type VisualizeResponse = {
 export type GraphStep = {
 	node: string;
 	label: string;
+	thought?: string | null;
 	status: 'completed' | 'active';
 };
 

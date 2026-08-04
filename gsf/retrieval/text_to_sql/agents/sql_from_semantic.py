@@ -27,7 +27,7 @@ from typing import Any, Dict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from gsf.utils.llm_invoke import safe_invoke_with_structured_output
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.data_access.custom_analyses import (
     build_custom_analyses_section,
@@ -51,6 +51,12 @@ from gsf.retrieval.text_to_sql.evidence_hints import (
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 
 logger = logging.getLogger(__name__)
+
+# Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
+# (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
+# so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
+# right step event and ``NODE_LABELS`` entry.
+_GRAPH_NODE_NAME = "construct_sql_from_candidates"
 
 
 def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
@@ -503,6 +509,10 @@ class SQLFromCandidatesAgent(BaseAgent):
                 },
                 "decision": "unconstructable",
             }
+
+        thought = (getattr(response, "thought", "") or "").strip()
+        if thought:
+            record_thought(path_state, _GRAPH_NODE_NAME, thought)
 
         # Check if we have a valid response (either SQL or text-based answer from file contents)
         has_sql = bool(response.sql_code and response.sql_code.strip())
