@@ -375,6 +375,46 @@ def _deduplicate_inferred_links(graph: Any) -> int:
     return removed
 
 
+# KumoRFM rewrites every Stype.text column into a list of lower-case words before
+# sending it (``kumorfm/rfm/base/sampler.py::_normalize_text``), but the request payload
+# still declares that column's dtype from the *pandas* dtype, which for an object column
+# is "string" (``kumorfm/rfm/payload.py::_dtype_name``). A KumoRFM deployment that
+# validates cells against the declared schema therefore rejects the ENTIRE request with
+# "Table cells do not match the declared schema" — so one incidental text column (a serial
+# number, a firmware string) makes every prediction on that graph fail, whatever the query.
+#
+# Re-typing text to categorical keeps the column as a usable feature and serializes it as
+# the plain string the schema declares. Set KUMO_ALLOW_TEXT_STYPE=1 to turn this off once
+# the SDK declares a list dtype for text columns.
+_ALLOW_TEXT_STYPE = os.environ.get("KUMO_ALLOW_TEXT_STYPE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
+
+def _retype_text_columns(graph: Any) -> list[str]:
+    """Re-type ``text`` columns to ``categorical``; returns the names changed."""
+    if _ALLOW_TEXT_STYPE:
+        return []
+    from kumoapi.typing import Stype
+
+    retyped: list[str] = []
+    for table_name, table in graph.tables.items():
+        for column in table.columns:
+            if column.stype == Stype.text:
+                column.stype = Stype.categorical
+                retyped.append(f"{table_name}.{column.name}")
+    if retyped:
+        logger.info(
+            "kumo: re-typed %d text column(s) to categorical for payload-schema "
+            "compatibility: %s",
+            len(retyped),
+            ", ".join(retyped),
+        )
+    return retyped
+
+
 def build_prediction_context(
     connectors: list[Any],
     relevant_tables: list[dict[str, Any]] | None = None,
@@ -434,6 +474,7 @@ def build_prediction_context(
         "kumo: LocalGraph.from_data (metadata inferred) in %.2fs",
         time.perf_counter() - _graph_start,
     )
+    _retype_text_columns(graph)
     covered = _apply_join_paths(graph, join_paths)
     if covered:
         logger.info("kumo: using %d catalog join edge(s)", covered)
