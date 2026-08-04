@@ -11,6 +11,7 @@ import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
+import { PopoverMenu } from '@/common/PopoverMenu';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
@@ -377,28 +378,47 @@ export const AnalysisView = () => {
 										text={a.name}
 										variant={TextVariant.CardTitle}
 									/>
-									<div className="flex shrink-0 items-center gap-1">
-										<Button
-											theme={ButtonTheme.Icon}
-											size={Size.SMALL}
-											iconOnly
-											onClick={() => openEditModal(a)}
-											aria-label={`Edit ${a.name}`}
-											title="Edit"
-										>
-											<Icon name={IconName.Pencil} className="h-4 w-4" />
-										</Button>
-										<Button
-											theme={ButtonTheme.IconDanger}
-											size={Size.SMALL}
-											iconOnly
-											onClick={() => openDeleteModal(a)}
-											aria-label={`Delete ${a.name}`}
-											title="Delete"
-										>
-											<Icon name={IconName.Trash} className="h-4 w-4" />
-										</Button>
-									</div>
+									<PopoverMenu
+										className="shrink-0"
+										items={[
+											{
+												label: 'Edit',
+												icon: (
+													<Icon
+														name={IconName.Pencil}
+														className="h-3.5 w-3.5"
+													/>
+												),
+												onClick: () => openEditModal(a),
+											},
+											{
+												label: 'Delete',
+												icon: (
+													<Icon
+														name={IconName.Trash}
+														className="h-3.5 w-3.5"
+													/>
+												),
+												onClick: () => openDeleteModal(a),
+												danger: true,
+											},
+										]}
+										trigger={({ toggle }) => (
+											<Button
+												theme={ButtonTheme.IconNeutral}
+												size={Size.SMALL}
+												iconOnly
+												type="button"
+												onClick={toggle}
+												aria-label={`Actions for ${a.name}`}
+											>
+												<Icon
+													name={IconName.DotsVertical}
+													className="h-4 w-4"
+												/>
+											</Button>
+										)}
+									/>
 								</div>
 								{a.description.trim() !== '' && (
 									<div className="mt-2">

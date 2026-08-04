@@ -4,37 +4,17 @@
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { signOut, useSession } from '@/auth/auth-client';
-import { Button, SelectButton } from '@/common/Button';
+import { SelectButton } from '@/common/Button';
+import { PopoverMenu } from '@/common/PopoverMenu';
 import { TruncatedText } from '@/common/TruncatedText';
-import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
+import { SelectButtonTheme } from '@/enums/button';
 import { TextVariant } from '@/enums/text';
 
 export const UserMenu = ({ version }: { version?: string }) => {
 	const { data } = useSession();
-	const [open, setOpen] = useState(false);
 	const [signingOut, setSigningOut] = useState(false);
-	const menuRef = useRef<HTMLDivElement>(null);
-
-	// Close the dropdown on outside click or Escape.
-	useEffect(() => {
-		if (!open) return undefined;
-		const onPointerDown = (event: MouseEvent) => {
-			if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-				setOpen(false);
-			}
-		};
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') setOpen(false);
-		};
-		document.addEventListener('mousedown', onPointerDown);
-		document.addEventListener('keydown', onKeyDown);
-		return () => {
-			document.removeEventListener('mousedown', onPointerDown);
-			document.removeEventListener('keydown', onKeyDown);
-		};
-	}, [open]);
 
 	if (!data) return null;
 
@@ -55,48 +35,37 @@ export const UserMenu = ({ version }: { version?: string }) => {
 	};
 
 	return (
-		<div ref={menuRef} className="relative">
-			<SelectButton
-				theme={SelectButtonTheme.Avatar}
-				onClick={() => setOpen((value) => !value)}
-				aria-haspopup="menu"
-				aria-expanded={open}
-				aria-label="User menu"
-			>
-				{initial}
-			</SelectButton>
-
-			{open ? (
-				<div
-					role="menu"
-					className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 text-sm shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
-				>
-					{version ? (
-						<div className="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500">
-							Version {version}
-						</div>
-					) : null}
-					<div className="border-t border-zinc-100 px-3 py-2 text-xs text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
-						<TruncatedText text={fullName} variant={TextVariant.Strong} />
-						{roleLabel ? (
-							<div className="text-[10px] text-zinc-400 dark:text-zinc-500">
-								{roleLabel}
-							</div>
-						) : null}
-					</div>
-					<div className="border-t border-zinc-100 p-1 dark:border-zinc-800">
-						<Button
-							theme={ButtonTheme.Minimal}
-							size={Size.SMALL}
-							onClick={handleSignOut}
-							disabled={signingOut}
-							full
-						>
-							{signingOut ? 'Signing out…' : 'Sign out'}
-						</Button>
-					</div>
+		<PopoverMenu
+			header={
+				// The fixed width is what gives a long email something to be
+				// clipped against, since the menu is otherwise as wide as its
+				// widest item.
+				<div className="w-56 px-3 py-1 text-xs text-zinc-400 dark:text-zinc-500">
+					{version ? <p>Version {version}</p> : null}
+					<TruncatedText text={fullName} variant={TextVariant.Strong} />
+					{roleLabel ? <p className="text-[10px]">{roleLabel}</p> : null}
 				</div>
-			) : null}
-		</div>
+			}
+			items={[
+				{
+					label: signingOut ? 'Signing out…' : 'Sign out',
+					onClick: () => {
+						void handleSignOut();
+					},
+					disabled: signingOut,
+				},
+			]}
+			trigger={({ open, toggle }) => (
+				<SelectButton
+					theme={SelectButtonTheme.Avatar}
+					onClick={toggle}
+					aria-haspopup="menu"
+					aria-expanded={open}
+					aria-label="User menu"
+				>
+					{initial}
+				</SelectButton>
+			)}
+		/>
 	);
 };
