@@ -766,7 +766,7 @@ export const TermsView = () => {
 			if (focusId == null) {
 				return {
 					sections: [],
-					header: { header: { title: 'Column Attribute not found', withBorder: true } },
+					header: { header: { title: 'Column Attribute not found' } },
 				};
 			}
 			// TODO: viewer zone-scoping handled in a separate PR — for now the
@@ -778,7 +778,7 @@ export const TermsView = () => {
 			if (attr == null) {
 				return {
 					sections: [],
-					header: { header: { title: 'Column Attribute not found', withBorder: true } },
+					header: { header: { title: 'Column Attribute not found' } },
 				};
 			}
 			setColumnAttrs(attrs);
@@ -791,8 +791,6 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
-						withBorder: true,
-						showContentHeader: true,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -865,7 +863,7 @@ export const TermsView = () => {
 			if (res.error || !res.data) {
 				return {
 					sections: [],
-					header: { header: { title: 'SQL Attribute not found', withBorder: true } },
+					header: { header: { title: 'SQL Attribute not found' } },
 				};
 			}
 			const attr = res.data;
@@ -884,8 +882,6 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
-						withBorder: true,
-						showContentHeader: true,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -932,7 +928,7 @@ export const TermsView = () => {
 		if (res.error || !res.data) {
 			return {
 				sections: [],
-				header: { header: { title: 'Term not found', withBorder: true } },
+				header: { header: { title: 'Term not found' } },
 			};
 		}
 		const term = res.data;
@@ -952,8 +948,6 @@ export const TermsView = () => {
 			header: {
 				header: {
 					title: term.name,
-					withBorder: true,
-					showContentHeader: true,
 					titleEditable: true,
 					certification: { certified: term.name_certified },
 				},
@@ -1122,7 +1116,6 @@ export const TermsView = () => {
 					<SinglePageView
 						key={sqlAttrId}
 						dataId={sqlAttrId}
-						title={sqlAttrTitle}
 						getSinglePage={getSqlAttributeSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
 						isEditing={sqlAttrEditing}
@@ -1251,7 +1244,6 @@ export const TermsView = () => {
 					<SinglePageView
 						key={colAttrId}
 						dataId={colAttrId}
-						title={colAttrTitle}
 						getSinglePage={getColumnAttributeSinglePage}
 						treeDataEpoch={columnAttrsEpoch}
 						isEditing={columnAttrEditing}
@@ -1321,7 +1313,6 @@ export const TermsView = () => {
 					<SinglePageView
 						key={focusId}
 						dataId={focusId}
-						title={termTitle}
 						getSinglePage={getSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
 						isEditing={termEditing}
