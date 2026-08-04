@@ -57,14 +57,13 @@ Formulas or conditions whose exact specification is still missing, ranked most-c
 
 STRICT RULES — follow every one of these exactly:
 1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', or 'schema'. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
-1a. Exception to rule 1: if "Formulas or conditions whose exact specification is still missing" flags that column names for a user-defined formula are unknown, you MAY ask the user to name those specific identifiers — e.g. "What are the exact column names for battery life and battery capacity in your formula?" This is asking the user to complete their own formula specification, not asking about the database structure.
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, or history: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
 3. Never re-ask about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED") — not even rephrased. You MAY ask follow-up questions on topics the user did answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 4. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
 5. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
 6. If anything else in the user's question seems unclear, you may ask about it - for example, ambiguous grouping term, thresholds, or normalization methods.
 7. Output a single focused question only — never two questions joined with "and" or "or".
-8. Output PROCEED only when BOTH of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question. If the unresolvable terms list contains any term not covered by those two sources, ASK about the most important one before proceeding.
+8. Output PROCEED only when ALL of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question, AND (c) "Formulas or conditions whose exact specification is still missing" lists "None". If any condition fails, ASK about the most critical unresolved item before proceeding.
 
 Output PROCEED or ASK: <question>:"""
 
@@ -108,6 +107,19 @@ _FILLER = frozenset([
 # never counted toward the filler threshold (unlike _FILLER words).
 # e.g. "number of records" → ["number", "records"] before threshold check.
 _CONNECTIVES = frozenset(["of", "by"])
+
+
+_FORCED_QUESTION_PROMPT = """\
+The following output specification is required for a database query but cannot be resolved \
+from the schema or external knowledge:
+
+Term: {term}
+Why it's needed: {description}
+
+Generate a single, focused question to ask the user to clarify this specification.
+Ask about the business concept — what data they want to see — not about database tables or columns.
+Output only the question text, nothing else.\
+"""
 
 
 _SORT_TRIGGERS = re.compile(
@@ -212,10 +224,13 @@ def _filter_covered_by_external_knowledge(
     formatted_kg: str,
     question: str = "",
     children_map: dict[str, list[str]] | None = None,
-) -> tuple[set[str], str]:
+) -> tuple[set[str], str, dict[str, list[str]]]:
     """Check which entities are covered by external knowledge.
 
-    Returns (covered_set, relevant_kg_text). The LLM outputs YES | <entry name>
+    Returns (covered_set, relevant_kg_text, entry_to_original_terms).
+    entry_to_original_terms maps each confirmed KB entry name to the original
+    natural-language terms that matched it, so callers can annotate cumulative_grounded_kg.
+    The LLM outputs YES | <entry name>
     for each covered term; we look up the verbatim entry ourselves so the content
     is never hallucinated. Uses the non-reasoning model for speed.
 
@@ -302,6 +317,7 @@ def _filter_covered_by_external_knowledge(
     covered: set[str] = set()
     relevant_lines: list[str] = []
     seen_names: set[str] = set()
+    entry_to_original_terms: dict[str, list[str]] = {}
     # Normalize children_map keys once for efficient lookup
     norm_children_map: dict[str, list[str]] = (
         {_norm_key(k): v for k, v in children_map.items()} if children_map else {}
@@ -313,6 +329,10 @@ def _filter_covered_by_external_knowledge(
                 None,
             )
             logger.debug("Clarify — lookup %r → match=%r", entry_name, match)
+            if match:
+                # Always record which original term matched this entry, even if the
+                # entry is a duplicate (seen_names dedup below).
+                entry_to_original_terms.setdefault(match, []).append(term)
             if match and match not in seen_names:
                 seen_names.add(match)
                 relevant_lines.append(kg_entries[match])
@@ -328,7 +348,7 @@ def _filter_covered_by_external_knowledge(
     relevant_kg_text = "\n".join(relevant_lines)
     logger.info("Clarify — external_kg covers: %s", covered or "none")
     logger.info("Clarify — relevant_kg_text stored (%d chars): %r", len(relevant_kg_text), relevant_kg_text[:300] if relevant_kg_text else "")
-    return covered, relevant_kg_text
+    return covered, relevant_kg_text, entry_to_original_terms
 
 
 def _compact_schema(db_schema: str) -> str:
@@ -434,26 +454,28 @@ def _find_unresolvable_entities(
     db_name: str | None,
     formatted_kg: str = "",
     children_map: dict[str, list[str]] | None = None,
-) -> tuple[list[tuple[str, str | None]], list[tuple[str, str, float]], str, set[str]]:
-    """Return (unresolvable_entities, resolved_hits, relevant_kg_text).
+) -> tuple[list[tuple[str, str | None]], list[tuple[str, str, float]], str, set[str], dict[str, list[str]]]:
+    """Return (unresolvable_entities, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms).
 
     KB check runs first so entities covered by external knowledge are never
     sent to the VDB. relevant_kg_text is '' when nothing is covered.
     resolved_hits contains (entity, hit_text, score) for entities found in the
     schema (score <= 0.65); the caller uses score <= 0.63 for evidence generation.
+    entry_to_original_terms maps each confirmed KB entry name to the original
+    natural-language terms that matched it (for cumulative_grounded_kg annotation).
     """
     try:
         extraction_llm = get_non_reasoning_llm_client()
         messages = [SystemMessage(content=create_entity_extraction_prompt(question))]
         result = invoke_with_structured_output(extraction_llm, messages, EntitiesExtractionModel)
         if result is None:
-            return [], [], "", set()
+            return [], [], "", set(), {}
         entities = [e.strip() for e in (result.required_entity_name or []) if e.strip()]
     except Exception:
-        return [], [], "", set()
+        return [], [], "", set(), {}
 
     if not entities or semantic_retriever is None:
-        return [], [], "", set()
+        return [], [], "", set(), {}
 
     # Normalize (strip filler/structural words) and deduplicate before any search.
     # "median signal quality" and "signal quality" both → "signal quality" (one search).
@@ -472,16 +494,17 @@ def _find_unresolvable_entities(
     # Use original entity names for KB matching (e.g. "bandwidth ratio" matches
     # "Bandwidth-Frequency Ratio (BFR)") but keep normalized names for VDB column search.
     relevant_kg_text = ""
+    entry_to_original_terms: dict[str, list[str]] = {}
     if formatted_kg and search_entities:
         kb_entities = [norm_to_original.get(norm, norm) for norm in search_entities]
         orig_lower_to_norm = {norm_to_original.get(n, n).lower(): n for n in search_entities}
-        covered_originals, relevant_kg_text = _filter_covered_by_external_knowledge(kb_entities, formatted_kg, question, children_map)
+        covered_originals, relevant_kg_text, entry_to_original_terms = _filter_covered_by_external_knowledge(kb_entities, formatted_kg, question, children_map)
         covered_norms = {orig_lower_to_norm.get(orig, orig) for orig in covered_originals}
         search_entities = [e for e in search_entities if e not in covered_norms]
         logger.info("Clarify — after KB filter, sending to VDB: %s", search_entities or "none")
 
     if not search_entities:
-        return [], [], relevant_kg_text, all_norms
+        return [], [], relevant_kg_text, all_norms, entry_to_original_terms
 
     # Standalone generic terms (single token, no domain meaning) reliably produce
     # false-positive VDB matches via substring coincidence (e.g. "id" → "idle power").
@@ -498,7 +521,7 @@ def _find_unresolvable_entities(
     resolved_hits: list[tuple[str, str, float]] = []  # (entity, hit_text, score)
 
     if not vdb_entities:
-        return unresolvable, resolved_hits, relevant_kg_text, all_norms
+        return unresolvable, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms
 
     with ThreadPoolExecutor(max_workers=len(vdb_entities)) as pool:
         futures = {
@@ -532,7 +555,7 @@ def _find_unresolvable_entities(
 
     logger.info("Clarify — unresolvable after VDB: %s", [e for e, _ in unresolvable] or "none")
     logger.info("Clarify — resolved by VDB: %s", [(e, f"{s:.3f}") for e, _, s in resolved_hits] or "none")
-    return unresolvable, resolved_hits, relevant_kg_text, all_norms
+    return unresolvable, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms
 
 
 _PRUNE_RESOLVED_PROMPT = """\
@@ -602,7 +625,7 @@ def should_clarify(
     unanswered_topics_text = "\n".join(f"- {q}" for q in unanswered) if unanswered else "None"
 
     if session._cached_unresolvable_for != session.working_question:
-        unresolvable, resolved_hits, relevant_kg, extracted_norms = _find_unresolvable_entities(
+        unresolvable, resolved_hits, relevant_kg, extracted_norms, entry_to_original_terms = _find_unresolvable_entities(
             session.working_question,
             session.semantic_retriever,
             session.db_name,
@@ -616,10 +639,17 @@ def should_clarify(
         session._grounded_kg = relevant_kg
         session._grounded_kg_for = session.working_question
         # Accumulate across turns: union of all KB entries seen this phase.
+        # Annotate each new entry with the original natural-language terms that matched
+        # it so the evidence builder can bridge phrasing gaps (e.g. "significant compliance
+        # issues" → "High Audit Compliance Pressure") even when later turns stop linking them.
         if relevant_kg:
             existing = _parse_kg_entries(session.cumulative_grounded_kg)
             for name, text in _parse_kg_entries(relevant_kg).items():
                 if name not in existing:
+                    matched_from = entry_to_original_terms.get(name, [])
+                    if matched_from:
+                        first_nl = text.index("\n") if "\n" in text else len(text)
+                        text = text[:first_nl] + f"\n# matched from: {', '.join(matched_from)}" + text[first_nl:]
                     session.cumulative_grounded_kg = (
                         session.cumulative_grounded_kg + "\n" + text
                         if session.cumulative_grounded_kg
@@ -724,12 +754,39 @@ def should_clarify(
     )
     response = safe_invoke_text(llm, prompt).strip()
 
+    # Guard: override PROCEED if any incomplete term has never been asked about.
+    # The decide-LLM may rationalize PROCEED when it can see VDB hints, but a term
+    # that hasn't appeared in any past question is genuinely unasked and needs a turn.
+    if not response.upper().startswith("ASK:") and session.incomplete_formula_terms and turns_remaining > 0:
+        asked_tokens = {
+            re.sub(r"[^\w]", "", tok).lower()
+            for h in session.clarify_history
+            for tok in re.split(r"[\s/\W]+", h["q"])
+            if tok
+        } - {""}
+        for term, description in session.incomplete_formula_terms:
+            term_tokens = {
+                re.sub(r"[^\w]", "", tok)
+                for tok in re.split(r"[\s/]+", term.lower())
+                if tok and tok not in _FILLER and tok not in _CONNECTIVES
+            } - {""}
+            if term_tokens and not (term_tokens & asked_tokens):
+                question = _generate_forced_question(term, description, llm)
+                logger.info("Clarify — DECISION override: ASK (never-asked incomplete term %r)", term)
+                return True, question
+
     if response.upper().startswith("ASK:"):
         question = response[4:].strip()
         logger.info("Clarify — DECISION: ASK  (history len=%d)", len(session.clarify_history))
         return True, question
     logger.info("Clarify — DECISION: PROCEED  (history len=%d)", len(session.clarify_history))
     return False, None
+
+
+def _generate_forced_question(term: str, description: str, llm) -> str:
+    """Generate a targeted clarification question for a term that is both incomplete and unresolvable."""
+    prompt = _FORCED_QUESTION_PROMPT.format(term=term, description=description)
+    return safe_invoke_text(llm, prompt).strip()
 
 
 def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
@@ -742,7 +799,7 @@ def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
     if session._cached_unresolvable_for == session.working_question:
         logger.info("Clarify — KB already current for Phase 2 question (cached)")
         return
-    unresolvable, resolved_hits, relevant_kg, _ = _find_unresolvable_entities(
+    unresolvable, resolved_hits, relevant_kg, _, entry_to_original_terms = _find_unresolvable_entities(
         session.working_question,
         session.semantic_retriever,
         session.db_name,
@@ -758,6 +815,10 @@ def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
         existing = _parse_kg_entries(session.cumulative_grounded_kg)
         for name, text in _parse_kg_entries(relevant_kg).items():
             if name not in existing:
+                matched_from = entry_to_original_terms.get(name, [])
+                if matched_from:
+                    first_nl = text.index("\n") if "\n" in text else len(text)
+                    text = text[:first_nl] + f"\n# matched from: {', '.join(matched_from)}" + text[first_nl:]
                 session.cumulative_grounded_kg = (
                     session.cumulative_grounded_kg + "\n" + text
                     if session.cumulative_grounded_kg

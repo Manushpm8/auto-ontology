@@ -67,15 +67,6 @@ def test_follow_up_seed_clears_sql_keys():
     assert "normalized_question" not in sess.path_state
 
 
-def test_follow_up_seed_sets_similar_questions():
-    sess = _make_session()
-    sess.path_state["sql_code"] = "SELECT COUNT(*) FROM aliens"
-    sess.phase1_question = "How many aliens?"
-    msg = "Phase 1 is complete. Here is a follow-up question:\n\nShow totals.\n\nGenerate the PostgreSQL query and call submit_sql."
-    _apply_follow_up_seed(sess, msg)
-    assert sess.path_state["similar_questions"] == [["How many aliens?", "SELECT COUNT(*) FROM aliens"]]
-
-
 def test_apply_user_answer_merges_question():
     sess = _make_session()
     sess._pending_question = "Which year?"

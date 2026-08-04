@@ -170,6 +170,9 @@ line in SQL-friendly notation:
 Only include conditions expressible with specific column names and values — skip \
 natural-language qualifiers with no clear SQL translation. \
 Skip any entry not required by the working question. \
+Entries may include a "# matched from: <terms>" annotation line listing the original \
+natural-language phrases from the question that correspond to this KB entry — use these \
+to connect KB entries to the working question even when the phrasing differs. \
 If nothing applies, output: NONE"""
 
 

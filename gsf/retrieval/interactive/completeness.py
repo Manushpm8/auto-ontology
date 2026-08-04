@@ -37,12 +37,16 @@ Your task — produce a FRESH updated list:
    - A composite formula whose aggregation semantics are unspecified — i.e. the formula \
      combines multiple columns non-linearly and it is unclear at which level it should \
      be evaluated before grouping
+   - A natural language formula description that does not map to a unique equation — \
+     e.g. "adjusted by X", "modified with Y", "compensated for Z" where different \
+     placements of the adjustment (inside a fraction vs. outside, numerator vs. denominator) \
+     produce different values; include the user's exact phrase in the description
 
 Do NOT flag:
 - Business context or motivation that does not affect SQL structure
 - Terms fully defined by an explicit formula in the answer or KB
 - Minor stylistic ambiguities a SQL generator can resolve on its own (e.g. sign \
-  handling, boundary operators, or standard division-by-zero conventions)
+  handling, boundary operators)
 
 Output one line per remaining gap, ordered from most to least critical for SQL correctness \
 (e.g. a missing core formula blocks SQL entirely; a missing secondary threshold is lower priority):
@@ -65,6 +69,8 @@ Identify any terms, formulas, or conditions in the external knowledge that:
 - Are expressed with hedged language ("typically", "often", "approximately")
 - Reference sub-conditions or sub-metrics that are not mapped to specific column values
 - Cannot be directly translated to SQL without further information from the user
+- Use natural language that does not map to a unique equation — e.g. "adjusted by X" \
+  or "modified with Y" where the placement of the adjustment is ambiguous
 
 A gap is only significant if it would prevent writing correct SQL.
 
