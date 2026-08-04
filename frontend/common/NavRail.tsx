@@ -22,10 +22,9 @@ const navItems: NavItem[] = [
 	{ icon: IconName.ChartBar, href: '/analysis', label: 'Analysis' },
 	{ icon: IconName.Exploration, href: '/exploration', label: 'Exploration' },
 	{ icon: IconName.Database, href: '/data', label: 'Data' },
-	{ icon: IconName.Pencil, href: '/semantic-input', label: 'Semantic Input' },
 	{ icon: IconName.ChartLine, href: '/analytics', label: 'Analytics', adminOnly: true },
-	// Settings is admin-only and now also contains Users and Single Sign-On
-	// (see app/settings/*). Viewers don't see it.
+	// Settings is admin-only and now also contains Users, Single Sign-On and
+	// Semantic Input (see app/settings/*). Viewers don't see it.
 	{ icon: IconName.Settings, href: '/settings', label: 'Settings', adminOnly: true },
 ];
 
@@ -36,7 +35,6 @@ export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {
 
 	return (
 		<nav className="relative h-full w-12 shrink-0 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-			{/* Expanded state is an overlay so the page content never reflows on hover. */}
 			<div
 				onMouseEnter={() => setIsExpanded(true)}
 				onMouseLeave={() => setIsExpanded(false)}
