@@ -14,7 +14,7 @@ import {
 	type ClipboardEvent,
 	type KeyboardEvent,
 } from 'react';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 
 export type TagInputHandle = {
 	/** Forces any pending text in the input to be committed as a tag. */
@@ -184,7 +184,7 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 					key={`${tag}-${idx}`}
 					className="inline-flex max-w-[min(24rem,100%)] items-center gap-1 rounded-md border border-[#76b900]/40 bg-[#76b900]/10 px-2 py-0.5 text-xs font-medium text-[#3f6b00] dark:border-[#76b900]/40 dark:bg-[#76b900]/15 dark:text-[#cdeb86]"
 				>
-					<TruncatedText text={tag} />
+					<Text text={tag} />
 					{!disabled && (
 						<button
 							type="button"

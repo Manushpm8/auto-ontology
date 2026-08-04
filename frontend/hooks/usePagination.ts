@@ -8,6 +8,9 @@ import { useCallback, useMemo, useState } from 'react';
 
 import type { TablePagination } from '@/types/table';
 
+/** Rows per page every paginated `Table` in the app uses. */
+export const DEFAULT_PAGE_SIZE = 10;
+
 type UsePaginationResult<T> = {
 	/** The slice of `rows` belonging to the current page. */
 	pageRows: T[];

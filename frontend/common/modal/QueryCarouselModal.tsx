@@ -14,7 +14,7 @@ import { EmptyStateVariant } from '@/enums/emptyState';
 import type { ExplorationForeignKey, ExplorationLink } from '@/types/exploration';
 import { LabelList } from '@/common/SinglePageComposer';
 import { SqlBlock } from '@/common/SqlBlock';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { Modal } from './Modal';
 
@@ -57,17 +57,17 @@ const ForeignKeyColumnsPanel = ({
 					className="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 p-3 sm:grid-cols-2 dark:border-zinc-700"
 				>
 					<div className="min-w-0">
-						<TruncatedText as="p" variant={TextVariant.Overline}>
+						<Text as="p" variant={TextVariant.Overline}>
 							{sourceName}.{fk.sourceColumn}
-						</TruncatedText>
+						</Text>
 						<div className="mt-1.5">
 							<LabelList values={fk.sourceSampleValues ?? []} />
 						</div>
 					</div>
 					<div className="min-w-0">
-						<TruncatedText as="p" variant={TextVariant.Overline}>
+						<Text as="p" variant={TextVariant.Overline}>
 							{targetName}.{fk.targetColumn}
-						</TruncatedText>
+						</Text>
 						<div className="mt-1.5">
 							<LabelList values={fk.targetSampleValues ?? []} />
 						</div>
@@ -106,9 +106,9 @@ export const QueryCarouselModal = ({
 								</span>
 							)}
 						</div>
-						<TruncatedText as="p" variant={TextVariant.Detail}>
+						<Text as="p" variant={TextVariant.Detail}>
 							{sourceName} ↔ {targetName}
-						</TruncatedText>
+						</Text>
 					</div>
 				</div>
 				<div className="flex items-center gap-3">

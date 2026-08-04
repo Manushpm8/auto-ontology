@@ -15,7 +15,7 @@ import { PopoverMenu } from '@/common/PopoverMenu';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { analyses } from '@/api/analyses';
 import { pqlAnalyses } from '@/api/pqlAnalyses';
@@ -373,11 +373,7 @@ export const AnalysisView = () => {
 								className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
 							>
 								<div className="flex items-start justify-between gap-3">
-									<TruncatedText
-										as="h2"
-										text={a.name}
-										variant={TextVariant.CardTitle}
-									/>
+									<Text as="h2" text={a.name} variant={TextVariant.CardTitle} />
 									<PopoverMenu
 										className="shrink-0"
 										items={[
@@ -422,7 +418,7 @@ export const AnalysisView = () => {
 								</div>
 								{a.description.trim() !== '' && (
 									<div className="mt-2">
-										<TruncatedText
+										<Text
 											as="p"
 											text={a.description}
 											lines={3}

@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Database, Schema, Table } from '@/types/datasources';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 
 const treeRowClassName =
 	'flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm text-zinc-800 hover:bg-zinc-100/90 dark:text-zinc-200 dark:hover:bg-zinc-800/70';
@@ -271,7 +271,7 @@ export const ZonesDataTree = ({
 				onChange={onSelectionChange}
 				className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#76b900] focus:ring-[#76b900]/40 dark:border-zinc-600"
 			/>
-			<TruncatedText text={label} />
+			<Text text={label} />
 		</div>
 	);
 

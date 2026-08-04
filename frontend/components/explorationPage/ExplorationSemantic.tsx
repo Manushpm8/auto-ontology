@@ -10,7 +10,7 @@ import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { DetailLinkButton } from '@/common/DetailLinkButton';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { ExplorationLayer } from '@/enums/exploration';
 import { Label } from '@/common/Label';
@@ -98,13 +98,13 @@ export const ActiveTermCard = ({
 							className="mt-0.5 h-5 w-5 shrink-0 text-[#76b900]"
 						/>
 						<div className="min-w-0 flex-1 space-y-1">
-							<TruncatedText as="h2" text={node.name} variant={TextVariant.Heading} />
+							<Text as="h2" text={node.name} variant={TextVariant.Heading} />
 							{node.synonyms.length > 0 && (
-								<TruncatedText as="p" variant={TextVariant.Caption}>
+								<Text as="p" variant={TextVariant.Caption}>
 									Synonyms: {node.synonyms.join(', ')}
-								</TruncatedText>
+								</Text>
 							)}
-							<TruncatedText
+							<Text
 								as="p"
 								text={node.description || 'No Description'}
 								lines={2}

@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { signOut, useSession } from '@/auth/auth-client';
 import { SelectButton } from '@/common/Button';
 import { PopoverMenu } from '@/common/PopoverMenu';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { SelectButtonTheme } from '@/enums/button';
 import { TextVariant } from '@/enums/text';
 
@@ -42,7 +42,7 @@ export const UserMenu = ({ version }: { version?: string }) => {
 				// widest item.
 				<div className="w-56 px-3 py-1 text-xs text-zinc-400 dark:text-zinc-500">
 					{version ? <p>Version {version}</p> : null}
-					<TruncatedText text={fullName} variant={TextVariant.Strong} />
+					<Text text={fullName} variant={TextVariant.Strong} />
 					{roleLabel ? <p className="text-[10px]">{roleLabel}</p> : null}
 				</div>
 			}

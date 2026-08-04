@@ -13,7 +13,7 @@ import {
 } from '@nvidia/foundations-react-core';
 
 import { EmptyState } from '@/common/EmptyState';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import type { TableColumn, TableProps } from '@/types/table';
 
@@ -130,12 +130,9 @@ export const Table = <T,>({
 						{columns.map((column) => (
 							<td key={column.key} className={bodyCellClasses(column, cellClassName)}>
 								{column.truncate ? (
-									// A cell is the one place a clipped value has no
-									// other way of being read, so it gets the keyboard
-									// affordance the tooltip needs.
-									<TruncatedText text={column.title?.(row)} focusable>
+									<Text text={column.title?.(row)} focusable>
 										{column.cell(row)}
-									</TruncatedText>
+									</Text>
 								) : (
 									column.cell(row)
 								)}

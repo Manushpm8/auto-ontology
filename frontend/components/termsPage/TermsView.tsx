@@ -16,7 +16,7 @@ import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
@@ -83,13 +83,9 @@ const TermCard = ({
 		{/* Card header */}
 		<div className="flex items-start justify-between gap-3">
 			<div className="min-w-0 space-y-0.5">
-				<TruncatedText as="h2" text={term.name} variant={TextVariant.CardTitle} />
+				<Text as="h2" text={term.name} variant={TextVariant.CardTitle} />
 				{term.synonyms.length > 0 && (
-					<TruncatedText
-						as="p"
-						text={term.synonyms.join(', ')}
-						variant={TextVariant.Caption}
-					/>
+					<Text as="p" text={term.synonyms.join(', ')} variant={TextVariant.Caption} />
 				)}
 			</div>
 			<CertificationBadge status={certificationStatus} />
@@ -97,12 +93,7 @@ const TermCard = ({
 
 		<div className="mt-2">
 			{term.description != null && term.description.trim() !== '' ? (
-				<TruncatedText
-					as="p"
-					text={term.description}
-					lines={3}
-					variant={TextVariant.Body}
-				/>
+				<Text as="p" text={term.description} lines={3} variant={TextVariant.Body} />
 			) : (
 				<p className="text-sm italic text-zinc-400 dark:text-zinc-500">
 					No Description Available

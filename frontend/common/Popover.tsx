@@ -32,7 +32,7 @@ type PopoverProps = {
  * absolutely positioned panel is clipped by any `overflow-hidden`/`overflow-auto`
  * ancestor, which hid it entirely when the trigger lived inside a scrolling
  * table (see the certification column in `SinglePageComposer`'s data table).
- * `TruncatedText` portals its tooltip for the same reason.
+ * `Text` portals its tooltip for the same reason.
  */
 export const Popover = ({
 	trigger,

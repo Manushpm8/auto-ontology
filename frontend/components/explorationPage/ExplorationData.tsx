@@ -14,7 +14,7 @@ import { getTableType } from '@/components/dataPage/get-table-type';
 import { ExplorationLayer } from '@/enums/exploration';
 import { TableType } from '@/enums/datasources';
 import { DetailLinkButton } from '@/common/DetailLinkButton';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import type {
 	DataExplorationGraph,
@@ -142,11 +142,11 @@ export const ActiveDataCard = ({
 							className="mt-0.5 h-5 w-5 shrink-0 text-[#3b82b6]"
 						/>
 						<div className="min-w-0 flex-1 space-y-1">
-							<TruncatedText as="h2" text={node.name} variant={TextVariant.Heading} />
-							<TruncatedText as="p" variant={TextVariant.Caption}>
+							<Text as="h2" text={node.name} variant={TextVariant.Heading} />
+							<Text as="p" variant={TextVariant.Caption}>
 								{node.databaseName} • {node.schemaName}
-							</TruncatedText>
-							<TruncatedText
+							</Text>
+							<Text
 								as="p"
 								text={node.description || 'No Description'}
 								lines={2}

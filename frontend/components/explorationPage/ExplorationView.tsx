@@ -16,7 +16,7 @@ import { SelectButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
 import { SearchInput } from '@/common/SearchInput';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import {
 	ColumnAttributesModal,
 	DataDetailsModal,
@@ -24,7 +24,7 @@ import {
 	RelationshipsModal,
 	SemanticRelationshipModal,
 	SqlAttributesModal,
-	type DataDetailsKind,
+	type DataDetailsType,
 } from '@/common/modal';
 import { TableType } from '@/enums/datasources';
 import { ExplorationLayer } from '@/enums/exploration';
@@ -64,7 +64,7 @@ export const ExplorationView = () => {
 	const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
 	const [selectedSemanticEdgeId, setSelectedSemanticEdgeId] = useState<string | null>(null);
 	const [relationshipsNodeId, setRelationshipsNodeId] = useState<string | null>(null);
-	const [dataDetailsKind, setDataDetailsKind] = useState<DataDetailsKind | null>(null);
+	const [dataDetailsType, setDataDetailsType] = useState<DataDetailsType | null>(null);
 	const [columnAttributesNodeId, setColumnAttributesNodeId] = useState<string | null>(null);
 	const [sqlAttributesNodeId, setSqlAttributesNodeId] = useState<string | null>(null);
 	const [controller, setController] = useState<Core | null>(null);
@@ -141,7 +141,7 @@ export const ExplorationView = () => {
 			setSelectedLinkId(null);
 			setSelectedSemanticEdgeId(null);
 			setRelationshipsNodeId(null);
-			setDataDetailsKind(null);
+			setDataDetailsType(null);
 			setColumnAttributesNodeId(null);
 			setSqlAttributesNodeId(null);
 			setActiveNodeId(nodeId);
@@ -173,7 +173,7 @@ export const ExplorationView = () => {
 		setSelectedLinkId(null);
 		setSelectedSemanticEdgeId(null);
 		setRelationshipsNodeId(null);
-		setDataDetailsKind(null);
+		setDataDetailsType(null);
 		setColumnAttributesNodeId(null);
 		setSqlAttributesNodeId(null);
 		router.replace(
@@ -304,7 +304,7 @@ export const ExplorationView = () => {
 														: 'text-[#3b82b6]'
 												}`}
 											/>
-											<TruncatedText text={node.name} />
+											<Text text={node.name} />
 										</SelectButton>
 									</li>
 								))}
@@ -387,9 +387,9 @@ export const ExplorationView = () => {
 						)
 					}
 					onShowRelationships={() => setRelationshipsNodeId(activeNode.id)}
-					onShowColumns={() => setDataDetailsKind('columns')}
-					onShowQueries={() => setDataDetailsKind('queries')}
-					onShowTerms={() => setDataDetailsKind('terms')}
+					onShowColumns={() => setDataDetailsType('columns')}
+					onShowQueries={() => setDataDetailsType('queries')}
+					onShowTerms={() => setDataDetailsType('terms')}
 				/>
 			)}
 
@@ -450,8 +450,8 @@ export const ExplorationView = () => {
 			/>
 			<DataDetailsModal
 				target={activeNode?.layer === ExplorationLayer.Data ? activeNode : null}
-				kind={dataDetailsKind}
-				onClose={() => setDataDetailsKind(null)}
+				type={dataDetailsType}
+				onClose={() => setDataDetailsType(null)}
 			/>
 			<ColumnAttributesModal
 				term={columnAttributesNode}

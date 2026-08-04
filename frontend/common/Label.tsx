@@ -4,7 +4,7 @@
 
 import type { CSSProperties } from 'react';
 
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 
 // A label carries a name, so it is capped and clipped rather than allowed to
 // grow: one oversized value (a description that ended up in a name field, say)
@@ -49,7 +49,7 @@ export const Label = ({ label, onClick, color, muted = false }: LabelProps) => {
 	const style = usesZoneColor ? zoneLabelStyle(color as string) : undefined;
 	// Clipping is what makes the cap above win over a long value, and a clipped
 	// chip reveals itself in the same tooltip the tags elsewhere use.
-	const content = <TruncatedText text={label} />;
+	const content = <Text text={label} />;
 
 	if (interactive) {
 		return (

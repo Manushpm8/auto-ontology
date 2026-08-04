@@ -15,11 +15,9 @@ import { Table } from '@/common/Table';
 import { Toast } from '@/common/Toast';
 import { analyticsApi } from '@/api/analytics';
 import { formatDate } from '@/common/date';
-import { usePagination } from '@/hooks/usePagination';
+import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
 import type { ConversationAnalytics } from '@/types/analytics';
 import type { TableColumn } from '@/types/table';
-
-const PAGE_SIZE = 10;
 
 const CSV_HEADERS = ['Timestamp', 'User', 'Source', 'Question', 'Reasoning', 'SQL'];
 const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
@@ -81,7 +79,7 @@ export const AnalyticsView = () => {
 	const [rows, setRows] = useState<ConversationAnalytics[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const { pageRows, pagination } = usePagination(rows, PAGE_SIZE);
+	const { pageRows, pagination } = usePagination(rows, DEFAULT_PAGE_SIZE);
 
 	useEffect(() => {
 		let cancelled = false;

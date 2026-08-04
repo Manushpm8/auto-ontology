@@ -21,14 +21,12 @@ import type { TableExplorationDetails } from '@/types/exploration';
 import type { TableColumn } from '@/types/table';
 import { SqlBlock } from '@/common/SqlBlock';
 import { Table } from '@/common/Table';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
-import { usePagination } from '@/hooks/usePagination';
+import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
 import { Modal } from './Modal';
 
-const PAGE_SIZE = 10;
-
-export type DataDetailsKind = 'columns' | 'queries' | 'terms';
+export type DataDetailsType = 'columns' | 'queries' | 'terms';
 
 /** Minimal data-object reference — decoupled from any specific page's node shape. */
 export type DataDetailsModalTarget = {
@@ -40,12 +38,12 @@ export type DataDetailsModalTarget = {
 
 type DataDetailsModalProps = {
 	target: DataDetailsModalTarget | null;
-	kind: DataDetailsKind | null;
+	type: DataDetailsType | null;
 	onClose: () => void;
 };
 
 /** Generic modal for a Table/View's columns, SQL queries, or related Terms. */
-export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProps) => {
+export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProps) => {
 	const [columns, setColumns] = useState<Column[]>([]);
 	const [details, setDetails] = useState<TableExplorationDetails>({
 		queries: [],
@@ -53,19 +51,17 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 	});
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	// Both lists are paged from here rather than from `renderTable`, where the
-	// hooks would sit behind the `kind` branch.
-	const columnsPage = usePagination(columns, PAGE_SIZE, target?.id ?? null);
-	const termsPage = usePagination(details.terms, PAGE_SIZE, target?.id ?? null);
+	const columnsPage = usePagination(columns, DEFAULT_PAGE_SIZE, target?.id ?? null);
+	const termsPage = usePagination(details.terms, DEFAULT_PAGE_SIZE, target?.id ?? null);
 
 	useEffect(() => {
-		if (target == null || kind == null) return undefined;
+		if (target == null || type == null) return undefined;
 		let cancelled = false;
 
 		const load = async () => {
 			setLoading(true);
 			setError(null);
-			if (kind === 'columns') {
+			if (type === 'columns') {
 				const response = await datasources.getColumnsForTable(target.id);
 				if (cancelled) return;
 				if (response.error) {
@@ -89,12 +85,12 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 		return () => {
 			cancelled = true;
 		};
-	}, [kind, target]);
+	}, [type, target]);
 
-	const title = kind === 'columns' ? 'Columns' : kind === 'queries' ? 'SQL Queries' : 'Terms';
+	const title = type === 'columns' ? 'Columns' : type === 'queries' ? 'SQL Queries' : 'Terms';
 
 	const renderTable = () => {
-		if (kind === 'columns') {
+		if (type === 'columns') {
 			const tableColumns: TableColumn<Column>[] = [
 				{
 					key: 'column',
@@ -134,7 +130,7 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 			);
 		}
 
-		if (kind === 'queries') {
+		if (type === 'queries') {
 			if (details.queries.length === 0) {
 				return <EmptyState variant={EmptyStateVariant.Inline} title="No SQL queries" />;
 			}
@@ -187,22 +183,22 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 	};
 
 	return (
-		<Modal open={target != null && kind != null} onClose={onClose} className="w-full max-w-4xl">
+		<Modal open={target != null && type != null} onClose={onClose} className="w-full max-w-4xl">
 			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex min-w-0 items-center gap-2">
 					<Icon
 						name={
-							kind === 'columns'
+							type === 'columns'
 								? IconName.Column
-								: kind === 'terms'
+								: type === 'terms'
 									? IconName.Terms
 									: IconName.Link
 						}
 						className="h-5 w-5 shrink-0 text-[#76b900]"
 					/>
-					<TruncatedText as="h2" variant={TextVariant.Heading}>
+					<Text as="h2" variant={TextVariant.Heading}>
 						{target?.name} ({title})
-					</TruncatedText>
+					</Text>
 				</div>
 				<Button
 					theme={ButtonTheme.IconNeutral}

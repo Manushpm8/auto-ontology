@@ -64,8 +64,6 @@ export const ConfirmModal = ({
 				</Button>
 			</div>
 			<div className="space-y-4 p-6">
-				{/* The message usually names the entity being deleted, which can
-				    be a long identifier with nothing to break on. */}
 				<div className="wrap-anywhere text-sm text-zinc-700 dark:text-zinc-300">
 					{message}
 				</div>

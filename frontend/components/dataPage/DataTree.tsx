@@ -14,7 +14,7 @@ import { datasources } from '@/api/datasources';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { splitId } from '@/lib/data/catalog-ids';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import {
 	catalogStructureFingerprint,
@@ -145,7 +145,7 @@ function Row({
 		</span>
 	);
 
-	const nameEl = <TruncatedText text={name} variant={TextVariant.Strong} fill />;
+	const nameEl = <Text text={name} variant={TextVariant.Strong} fill />;
 
 	const inner = (
 		<>

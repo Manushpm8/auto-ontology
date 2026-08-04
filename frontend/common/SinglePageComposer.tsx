@@ -23,7 +23,7 @@ import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
 import { TagInput } from '@/common/TagInput';
 import { Table } from '@/common/Table';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { SqlBlock } from '@/common/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
@@ -403,12 +403,7 @@ function renderComposerSection(
 							/>
 						) : null}
 					</div>
-					<TruncatedText
-						as="p"
-						text={section.body}
-						lines={3}
-						variant={TextVariant.Body}
-					/>
+					<Text as="p" text={section.body} lines={3} variant={TextVariant.Body} />
 				</div>
 			);
 		case ComposerSectionKind.TAG_LIST:
@@ -994,7 +989,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													aria-label="Name"
 												/>
 											) : (
-												<TruncatedText
+												<Text
 													as="h1"
 													text={title}
 													variant={TextVariant.PageTitle}

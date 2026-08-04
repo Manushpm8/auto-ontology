@@ -5,12 +5,12 @@
 'use client';
 
 import { useCallback, useRef, useState, type ReactNode } from 'react';
-import { TooltipContent, TooltipRoot, TooltipTrigger } from '@nvidia/foundations-react-core';
+import { Tooltip } from '@nvidia/foundations-react-core';
 import { TextVariant } from '@/enums/text';
 
-type TruncatedTextElement = 'span' | 'p' | 'div' | 'h1' | 'h2' | 'h3' | 'h4';
+type TextElement = 'span' | 'p' | 'div' | 'h1' | 'h2' | 'h3' | 'h4';
 
-type TruncatedTextProps = {
+type TextProps = {
 	/**
 	 * Value revealed in the tooltip. Defaults to the rendered text content, so
 	 * it only has to be passed when the two differ — a cell that renders a badge
@@ -26,7 +26,7 @@ type TruncatedTextProps = {
 	 */
 	lines?: 1 | 2 | 3;
 	/** Element to render, for headings and paragraphs that need their own tag. */
-	as?: TruncatedTextElement;
+	as?: TextElement;
 	/** Role the value plays on the page. Defaults to the surrounding typography. */
 	variant?: TextVariant;
 	/** Claims the free space of a flex row, for a value followed by trailing controls. */
@@ -71,7 +71,7 @@ const TOOLTIP_CLASS =
 	'z-[1000] block max-h-[60vh] max-w-[min(500px,90vw)] overflow-y-auto whitespace-pre-wrap wrap-anywhere rounded-lg border border-zinc-200 bg-white p-2 text-xs leading-5 text-zinc-600 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300';
 
 const cx = (...classes: (string | false | undefined)[]) => classes.filter(Boolean).join(' ');
-export const TruncatedText = ({
+export const Text = ({
 	text,
 	children,
 	lines = 1,
@@ -79,7 +79,7 @@ export const TruncatedText = ({
 	variant = TextVariant.Inherit,
 	fill = false,
 	focusable = false,
-}: TruncatedTextProps) => {
+}: TextProps) => {
 	const elementRef = useRef<HTMLSpanElement | null>(null);
 	const [tooltip, setTooltip] = useState('');
 	// Every supported tag renders a plain `HTMLElement`, so narrowing the union
@@ -131,24 +131,11 @@ export const TruncatedText = ({
 	// are never clipped.
 	if (tooltip === '') return line;
 
+	// Open delay and skip window come from the `TooltipProvider` the root layout
+	// puts around the app, so they stay consistent with every other tooltip.
 	return (
-		// Composed from the design system's parts rather than its `Tooltip`
-		// wrapper, which hard-codes a `data-testid` onto both the trigger and
-		// the panel; passing `undefined` for it here is what drops them. The
-		// wrapper also falls back to a local `TooltipProvider`, so going
-		// without it relies on the one the root layout puts around the app.
-		<TooltipRoot>
-			<TooltipTrigger asChild data-testid={undefined}>
-				{line}
-			</TooltipTrigger>
-			<TooltipContent
-				side="bottom"
-				align="start"
-				className={TOOLTIP_CLASS}
-				data-testid={undefined}
-			>
-				{tooltip}
-			</TooltipContent>
-		</TooltipRoot>
+		<Tooltip slotContent={tooltip} side="bottom" align="start" className={TOOLTIP_CLASS}>
+			{line}
+		</Tooltip>
 	);
 };

@@ -9,10 +9,8 @@ import type { ParsedTable, TableRow } from '@/lib/parseSqlResponse';
 import { EmptyState } from '@/common/EmptyState';
 import { Table } from '@/common/Table';
 import { EmptyStateVariant } from '@/enums/emptyState';
-import { usePagination } from '@/hooks/usePagination';
+import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
 import type { TableColumn } from '@/types/table';
-
-const PAGE_SIZE = 10;
 
 type DynamicTableProps = {
 	table: ParsedTable;
@@ -20,7 +18,7 @@ type DynamicTableProps = {
 
 export const DynamicTable = ({ table }: DynamicTableProps) => {
 	const { columns, rows } = table;
-	const { pageRows, pagination } = usePagination(rows, PAGE_SIZE);
+	const { pageRows, pagination } = usePagination(rows, DEFAULT_PAGE_SIZE);
 
 	const tableColumns = useMemo<TableColumn<TableRow>[]>(
 		() =>

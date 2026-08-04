@@ -8,7 +8,7 @@ import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { PopoverMenu } from '@/common/PopoverMenu';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import type { Connection } from '@/types/connection';
 
@@ -30,7 +30,7 @@ export const ConnectionInfoCard = ({
 			<header className="flex w-full items-center justify-between gap-2 px-4 py-5">
 				<div className="flex min-w-0 items-center gap-1">
 					<Icon name={IconName.Database} className="h-5 w-5 shrink-0 text-[#76b900]" />
-					<TruncatedText
+					<Text
 						as="h3"
 						text={connection.database_name}
 						variant={TextVariant.Subheading}

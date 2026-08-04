@@ -15,12 +15,10 @@ import { Icon, IconName } from '@/common/icons';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Table } from '@/common/Table';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
-import { usePagination } from '@/hooks/usePagination';
+import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
 import { Modal } from './Modal';
-
-const PAGE_SIZE = 10;
 
 type RelationshipsModalProps = {
 	node: ExplorationNode | null;
@@ -31,7 +29,7 @@ type RelationshipsModalProps = {
 
 /** Related-entities modal shared by both Exploration layers (Terms and Tables/Views). */
 export const RelationshipsModal = ({ node, rows, onClose, onFocus }: RelationshipsModalProps) => {
-	const { pageRows, pagination } = usePagination(rows, PAGE_SIZE, node?.id ?? null);
+	const { pageRows, pagination } = usePagination(rows, DEFAULT_PAGE_SIZE, node?.id ?? null);
 
 	const columns: TableColumn<ExplorationNode>[] = [
 		{
@@ -108,9 +106,9 @@ export const RelationshipsModal = ({ node, rows, onClose, onFocus }: Relationshi
 			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex min-w-0 items-center gap-2">
 					<Icon name={IconName.Link} className="h-5 w-5 shrink-0 text-[#76b900]" />
-					<TruncatedText as="h2" variant={TextVariant.Heading}>
+					<Text as="h2" variant={TextVariant.Heading}>
 						{node?.name} — Related Entities ({rows.length})
-					</TruncatedText>
+					</Text>
 				</div>
 				<Button
 					theme={ButtonTheme.IconNeutral}

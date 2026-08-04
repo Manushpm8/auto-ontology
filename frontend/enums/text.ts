@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Typography presets for `TruncatedText`. Callers pick the role a value plays
+ * Typography presets for `Text`. Callers pick the role a value plays
  * on the page rather than the classes that render it, so the styling stays in
  * one place instead of being spelled out at every call site.
  */
