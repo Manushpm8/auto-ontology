@@ -194,7 +194,7 @@
       "module": "dev_tools.test_entity_coverage",
       "args": [
         "--question",
-        "which is the single earliest opened account name, select 1 if multiple accounts share the same date"
+        "list the invoices issued in may 2014, including their ids, customer ids, and invoice dates"
       ],
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",

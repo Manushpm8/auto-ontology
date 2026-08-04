@@ -94,19 +94,7 @@ def get_coverage_response(payload: EntityCoveragePayload) -> dict:
         raise RuntimeError("LLM client is not configured.")
 
     state = _build_state(payload)
-    final_state: dict[str, Any] = dict(state)
-
-    for step in app.stream(state, config={"recursion_limit": 10}):
-        for node_name, node_output in step.items():
-            logger.info("Entity-coverage node: %s", node_name)
-            if not node_output:
-                continue
-            if "path_state" in node_output:
-                final_state.setdefault("path_state", {})
-                final_state["path_state"].update(node_output["path_state"])
-            for key, value in node_output.items():
-                if key != "path_state":
-                    final_state[key] = value
+    final_state = app.invoke(state, config={"recursion_limit": 10})
 
     path_state = final_state.get("path_state", {})
     final_response = path_state.get("final_response")

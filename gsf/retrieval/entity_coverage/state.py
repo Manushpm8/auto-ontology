@@ -14,7 +14,7 @@ from typing import NotRequired, TypedDict
 from nemo_retriever.graph.retriever import Retriever
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
-DEFAULT_MAX_DISTANCE = 0.7
+DEFAULT_MAX_DISTANCE = 0.75
 
 
 class EntityCoveragePayload(TypedDict):
