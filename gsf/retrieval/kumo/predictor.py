@@ -46,29 +46,37 @@ _init_lock = threading.Lock()
 _initialized = False
 
 
-def _ensure_init() -> None:
-    """Authenticate the KumoRFM SDK once, from env vars."""
-    global _initialized
-    if _initialized:
-        return
+_client: Any = None
+
+
+def _ensure_init() -> Any:
+    """Open the SDFM client once, from env vars, and return it.
+
+    The client is the only supported entry point to the engine: kumorfm refuses
+    direct use. Opening it makes no request, so a bad URL surfaces on the first
+    prediction rather than here.
+    """
+    global _client
+    if _client is not None:
+        return _client
     with _init_lock:
-        if _initialized:
-            return
+        if _client is not None:
+            return _client
         url = os.environ.get("KUMO_RFM_API_URL")
         if not url:
             raise RuntimeError("KUMO_RFM_API_URL is not set")
         api_key = os.environ.get("KUMO_RFM_API_KEY") or None
 
-        import kumorfm.rfm as rfm
+        from nvidia_sdfm import SDFMClient
 
         before = time.perf_counter()
-        rfm.init(url=url, api_key=api_key)
-        _initialized = True
+        _client = SDFMClient(url, api_key=api_key)
         logger.info(
-            "KumoRFM initialized (url=%s) in %.2fs",
-            url or "<default>",
+            "KumoRFM client opened (url=%s) in %.2fs",
+            url,
             time.perf_counter() - before,
         )
+        return _client
 
 
 def _quote(schema: str, table: str) -> str:
@@ -375,46 +383,6 @@ def _deduplicate_inferred_links(graph: Any) -> int:
     return removed
 
 
-# KumoRFM rewrites every Stype.text column into a list of lower-case words before
-# sending it (``kumorfm/rfm/base/sampler.py::_normalize_text``), but the request payload
-# still declares that column's dtype from the *pandas* dtype, which for an object column
-# is "string" (``kumorfm/rfm/payload.py::_dtype_name``). A KumoRFM deployment that
-# validates cells against the declared schema therefore rejects the ENTIRE request with
-# "Table cells do not match the declared schema" — so one incidental text column (a serial
-# number, a firmware string) makes every prediction on that graph fail, whatever the query.
-#
-# Re-typing text to categorical keeps the column as a usable feature and serializes it as
-# the plain string the schema declares. Set KUMO_ALLOW_TEXT_STYPE=1 to turn this off once
-# the SDK declares a list dtype for text columns.
-_ALLOW_TEXT_STYPE = os.environ.get("KUMO_ALLOW_TEXT_STYPE", "").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-}
-
-
-def _retype_text_columns(graph: Any) -> list[str]:
-    """Re-type ``text`` columns to ``categorical``; returns the names changed."""
-    if _ALLOW_TEXT_STYPE:
-        return []
-    from kumoapi.typing import Stype
-
-    retyped: list[str] = []
-    for table_name, table in graph.tables.items():
-        for column in table.columns:
-            if column.stype == Stype.text:
-                column.stype = Stype.categorical
-                retyped.append(f"{table_name}.{column.name}")
-    if retyped:
-        logger.info(
-            "kumo: re-typed %d text column(s) to categorical for payload-schema "
-            "compatibility: %s",
-            len(retyped),
-            ", ".join(retyped),
-        )
-    return retyped
-
-
 def build_prediction_context(
     connectors: list[Any],
     relevant_tables: list[dict[str, Any]] | None = None,
@@ -434,7 +402,7 @@ def build_prediction_context(
     from.
     """
     logger.info("kumo: build_prediction_context start (initializing KumoRFM)")
-    _ensure_init()
+    client = _ensure_init()
 
     import kumorfm.rfm as rfm
 
@@ -464,7 +432,7 @@ def build_prediction_context(
     # Passing an explicit empty edge list suppresses LocalGraph's automatic
     # relationship inference. This lets catalog join paths take precedence and
     # avoids inferring the same links twice.
-    graph = rfm.LocalGraph.from_data(
+    graph = rfm.Graph.from_data(
         frames,
         edges=[],
         infer_metadata=True,
@@ -474,7 +442,6 @@ def build_prediction_context(
         "kumo: LocalGraph.from_data (metadata inferred) in %.2fs",
         time.perf_counter() - _graph_start,
     )
-    _retype_text_columns(graph)
     covered = _apply_join_paths(graph, join_paths)
     if covered:
         logger.info("kumo: using %d catalog join edge(s)", covered)
@@ -490,7 +457,7 @@ def build_prediction_context(
             )
 
     graph_ddl, edges, col_stypes, time_columns = build_graph_context(graph)
-    kumo_model = KumoModel(rfm.KumoRFM(graph, verbose=False))
+    kumo_model = KumoModel(client.kumorfm(graph), graph)
     entity_ids: dict[str, list[Any]] = {}
     for name, table in graph.tables.items():
         primary_key = getattr(table.primary_key, "name", None)
