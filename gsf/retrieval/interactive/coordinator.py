@@ -156,16 +156,61 @@ def _resolve_cross_phase_entities(
 
 # ── SQL generation ──────────────────────────────────────────────────────────
 
-_FOLLOW_UP_INSTRUCTION = """\
+_FOLLOW_UP_MERGE_PROMPT = """\
+You are rewriting a follow-up database question into a clear, self-contained question \
+for a SQL generator.
 
-[Follow-up context]
-This question is a follow-up on the same database. The previous question and its SQL \
-are provided for reference — use them as directly relevant or as background context \
-depending on what this question asks.
+Previous question (Phase 1):
+{p1_question}
 
-Previous question: {p1_question}
 Previous SQL:
-{p1_sql}"""
+{p1_sql}
+{cross_phase_section}
+Follow-up question:
+{p2_question}
+
+Task: Write a single, complete, standalone question that fully describes what the SQL \
+generator should produce next.
+
+Rules:
+- If the follow-up extends or refines the previous query (adds columns, narrows or \
+changes filters, adjusts aggregation, changes sort order, modifies the result limit), \
+incorporate the relevant column names, table names, and conditions from the previous \
+SQL directly into the question text — this removes ambiguity for the SQL generator.
+- If the follow-up asks for something substantially different or shifts focus to an \
+unrelated entity or dataset, treat the previous SQL as background context only. \
+Do not force its columns or structure into the new question.
+- Always produce a standalone question: someone reading only your output should \
+understand exactly what data to retrieve, including column names where known.
+- Do not add assumptions beyond what the context together implies.
+- Output only the rewritten question, no preamble or explanation."""
+
+
+def _merge_follow_up_question(
+    p1_question: str,
+    p1_sql: str,
+    cross_phase: str,
+    p2_question: str,
+) -> str:
+    """Rewrite a raw follow-up question into a self-contained question with column
+    names and conditions drawn from the Phase 1 SQL and any cross-phase resolutions."""
+    cross_phase_section = (
+        f"\nResolved mappings for terms in the follow-up:\n{cross_phase}\n"
+        if cross_phase
+        else ""
+    )
+    prompt = _FOLLOW_UP_MERGE_PROMPT.format(
+        p1_question=p1_question,
+        p1_sql=p1_sql[:800],
+        cross_phase_section=cross_phase_section,
+        p2_question=p2_question,
+    )
+    merged = safe_invoke_text(_get_fast_llm(), prompt).strip()
+    if not merged:
+        logger.warning("Follow-up merge returned empty; falling back to raw follow-up question")
+        return p2_question
+    logger.info("Follow-up merged question: %s", merged[:300])
+    return merged
 
 _EVIDENCE_PROMPT = """\
 Working question: {question}
@@ -288,27 +333,40 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         p1_sql,
     )
 
-    # Build Evidence from the union of: Phase 1 carry-over + cross-phase resolution
-    # + all this-phase KB turns + debug extra.
+    # Build Evidence from the union of: Phase 1 carry-over + this-phase KB turns + debug extra.
+    # cross_phase is passed to the follow-up merge (below) rather than evidence, since it
+    # feeds the question directly; adding it to evidence too would be redundant.
     # VDB resolved hits are column descriptions, not formulas — the SQL generator
     # rediscovers schema mappings via its own VDB; they only benefit the decide-LLM prompt.
-    combined_kg = "\n".join(filter(None, [session.phase1_grounded_kg, cross_phase, session.cumulative_grounded_kg, extra_kg]))
+    combined_kg = "\n".join(filter(None, [session.phase1_grounded_kg, session.cumulative_grounded_kg, extra_kg]))
+
+    # For Phase 2, rewrite the follow-up into a self-contained question that bakes in
+    # column names and conditions from Phase 1 SQL so the SQL generator doesn't have to
+    # guess the relationship between the two phases. Persist as working_question so debug
+    # re-runs and logging reflect the enriched question.
+    if p1_sql and p1_question:
+        merged_q = _merge_follow_up_question(
+            p1_question, p1_sql, cross_phase, session.working_question
+        )
+        session.working_question = merged_q
+        logger.info("[%s] SQL gen — follow-up merged question (p1 sql %d chars)", session.task_id, len(p1_sql))
+
     question = session.working_question
-    evidence = _generate_evidence(question, combined_kg)
+    # For Phase 2, append the raw Phase 1 SQL as an exact reference so numeric thresholds,
+    # CASE conditions, and formulas are preserved verbatim — the merged question captures
+    # intent and structure, but the raw SQL is the source of truth for precise values.
+    if p1_sql and p1_question:
+        question = (
+            f"{question}\n\n[Phase 1 SQL reference — use exact column names, "
+            f"thresholds, and formulas from this SQL where applicable]\n{p1_sql}"
+        )
+
+    evidence = _generate_evidence(session.working_question, combined_kg)
     if session._named_column_evidence:
         evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
     if evidence:
         question = f"{question}\n\nEvidence: {evidence}"
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence[:200])
-
-    # For Phase 2, append an explicit follow-up instruction block so the SQL generator
-    # knows to extend or filter Phase 1's SQL rather than starting from scratch.
-    if p1_sql and p1_question:
-        question = question + _FOLLOW_UP_INSTRUCTION.format(
-            p1_question=p1_question,
-            p1_sql=p1_sql,
-        )
-        logger.info("[%s] SQL gen — follow-up instruction injected (p1 sql %d chars)", session.task_id, len(p1_sql))
 
     payload: TextToSQLPayload = {
         "question": question,
