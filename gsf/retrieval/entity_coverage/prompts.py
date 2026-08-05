@@ -61,6 +61,9 @@ Guidelines for what to exclude from required_entity_name:
 - Aggregation indicators ("count", "total", "average", "sum", "min", "max")
   when standing alone
 - Status and filter adjectives when standing alone ("open", "active", "high-priority")
+- Bare schema-generic words with no domain meaning on their own: "id", "name",
+  "type", "code", "key", "value", "description", "label", "title", "flag",
+  "uuid", "pk", "fk". Do not emit these as standalone entities.
 
 Date rule: When a question references a time-qualified event, collapse subject + action
 + granularity into one compact phrase ending with "date".

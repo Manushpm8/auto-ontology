@@ -57,7 +57,7 @@ def _build_state(payload: EntityCoveragePayload) -> AgentState:
     max_distance = payload.get("max_distance", DEFAULT_MAX_DISTANCE)
     initial_path_state["max_distance"] = float(max_distance)
     initial_path_state["return_uncovered_entities"] = bool(
-        payload.get("return_uncovered_entities", True)
+        payload.get("return_uncovered_entities", False)
     )
 
     target_db = payload.get("target_db")
