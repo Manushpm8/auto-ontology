@@ -131,6 +131,28 @@ class CombinedCandidateFilterModel(BaseModel):
     )
 
 
+class ColumnAttributeEvalModel(BaseModel):
+    """LLM structured output for SQL-relevance evaluation of ColumnAttribute candidates."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reasoning: str = Field(
+        ...,
+        description=(
+            "Step-by-step reasoning: what data is needed to answer the question, "
+            "and which candidates provide it."
+        ),
+    )
+    relevant_ids: list[str] = Field(
+        ...,
+        description=(
+            "IDs of candidates relevant to constructing SQL for this question. "
+            "Be inclusive — keep any candidate that could plausibly contribute "
+            "a value, filter, grouping, or join to the answer."
+        ),
+    )
+
+
 class AnchorColumnModel(BaseModel):
     """LLM output for identifying the primary ColumnAttribute for the question."""
 

@@ -9,7 +9,7 @@ Searches the semantic VDB per extracted entity, applies an LLM intent filter on
 each entity's raw hits, and stores typed results in path_state.
 
 Responsibilities:
-- Search the semantic VDB for ColumnAttribute candidates (top-5 per entity).
+- Search the semantic VDB for ColumnAttribute candidates (top-12 per entity).
 - Search the semantic VDB for CustomAnalysis candidates.
 - Do not retrieve SqlAttribute candidates.
 - Filter CustomAnalysis hits by intent using the LLM (full question).
@@ -27,12 +27,16 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 
-from gsf.dal.attributes import fetch_column_attribute_fk_counts
+from gsf.dal.attributes import (
+    fetch_attr_column_contexts,
+    fetch_column_attribute_fk_counts,
+)
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import (
     CandidateFilterModel,
+    ColumnAttributeEvalModel,
     ColumnAttributeSpec,
     CombinedCandidateFilterModel,
     CustomAnalysisFilterModel,
@@ -271,6 +275,119 @@ def _llm_filter_both(
 
 
 # ---------------------------------------------------------------------------
+# ColumnAttribute SQL-relevance evaluator
+# ---------------------------------------------------------------------------
+
+_COL_ATTR_EVAL_PROMPT = """\
+You are evaluating ColumnAttribute candidates for their usefulness in constructing \
+a SQL query that answers a user's question.
+
+A ColumnAttribute is a named semantic concept mapped to a specific table column — \
+for example, "Total Due" maps to salesorderheader.TotalDue.
+
+User question: {question}
+
+Candidates:
+{candidates_block}
+
+Think step by step about what data is needed to answer this question with SQL:
+- What value, metric, or measure is being asked for? Which candidate column \
+computes or stores it?
+- What is the primary entity (table) being queried?
+- Are there filters, time periods, or groupings implied? Which candidates support them?
+
+Important: semantic text similarity is NOT a reliable signal here. A candidate \
+whose name differs from the question's wording may still be the correct column \
+for computing the requested metric — reason about what data is actually needed.
+
+Return the IDs of ALL candidates that could meaningfully contribute to the SQL answer \
+— as a selected value, a filter, a GROUP BY dimension, or a join key. Be inclusive: \
+only exclude candidates that are clearly from a completely unrelated domain.
+"""
+
+
+def _llm_evaluate_col_attr_candidates(
+    llm: object,
+    question: str,
+    candidates: list[dict],
+    attr_contexts: dict[str, dict],
+) -> list[dict]:
+    """Evaluate ColumnAttribute candidates for SQL-construction relevance via the LLM.
+
+    Unlike VDB similarity, this applies SQL domain reasoning to identify which
+    candidates are actually needed to compute the answer — even when surface-level
+    text similarity between the question and a candidate is low (e.g. "Total Due"
+    for "annual total sales").
+
+    Falls back to the full candidate list on LLM failure or empty response.
+    """
+    if not candidates:
+        return candidates
+
+    all_ids = {str(c.get("id") or "") for c in candidates if c.get("id")}
+
+    lines: list[str] = []
+    for c in candidates:
+        cid = str(c.get("id") or "")
+        if not cid:
+            continue
+        ctx = attr_contexts.get(cid, {})
+        attr_name = (
+            ctx.get("attr_name") or c.get("name") or (c.get("text") or "").split(":")[0]
+        )
+        table = ctx.get("table_name") or ""
+        schema = ctx.get("schema_name") or ""
+        col = ctx.get("col_name") or ""
+        desc = ctx.get("attr_description") or ctx.get("column_description") or ""
+
+        if schema and table and col:
+            location = f"{schema}.{table}.{col}"
+        elif table and col:
+            location = f"{table}.{col}"
+        else:
+            location = ""
+
+        entry = f"- id: {cid} | {attr_name}"
+        if location:
+            entry += f" ({location})"
+        if desc:
+            entry += f": {desc}"
+        lines.append(entry)
+
+    if not lines:
+        return candidates
+
+    messages = [
+        SystemMessage(
+            content=_COL_ATTR_EVAL_PROMPT.format(
+                question=question,
+                candidates_block="\n".join(lines),
+            )
+        )
+    ]
+
+    result = invoke_with_structured_output(llm, messages, ColumnAttributeEvalModel)
+    if result is None:
+        return candidates
+
+    kept_ids = set(result.relevant_ids) & all_ids
+    if not kept_ids:
+        logger.warning(
+            "LLM col-attr eval returned no kept IDs — retaining all candidates"
+        )
+        return candidates
+
+    filtered = [c for c in candidates if str(c.get("id") or "") in kept_ids]
+    logger.info(
+        "LLM col-attr eval: %d → %d candidates (kept: %s)",
+        len(candidates),
+        len(filtered),
+        kept_ids,
+    )
+    return filtered if filtered else candidates
+
+
+# ---------------------------------------------------------------------------
 # ColumnAttributeSpec builder
 # ---------------------------------------------------------------------------
 
@@ -317,7 +434,7 @@ def _build_column_attribute_spec(hit: dict) -> ColumnAttributeSpec | None:
 class CandidateRetrievalAgent(BaseAgent):
     """Retrieve ColumnAttribute and CustomAnalysis candidates.
 
-    - ColumnAttributes: searched per entity from the semantic VDB (top-5 each).
+    - ColumnAttributes: searched per entity from the semantic VDB (top-12 each).
     - CustomAnalysis: searched once with the full question from the semantic VDB.
     - SqlAttribute retrieval is disabled; ``retrieved_sql_attributes`` is always empty.
 
@@ -370,7 +487,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             semantic_retriever,
                             entity,
                             LABEL_COLUMN_ATTRIBUTE,
-                            5,
+                            12,
                             target_db,
                         ),
                     )
@@ -391,12 +508,6 @@ class CandidateRetrievalAgent(BaseAgent):
                     else:
                         all_col_attr_hits.extend(result)
 
-        # SqlAttribute candidates are not retrieved; keep the combined filter
-        # call so CustomAnalysis filtering stays unchanged.
-        all_custom_hits, all_sql_attr_hits = _llm_filter_both(
-            llm, question, all_custom_hits, all_sql_attr_hits
-        )
-
         # Annotate each ColumnAttribute hit with its incoming SEMANTIC_FK count so
         # that join-central candidates are ranked higher than VDB-score alone.
         if all_col_attr_hits:
@@ -409,9 +520,32 @@ class CandidateRetrievalAgent(BaseAgent):
         deduped_custom = _dedupe_best_score(all_custom_hits)
         deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)
 
+        # Fetch Neo4j context (table names, descriptions) for the deduped candidates
+        # and evaluate them by SQL-construction relevance via the LLM.  This catches
+        # candidates that score low on text similarity but are the correct column for
+        # computing the requested metric (e.g. "Total Due" for "annual total sales").
+        # The contexts are cached in path_state to avoid a duplicate Neo4j call in
+        # candidates_preparation.
+        col_attr_contexts: dict[str, dict] = {}
+        if deduped_col_attr:
+            deduped_ids = [
+                str(h.get("id") or "") for h in deduped_col_attr if h.get("id")
+            ]
+            col_attr_contexts = fetch_attr_column_contexts(deduped_ids)
+            deduped_col_attr = _llm_evaluate_col_attr_candidates(
+                llm, question, deduped_col_attr, col_attr_contexts
+            )
+
+        # Filter CustomAnalysis candidates after deduplication so the LLM
+        # evaluates each unique candidate only once.
+        deduped_custom, deduped_sql_attr = _llm_filter_both(
+            llm, question, deduped_custom, deduped_sql_attr
+        )
+
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = deduped_sql_attr
+        path_state["col_attr_contexts"] = col_attr_contexts
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "

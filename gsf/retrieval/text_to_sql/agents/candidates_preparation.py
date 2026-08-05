@@ -203,7 +203,19 @@ class CandidatePreparationAgent(BaseAgent):
             ]
             attr_ids = list(dict.fromkeys(attr_ids))
 
-            attr_contexts = fetch_attr_column_contexts(attr_ids)
+            # Reuse contexts already fetched and cached by CandidateRetrievalAgent
+            # to avoid a redundant Neo4j round-trip.
+            cached_contexts: dict[str, dict] = path_state.get("col_attr_contexts") or {}
+            missing_ids = [aid for aid in attr_ids if aid not in cached_contexts]
+            if missing_ids:
+                fresh = fetch_attr_column_contexts(missing_ids)
+                attr_contexts = {**cached_contexts, **fresh}
+            else:
+                attr_contexts = {
+                    aid: cached_contexts[aid]
+                    for aid in attr_ids
+                    if aid in cached_contexts
+                }
             self.logger.info(
                 "Fetched Neo4j context for %d/%d column attributes",
                 len(attr_contexts),
