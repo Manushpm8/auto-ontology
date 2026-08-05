@@ -16,6 +16,8 @@ import { Icon, IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
@@ -80,26 +82,24 @@ const TermCard = ({
 	>
 		{/* Card header */}
 		<div className="flex items-start justify-between gap-3">
-			<div>
-				<h2 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-					{term.name}
-				</h2>
+			<div className="min-w-0 space-y-0.5">
+				<Text as="h2" text={term.name} variant={TextVariant.CardTitle} />
 				{term.synonyms.length > 0 && (
-					<p className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
-						{term.synonyms.join(', ')}
-					</p>
+					<Text as="p" text={term.synonyms.join(', ')} variant={TextVariant.Caption} />
 				)}
 			</div>
 			<CertificationBadge status={certificationStatus} />
 		</div>
 
-		{term.description != null && term.description.trim() !== '' ? (
-			<p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{term.description}</p>
-		) : (
-			<p className="mt-2 text-sm italic text-zinc-400 dark:text-zinc-500">
-				No Description Available
-			</p>
-		)}
+		<div className="mt-2">
+			{term.description != null && term.description.trim() !== '' ? (
+				<Text as="p" text={term.description} lines={3} variant={TextVariant.Body} />
+			) : (
+				<p className="text-sm italic text-zinc-400 dark:text-zinc-500">
+					No Description Available
+				</p>
+			)}
+		</div>
 
 		{/* Four-column section */}
 		<div className="mt-4 grid grid-cols-4 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
@@ -766,7 +766,7 @@ export const TermsView = () => {
 			if (focusId == null) {
 				return {
 					sections: [],
-					header: { header: { title: 'Column Attribute not found', withBorder: true } },
+					header: { header: { title: 'Column Attribute not found' } },
 				};
 			}
 			// TODO: viewer zone-scoping handled in a separate PR — for now the
@@ -778,7 +778,7 @@ export const TermsView = () => {
 			if (attr == null) {
 				return {
 					sections: [],
-					header: { header: { title: 'Column Attribute not found', withBorder: true } },
+					header: { header: { title: 'Column Attribute not found' } },
 				};
 			}
 			setColumnAttrs(attrs);
@@ -791,8 +791,6 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
-						withBorder: true,
-						showContentHeader: true,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -865,7 +863,7 @@ export const TermsView = () => {
 			if (res.error || !res.data) {
 				return {
 					sections: [],
-					header: { header: { title: 'SQL Attribute not found', withBorder: true } },
+					header: { header: { title: 'SQL Attribute not found' } },
 				};
 			}
 			const attr = res.data;
@@ -884,8 +882,6 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
-						withBorder: true,
-						showContentHeader: true,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -932,7 +928,7 @@ export const TermsView = () => {
 		if (res.error || !res.data) {
 			return {
 				sections: [],
-				header: { header: { title: 'Term not found', withBorder: true } },
+				header: { header: { title: 'Term not found' } },
 			};
 		}
 		const term = res.data;
@@ -952,8 +948,6 @@ export const TermsView = () => {
 			header: {
 				header: {
 					title: term.name,
-					withBorder: true,
-					showContentHeader: true,
 					titleEditable: true,
 					certification: { certified: term.name_certified },
 				},
@@ -1001,7 +995,6 @@ export const TermsView = () => {
 					terms: relatedTerms.map((t) => ({
 						id: t.id,
 						name: t.name,
-						description: t.description,
 					})),
 				},
 				{
@@ -1123,7 +1116,6 @@ export const TermsView = () => {
 					<SinglePageView
 						key={sqlAttrId}
 						dataId={sqlAttrId}
-						title={sqlAttrTitle}
 						getSinglePage={getSqlAttributeSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
 						isEditing={sqlAttrEditing}
@@ -1252,7 +1244,6 @@ export const TermsView = () => {
 					<SinglePageView
 						key={colAttrId}
 						dataId={colAttrId}
-						title={colAttrTitle}
 						getSinglePage={getColumnAttributeSinglePage}
 						treeDataEpoch={columnAttrsEpoch}
 						isEditing={columnAttrEditing}
@@ -1322,7 +1313,6 @@ export const TermsView = () => {
 					<SinglePageView
 						key={focusId}
 						dataId={focusId}
-						title={termTitle}
 						getSinglePage={getSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
 						isEditing={termEditing}

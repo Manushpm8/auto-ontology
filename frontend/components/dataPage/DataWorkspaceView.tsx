@@ -17,7 +17,7 @@ import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import { Toast } from '@/common/Toast';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
-import { WORKSPACE_ROOT_PARENT_ID, buildTreeFocusPageFormat } from '@/lib/data/tree-focus-page';
+import { buildTreeFocusPageFormat } from '@/lib/data/tree-focus-page';
 import {
 	mergeColumnsIntoTable,
 	mergeSchemasIntoDatabase,
@@ -48,7 +48,6 @@ export function DataWorkspaceView() {
 
 	const workspaceDb = databases[0];
 	const workspaceDataId = workspaceDb?.id ?? '';
-	const workspaceTitle = workspaceDb?.name ?? 'Data';
 
 	const fetchDatabases = useCallback(async () => {
 		if (inFlightRef.current) return;
@@ -157,9 +156,9 @@ export function DataWorkspaceView() {
 	}, []);
 
 	const getSinglePage = useCallback(
-		async (dataId: string, treeFocus: string | null): Promise<SinglePageFormat> => {
+		async (_dataId: string, treeFocus: string | null): Promise<SinglePageFormat> => {
 			if (treeFocus) await hydrateBranchForFocus(treeFocus);
-			return buildTreeFocusPageFormat(treeFocus, databasesRef.current, dataId);
+			return buildTreeFocusPageFormat(treeFocus, databasesRef.current);
 		},
 		[hydrateBranchForFocus],
 	);
@@ -289,8 +288,6 @@ export function DataWorkspaceView() {
 			<main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
 				<SinglePageView
 					dataId={workspaceDataId}
-					parentId={WORKSPACE_ROOT_PARENT_ID}
-					title={workspaceTitle}
 					treeFocusId={treeFocusId}
 					treeDataEpoch={treeDataEpoch}
 					getSinglePage={getSinglePage}

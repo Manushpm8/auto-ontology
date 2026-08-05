@@ -10,27 +10,15 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# Maps LangGraph node names from
-# nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph
-# to a single user-facing label per agent (1-to-1 with the agent classes
-# instantiated inside ``create_graph``). Unknown nodes fall through to the
-# raw node_name in the router so we never display a blank thinking step.
-NODE_LABELS: dict[str, str] = {
-    "question_extraction": "Understanding the question",
-    "classify_prediction": "Checking for a prediction",
-    "prepare_prediction_graph": "Preparing prediction graph",
-    "kumo_predict": "Predicting with KumoRFM",
-    "retrieve_candidates": "Retrieving candidates",
-    "prepare_candidates": "Preparing candidates",
-    "construct_sql_from_candidates": "Constructing SQL from candidates",
-    "construct_sql_not_from_snippets": "Constructing SQL from tables",
-    "reconstruct_sql": "Reconstructing SQL",
-    "validate_sql_query": "Validating SQL",
-    "validate_intent": "Validating intent",
-    "execute_sql_query": "Executing SQL",
-    "format_and_respond": "Formatting response",
-    "unconstructable_sql_response": "SQL could not be constructed",
-}
+# Re-exported so the router (and any other server-side consumer) can keep
+# importing NODE_LABELS from here. The dict itself now lives next to the
+# graph definition (``gsf.retrieval.text_to_sql.node_labels``) so the agent
+# pipeline can also use it — e.g. when building the final run's ``thoughts``
+# summary in ``stream_agent_response`` — without the retrieval layer having
+# to depend on the server layer.
+from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
+
+__all__ = ["NODE_LABELS", "ChatRequest", "VisualizeRequest"]
 
 
 class ChatRequest(BaseModel):
@@ -43,6 +31,9 @@ class ChatRequest(BaseModel):
     # False -> go straight to the regular text-to-SQL flow
     # None  -> classify as usual (default)
     prediction: bool | None = None
+    # Scope retrieval/SQL to one connected database. When omitted (and more
+    # than one connector is loaded), the pipeline does not pin a database.
+    target_db: str | None = None
 
 
 class VisualizeRequest(BaseModel):

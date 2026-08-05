@@ -14,6 +14,8 @@ import { getTableType } from '@/components/dataPage/get-table-type';
 import { ExplorationLayer } from '@/enums/exploration';
 import { TableType } from '@/enums/datasources';
 import { DetailLinkButton } from '@/common/DetailLinkButton';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import type {
 	DataExplorationGraph,
 	ExplorationDataNode,
@@ -139,16 +141,17 @@ export const ActiveDataCard = ({
 							name={catalogNodeInfo[node.nodeType].icon}
 							className="mt-0.5 h-5 w-5 shrink-0 text-[#3b82b6]"
 						/>
-						<div className="min-w-0 flex-1">
-							<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-								{node.name}
-							</h2>
-							<p className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
+						<div className="min-w-0 flex-1 space-y-1">
+							<Text as="h2" text={node.name} variant={TextVariant.Heading} />
+							<Text as="p" variant={TextVariant.Caption}>
 								{node.databaseName} • {node.schemaName}
-							</p>
-							<p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-								{node.description || 'No Description'}
-							</p>
+							</Text>
+							<Text
+								as="p"
+								text={node.description || 'No Description'}
+								lines={2}
+								variant={TextVariant.Detail}
+							/>
 						</div>
 						<div className="flex shrink-0 items-center gap-1">
 							<Button

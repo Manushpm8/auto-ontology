@@ -13,6 +13,7 @@ from gsf.retrieval.text_to_sql.text_to_sql_graph import (
     _prediction_enabled,
     create_graph,
 )
+from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
 from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
@@ -117,12 +118,29 @@ def _extract_answer(final_state: dict) -> dict:
     return {"response": str(final_response)}
 
 
+def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
+    """Concatenate the run's per-node thought entries into one summary string.
+
+    Deterministic (no extra LLM call): one bullet per entry, labelled with the
+    same human-readable name the live step events use, in the order the nodes
+    actually ran (a node visited more than once — e.g. during reconstruction
+    retries — contributes one bullet per visit).
+    """
+    lines = [
+        f"- {NODE_LABELS.get(entry['node'], entry['node'])}: {entry['text']}"
+        for entry in thoughts_log
+        if entry.get("text")
+    ]
+    return "\n".join(lines)
+
+
 def stream_agent_response(
     payload: TextToSQLPayload,
 ) -> Generator[dict, None, None]:
-    """Yield ``{"type": "step", "node": ...}`` for each graph node,
-    then ``{"type": "result", "answer": ...}`` with the final answer.
-    On error yields ``{"type": "error", "message": ...}``."""
+    """Yield ``{"type": "step", "node": ..., "thought": ...}`` for each graph
+    node, then ``{"type": "result", "answer": ...}`` with the final answer
+    (its ``thoughts`` key summarizes every ``thought`` collected along the
+    way). On error yields ``{"type": "error", "message": ...}``."""
     t0 = time.perf_counter()
 
     logger.info("Text-to-SQL agent started for question: %s", payload["question"])
@@ -135,7 +153,19 @@ def stream_agent_response(
             logger.info("--- AGENT STEP ---")
             for node_name, node_output in step.items():
                 logger.info("Node: %s", node_name)
-                yield {"type": "step", "node": node_name}
+
+                # A node records its own thought (if any) at the tail of
+                # path_state["thoughts_log"] — see BaseAgent.record_thought.
+                # Only surface it here when this node is the one that just
+                # added it, so a step event never shows a stale entry left
+                # over from an earlier node.
+                thought = None
+                node_path_state = (node_output or {}).get("path_state") or {}
+                thoughts_log = node_path_state.get("thoughts_log") or []
+                if thoughts_log and thoughts_log[-1].get("node") == node_name:
+                    thought = thoughts_log[-1].get("text")
+
+                yield {"type": "step", "node": node_name, "thought": thought}
 
                 if node_output:
                     if "path_state" in node_output:
@@ -147,6 +177,10 @@ def stream_agent_response(
                             final_state[key] = value
 
         answer = _extract_answer(final_state)
+        thoughts_log = final_state.get("path_state", {}).get("thoughts_log") or []
+        thoughts_summary = _build_thoughts_summary(thoughts_log)
+        if isinstance(answer, dict) and thoughts_summary:
+            answer["thoughts"] = thoughts_summary
         elapsed = time.perf_counter() - t0
         logger.info("Final answer (%.2fs):\n%s", elapsed, answer)
         yield {"type": "result", "answer": answer}

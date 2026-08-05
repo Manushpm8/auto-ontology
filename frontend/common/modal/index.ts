@@ -17,7 +17,7 @@ export {
 export { ColumnAttributesModal, type ColumnAttributesModalTerm } from './ColumnAttributesModal';
 export {
 	DataDetailsModal,
-	type DataDetailsKind,
+	type DataDetailsType,
 	type DataDetailsModalTarget,
 } from './DataDetailsModal';
 export { RelationshipsModal } from './RelationshipsModal';

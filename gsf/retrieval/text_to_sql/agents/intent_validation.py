@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
     create_intent_validation_prompt,
@@ -42,10 +42,20 @@ from gsf.retrieval.text_to_sql.state import (
 
 logger = logging.getLogger(__name__)
 
+# Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
+# (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
+# so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
+# right step event and ``NODE_LABELS`` entry.
+_GRAPH_NODE_NAME = "validate_intent"
+
 
 class IntentValidationModel(BaseModel):
     """Model for intent validation response."""
 
+    reasoning: str = Field(
+        default="",
+        description="Brief reasoning (1-2 sentences max) on whether the SQL addresses the question's intent.",
+    )
     is_valid: bool = Field(
         description="Whether the SQL query has any CRITICAL issues. Should be True unless there are serious problems."
     )
@@ -169,6 +179,11 @@ class IntentValidationAgent(BaseAgent):
                 "decision": "intent_valid",
                 "path_state": path_state,
             }
+
+        if (validation_result.reasoning or "").strip():
+            record_thought(
+                path_state, _GRAPH_NODE_NAME, validation_result.reasoning.strip()
+            )
 
         if validation_result.is_valid:
             self.logger.info("SQL validation passed (no critical issues)")

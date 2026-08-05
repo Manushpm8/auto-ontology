@@ -92,7 +92,9 @@ const AcronymRow = ({
 }) => (
 	<tr className="border-b border-zinc-100 transition-colors last:border-b-0 hover:bg-zinc-50/80 dark:border-zinc-800 dark:hover:bg-zinc-900/50">
 		<td className="px-3 py-2 font-medium text-zinc-800 dark:text-zinc-200">{acronym.name}</td>
-		<td className="px-3 py-2 text-zinc-800 dark:text-zinc-200">{acronym.description}</td>
+		<td className="px-3 py-2 wrap-anywhere text-zinc-800 dark:text-zinc-200">
+			{acronym.description}
+		</td>
 		<td className="relative px-2 py-2 text-right">
 			<PopoverMenu
 				items={[
@@ -420,7 +422,7 @@ const SettingsSection = ({
 						<span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
 							Prompt
 						</span>
-						<p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
+						<p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
 							{prompts[0].content}
 						</p>
 					</div>

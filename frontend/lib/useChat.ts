@@ -60,13 +60,14 @@ export const useChat = () => {
 	// stays correct even if this component unmounts mid-stream), so there is
 	// no DB write to do here.
 	const appendAssistantMessage = useCallback(
-		(content: string, extras?: { sql?: string; sqlResponse?: string }) => {
+		(content: string, extras?: { sql?: string; sqlResponse?: string; thoughts?: string }) => {
 			const assistantMsg: ChatMessage = {
 				id: uid(),
 				role: 'assistant',
 				content,
 				sql: extras?.sql,
 				sqlResponse: extras?.sqlResponse,
+				thoughts: extras?.thoughts,
 				timestamp: Date.now(),
 			};
 			setMessages((prev) => [...prev, assistantMsg]);
@@ -80,7 +81,7 @@ export const useChat = () => {
 	const appendSqlAnswerMessage = useCallback(
 		(answer: ResultEvent['answer']) => {
 			const msg = buildSqlAnswerMessage(answer);
-			if (msg) appendAssistantMessage(msg.content, { sql: msg.sql });
+			if (msg) appendAssistantMessage(msg.content, { sql: msg.sql, thoughts: msg.thoughts });
 		},
 		[appendAssistantMessage],
 	);
@@ -218,7 +219,12 @@ export const useChat = () => {
 						}));
 						return [
 							...completed,
-							{ node: event.node, label: event.label, status: 'active' },
+							{
+								node: event.node,
+								label: event.label,
+								thought: event.thought,
+								status: 'active',
+							},
 						];
 					});
 				},
@@ -339,7 +345,12 @@ export const useChat = () => {
 							}));
 							return [
 								...completed,
-								{ node: event.node, label: event.label, status: 'active' },
+								{
+									node: event.node,
+									label: event.label,
+									thought: event.thought,
+									status: 'active',
+								},
 							];
 						});
 					},

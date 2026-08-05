@@ -7,6 +7,8 @@
 import { Icon, IconName } from '@/common/icons';
 import { Button, SelectButton } from '@/common/Button';
 import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import { Modal } from './Modal';
 
 /** Minimal Term reference — decoupled from any specific page's node/row shape. */
@@ -36,9 +38,9 @@ export const SemanticRelationshipModal = ({
 			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex min-w-0 items-center gap-2">
 					<Icon name={IconName.Connection} className="h-5 w-5 shrink-0 text-[#76b900]" />
-					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					<Text as="h2" variant={TextVariant.Heading}>
 						{sourceTerm?.name} (Term) &lt;&gt; {targetTerm?.name} (Term)
-					</h2>
+					</Text>
 				</div>
 				<Button
 					theme={ButtonTheme.IconNeutral}
@@ -61,9 +63,7 @@ export const SemanticRelationshipModal = ({
 							}
 						>
 							<div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-800/60">
-								<span className="truncate text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-									{term?.name}
-								</span>
+								<Text text={term?.name} variant={TextVariant.Label} />
 							</div>
 							<SelectButton
 								theme={SelectButtonTheme.ListItemLink}
@@ -74,7 +74,7 @@ export const SemanticRelationshipModal = ({
 										name={IconName.Terms}
 										className="h-3.5 w-3.5 shrink-0 text-[#76b900]"
 									/>
-									<span className="truncate">{term?.name}</span>
+									<Text text={term?.name} />
 								</span>
 								<Icon
 									name={IconName.ExternalLink}
