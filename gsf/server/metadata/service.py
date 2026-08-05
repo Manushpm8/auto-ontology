@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Orchestration for ``text-to-data`` / ``text-to-pql`` / ``entity-coverage``.
+"""Orchestration for ``text-to-data`` / ``text-to-pql`` / ``question-entity-coverage``.
 
 Reuses the front of the text-to-SQL prediction pipeline in-process: it runs the
 graph up to ``prepare_candidates`` to gather the data objects (relevant tables,

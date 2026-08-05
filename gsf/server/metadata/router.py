@@ -64,7 +64,7 @@ def text_to_pql(body: TextRequest) -> dict:
     return {"data": result}
 
 
-@router.post("/entity-coverage")
+@router.post("/question-entity-coverage")
 def entity_coverage(body: EntityCoverageRequest) -> dict:
     """Return ranked semantic candidates and a 0–1 entity coverage grade.
 
