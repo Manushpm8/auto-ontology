@@ -45,6 +45,58 @@ _MIN_INTERVAL_S = float(os.environ.get("RERANK_MIN_INTERVAL_S", "0.35"))
 _last_call_mono = 0.0
 _last_call_lock = threading.Lock()
 
+# Circuit breaker. Reranking is an optional improvement — callers already fall back
+# to embedding order on ``[]`` — but the retry sits inside an exclusive
+# cross-process lock, so a hung endpoint does not merely fail, it serialises every
+# worker behind a full timeout each. Measured on a parallel BIRD run with the
+# endpoint blackholed: 60 of 63 calls failed, 1812s of a 31-minute wall clock was
+# spent holding that lock, mean queue 125s, and not one question finished. Once a
+# host has failed this many times in a row it is down, and continuing to ask costs
+# the whole run while buying nothing. Set RERANK_CIRCUIT_FAILS=0 to disable.
+_CIRCUIT_FAILS = max(0, int(os.environ.get("RERANK_CIRCUIT_FAILS", "3")))
+_consecutive_failures = 0
+_circuit_lock = threading.Lock()
+
+
+def _rerank_enabled() -> bool:
+    """Whether reranking is switched on at all.
+
+    Read per call rather than at import so an A/B can hold reranking constant
+    across arms. The v15 EXPLORE run reranked almost nowhere — the breaker had
+    tripped behind a blackholed endpoint — so a later arm on a healthy endpoint
+    would differ from it by reranking as well as by the variable under test.
+    Off yields ``[]``, the same fallback-to-embedding-order path a failure takes.
+    """
+    return os.environ.get("RERANK_ENABLED", "1").strip().lower() not in {
+        "0", "false", "no",
+    }
+
+
+def _circuit_open() -> bool:
+    """Whether reranking has been abandoned for the rest of this process."""
+    if not _CIRCUIT_FAILS:
+        return False
+    with _circuit_lock:
+        return _consecutive_failures >= _CIRCUIT_FAILS
+
+
+def _record_outcome(ok: bool) -> None:
+    global _consecutive_failures
+    if not _CIRCUIT_FAILS:
+        return
+    with _circuit_lock:
+        if ok:
+            _consecutive_failures = 0
+            return
+        _consecutive_failures += 1
+        if _consecutive_failures == _CIRCUIT_FAILS:
+            logger.warning(
+                "rerank_passages: %d consecutive failures — disabling reranking for "
+                "this process and falling back to embedding order. Endpoint: %s",
+                _consecutive_failures,
+                _rerank_endpoint(),
+            )
+
 
 def _cross_process_slot():
     """Context manager: exclusive file lock + min spacing between POSTs."""
@@ -140,6 +192,12 @@ def rerank_passages(
     """
     if not query.strip() or not passages:
         return []
+    if not _rerank_enabled():
+        return []
+    # Checked before the lock is taken: the point is to stop queueing behind a
+    # dead endpoint, and a breaker that still waits for the lock saves nothing.
+    if _circuit_open():
+        return []
     api_key = _rerank_api_key()
     if not api_key:
         logger.warning("rerank_passages: no RERANK/EMBED/NVIDIA API key — skipping")
@@ -203,6 +261,9 @@ def rerank_passages(
                         exc_info=True,
                     )
                     break
+
+
+    _record_outcome(body is not None)
 
     if body is None:
         return []

@@ -8,6 +8,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from gsf.semantic.constants import MAX_SAMPLE_VALUE_LEN
 from gsf.semantic.deterministic import fk_source_columns
 from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
 from gsf.semantic.models import FkAndPkResult, PotentialFkResult, PotentialFkSuggestion
@@ -58,12 +59,16 @@ def _candidate_columns(
 
 
 def _format_sample_values(raw: str | None) -> str:
-    """Return a 'samples: ...' string filtered to ≤30-char non-null values, or empty."""
+    """Return a 'samples: ...' string of short non-null values, or empty."""
     if not raw:
         return ""
     try:
         values = json.loads(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
+        non_null = [
+            str(v)
+            for v in values
+            if v is not None and len(str(v)) <= MAX_SAMPLE_VALUE_LEN
+        ]
         return ("samples: " + ", ".join(non_null)) if non_null else ""
     except Exception:
         return ""

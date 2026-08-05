@@ -19,6 +19,10 @@ their result set, then:
      (``BIRD_SQL_MAJORITY_LOCK_K``, default 3), rerank may override only if
      its top logit beats the majority passage by ``BIRD_SQL_RERANK_MARGIN``.
    - ``llm_judge``: GPT structured pick on result+SQL.
+   Optional ``BIRD_SLOT_VOTE_WEIGHTS=solo_acc|voter_q`` scales each candidate's
+   vote by that slot's held-out reliability (CV +0.7–0.85pp vs flat majority;
+   hard slot removal does not CV-hold). Override table via
+   ``BIRD_SLOT_VOTE_WEIGHTS_JSON='[0.73,0.71,...]'``.
 3. On rerank/judge failure → fall back to majority.
 4. Optional unanimous critic (``BIRD_UNANIMOUS_CRITIC=1``): when all successful
    candidates share one result, audit for concrete bugs and propose a challenger.
@@ -38,7 +42,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
-from gsf.retrieval.text_to_sql import empty_repair
+from gsf.retrieval.text_to_sql import empty_repair, verify_revise
 from gsf.retrieval.text_to_sql.agents.sql_execution import QueryResponse, _run_sql
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
@@ -284,6 +288,26 @@ def _run_unanimous_critic(
     return challenger, stats
 
 
+def _schema_block_for_revision(path_state: dict) -> str:
+    """Render the same schema the generator saw, for the audit pass.
+
+    The audit has to be able to name a *different* column than the draft chose,
+    which it can only do if it sees the same table and column inventory the draft
+    was working from.
+    """
+    try:
+        from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
+            format_tables_for_prompt,
+        )
+
+        tables = path_state.get("relevant_tables") or []
+        if not tables:
+            return "(schema unavailable)"
+        return format_tables_for_prompt(tables, target_db=path_state.get("target_db"))
+    except Exception:
+        return "(schema unavailable)"
+
+
 def _result_signature(qr: QueryResponse) -> Optional[tuple]:
     """Canonicalize a query result into an order-insensitive, hashable signature.
 
@@ -353,20 +377,114 @@ def _nonempty_first_enabled() -> bool:
     }
 
 
-def _majority_winner(clusters: dict[tuple, list[int]]) -> int:
-    """Largest-cluster vote; prefer non-empty results; tie-break to lowest index."""
+# Slot reliability priors from v20 pools (full-set fit). Used when
+# BIRD_SLOT_VOTE_WEIGHTS is on and no JSON override is provided. Tail indices
+# past the table fall back to the last entry (weak revision slots).
+_SOLO_ACC_WEIGHTS: tuple[float, ...] = (
+    0.729,
+    0.708,
+    0.483,
+    0.720,
+    0.497,
+    0.501,
+    0.497,
+    0.451,
+    0.447,
+    0.420,
+    0.391,
+    0.484,
+    0.417,
+    0.500,
+)
+_VOTER_Q_WEIGHTS: tuple[float, ...] = (
+    0.742,
+    0.733,
+    0.670,
+    0.733,
+    0.553,
+    0.549,
+    0.554,
+    0.507,
+    0.493,
+    0.453,
+    0.438,
+    0.517,
+    0.417,
+    0.500,
+)
+
+
+def _slot_vote_weight_mode() -> str:
+    """``off`` | ``solo_acc`` | ``voter_q``. Env ``BIRD_SLOT_VOTE_WEIGHTS``."""
+    raw = os.environ.get("BIRD_SLOT_VOTE_WEIGHTS", "").strip().lower()
+    if raw in {"solo_acc", "solo", "acc", "accuracy"}:
+        return "solo_acc"
+    if raw in {"voter_q", "voter", "vq", "voter_quality"}:
+        return "voter_q"
+    if raw in {"1", "true", "yes", "on"}:
+        return "solo_acc"
+    return "off"
+
+
+def _slot_vote_weights() -> list[float] | None:
+    """Per-index vote weights, or None for flat majority.
+
+    ``BIRD_SLOT_VOTE_WEIGHTS_JSON`` (JSON array of floats) overrides the built-in
+    prior whenever the feature is enabled.
+    """
+    mode = _slot_vote_weight_mode()
+    if mode == "off":
+        return None
+    raw = os.environ.get("BIRD_SLOT_VOTE_WEIGHTS_JSON", "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            weights = [float(x) for x in parsed]
+            if weights:
+                return weights
+        except (TypeError, ValueError, json.JSONDecodeError):
+            logger.warning(
+                "BIRD_SLOT_VOTE_WEIGHTS_JSON unparseable; using %s prior", mode
+            )
+    return list(_SOLO_ACC_WEIGHTS if mode == "solo_acc" else _VOTER_Q_WEIGHTS)
+
+
+def _weight_for_index(weights: list[float] | None, idx: int) -> float:
+    if not weights:
+        return 1.0
+    if idx < len(weights):
+        return float(weights[idx])
+    return float(weights[-1])
+
+
+def _majority_winner(
+    clusters: dict[tuple, list[int]],
+    weights: list[float] | None = None,
+) -> int:
+    """Largest-cluster vote; prefer non-empty results; tie-break to lowest index.
+
+    When *weights* is set, each candidate contributes its slot weight instead of
+    1.0. Cluster score is the sum of member weights.
+    """
 
     nonempty_first = _nonempty_first_enabled()
+
+    def _cluster_score(idxs: list[int]) -> float:
+        if weights is None:
+            return float(len(idxs))
+        return sum(_weight_for_index(weights, i) for i in idxs)
 
     def _cluster_key(item: tuple) -> tuple:
         sig, idxs = item
         nonempty = 1 if len(sig) > 0 else 0
+        score = _cluster_score(idxs)
         if nonempty_first:
-            return (nonempty, len(idxs), -min(idxs))
-        return (len(idxs), nonempty, -min(idxs))
+            return (nonempty, score, -min(idxs))
+        return (score, nonempty, -min(idxs))
 
     _best_sig, best_idxs = max(clusters.items(), key=_cluster_key)
     winner = min(best_idxs)
+
 
     return winner
 
@@ -610,9 +728,57 @@ class SQLSelectionAgent(BaseAgent):
                 "error" if sig is None else f"rows_signature_len={len(sig)}",
             )
 
+        n_original = len(candidates)
+
+        # Second reasoning pass, now that every draft has a result to be judged
+        # against. Revisions are appended rather than substituted, so the oracle
+        # pool can only grow and the vote below still ranks the original drafts
+        # in their original order unless BIRD_VERIFY_REVISE_VOTE says otherwise.
+        if verify_revise.enabled() and len(candidates) >= 1:
+            _q = get_original_question(state) or get_question_for_processing(state)
+            _schema = _schema_block_for_revision(path_state)
+            revisions = verify_revise.revise_pool(
+                question=_q,
+                candidates=candidates,
+                query_responses=query_responses,
+                schema_block=_schema,
+                llm=state.get("llm"),
+                run_sql=_run_sql,
+                connector=connector,
+            )
+            revisions.extend(
+                verify_revise.arbitrate(
+                    question=_q,
+                    candidates=candidates,
+                    query_responses=query_responses,
+                    schema_block=_schema,
+                    llm=state.get("llm"),
+                    run_sql=_run_sql,
+                    connector=connector,
+                )
+            )
+            for rev in revisions:
+                candidates.append(rev)
+                qr = _run_sql(getattr(rev, "sql_code", "") or "", connector)
+                query_responses.append(qr)
+                signatures.append(_result_signature(qr))
+                exec_errors.append(None)
+            if revisions:
+                path_state["sql_candidates"] = candidates
+                self.logger.info(
+                    "verify_revise: appended %d revision(s); pool now %d",
+                    len(revisions),
+                    len(candidates),
+                )
+
         # Cluster successful candidates by identical result set.
         clusters: dict[tuple, list[int]] = {}
-        for idx, sig in enumerate(signatures):
+        n_voting = (
+            len(signatures)
+            if (not verify_revise.enabled() or verify_revise.vote_enabled())
+            else min(len(signatures), n_original)
+        )
+        for idx, sig in enumerate(signatures[:n_voting]):
             if sig is None:
                 continue
             clusters.setdefault(sig, []).append(idx)
@@ -632,9 +798,21 @@ class SQLSelectionAgent(BaseAgent):
                 len(candidates),
             )
         else:
-            majority_idx = _majority_winner(clusters)
+            slot_weights = _slot_vote_weights()
+            majority_idx = _majority_winner(clusters, weights=slot_weights)
             winner_idx = majority_idx
-            if len(clusters) > 1 and mode in {"rerank", "llm_judge"}:
+            if slot_weights is not None:
+                # Weighted vote *is* the measured policy (CV +0.7–0.85pp). Do not
+                # let rerank/judge undo it unless explicitly allowed.
+                selection_method = f"majority_weighted_{_slot_vote_weight_mode()}"
+            allow_override = slot_weights is None or os.environ.get(
+                "BIRD_SLOT_VOTE_WEIGHTS_ALLOW_RERANK", "0"
+            ).strip().lower() in {"1", "true", "yes", "on"}
+            if (
+                allow_override
+                and len(clusters) > 1
+                and mode in {"rerank", "llm_judge"}
+            ):
                 question = get_original_question(state) or get_question_for_processing(
                     state
                 )
@@ -683,7 +861,103 @@ class SQLSelectionAgent(BaseAgent):
         winner = candidates[winner_idx]
         critic_stats: dict[str, Any] | None = None
         repair_stats: dict[str, Any] | None = None
+        ship_stats: dict[str, Any] | None = None
+        gate_stats: dict[str, Any] | None = None
         n_success = sum(1 for s in signatures if s is not None)
+
+        # Fail-closed binary wrongness → largest-other. Prefer this over free
+        # ship-rewrite: it never invents SQL and was ~92% precise offline.
+        #
+        # The gate clusters over the *whole* pool, revisions included, even when
+        # they are barred from the vote. The vote deliberately ignores them so a
+        # bad revision cannot outvote the drafts; the gate only consults them
+        # after an independent judge has already called the winner wrong, and
+        # the alternative it needs usually lives among those revisions. Reusing
+        # the vote's clusters makes the gate unreachable: the winner is the
+        # majority of the drafts, so no other draft cluster can outnumber it.
+        if verify_revise.wrongness_gate_enabled() and clusters:
+            question = get_original_question(state) or get_question_for_processing(
+                state
+            )
+            gate_clusters: dict[tuple, list[int]] = {}
+            for idx, sig in enumerate(signatures):
+                if sig is None:
+                    continue
+                gate_clusters.setdefault(sig, []).append(idx)
+            new_idx, gate_stats = verify_revise.maybe_wrongness_switch(
+                question=question,
+                winner_idx=winner_idx,
+                candidates=candidates,
+                query_responses=query_responses,
+                signatures=signatures,
+                clusters=gate_clusters,
+                llm=state.get("llm"),
+            )
+            if gate_stats.get("applied") and new_idx != winner_idx:
+                winner_idx = new_idx
+                winner = candidates[winner_idx]
+                selection_method = "wrongness_gate"
+
+        # Force-fix harvest: K independent corrections of the winner; if they
+        # agree on a result signature that already exists in the pool, switch.
+        # Runs after the wrongness gate so empty/WRONG∧margin can still fire
+        # cheaply first. Default off (BIRD_HARVEST_FORCE).
+        harvest_stats: dict[str, Any] | None = None
+        if (
+            verify_revise.harvest_force_enabled()
+            and not (gate_stats and gate_stats.get("applied"))
+            and connector is not None
+        ):
+            question = get_original_question(state) or get_question_for_processing(
+                state
+            )
+            new_idx, harvest_stats = verify_revise.maybe_harvest_force_switch(
+                question=question,
+                winner_idx=winner_idx,
+                candidates=candidates,
+                query_responses=query_responses,
+                signatures=signatures,
+                llm=state.get("llm"),
+                run_sql=_run_sql,
+                connector=connector,
+                evidence=str(path_state.get("evidence") or state.get("evidence") or ""),
+            )
+            if harvest_stats.get("applied") and new_idx != winner_idx:
+                winner_idx = new_idx
+                winner = candidates[winner_idx]
+                selection_method = "harvest_force"
+
+        # Result-grounded rewrite of the *shipped* query. Pool voting failed;
+        # this asks the same audit to fix the one query we return, in place.
+        # Skipped when the wrongness gate already switched — free rewrite has
+        # much worse precision than largest-other.
+        if (
+            verify_revise.enabled()
+            and verify_revise.ship_enabled()
+            and not (gate_stats and gate_stats.get("applied"))
+            and not (harvest_stats and harvest_stats.get("applied"))
+            and winner_idx < len(query_responses)
+            and connector is not None
+        ):
+            question = get_original_question(state) or get_question_for_processing(
+                state
+            )
+            challenger, ship_stats = verify_revise.rewrite_shipped(
+                question=question,
+                winner=winner,
+                winner_qr=query_responses[winner_idx],
+                schema_block=_schema_block_for_revision(path_state),
+                llm=state.get("llm"),
+                run_sql=_run_sql,
+                connector=connector,
+            )
+            if challenger is not None:
+                winner = challenger
+                selection_method = "verify_revise_ship"
+                # Keep signatures consistent for any later empty_repair checks.
+                new_qr = _run_sql(getattr(winner, "sql_code", "") or "", connector)
+                query_responses[winner_idx] = new_qr
+                signatures[winner_idx] = _result_signature(new_qr)
 
         # An empty winner has already lost — no BIRD gold query returns zero rows
         # — so a repair that produces any rows cannot score worse. Only fires when
@@ -773,5 +1047,13 @@ class SQLSelectionAgent(BaseAgent):
                     else {}
                 ),
                 **({"empty_repair": repair_stats} if repair_stats is not None else {}),
+                **(
+                    {"verify_revise_ship": ship_stats}
+                    if ship_stats is not None
+                    else {}
+                ),
+                **(
+                    {"wrongness_gate": gate_stats} if gate_stats is not None else {}
+                ),
             },
         }

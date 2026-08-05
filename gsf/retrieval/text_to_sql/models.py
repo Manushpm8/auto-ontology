@@ -19,6 +19,28 @@ from typing import List, Annotated, Literal
 SYNTHETIC_EXAMPLE_COUNT = max(2, int(os.environ.get("BIRD_SYNTHETIC_N", "3")))
 
 
+# The 1-2 sentence cap on ``thought`` was stated twice: in the prompt's field
+# spec and again in this schema description, which structured output sends to the
+# model alongside it. ``BIRD_OPEN_REASONING`` only ever swapped the prompt copy,
+# so enabling it left the schema still asking for two sentences — the model got
+# one instruction telling it to take as much room as it needs and another telling
+# it not to. Both copies now follow the flag.
+_OPEN_REASONING = os.environ.get("BIRD_OPEN_REASONING", "0").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+    "",
+}
+_THOUGHT_DESCRIPTION = (
+    "Internal reasoning: work the question out here before writing any SQL, at "
+    "whatever length it needs. This is NOT shown to the user."
+    if _OPEN_REASONING
+    else "Internal reasoning (1-2 sentences): briefly explain your approach "
+    "and key decisions. This is NOT shown to the user."
+)
+
+
 # ==================== TYPE ALIASES ====================
 
 NonEmptyStr = Annotated[str, Field(min_length=1, description="Non-empty string")]
@@ -166,13 +188,7 @@ class SQLGenerationModel(StrictModel):
     comes first to drain reasoning before it writes the clean output fields.
     """
 
-    thought: str = Field(
-        ...,
-        description=(
-            "Internal reasoning (1-2 sentences): briefly explain your approach "
-            "and key decisions. This is NOT shown to the user."
-        ),
-    )
+    thought: str = Field(..., description=_THOUGHT_DESCRIPTION)
     sql_code: NonEmptyStr = Field(
         ...,
         description=(

@@ -484,10 +484,12 @@ def fetch_fk_neighbour_tables(
         for col in row.get("cols") or []:
             if not col.get("name"):
                 continue
-            # Most descriptions already end in "— samples: ..."; keeping
-            # sample_values as well would print the same values twice and adds
-            # ~30% to the rendered schema block.
-            if "samples:" in (col.get("description") or ""):
+            # Most descriptions already end in "— samples: ..." (or "— one of:
+            # ..." for a closed enumeration); keeping sample_values as well would
+            # print the same values twice and adds ~30% to the rendered schema
+            # block.
+            description = col.get("description") or ""
+            if "samples:" in description or "one of:" in description:
                 col.pop("sample_values", None)
             cols.append(col)
         tables.append(
@@ -564,6 +566,8 @@ RETURN c.id AS id,
        {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
+       c.is_unique AS is_unique,
+       c.exhaustive AS exhaustive,
        EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key
 ORDER BY c.ordinal_position
 """
@@ -640,6 +644,8 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r.get("description"),
             "ordinal_position": r.get("ordinal_position"),
             "sample_values": r.get("sample_values"),
+            "is_unique": r.get("is_unique"),
+            "exhaustive": r.get("exhaustive"),
         }
         for r in rows
         if r.get("id") is not None
@@ -689,6 +695,74 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
              AS sv
         WHERE sv IS NOT NULL
         SET col.sample_values = sv
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_column_descriptions(table_id: str, descriptions: dict[str, str]) -> None:
+    """Copy generated descriptions down onto the Column nodes of a table.
+
+    The semantic layer writes its descriptions to ColumnAttribute nodes, and the
+    only other writer of ``Column.description`` is the ingest-time metadata apply.
+    A column the source metadata left blank therefore has a description on its
+    attribute but none on itself — and columns with no attribute at all (foreign
+    keys, which are linked by SEMANTIC_FK to the attribute they reference) end up
+    with a description nowhere, reaching the prompt as a bare name and type.
+
+    Existing descriptions are never overwritten: a description that came from the
+    source metadata is authoritative, and this only fills the gaps.
+    """
+    if not descriptions:
+        return
+    entries = [
+        {"column_name": col, "description": desc}
+        for col, desc in descriptions.items()
+        if desc and desc.strip()
+    ]
+    if not entries:
+        return
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.description][0]
+             AS d
+        WHERE d IS NOT NULL AND (col.description IS NULL OR trim(col.description) = "")
+        SET col.description = d
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_column_exhaustiveness(table_id: str, exhaustiveness: dict[str, bool]) -> None:
+    """Write exhaustive flags onto Column nodes for a given table.
+
+    ``exhaustive`` records whether ``sample_values`` is the column's complete
+    distinct set rather than its most common few, which is what lets a
+    description say "one of: Active, Closed" instead of "samples: Active,
+    Closed" — a constraint rather than a hint. Persisting it lets the semantic
+    layer read the profile back instead of recomputing it with a second table
+    scan and a DISTINCT probe per categorical column.
+
+    Skips silently when *exhaustiveness* is empty.
+    """
+    if not exhaustiveness:
+        return
+    entries = [
+        {"column_name": col, "exhaustive": bool(flag)}
+        for col, flag in exhaustiveness.items()
+    ]
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.exhaustive][0]
+             AS ex
+        WHERE ex IS NOT NULL
+        SET col.exhaustive = ex
         """,
         {"table_id": table_id, "entries": entries},
     )

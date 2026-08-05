@@ -24,6 +24,7 @@ Design Decisions:
 
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
@@ -45,11 +46,14 @@ from gsf.dal.sql_attributes import (
     fetch_tables_from_sql_attributes,
 )
 from gsf.dal.terms import fetch_term_synonyms
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+
 from gsf.retrieval.data_access.relevant_tables import (
     dedupe_merge_relevant_tables,
     get_relevant_tables,
     get_relevant_tables_from_candidates,
 )
+from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.evidence_hints import (
     evidence_retrieval_phrases,
@@ -75,6 +79,155 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.utils.llm_invoke import invoke_with_structured_output
 
 
+def _parse_column_hit(text: str) -> dict:
+    """Pull the fields out of an embedded Column row.
+
+    Ingestion writes these rows in one fixed shape —
+    ``table_name: T, column_name: C, data_type: D, column_description: ..., sample_values: ...``
+    — and the structured values are not returned as separate keys by the vector search,
+    only inside ``text``.
+    """
+    out: dict[str, str] = {}
+    for key in ("table_name", "column_name", "data_type"):
+        m = re.search(rf"{key}:\s*(.*?)(?:,\s*(?:table_name|column_name|data_type|column_description|sample_values):|$)", text, re.S)
+        if m:
+            out[key] = m.group(1).strip()
+    m = re.search(r"column_description:\s*(.*?)(?:,\s*sample_values:|$)", text, re.S)
+    if m:
+        out["description"] = " ".join(m.group(1).split())
+    m = re.search(r"sample_values:\s*(.*)$", text, re.S)
+    if m:
+        out["sample_values"] = " ".join(m.group(1).split())
+    return out
+
+
+def _qualify(table: str, column: str) -> str:
+    """``table.column``, quoting the column only when it needs it."""
+    if not table:
+        return column
+    if re.fullmatch(r"\w+", column or ""):
+        return f"{table}.{column}"
+    return f'{table}."{column}"'
+
+
+def _fk_partner_tables(verified_fks: list[dict] | None) -> dict[str, set[str]]:
+    """table -> tables it has a physical FK edge to, lowercased and unqualified.
+
+    ``get_relevant_fks`` returns ``table1``/``table2`` schema-qualified ("main.frpm"),
+    while column hits carry the bare table name, so the prefix has to go or nothing
+    ever matches and every column is labelled as having no FK.
+    """
+
+    def _bare(value: object) -> str:
+        return str(value or "").strip().lower().rpartition(".")[2]
+
+    out: dict[str, set[str]] = {}
+    for fk in verified_fks or []:
+        if not isinstance(fk, dict):
+            continue
+        left, right = _bare(fk.get("table1")), _bare(fk.get("table2"))
+        if not left or not right or left == right:
+            continue
+        out.setdefault(left, set()).add(right)
+        out.setdefault(right, set()).add(left)
+    return out
+
+
+def fetch_entity_columns(
+    retriever,
+    entities: list[str],
+    target_db: str | None,
+    k: int | None = None,
+    min_competing: int | None = None,
+    allowed_tables: set[str] | None = None,
+    verified_fks: list[dict] | None = None,
+) -> list[dict]:
+    """Per entity, the columns whose descriptions match it — provenance kept.
+
+    Returns only entities where ``min_competing`` or more distinct columns match, since
+    those are the ambiguous bindings. One search per entity, in parallel.
+
+    ``allowed_tables`` restricts hits to the final prompt table set. Without it the
+    block offered columns from tables that never reached the prompt, which is how q71
+    and q74 ended up answered from ``schools`` alone rather than joined to ``frpm``.
+    """
+    entities = [e.strip() for e in dict.fromkeys(entities or []) if (e or "").strip()]
+    if not entities:
+        return []
+    k = _ENTITY_COLUMNS_K if k is None else k
+    min_competing = _ENTITY_COLUMNS_MIN if min_competing is None else min_competing
+    fk_partners = _fk_partner_tables(verified_fks)
+
+    def _one(entity: str) -> tuple[str, list[dict]]:
+        rows = list(
+            search_semantic_index(
+                retriever,
+                entity,
+                label_filter=[Labels.COLUMN],
+                per_label_k=k,
+                database_name=target_db,
+            )
+        )
+        cols: list[dict] = []
+        seen: set[str] = set()
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            parsed = _parse_column_hit(str(r.get("text") or ""))
+            name = parsed.get("column_name") or str(r.get("name") or "")
+            table = parsed.get("table_name") or ""
+            if not name:
+                continue
+            if allowed_tables and table.strip().lower() not in allowed_tables:
+                continue
+            key = f"{table}.{name}".lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cols.append(
+                {
+                    "qualified": _qualify(table, name),
+                    "table": table,
+                    "column": name,
+                    "type": parsed.get("data_type") or "",
+                    "description": parsed.get("description") or "",
+                    "sample_values": parsed.get("sample_values") or "",
+                    "score": r.get("score"),
+                    "fk_partners": sorted(fk_partners.get(table.strip().lower(), set())),
+                }
+            )
+        scored = [c for c in cols if c.get("score") is not None]
+        if scored and _ENTITY_COLUMNS_MARGIN > 0:
+            best = min(float(c["score"]) for c in scored)
+            cols = [
+                c
+                for c in cols
+                if c.get("score") is None
+                or float(c["score"]) <= best + _ENTITY_COLUMNS_MARGIN
+            ]
+        # Distance decides who is shown, never the order they are shown in. Vector
+        # rank is unreliable at the top — MailCity outranks City for "city", and
+        # NCESDist and District Type both outrank District Code for "district name" —
+        # so a distance-sorted list reads as a recommendation for the wrong column.
+        cols.sort(key=lambda c: (str(c["table"]).lower(), str(c["column"]).lower()))
+        return entity, cols
+
+    out: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(len(entities), 8)) as pool:
+        futures = {pool.submit(_one, e): e for e in entities}
+        for future in as_completed(futures):
+            entity = futures[future]
+            try:
+                entity, cols = future.result()
+            except Exception:
+                logger.warning("entity column search failed for %r", entity, exc_info=True)
+                continue
+            if len(cols) >= min_competing:
+                out.append({"entity": entity, "columns": cols})
+    out.sort(key=lambda d: entities.index(d["entity"]) if d["entity"] in entities else 99)
+    return out[:_ENTITY_COLUMNS_MAX_ENTITIES]
+
+
 def _env_int(name: str, default: int) -> int:
     try:
         return max(1, int(os.environ.get(name, str(default))))
@@ -98,6 +251,36 @@ _TABLE_SEARCH_K = _env_int("BIRD_TABLE_SEARCH_K", 12)
 _TABLE_SEARCH_MIN_K = _env_int("BIRD_TABLE_SEARCH_MIN_K", 5)
 _TABLE_SEARCH_CAP = _env_int("BIRD_TABLE_SEARCH_CAP", 20)
 _TABLE_FILTER_ENABLED = _env_flag("BIRD_TABLE_FILTER", "1")
+# Search COLUMNS per entity and keep which entity matched which columns. The entity
+# searches below filter to Labels.TABLE, so column-level matches are never fetched and
+# the per-query provenance is destroyed by the `extend` into one flat pool: the prompt
+# can never say "the entity 'charter' matched these five columns". Measured on
+# california_schools, searching "charter" returns schools.Charter (1/0),
+# frpm.'Charter Funding Type', schools.FundingType and frpm.'Charter School (Y/N)' in
+# its top five — exactly the columns that get confused for each other.
+_ENTITY_COLUMNS = _env_flag("BIRD_ENTITY_COLUMNS", "0")
+_ENTITY_COLUMNS_K = _env_int("BIRD_ENTITY_COLUMNS_K", 6)
+# Only entities where at least this many distinct columns compete are worth printing:
+# a noun with one match is not a choice, and rendering it is pure prompt bloat.
+_ENTITY_COLUMNS_MIN = _env_int("BIRD_ENTITY_COLUMNS_MIN", 2)
+_ENTITY_COLUMNS_MAX_ENTITIES = _env_int("BIRD_ENTITY_COLUMNS_MAX_ENTITIES", 8)
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+# Keep only hits within this vector distance of the entity's best match. Without it
+# every entity prints its full k, so "phone numbers" drags in schools.Ext and the block
+# becomes bloat rather than a set of real alternatives. Sized off the charter case,
+# where the genuine competitors span 0.717 (schools.Charter) to 0.808
+# (frpm.'Charter School (Y/N)') and the first irrelevant hit is 0.832 (schools.DOC):
+# 0.10 keeps all five confusable columns and cuts the tail. schools.FundingType sits at
+# 0.801, so a tighter margin would drop the exact column q65 needed.
+_ENTITY_COLUMNS_MARGIN = _env_float("BIRD_ENTITY_COLUMNS_MARGIN", 0.10)
 _EVIDENCE_FORCE_KEEP = _env_flag("BIRD_EVIDENCE_FORCE_KEEP_TABLES", "1")
 # Add tables that sit one foreign key away from a table we already kept.
 _FK_CLOSURE = _env_flag("BIRD_FK_CLOSURE", "1")
@@ -304,6 +487,7 @@ class CandidatePreparationAgent(BaseAgent):
         self.logger.info(
             "Tables from candidates: %s", [t["name"] for t in relevant_tables]
         )
+
 
         additional_tables = []
         # Prefer original (with Evidence) + evidence phrases so table search
@@ -547,6 +731,28 @@ class CandidatePreparationAgent(BaseAgent):
                 "Verified FK edges among prompt tables: %d", len(verified_fks)
             )
 
+        # --- 5d. Per-entity candidate columns, scoped to the final table set ---
+        # Runs here and not beside the table search: v1 ran before the relevance
+        # filter, FK closure and evidence force-keep, so it offered columns from
+        # tables that were never in the prompt. Measured cost of that on 137
+        # questions — q71 answered from schools.DOC instead of frpm."District Code"
+        # and q74 from schools.GSserved instead of frpm."Low Grade", both dropping
+        # the join to frpm entirely, because a same-table lookalike was presented
+        # as a peer of the column gold needed.
+        entity_columns: list[dict] = []
+        if _ENTITY_COLUMNS:
+            entity_columns = fetch_entity_columns(
+                state["data_retriever"],
+                list(path_state.get("entities") or []) + evidence_phrases,
+                target_db,
+                allowed_tables={
+                    str(t.get("name") or "").strip().lower()
+                    for t in relevant_tables
+                    if t.get("name")
+                },
+                verified_fks=verified_fks,
+            )
+
         # --- 6. Cross-database Train few-shot Q→SQL demos ---
         retrieved_questions = fetch_similar_questions(question)
         # Preserve examples supplied by callers / conversation retrieval, then
@@ -582,6 +788,7 @@ class CandidatePreparationAgent(BaseAgent):
                 "primary_attribute": primary_attribute,
                 "attribute_join_paths": attribute_join_paths,
                 "term_synonyms": term_synonyms,
+                "entity_columns": entity_columns,
             }
         }
 

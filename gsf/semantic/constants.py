@@ -4,6 +4,14 @@ from __future__ import annotations
 
 SEMANTIC_SOURCE = "semantic"
 
+# Longest sample value that is worth carrying. Profiling stores nothing longer,
+# and the prompt/embedding renderers drop anything longer on the way out. Raised
+# from 30 because real categorical values exceed it — BIRD district names such as
+# "Los Angeles Unified School District" are 35 characters — and a dropped value
+# is worse than a long one now that a complete value list is presented to the
+# model as a closed set ("one of: ...") rather than as examples.
+MAX_SAMPLE_VALUE_LEN = 60
+
 # Semantic node labels
 LABEL_TERM = "Term"
 LABEL_COLUMN_ATTRIBUTE = "ColumnAttribute"

@@ -31,6 +31,7 @@ from gsf.dal.attributes import (
     merge_semantic_fk,
 )
 from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
+from gsf.semantic.constants import MAX_SAMPLE_VALUE_LEN
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
 
@@ -195,7 +196,11 @@ def _format_sample_values(raw: str | None) -> str:
         import json
 
         values = json.loads(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
+        non_null = [
+            str(v)
+            for v in values
+            if v is not None and len(str(v)) <= MAX_SAMPLE_VALUE_LEN
+        ]
         if not non_null:
             return ""
         return "sample_values: " + ", ".join(non_null)

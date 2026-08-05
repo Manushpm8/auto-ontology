@@ -62,10 +62,10 @@ _USER_RULES = (
     "COUNT(CASE WHEN condition THEN 1 END) or SUM(CASE WHEN condition THEN 1 ELSE 0 END).\n"
     "- If business categories are specified, use CASE WHEN to classify.\n\n"
     "**Literal Result Fidelity (STRICT)**\n"
-    "- Preserve database row multiplicity. Do NOT add DISTINCT merely to make "
-    "results look cleaner. Use DISTINCT only when the question explicitly asks "
-    "for unique/different values or when deduplication is mathematically required "
-    "at the requested entity grain.\n"
+    "- Decide the counting grain inside aggregates deliberately, since it changes "
+    "the number returned: COUNT(DISTINCT x) when the question counts distinct "
+    "entities ('how many different/unique/separate X'), COUNT(x) when it counts "
+    "rows or occurrences.\n"
     "- Return raw stored values unless the question explicitly requests a "
     "human-readable translation. Do NOT convert code/label values (for example "
     "'+', '-', status codes, element symbols) into explanatory CASE text.\n"
@@ -119,6 +119,14 @@ _USER_RULES = (
 )
 
 
+# Answer-shape conventions were tried here and removed. Stating DISTINCT and
+# COUNT-form defaults mined from train looked promising — gold omits SELECT
+# DISTINCT 88% of the time — but the model already omitted it 90.2% of the time,
+# so the rule pushed it away from gold rather than toward it. Nothing predicts
+# DISTINCT either: the best feature reaches 15.7% on 4,019 train queries while
+# firing on 42% of the questions already answered correctly. The ceiling is 9
+# dev questions (0.59pp), and they contradict each other on the same table and
+# query shape, so it is annotator noise. See scripts/distinct_predictors.py.
 create_sql_user_prompt = _USER_TASK + _USER_QUESTION + _USER_CONTEXT + _USER_RULES
 
 
@@ -136,7 +144,7 @@ def get_sql_user_prompt() -> str:
     """
     if _question_last_enabled():
         return _USER_TASK + _USER_CONTEXT + _USER_RULES + "\n" + _USER_QUESTION
-    return create_sql_user_prompt
+    return _USER_TASK + _USER_QUESTION + _USER_CONTEXT + _USER_RULES
 
 
 # Functions the LLM reaches for (Postgres / Snowflake / BigQuery / PostGIS
@@ -256,6 +264,49 @@ def _open_reasoning_enabled() -> bool:
     }
 
 
+# Measured on the 354 pools where no candidate matched gold: 63 (17.8%) have all
+# seven candidates using a column gold does not while missing one gold needs, and
+# 252 (71.2%) agree on an identical column set. The wrong column is chosen
+# unanimously, which is why neither candidate diversity nor selection can reach
+# these. The disambiguating values are already rendered — "charter" in the
+# California schools DB matches schools.Charter (1, 0) and schools.FundingType
+# ('Directly funded', 'Locally funded', ...), both printed with sample values in
+# the same prompt — so this asks for no new information. It only forces the
+# binding to be written down as an explicit decision instead of glided past.
+_BINDING_SPEC = (
+    " Begin by binding the question's nouns to the schema: for each meaningful "
+    "noun or modifier, name the exact table.column you will use. Where more than "
+    "one column plausibly matches, list every candidate with its sample values "
+    "and state why you chose one — a boolean flag column and a text column "
+    "describing a category are different questions, and their values show which "
+    "is which. Only then write the SQL."
+)
+_BINDING_EXAMPLE = """Bindings: "revenue" -> sales.sales_amount (numeric measure);
+"country" -> customers.country_name (only country column in scope);
+"last full quarter" -> sales.order_date. No ambiguous nouns here; had both
+customers.country_name and customers.country_code matched, the sample values
+('Germany' vs 'DE') decide it, and the question asks for a name.
+"""
+
+
+def _entity_binding_enabled() -> bool:
+    """Whether ``thought`` must open with an entity-to-column binding list.
+
+    Env ``BIRD_BIND_ENTITIES`` (default ``0``). Only meaningful alongside
+    ``BIRD_OPEN_REASONING``: a binding list does not fit the 1-2 sentence cap, so
+    it is ignored while the capped spec is active rather than contradicting it.
+    """
+    if not _open_reasoning_enabled():
+        return False
+    return os.environ.get("BIRD_BIND_ENTITIES", "0").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+        "",
+    }
+
+
 def create_sql_from_candidates_prompt(
     *,
     dialect: str | None = None,
@@ -276,6 +327,9 @@ def create_sql_from_candidates_prompt(
     thought_example = (
         _OPEN_THOUGHT_EXAMPLE if open_reasoning else _CAPPED_THOUGHT_EXAMPLE
     )
+    if _entity_binding_enabled():
+        thought_spec += _BINDING_SPEC
+        thought_example = _BINDING_EXAMPLE + thought_example
 
     bare_table_names = (dialect or "").lower() in _SCHEMALESS_DIALECTS
     if bare_table_names:
