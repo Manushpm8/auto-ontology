@@ -6,6 +6,8 @@
 
 import type { ChangeEvent } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import {
 	CONNECTION_FIELDS,
 	connectionDisplayName,
@@ -95,7 +97,6 @@ export const ConnectionConnectStep = ({
 								onChange={onChange}
 								placeholder={field.placeholder}
 								autoComplete={field.secret ? 'new-password' : 'off'}
-								data-testid={`connection-field-${field.key}`}
 								className="rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-900 outline-none focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
 							/>
 						</label>
@@ -104,15 +105,15 @@ export const ConnectionConnectStep = ({
 			</div>
 			<div className="mt-auto flex flex-col items-start">
 				{onTestConnection != null && (
-					<button
+					<Button
+						theme={ButtonTheme.Outline}
+						size={Size.REGULAR}
 						type="button"
-						data-testid="stepper-button-Test Connection"
 						onClick={onTestConnection}
 						disabled={testButtonDisabled}
-						className="cursor-pointer rounded-lg border border-[#76b900] bg-white px-4 py-2 text-sm font-medium text-[#5e9400] transition-colors hover:bg-[#76b900]/10 disabled:cursor-default disabled:border-zinc-300 disabled:text-zinc-400 dark:border-[#76b900] dark:bg-zinc-900 dark:hover:bg-[#76b900]/20 disabled:dark:border-zinc-600"
 					>
 						{testingConnection ? 'Test Connection…' : 'Test Connection'}
-					</button>
+					</Button>
 				)}
 				{testSuccessMessage != null && (
 					<p className="text-sm text-[#5e9400] dark:text-[#8fd100]">

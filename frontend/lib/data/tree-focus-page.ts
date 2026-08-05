@@ -15,8 +15,6 @@ import type { ComposerCertification, ComposerSection } from '@/types/composer-se
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
 import { fieldStatus } from '@/lib/certification';
 
-export const WORKSPACE_ROOT_PARENT_ID = 'workspace-root';
-
 export type TreeResolved =
 	| { type: TreeFocusState.NONE }
 	| { type: TreeFocusState.LOADING }
@@ -105,7 +103,6 @@ function baseCardsForEntity(
 export function buildTreeFocusPageFormat(
 	focusId: string | null,
 	databases: Database[],
-	workspaceDataId: string,
 ): SinglePageFormat {
 	const resolvedFocus = resolveTreeNode(focusId, databases);
 
@@ -119,12 +116,7 @@ export function buildTreeFocusPageFormat(
 		];
 		return {
 			sections,
-			header: {
-				header: {
-					title: 'Loading…',
-					label: 'Catalog',
-				},
-			},
+			header: { header: { title: 'Loading…' } },
 		};
 	}
 
@@ -157,12 +149,7 @@ export function buildTreeFocusPageFormat(
 		}
 		return {
 			sections,
-			header: {
-				header: {
-					title: 'All Data',
-					label: 'Select a database, schema, table, or column in the tree.',
-				},
-			},
+			header: { header: { title: 'All Data' } },
 		};
 	}
 
@@ -191,14 +178,7 @@ export function buildTreeFocusPageFormat(
 			});
 			return {
 				sections,
-				header: {
-					header: {
-						title: database.name,
-						label: catalogNodeInfo[DataModels.DB].title,
-						entityId: database.id,
-						parentId: workspaceDataId,
-					},
-				},
+				header: { header: { title: database.name, entityId: database.id } },
 			};
 		}
 		case DataModels.SCHEMA: {
@@ -234,18 +214,11 @@ export function buildTreeFocusPageFormat(
 			});
 			return {
 				sections,
-				header: {
-					header: {
-						title: schema.schema_name,
-						label: `${catalogNodeInfo[DataModels.SCHEMA].title} · ${database.name}`,
-						entityId: schema.id,
-						parentId: database.id,
-					},
-				},
+				header: { header: { title: schema.schema_name, entityId: schema.id } },
 			};
 		}
 		case DataModels.TABLE: {
-			const { database, schema, table } = resolvedFocus;
+			const { table } = resolvedFocus;
 			const tableTypeLabel = catalogNodeInfo[table.table_type].title;
 			sections.push(
 				...baseCardsForEntity(
@@ -286,18 +259,11 @@ export function buildTreeFocusPageFormat(
 			});
 			return {
 				sections,
-				header: {
-					header: {
-						title: table.name,
-						label: `${tableTypeLabel} · ${schema.schema_name} · ${database.name}`,
-						entityId: table.id,
-						parentId: schema.id,
-					},
-				},
+				header: { header: { title: table.name, entityId: table.id } },
 			};
 		}
 		case DataModels.COLUMN: {
-			const { table, column } = resolvedFocus;
+			const { column } = resolvedFocus;
 			sections.push(
 				{
 					type: ComposerSectionKind.TEXT_CARD,
@@ -331,14 +297,7 @@ export function buildTreeFocusPageFormat(
 			);
 			return {
 				sections,
-				header: {
-					header: {
-						title: column.column_name,
-						label: `${catalogNodeInfo[DataModels.COLUMN].title} · ${column.table_name}`,
-						entityId: column.id,
-						parentId: table.id,
-					},
-				},
+				header: { header: { title: column.column_name, entityId: column.id } },
 			};
 		}
 	}

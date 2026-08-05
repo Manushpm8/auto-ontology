@@ -6,12 +6,16 @@
 
 import { useState } from 'react';
 
-import { Icon } from '@/common/icons';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
+import { Icon, IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { getTableType } from '@/components/dataPage/get-table-type';
 import { ExplorationLayer } from '@/enums/exploration';
 import { TableType } from '@/enums/datasources';
 import { DetailLinkButton } from '@/common/DetailLinkButton';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import type {
 	DataExplorationGraph,
 	ExplorationDataNode,
@@ -104,10 +108,12 @@ export const ActiveDataCard = ({
 					Showing info on this Data Object
 				</p>
 				<div className="flex items-center gap-1">
-					<button
+					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={() => setMinimized((value) => !value)}
-						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 						aria-label={
 							minimized
 								? 'Expand data object details'
@@ -115,15 +121,17 @@ export const ActiveDataCard = ({
 						}
 					>
 						{minimized ? '+' : '−'}
-					</button>
-					<button
+					</Button>
+					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={onClose}
-						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 						aria-label="Close data object details"
 					>
-						×
-					</button>
+						<Icon name={IconName.Close} className="h-4 w-4" />
+					</Button>
 				</div>
 			</header>
 			{!minimized && (
@@ -133,25 +141,27 @@ export const ActiveDataCard = ({
 							name={catalogNodeInfo[node.nodeType].icon}
 							className="mt-0.5 h-5 w-5 shrink-0 text-[#3b82b6]"
 						/>
-						<div className="min-w-0 flex-1">
-							<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-								{node.name}
-							</h2>
-							<p className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
+						<div className="min-w-0 flex-1 space-y-1">
+							<Text as="h2" text={node.name} variant={TextVariant.Heading} />
+							<Text as="p" variant={TextVariant.Caption}>
 								{node.databaseName} • {node.schemaName}
-							</p>
-							<p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-								{node.description || 'No Description'}
-							</p>
+							</Text>
+							<Text
+								as="p"
+								text={node.description || 'No Description'}
+								lines={2}
+								variant={TextVariant.Detail}
+							/>
 						</div>
 						<div className="flex shrink-0 items-center gap-1">
-							<button
+							<Button
+								theme={ButtonTheme.Primary}
+								size={Size.SMALL}
 								type="button"
 								onClick={onView}
-								className="cursor-pointer rounded-lg bg-[#76b900] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#5e9400]"
 							>
 								View in Data
-							</button>
+							</Button>
 						</div>
 					</div>
 					<div className="grid grid-cols-2 gap-2">

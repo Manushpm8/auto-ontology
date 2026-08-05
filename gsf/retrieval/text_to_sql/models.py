@@ -98,7 +98,7 @@ class CandidateFilterModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    reasoning: str = Field(..., description="1-2 sentence reasoning.")
+    reasoning: str = Field(..., description="Brief reasoning (1-2 sentences max).")
     best_id: str | None = Field(
         ...,
         description="ID of the single best candidate that matches the user's intent. Null if none match.",
@@ -136,7 +136,7 @@ class AnchorColumnModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    reasoning: str = Field(..., description="Brief reasoning for the choice.")
+    reasoning: str = Field(..., description="Brief reasoning (1-2 sentences max).")
     anchor_id: str | None = Field(
         ...,
         description="The id of the ColumnAttribute that is the primary focus of the question.",
@@ -156,8 +156,8 @@ class SQLGenerationModel(StrictModel):
     thought: str = Field(
         ...,
         description=(
-            "Internal reasoning (1-2 sentences): briefly explain your approach "
-            "and key decisions. This is NOT shown to the user."
+            "Brief reasoning (1-2 sentences) explaining the SQL "
+            "approach and key decisions."
         ),
     )
     sql_code: NonEmptyStr = Field(

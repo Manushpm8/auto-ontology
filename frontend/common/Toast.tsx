@@ -6,6 +6,8 @@
 
 import { useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 
 type ToastVariant = 'error' | 'success' | 'info' | 'pending';
 
@@ -119,11 +121,13 @@ export const Toast = ({ open, message, title, variant = 'error', onClose }: Toas
 				<span className="text-sm text-zinc-800 dark:text-zinc-200">
 					{capitalizeFirst(message)}
 				</span>
-				<button
+				<Button
+					theme={ButtonTheme.IconNeutral}
+					size={Size.SMALL}
+					iconOnly
 					type="button"
 					onClick={onClose}
 					aria-label="Dismiss notification"
-					className="ml-2 rounded p-1 text-zinc-500 opacity-80 transition-opacity hover:opacity-100 dark:text-zinc-400"
 				>
 					<svg
 						viewBox="0 0 24 24"
@@ -137,7 +141,7 @@ export const Toast = ({ open, message, title, variant = 'error', onClose }: Toas
 						<line x1="18" y1="6" x2="6" y2="18" />
 						<line x1="6" y1="6" x2="18" y2="18" />
 					</svg>
-				</button>
+				</Button>
 			</div>
 		</div>,
 		document.body,

@@ -46,29 +46,37 @@ _init_lock = threading.Lock()
 _initialized = False
 
 
-def _ensure_init() -> None:
-    """Authenticate the KumoRFM SDK once, from env vars."""
-    global _initialized
-    if _initialized:
-        return
+_client: Any = None
+
+
+def _ensure_init() -> Any:
+    """Open the SDFM client once, from env vars, and return it.
+
+    The client is the only supported entry point to the engine: kumorfm refuses
+    direct use. Opening it makes no request, so a bad URL surfaces on the first
+    prediction rather than here.
+    """
+    global _client
+    if _client is not None:
+        return _client
     with _init_lock:
-        if _initialized:
-            return
+        if _client is not None:
+            return _client
         url = os.environ.get("KUMO_RFM_API_URL")
         if not url:
             raise RuntimeError("KUMO_RFM_API_URL is not set")
         api_key = os.environ.get("KUMO_RFM_API_KEY") or None
 
-        import kumorfm.rfm as rfm
+        from nvidia_sdfm import SDFMClient
 
         before = time.perf_counter()
-        rfm.init(url=url, api_key=api_key)
-        _initialized = True
+        _client = SDFMClient(url, api_key=api_key)
         logger.info(
-            "KumoRFM initialized (url=%s) in %.2fs",
-            url or "<default>",
+            "KumoRFM client opened (url=%s) in %.2fs",
+            url,
             time.perf_counter() - before,
         )
+        return _client
 
 
 def _quote(schema: str, table: str) -> str:
@@ -394,7 +402,7 @@ def build_prediction_context(
     from.
     """
     logger.info("kumo: build_prediction_context start (initializing KumoRFM)")
-    _ensure_init()
+    client = _ensure_init()
 
     import kumorfm.rfm as rfm
 
@@ -424,7 +432,7 @@ def build_prediction_context(
     # Passing an explicit empty edge list suppresses LocalGraph's automatic
     # relationship inference. This lets catalog join paths take precedence and
     # avoids inferring the same links twice.
-    graph = rfm.LocalGraph.from_data(
+    graph = rfm.Graph.from_data(
         frames,
         edges=[],
         infer_metadata=True,
@@ -449,7 +457,7 @@ def build_prediction_context(
             )
 
     graph_ddl, edges, col_stypes, time_columns = build_graph_context(graph)
-    kumo_model = KumoModel(rfm.KumoRFM(graph, verbose=False))
+    kumo_model = KumoModel(client.kumorfm(graph), graph)
     entity_ids: dict[str, list[Any]] = {}
     for name, table in graph.tables.items():
         primary_key = getattr(table.primary_key, "name", None)

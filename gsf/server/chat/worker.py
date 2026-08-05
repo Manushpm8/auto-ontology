@@ -16,10 +16,13 @@ retriever/connector singletons once, then loops on an input queue:
 again. The cold-start cost is paid at server boot and at each cancel
 (when we kill+respawn), not per request.
 
-Because the product spec is "one conversation at a time", the pool size
-is hard-coded to 1: a single warm worker ready to be acquired, plus
-async replenishment after acquire/cancel so the next question almost
-always finds the slot prewarmed.
+The router (see ``router.py``) now allows one in-flight stream *per
+conversation* rather than one globally, so any number of conversations may
+run concurrently. This pool still only keeps a single warm standby: the
+first conversation to ask finds it prewarmed, and any additional concurrent
+conversations simply pay a cold start (``acquire()`` spawns a fresh
+subprocess on demand) — there is no cap on how many can run at once, just
+no more than one pre-warmed spare at a time.
 """
 
 from __future__ import annotations
@@ -116,7 +119,7 @@ def _worker_loop(
         if tag != _MSG_ASK:
             continue
 
-        question, subject_token = payload
+        question, prediction, target_dbsubject_token = payload
         try:
             # Per-user Databricks auth trades the prewarmed connectors for ones
             # bound to the caller's exchanged token. Databricks connectors open
@@ -128,14 +131,29 @@ def _worker_loop(
             else:
                 ask_connectors = connectors
 
+            question, prediction, target_db = payload
+            # Connections are resolved from Neo4j once at worker init. If that
+            # lookup came back empty — Neo4j not yet reachable when this
+            # subprocess booted, or the first connection created afterwards —
+            # the snapshot would stay empty for the life of the process and
+            # every question would fail with "missing required 'connectors'"
+            # until the pod restarted. Re-resolve lazily so the worker heals
+            # itself; get_connectors() caches a non-empty result and only
+            # retries while there is nothing to cache, so this costs nothing
+            # on the normal path.
+            if not connectors:
+                connectors = get_connectors()
             agent_payload = {
-                "question": question,
+                "question": payload,
+                "prediction": prediction,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
                 "connectors": ask_connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": fetch_custom_prompts(),
             }
+            if target_db:
+                agent_payload["target_db"] = target_db
             for event in stream_agent_response(agent_payload):
                 out_q.put((_TAG_EVENT, event))
         except BaseException as exc:  # noqa: BLE001 — surface to parent
@@ -178,14 +196,23 @@ class PrewarmedWorker:
     def is_alive(self) -> bool:
         return self._proc.is_alive()
 
-    def submit(self, question: str, subject_token: str | None = None) -> None:
-        """Ask *question*, optionally authenticating to Databricks as the caller.
+    def submit(
+        self,
+        question: str,
+        prediction: bool | None = None,
+        target_db: str | None = None,
+        subject_token: str | None = None,
+    ) -> None:
+        """Ask *question*, optionally forcing the prediction/SQL branch.
 
+        *prediction* mirrors the API parameter: True or False skips the
+        classification step, None classifies as usual.
+        *target_db* scopes the run to one connected database when set.
         *subject_token* is the caller's SSO JWT. When present the worker builds
         per-user connectors for this question instead of using the prewarmed
         ones, so SQL executes under that user's own Databricks grants.
         """
-        self._in_q.put((_MSG_ASK, (question, subject_token)))
+        self._in_q.put((_MSG_ASK, (question, prediction, target_db, subject_token)))
 
     def events(self) -> Generator[dict[str, Any] | None, None, None]:
         """Yield agent events for the current question.

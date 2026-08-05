@@ -7,9 +7,15 @@
 import { useState } from 'react';
 
 import { Icon, IconName } from '@/common/icons';
+import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { Size, ButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import type { ExplorationForeignKey, ExplorationLink } from '@/types/exploration';
 import { LabelList } from '@/common/SinglePageComposer';
 import { SqlBlock } from '@/common/SqlBlock';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import { Modal } from './Modal';
 
 type QueryCarouselModalProps = {
@@ -30,10 +36,12 @@ const ForeignKeyColumnsPanel = ({
 }) => {
 	if (foreignKeys.length === 0) {
 		return (
-			<p className="text-sm text-zinc-500 dark:text-zinc-400">
-				These tables share a foreign key relationship; no stored SQL query references both
-				of them together.
-			</p>
+			<EmptyState
+				variant={EmptyStateVariant.Inline}
+				icon={IconName.Link}
+				title="No stored SQL query"
+				description="These tables share a foreign key relationship, but no stored query references both of them together."
+			/>
 		);
 	}
 
@@ -49,17 +57,17 @@ const ForeignKeyColumnsPanel = ({
 					className="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 p-3 sm:grid-cols-2 dark:border-zinc-700"
 				>
 					<div className="min-w-0">
-						<p className="truncate text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+						<Text as="p" variant={TextVariant.Overline}>
 							{sourceName}.{fk.sourceColumn}
-						</p>
+						</Text>
 						<div className="mt-1.5">
 							<LabelList values={fk.sourceSampleValues ?? []} />
 						</div>
 					</div>
 					<div className="min-w-0">
-						<p className="truncate text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+						<Text as="p" variant={TextVariant.Overline}>
 							{targetName}.{fk.targetColumn}
-						</p>
+						</Text>
 						<div className="mt-1.5">
 							<LabelList values={fk.targetSampleValues ?? []} />
 						</div>
@@ -98,27 +106,32 @@ export const QueryCarouselModal = ({
 								</span>
 							)}
 						</div>
-						<p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
+						<Text as="p" variant={TextVariant.Detail}>
 							{sourceName} ↔ {targetName}
-						</p>
+						</Text>
 					</div>
 				</div>
 				<div className="flex items-center gap-3">
 					{queries.length > 1 && (
 						<div className="flex items-center gap-2">
-							<button
+							<Button
+								theme={ButtonTheme.IconNeutral}
+								size={Size.SMALL}
+								iconOnly
 								type="button"
 								onClick={() => setQueryIndex((index) => Math.max(0, index - 1))}
 								disabled={queryIndex === 0}
-								className="cursor-pointer rounded p-1 text-zinc-500 hover:bg-zinc-100 disabled:cursor-default disabled:opacity-30 dark:hover:bg-zinc-700"
 								aria-label="Previous query"
 							>
-								←
-							</button>
+								<Icon name={IconName.ChevronRight} className="h-4 w-4 rotate-180" />
+							</Button>
 							<span className="text-xs text-zinc-500">
 								{queryIndex + 1}/{queries.length}
 							</span>
-							<button
+							<Button
+								theme={ButtonTheme.IconNeutral}
+								size={Size.SMALL}
+								iconOnly
 								type="button"
 								onClick={() =>
 									setQueryIndex((index) =>
@@ -126,21 +139,22 @@ export const QueryCarouselModal = ({
 									)
 								}
 								disabled={queryIndex === queries.length - 1}
-								className="cursor-pointer rounded p-1 text-zinc-500 hover:bg-zinc-100 disabled:cursor-default disabled:opacity-30 dark:hover:bg-zinc-700"
 								aria-label="Next query"
 							>
-								→
-							</button>
+								<Icon name={IconName.ChevronRight} className="h-4 w-4" />
+							</Button>
 						</div>
 					)}
-					<button
+					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={onClose}
-						className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 						aria-label="Close query"
 					>
-						×
-					</button>
+						<Icon name={IconName.Close} className="h-4 w-4" />
+					</Button>
 				</div>
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">

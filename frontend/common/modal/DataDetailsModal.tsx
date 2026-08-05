@@ -11,15 +11,22 @@ import NextLink from 'next/link';
 import { datasources } from '@/api/datasources';
 import { explorationApi } from '@/api/exploration';
 import { Icon, IconName } from '@/common/icons';
+import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { Size, ButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import type { Column } from '@/types/datasources';
 import type { TableExplorationDetails } from '@/types/exploration';
 import type { TableColumn } from '@/types/table';
 import { SqlBlock } from '@/common/SqlBlock';
 import { Table } from '@/common/Table';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
+import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
 import { Modal } from './Modal';
 
-export type DataDetailsKind = 'columns' | 'queries' | 'terms';
+export type DataDetailsType = 'columns' | 'queries' | 'terms';
 
 /** Minimal data-object reference — decoupled from any specific page's node shape. */
 export type DataDetailsModalTarget = {
@@ -31,12 +38,12 @@ export type DataDetailsModalTarget = {
 
 type DataDetailsModalProps = {
 	target: DataDetailsModalTarget | null;
-	kind: DataDetailsKind | null;
+	type: DataDetailsType | null;
 	onClose: () => void;
 };
 
 /** Generic modal for a Table/View's columns, SQL queries, or related Terms. */
-export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProps) => {
+export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProps) => {
 	const [columns, setColumns] = useState<Column[]>([]);
 	const [details, setDetails] = useState<TableExplorationDetails>({
 		queries: [],
@@ -44,15 +51,17 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 	});
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const columnsPage = usePagination(columns, DEFAULT_PAGE_SIZE, target?.id ?? null);
+	const termsPage = usePagination(details.terms, DEFAULT_PAGE_SIZE, target?.id ?? null);
 
 	useEffect(() => {
-		if (target == null || kind == null) return undefined;
+		if (target == null || type == null) return undefined;
 		let cancelled = false;
 
 		const load = async () => {
 			setLoading(true);
 			setError(null);
-			if (kind === 'columns') {
+			if (type === 'columns') {
 				const response = await datasources.getColumnsForTable(target.id);
 				if (cancelled) return;
 				if (response.error) {
@@ -76,12 +85,12 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 		return () => {
 			cancelled = true;
 		};
-	}, [kind, target]);
+	}, [type, target]);
 
-	const title = kind === 'columns' ? 'Columns' : kind === 'queries' ? 'SQL Queries' : 'Terms';
+	const title = type === 'columns' ? 'Columns' : type === 'queries' ? 'SQL Queries' : 'Terms';
 
 	const renderTable = () => {
-		if (kind === 'columns') {
+		if (type === 'columns') {
 			const tableColumns: TableColumn<Column>[] = [
 				{
 					key: 'column',
@@ -112,22 +121,18 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 			return (
 				<Table
 					columns={tableColumns}
-					rows={columns}
+					rows={columnsPage.pageRows}
 					rowKey={(row) => row.id}
+					pagination={columnsPage.pagination}
 					containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
-					scrollClassName="max-h-[28rem] overflow-auto"
 					emptyMessage="No columns"
 				/>
 			);
 		}
 
-		if (kind === 'queries') {
+		if (type === 'queries') {
 			if (details.queries.length === 0) {
-				return (
-					<p className="text-sm italic text-zinc-500 dark:text-zinc-400">
-						No SQL queries
-					</p>
-				);
+				return <EmptyState variant={EmptyStateVariant.Inline} title="No SQL queries" />;
 			}
 			return (
 				<ul className="space-y-4">
@@ -168,41 +173,43 @@ export const DataDetailsModal = ({ target, kind, onClose }: DataDetailsModalProp
 		return (
 			<Table
 				columns={termColumns}
-				rows={details.terms}
+				rows={termsPage.pageRows}
 				rowKey={(row) => row.id}
+				pagination={termsPage.pagination}
 				containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
-				scrollClassName="max-h-[28rem] overflow-auto"
 				emptyMessage="No Terms"
 			/>
 		);
 	};
 
 	return (
-		<Modal open={target != null && kind != null} onClose={onClose} className="w-full max-w-4xl">
+		<Modal open={target != null && type != null} onClose={onClose} className="w-full max-w-4xl">
 			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex min-w-0 items-center gap-2">
 					<Icon
 						name={
-							kind === 'columns'
+							type === 'columns'
 								? IconName.Column
-								: kind === 'terms'
+								: type === 'terms'
 									? IconName.Terms
 									: IconName.Link
 						}
 						className="h-5 w-5 shrink-0 text-[#76b900]"
 					/>
-					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					<Text as="h2" variant={TextVariant.Heading}>
 						{target?.name} ({title})
-					</h2>
+					</Text>
 				</div>
-				<button
+				<Button
+					theme={ButtonTheme.IconNeutral}
+					size={Size.SMALL}
+					iconOnly
 					type="button"
 					onClick={onClose}
-					className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 					aria-label={`Close ${title}`}
 				>
-					×
-				</button>
+					<Icon name={IconName.Close} className="h-4 w-4" />
+				</Button>
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">
 				{loading ? (

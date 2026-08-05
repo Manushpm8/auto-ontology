@@ -27,19 +27,24 @@ def is_link_prediction(query: str) -> bool:
 
 
 class KumoModel:
-    """A built ``KumoRFM`` with the cheap-validate + batching-predict helpers."""
+    """A KumoRFM handle with the cheap-validate + batching-predict helpers."""
 
-    def __init__(self, model: Any) -> None:
+    def __init__(self, model: Any, graph: Any) -> None:
         self.model = model
+        self.graph = graph
+        self._graph_def: Any = None
 
     def validate_pql(self, query: str) -> Any:
         """Cheaply parse/validate a PQL query against the graph (no inference).
 
-        Raises ``ValueError`` with the server's detail on invalid PQL — the
-        repair-loop signal. Wraps ``KumoRFM._parse_query`` (the seam in
-        kumorfm 2.23.0), kept here so the call site is swappable.
+        Raises ``ValueError`` with the parser's detail on invalid PQL — the
+        repair-loop signal. Resolves locally, so it costs no request.
         """
-        return self.model._parse_query(query)
+        from kumorfm.rfm.query_parser import parse_query_locally
+
+        if self._graph_def is None:
+            self._graph_def = self.graph._to_api_graph_definition()
+        return parse_query_locally(query, self._graph_def)
 
     def predict(
         self,
@@ -52,12 +57,15 @@ class KumoModel:
     ) -> Any:
         """Run a prediction, transparently batching when ``indices`` exceeds the cap."""
         cap = _LINK_PREDICT_CAP if is_link_prediction(query) else _PREDICT_CAP
-        if indices is not None and len(indices) > cap:
-            with self.model.batch_mode(batch_size="max", num_retries=num_retries):
-                return self.model.predict(
-                    query, indices=indices, run_mode=run_mode, **kwargs
-                )
-        return self.model.predict(query, indices=indices, run_mode=run_mode, **kwargs)
+        batch_size = "max" if indices is not None and len(indices) > cap else None
+        return self.model.predict(
+            query,
+            indices=indices,
+            run_mode=run_mode,
+            batch_size=batch_size,
+            num_retries=num_retries,
+            **kwargs,
+        )
 
 
 def _col_name(col: Any) -> str | None:

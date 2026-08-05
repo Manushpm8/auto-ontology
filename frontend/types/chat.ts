@@ -8,29 +8,34 @@ export type ChatMessage = {
 	content: string;
 	sql?: string;
 	sqlResponse?: string;
+	thoughts?: string;
 	timestamp: number;
 };
 
 export type ChatRequest = {
 	question: string;
+	conversationId?: string | null;
+	/** Scope retrieval/SQL to one connected database when multiple are loaded. */
+	target_db?: string | null;
 };
 
 export type StepEvent = {
 	type: 'step';
 	node: string;
 	label: string;
+	thought?: string | null;
 };
+
+/** Shape of the executed SQL result, as returned by `sql_response_from_db`. */
+export type SqlResult = string[] | { [key: string]: string }[];
 
 export type ResultEvent = {
 	type: 'result';
 	answer: {
 		response: string;
 		sql_code?: string;
-		sql_response_from_db?:
-			| string[]
-			| {
-					[key: string]: string;
-			  }[];
+		sql_response_from_db?: SqlResult;
+		thoughts?: string;
 	};
 };
 
@@ -41,9 +46,31 @@ export type ErrorEvent = {
 
 export type ChatStreamEvent = StepEvent | ResultEvent | ErrorEvent;
 
+/**
+ * Illumex-style step 2: POST /api/chat/visualize takes the question, SQL, and
+ * already-executed result from step 1 and returns ResultChart specs, or an
+ * empty/null list when visualization is disabled or was skipped.
+ *
+ * Snake-cased because it is the FastAPI payload, which the Next proxy forwards
+ * as-is; `conversation_id` is read by the proxy alone, to persist the bubble
+ * this step produces and to keep two clients on one run from computing (and
+ * writing) it twice.
+ */
+export type VisualizeRequest = {
+	question: string;
+	sql: string;
+	result?: SqlResult;
+	conversation_id?: string;
+};
+
+export type VisualizeResponse = {
+	charts: Record<string, unknown>[] | null;
+};
+
 export type GraphStep = {
 	node: string;
 	label: string;
+	thought?: string | null;
 	status: 'completed' | 'active';
 };
 

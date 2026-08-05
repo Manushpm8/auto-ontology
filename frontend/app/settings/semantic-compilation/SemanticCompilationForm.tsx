@@ -6,13 +6,16 @@
 
 import { useState } from 'react';
 import { semanticCompilationApi } from '@/api/settings';
+import { ConfirmModal } from '@/common/modal';
 import { Toast } from '@/common/Toast';
+import { Toggle } from '@/common/Toggle';
 
 export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: boolean }) => {
 	// Seeded from the server (see page.tsx) so the correct state renders on first
 	// paint; updated optimistically and rolled back if the save fails.
 	const [enabled, setEnabled] = useState(initialEnabled);
 	const [saving, setSaving] = useState(false);
+	const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 
@@ -40,6 +43,19 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 		}
 	};
 
+	const handleReset = () => {
+		setError(null);
+		setConfirmModalOpen(false);
+		// The ingestion service deletes in the background and answers 202, so the
+		// request only starts the reset. Nothing here depends on the response, so
+		// it is left unawaited and only a failure to reach the API is surfaced.
+		setMessage('Semantic layer reset started — it runs in the background.');
+		semanticCompilationApi.reset().catch(() => {
+			setMessage(null);
+			setError('Failed to reset the semantic layer. Please try again.');
+		});
+	};
+
 	return (
 		<div className="h-full overflow-auto p-6">
 			<div className="mx-auto max-w-xl">
@@ -61,25 +77,45 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 							{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
 						</span>
 					</div>
-					<button
-						type="button"
-						role="switch"
-						aria-checked={enabled}
+					<Toggle
+						checked={enabled}
 						aria-label="Enable semantic compilation"
 						disabled={saving}
-						onClick={handleToggle}
-						className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-							enabled ? 'bg-[#76b900]' : 'bg-zinc-300 dark:bg-zinc-600'
-						}`}
-					>
-						<span
-							className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-								enabled ? 'translate-x-5' : 'translate-x-0.5'
-							}`}
-						/>
-					</button>
+						onChange={handleToggle}
+					/>
 				</div>
+
+				{enabled && (
+					<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+						<div className="flex flex-col">
+							<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+								Reset semantic layer
+							</span>
+							<span className="text-xs text-zinc-500">
+								Deletes the semantic layer for every database, and rebuild it from
+								scratch.
+							</span>
+						</div>
+						<button
+							type="button"
+							disabled={saving}
+							onClick={() => setConfirmModalOpen(true)}
+							className="cursor-pointer rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"
+						>
+							Reset
+						</button>
+					</div>
+				)}
 			</div>
+
+			<ConfirmModal
+				open={confirmModalOpen}
+				title="Reset semantic layer"
+				message="This deletes the semantic layer and a rebuild will be triggered."
+				confirmLabel="Reset"
+				onConfirm={handleReset}
+				onCancel={() => setConfirmModalOpen(false)}
+			/>
 
 			<Toast
 				open={error !== null}

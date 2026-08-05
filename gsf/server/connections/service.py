@@ -13,7 +13,7 @@ from typing import Any
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.registry import create_connector, invalidate_connectors_cache
 from gsf.connectors.vault import delete_secrets, is_vault_configured, write_secret
-from gsf.server.ingestion.proxy import trigger_ingest, trigger_ingest_delete
+from gsf.server.ingestion.proxy import trigger_ingest, trigger_reset
 from gsf.server.chat.worker import refresh_chat_workers
 from gsf.dal.connections import insert_connection, list_connections
 
@@ -139,6 +139,6 @@ def delete_connection(database_name: str) -> dict[str, str]:
     invalidate_connectors_cache()
     refresh_chat_workers()
 
-    trigger_ingest_delete(database_name)
+    trigger_reset(database_name)
 
     return {"database_name": database_name}

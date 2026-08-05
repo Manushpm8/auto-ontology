@@ -5,6 +5,10 @@
 'use client';
 
 import { Icon, IconName } from '@/common/icons';
+import { Button, SelectButton } from '@/common/Button';
+import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import { Modal } from './Modal';
 
 /** Minimal Term reference — decoupled from any specific page's node/row shape. */
@@ -34,18 +38,20 @@ export const SemanticRelationshipModal = ({
 			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex min-w-0 items-center gap-2">
 					<Icon name={IconName.Connection} className="h-5 w-5 shrink-0 text-[#76b900]" />
-					<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					<Text as="h2" variant={TextVariant.Heading}>
 						{sourceTerm?.name} (Term) &lt;&gt; {targetTerm?.name} (Term)
-					</h2>
+					</Text>
 				</div>
-				<button
+				<Button
+					theme={ButtonTheme.IconNeutral}
+					size={Size.SMALL}
+					iconOnly
 					type="button"
 					onClick={onClose}
-					className="cursor-pointer rounded p-1 text-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 					aria-label="Close term relationship"
 				>
-					×
-				</button>
+					<Icon name={IconName.Close} className="h-4 w-4" />
+				</Button>
 			</header>
 			<div className="p-5">
 				<div className="grid grid-cols-2 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
@@ -57,27 +63,24 @@ export const SemanticRelationshipModal = ({
 							}
 						>
 							<div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-800/60">
-								<span className="truncate text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-									{term?.name}
-								</span>
+								<Text text={term?.name} variant={TextVariant.Label} />
 							</div>
-							<button
-								type="button"
+							<SelectButton
+								theme={SelectButtonTheme.ListItemLink}
 								onClick={() => term != null && onView(term.id)}
-								className="flex w-full cursor-pointer items-center justify-between gap-2 px-4 py-3 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/40"
 							>
 								<span className="flex min-w-0 items-center gap-1.5">
 									<Icon
 										name={IconName.Terms}
 										className="h-3.5 w-3.5 shrink-0 text-[#76b900]"
 									/>
-									<span className="truncate">{term?.name}</span>
+									<Text text={term?.name} />
 								</span>
 								<Icon
 									name={IconName.ExternalLink}
 									className="h-4 w-4 shrink-0 text-zinc-400"
 								/>
-							</button>
+							</SelectButton>
 						</div>
 					))}
 				</div>

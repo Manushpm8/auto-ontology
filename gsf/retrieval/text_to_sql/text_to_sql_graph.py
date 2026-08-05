@@ -145,10 +145,14 @@ def _prediction_enabled() -> bool:
     """Whether the KumoRFM prediction branch should be built into the graph.
 
     Evaluated ONCE at graph-creation (startup), not per request: when
-    ``KUMO_RFM_API_KEY`` is unset the prediction nodes/edges are never added, so
+    ``KUMO_RFM_API_URL`` is unset the prediction nodes/edges are never added, so
     the classify → prepare-graph → predict path simply does not exist.
+
+    The URL is what makes prediction possible: the SDK targets a Universal TFM
+    NIM, and NIMs are unauthenticated by contract, so ``KUMO_RFM_API_KEY`` is
+    optional and only carries a gateway credential when a deployment adds one.
     """
-    return bool(os.environ.get("KUMO_RFM_API_KEY"))
+    return bool(os.environ.get("KUMO_RFM_API_URL"))
 
 
 def route_decision(state: AgentState) -> str:
@@ -468,6 +472,7 @@ def create_graph():
     graph.add_edge("reconstruct_sql", "validate_sql_query")
 
     graph.add_edge("unconstructable_sql_response", END)
+
     graph.add_edge("format_and_respond", END)
 
     return graph

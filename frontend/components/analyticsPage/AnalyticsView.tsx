@@ -6,16 +6,18 @@
 
 import { useEffect, useState } from 'react';
 
+import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
 import { Toast } from '@/common/Toast';
 import { analyticsApi } from '@/api/analytics';
 import { formatDate } from '@/common/date';
+import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
 import type { ConversationAnalytics } from '@/types/analytics';
 import type { TableColumn } from '@/types/table';
-
-const PAGE_SIZE = 10;
 
 const CSV_HEADERS = ['Timestamp', 'User', 'Source', 'Question', 'Reasoning', 'SQL'];
 const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
@@ -77,7 +79,7 @@ export const AnalyticsView = () => {
 	const [rows, setRows] = useState<ConversationAnalytics[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [page, setPage] = useState(1);
+	const { pageRows, pagination } = usePagination(rows, DEFAULT_PAGE_SIZE);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -100,10 +102,6 @@ export const AnalyticsView = () => {
 			cancelled = true;
 		};
 	}, []);
-
-	const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-	const currentPage = Math.min(page, pageCount);
-	const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
 	const handleDownload = () => {
 		const lines = [
@@ -142,14 +140,18 @@ export const AnalyticsView = () => {
 				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
 					Analytics
 				</h1>
-				<button
-					type="button"
-					onClick={handleDownload}
-					disabled={rows.length === 0}
-					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400] disabled:cursor-not-allowed disabled:opacity-40"
-				>
-					Download
-				</button>
+				<div className="ml-auto">
+					<Button
+						theme={ButtonTheme.Primary}
+						size={Size.REGULAR}
+						type="button"
+						onClick={handleDownload}
+						disabled={rows.length === 0}
+						shadow
+					>
+						Download
+					</Button>
+				</div>
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
@@ -160,19 +162,11 @@ export const AnalyticsView = () => {
 				)}
 
 				{!loading && error == null && rows.length === 0 && (
-					<div className="flex h-full min-h-[40dvh] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300/80 bg-white/60 p-12 text-center dark:border-zinc-600 dark:bg-zinc-950/40">
-						<Icon
-							name={IconName.ChartLine}
-							className="h-8 w-8 text-zinc-300 dark:text-zinc-600"
-						/>
-						<p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-							No analytics recorded yet
-						</p>
-						<p className="text-xs text-zinc-500 dark:text-zinc-500">
-							Analytics are captured automatically when you send messages in a
-							conversation.
-						</p>
-					</div>
+					<EmptyState
+						icon={IconName.ChartLine}
+						title="No analytics recorded yet"
+						description="Analytics are captured automatically when you send messages in a conversation."
+					/>
 				)}
 
 				{!loading && error == null && rows.length > 0 && (
@@ -180,12 +174,7 @@ export const AnalyticsView = () => {
 						columns={COLUMNS}
 						rows={pageRows}
 						rowKey={(row) => row.id}
-						pagination={{
-							page: currentPage,
-							pageSize: PAGE_SIZE,
-							totalItems: rows.length,
-							onPageChange: setPage,
-						}}
+						pagination={pagination}
 					/>
 				)}
 			</div>
