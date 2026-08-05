@@ -34,7 +34,7 @@ class QuestionExtractionAgent(BaseAgent):
         return True
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
-        llm = state.get("non_reasoning_llm") or state["llm"]
+        llm = state["llm"]
         path_state = state.get("path_state", {})
         original_question = get_original_question(state)
         result: Dict[str, Any] = {"path_state": path_state}

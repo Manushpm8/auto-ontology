@@ -18,7 +18,7 @@ from gsf.retrieval.entity_coverage.state import (
     EntityCoveragePayload,
 )
 from gsf.retrieval.text_to_sql.state import AgentState
-from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
+from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +27,6 @@ try:
 except (ValueError, EnvironmentError, OSError) as exc:
     logger.error("Failed to initialize LLM client: %s", exc)
     llm_client = None
-
-try:
-    non_reasoning_llm_client = get_non_reasoning_llm_client(max_tokens=2048)
-    logger.info("Entity coverage will use the non-reasoning model for extraction")
-except (ValueError, EnvironmentError, OSError) as exc:
-    logger.warning("Failed to init non-reasoning LLM: %s", exc)
-    non_reasoning_llm_client = None
 
 graph = create_graph()
 app = graph.compile()
@@ -64,7 +57,7 @@ def _build_state(payload: EntityCoveragePayload) -> AgentState:
     max_distance = payload.get("max_distance", DEFAULT_MAX_DISTANCE)
     initial_path_state["max_distance"] = float(max_distance)
     initial_path_state["return_uncovered_entities"] = bool(
-        payload.get("return_uncovered_entities", False)
+        payload.get("return_uncovered_entities", True)
     )
 
     target_db = payload.get("target_db")
@@ -86,8 +79,6 @@ def _build_state(payload: EntityCoveragePayload) -> AgentState:
         "decision": "",
         "domain_rules": domain_rules,
     }
-    if non_reasoning_llm_client is not None:
-        state["non_reasoning_llm"] = non_reasoning_llm_client
     return state  # type: ignore[return-value]
 
 
