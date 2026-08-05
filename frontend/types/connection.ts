@@ -12,8 +12,11 @@ export type DatabricksConnectionParams = {
 	database: string;
 	/** Optional ingestion allowlist: only these schemas are ingested. Empty/absent = all. */
 	schemas?: string[];
-	/** Test-only substring filter narrowing the schema picker. Never persisted. */
-	schema_contains?: string;
+	/**
+	 * Single schema to ingest, entered on the form instead of picking from a list.
+	 * Verified by the connection test, then sent as `schemas`; never persisted itself.
+	 */
+	schema?: string;
 	/**
 	 * Run chat queries as the signed-in user by exchanging their SSO token for a
 	 * Databricks token, instead of using the stored access token. Ingestion is

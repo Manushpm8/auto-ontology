@@ -77,10 +77,6 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         # connector logs this alongside every statement it runs.
         if federated:
             url += "&auth=sso"
-        # Test-only substring filter for the schema picker; not persisted.
-        schema_contains = str(connection.get("schema_contains") or "").strip()
-        if schema_contains:
-            url += f"&schema_contains={_enc(schema_contains)}"
         return url
 
     if conn_type == "heavydb":

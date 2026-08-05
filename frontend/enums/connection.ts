@@ -30,7 +30,7 @@ export type ConnectionFieldKey =
 	| 'password'
 	| 'database'
 	| 'protocol'
-	| 'schema_contains'
+	| 'schema'
 	| 'sso_federation';
 
 export type ConnectionField = {
@@ -64,9 +64,10 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'password', label: 'Access token', secret: true },
 		{ key: 'database', label: 'Catalog', placeholder: 'main' },
 		{
-			key: 'schema_contains',
-			label: 'Schema contains',
-			placeholder: 'Filter the schema list, e.g. sales',
+			key: 'schema',
+			label: 'Schema',
+			placeholder: 'Leave empty to choose from a list',
+			hint: 'Ingest only this schema. The connection test verifies it exists, and the schema selection step is skipped. Leave empty to pick schemas from a list instead.',
 			optional: true,
 			testOnly: true,
 		},
