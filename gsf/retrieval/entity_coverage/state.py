@@ -29,6 +29,7 @@ class EntityCoveragePayload(TypedDict):
     custom_prompts: NotRequired[str]
     target_db: NotRequired[str]
     max_distance: NotRequired[float]
+    return_uncovered_entities: NotRequired[bool]
 
 
 __all__ = [

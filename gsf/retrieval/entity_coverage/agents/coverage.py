@@ -47,17 +47,32 @@ def _entity_keys_for_hit(hit: dict[str, Any]) -> set[str]:
     return keys
 
 
+def _covered_entities(
+    entities: list[str],
+    col_attr_hits: list[dict[str, Any]],
+) -> set[str]:
+    covered: set[str] = set()
+    for hit in col_attr_hits:
+        covered.update(_entity_keys_for_hit(hit))
+    return {e for e in entities if e in covered}
+
+
 def _compute_coverage(
     entities: list[str],
     col_attr_hits: list[dict[str, Any]],
 ) -> float:
     if not entities:
         return 0.0
-    covered: set[str] = set()
-    for hit in col_attr_hits:
-        covered.update(_entity_keys_for_hit(hit))
-    n_covered = sum(1 for e in entities if e in covered)
-    return n_covered / len(entities)
+    return len(_covered_entities(entities, col_attr_hits)) / len(entities)
+
+
+def _uncovered_entities(
+    entities: list[str],
+    col_attr_hits: list[dict[str, Any]],
+) -> list[str]:
+    """Entities with no covering ColumnAttribute hit (order preserved)."""
+    covered = _covered_entities(entities, col_attr_hits)
+    return [e for e in entities if e not in covered]
 
 
 def _enrich_column_attributes(
@@ -176,10 +191,14 @@ class CoverageGradeAgent(BaseAgent):
         )
         candidates = [_to_response_candidate(hit) for hit in ranked]
 
-        final_response = {
+        final_response: dict[str, Any] = {
             "coverage": round(coverage, 4),
             "candidates": candidates,
         }
+        if path_state.get("return_uncovered_entities"):
+            final_response["uncovered_entities"] = _uncovered_entities(
+                entities, col_hits
+            )
         path_state["final_response"] = final_response
         path_state["coverage"] = coverage
 

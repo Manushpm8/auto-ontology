@@ -37,12 +37,19 @@ class QuestionExtractionModel(BaseModel):
 
 
 class EntityCoverageResponse(BaseModel):
-    """Final response for the entity-coverage endpoint."""
+    """Final response for the entity-coverage pipeline."""
 
     model_config = ConfigDict(extra="forbid")
 
     coverage: float = Field(..., ge=0.0, le=1.0)
     candidates: list[dict[str, Any]]
+    uncovered_entities: list[str] | None = Field(
+        default=None,
+        description=(
+            "Extracted entities with no covering candidate. Only present when "
+            "``return_uncovered_entities=True`` on the import payload."
+        ),
+    )
 
 
 __all__ = [
