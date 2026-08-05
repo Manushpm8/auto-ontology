@@ -72,20 +72,35 @@ def _search_by_label(
 
 
 def _dedupe_best_score(hits: list[dict]) -> list[dict]:
-    """Deduplicate by id, keeping the hit with the lowest score."""
+    """Deduplicate by id, keeping the hit with the lowest score.
+
+    When hits carry ``query_entity``, accumulate all entities that retrieved
+    the same id into ``query_entities`` so per-entity coverage is preserved.
+    """
     best: dict[str, dict] = {}
+    entities_by_id: dict[str, set[str]] = {}
     for hit in hits:
         hid = hit.get("id")
         if hid is None:
             continue
         key = str(hid)
+        qe = hit.get("query_entity")
+        if qe:
+            entities_by_id.setdefault(key, set()).add(str(qe))
         prev = best.get(key)
         if prev is None or float(hit.get("score") or float("inf")) < float(
             prev.get("score") or float("inf")
         ):
             best[key] = hit
+    result: list[dict] = []
+    for key, hit in best.items():
+        out = dict(hit)
+        ents = entities_by_id.get(key)
+        if ents:
+            out["query_entities"] = sorted(ents)
+        result.append(out)
     return sorted(
-        best.values(),
+        result,
         key=lambda h: float(h.get("score") or float("inf")),
     )
 
@@ -313,6 +328,8 @@ class CandidateRetrievalAgent(BaseAgent):
 
     Deduplicate across entities and store:
     - ``path_state["retrieved_column_attributes"]``: ``list[dict]``
+      (each ColumnAttribute hit may include ``query_entity`` /
+      ``query_entities`` naming the extraction string(s) that retrieved it)
     - ``path_state["retrieved_custom_analyses"]``:   ``list[dict]``
     - ``path_state["retrieved_sql_attributes"]``:    ``list[dict]``
     """
@@ -391,7 +408,12 @@ class CandidateRetrievalAgent(BaseAgent):
                     elif key == "sql_attr":
                         all_sql_attr_hits = result
                     else:
-                        all_col_attr_hits.extend(result)
+                        # key is "col_attr:{entity}" — tag each hit for coverage.
+                        entity = key.split(":", 1)[1]
+                        for hit in result:
+                            tagged = dict(hit)
+                            tagged["query_entity"] = entity
+                            all_col_attr_hits.append(tagged)
 
         all_custom_hits, all_sql_attr_hits = _llm_filter_both(
             llm, question, all_custom_hits, all_sql_attr_hits
