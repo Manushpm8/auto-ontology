@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
@@ -13,6 +13,7 @@ import { Button } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
+import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
@@ -21,6 +22,7 @@ import { TextVariant } from '@/enums/text';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useInfiniteList } from '@/hooks/useInfiniteList';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
 import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
@@ -30,7 +32,7 @@ import { attributeStatus } from '@/lib/certification';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
-import type { ColumnAttribute, SqlAttribute, Term } from '@/types/terms';
+import type { ColumnAttribute, SqlAttribute, Term, TermCount, TermDetail } from '@/types/terms';
 
 type TermCardProps = {
 	term: Term;
@@ -178,6 +180,29 @@ const TermCard = ({
 	</li>
 );
 
+/**
+ * Per-card badge numbers, keyed by term id. The list endpoint sends them
+ * alongside each page and only for that page's terms, so they accumulate as
+ * pages load rather than replacing one another.
+ */
+type TermBadgeCounts = {
+	columnAttributes: Map<string, number>;
+	sqlAttributes: Map<string, number>;
+	related: Map<string, number>;
+};
+
+const EMPTY_BADGE_COUNTS: TermBadgeCounts = {
+	columnAttributes: new Map(),
+	sqlAttributes: new Map(),
+	related: new Map(),
+};
+
+const withCounts = (held: Map<string, number>, rows: TermCount[] | undefined) => {
+	const merged = new Map(held);
+	for (const { term_id: termId, count } of rows ?? []) merged.set(termId, count);
+	return merged;
+};
+
 const FIELD_INPUT_CLASSNAME =
 	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
 
@@ -190,17 +215,27 @@ export const TermsView = () => {
 	const sqlAttrId = searchParams.get('sqlAttr');
 	const colAttrId = searchParams.get('colAttr');
 
-	const [terms, setTerms] = useState<Term[]>([]);
 	const [sqlAttrs, setSqlAttrs] = useState<SqlAttribute[]>([]);
 	const [columnAttrs, setColumnAttrs] = useState<ColumnAttribute[]>([]);
-	const [columnAttrCountsMap, setColumnAttrCountsMap] = useState<Map<string, number>>(new Map());
-	const [sqlAttrCountsMap, setSqlAttrCountsMap] = useState<Map<string, number>>(new Map());
-	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [badgeCounts, setBadgeCounts] = useState<TermBadgeCounts>(EMPTY_BADGE_COUNTS);
 	const [hasLoadedTerms, setHasLoadedTerms] = useState(false);
 	const [searchQuery, setSearchQuery] = useState('');
 	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
+	// Read inside `fetchTermsPage` to tell a response for a query that has
+	// since been superseded apart from one that still describes what's on
+	// screen — `useInfiniteList` already discards a stale `items`/`total`
+	// response by its own request id, but the badge counts below are a side
+	// effect of that same callback and need the same guard applied by hand.
+	const debouncedSearchQueryRef = useRef(debouncedSearchQuery);
+	useEffect(() => {
+		debouncedSearchQueryRef.current = debouncedSearchQuery;
+	}, [debouncedSearchQuery]);
+	/**
+	 * The focused term as the single-term endpoint returned it. A term opened by
+	 * link isn't necessarily on the pages the list has loaded, so the detail
+	 * fetch below is what the header and the edit form fall back to.
+	 */
+	const [focusedTermDetail, setFocusedTermDetail] = useState<TermDetail | null>(null);
 	const [createSqlAttrModalOpen, setCreateSqlAttrModalOpen] = useState(false);
 	const [sqlAttrsEpoch, setSqlAttrsEpoch] = useState(0);
 	const [columnAttrsEpoch, setColumnAttrsEpoch] = useState(0);
@@ -245,49 +280,64 @@ export const TermsView = () => {
 	const [sqlEditSubmitting, setSqlEditSubmitting] = useState(false);
 	const [sqlEditError, setSqlEditError] = useState<string | null>(null);
 
-	useEffect(() => {
-		let cancelled = false;
+	const fetchTermsPage = useCallback(
+		async (skip: number, limit: number) => {
+			const query = debouncedSearchQuery;
+			const res = await termsApi.list({
+				...(query ? { q: query } : {}),
+				skip,
+				limit,
+			});
+			if (res.error) return { error: res.message ?? 'Failed to load terms' };
 
-		(async () => {
-			setLoading(true);
-			const termsRes = await termsApi.list(
-				debouncedSearchQuery ? { q: debouncedSearchQuery } : undefined,
-			);
-			if (cancelled) return;
-
-			if (termsRes.error) {
-				setError(termsRes.message ?? 'Failed to load terms');
-				setTerms([]);
-			} else {
-				setError(null);
-				setTerms(termsRes.terms ?? []);
-				setHasLoadedTerms(true);
-				const map = new Map<string, number>();
-				for (const { term_id, count } of termsRes.column_attribute_counts ?? []) {
-					map.set(term_id, count);
-				}
-				setColumnAttrCountsMap(map);
-
-				const sqlAttributeCountsMap = new Map<string, number>();
-				for (const { term_id, count } of termsRes.sql_attribute_counts ?? []) {
-					sqlAttributeCountsMap.set(term_id, count);
-				}
-				setSqlAttrCountsMap(sqlAttributeCountsMap);
-
-				const relatedCountsMap = new Map<string, number>();
-				for (const { term_id, count } of termsRes.related_counts ?? []) {
-					relatedCountsMap.set(term_id, count);
-				}
-				setRelatedCountsMap(relatedCountsMap);
+			// A newer search may have started while this request was in flight.
+			// `useInfiniteList` already drops a late `items`/`total` response by
+			// request id; the badge counts have no such guard of their own, so a
+			// stale response merged in here would show counts for a search that
+			// is no longer on screen.
+			if (debouncedSearchQueryRef.current === query) {
+				setBadgeCounts((held) => {
+					const base = skip === 0 ? EMPTY_BADGE_COUNTS : held;
+					return {
+						columnAttributes: withCounts(
+							base.columnAttributes,
+							res.column_attribute_counts,
+						),
+						sqlAttributes: withCounts(base.sqlAttributes, res.sql_attribute_counts),
+						related: withCounts(base.related, res.related_counts),
+					};
+				});
 			}
+			setHasLoadedTerms(true);
+			return { items: res.terms ?? [], total: res.total ?? 0 };
+		},
+		[debouncedSearchQuery],
+	);
 
-			setLoading(false);
-		})();
+	const {
+		items: terms,
+		setItems: setTerms,
+		isLoading: loading,
+		isLoadingMore: loadingMoreTerms,
+		error,
+		hasMore: hasMoreTerms,
+		loadMore: loadMoreTerms,
+	} = useInfiniteList(fetchTermsPage, { itemKey: (term) => term.id });
 
-		return () => {
-			cancelled = true;
-		};
-	}, [debouncedSearchQuery]);
+	/**
+	 * Applies a saved change to both copies of a term: the card in the list
+	 * behind this page, and the detail copy the header falls back to when the
+	 * term isn't on a page the list has loaded.
+	 */
+	const patchTerm = useCallback(
+		(termId: string, patch: Partial<Term>) => {
+			setTerms((prev) =>
+				prev.map((term) => (term.id === termId ? { ...term, ...patch } : term)),
+			);
+			setFocusedTermDetail((prev) => (prev?.id === termId ? { ...prev, ...patch } : prev));
+		},
+		[setTerms],
+	);
 
 	const handleCardClick = useCallback(
 		(term: Term) => {
@@ -545,26 +595,14 @@ export const TermsView = () => {
 			return { error: true, message: res.message ?? 'Failed to update term' };
 		}
 
-		setTerms((prev) =>
-			prev.map((term) =>
-				term.id === focusId
-					? {
-							...term,
-							name: res.data.name,
-							description: res.data.description,
-						}
-					: term,
-			),
-		);
+		patchTerm(focusId, { name: res.data.name, description: res.data.description });
 		setSqlAttrsEpoch((prev) => prev + 1);
 		return { error: false };
 	};
 
 	const applyTermCertification = (termId: string, certification: CertificationStatus | null) => {
 		if (certification == null) return;
-		setTerms((prev) =>
-			prev.map((term) => (term.id === termId ? { ...term, certification } : term)),
-		);
+		patchTerm(termId, { certification });
 	};
 
 	// Certification changes save immediately (independent of the text Save
@@ -580,18 +618,11 @@ export const TermsView = () => {
 			return;
 		}
 		setCertError(null);
-		setTerms((prev) =>
-			prev.map((term) =>
-				term.id === focusId
-					? {
-							...term,
-							name_certified: res.data.name_certified,
-							description_certified: res.data.description_certified,
-							certification: res.data.certification,
-						}
-					: term,
-			),
-		);
+		patchTerm(focusId, {
+			name_certified: res.data.name_certified,
+			description_certified: res.data.description_certified,
+			certification: res.data.certification,
+		});
 		setSqlAttrsEpoch((prev) => prev + 1);
 	};
 
@@ -934,6 +965,9 @@ export const TermsView = () => {
 		const term = res.data;
 		const termAttrs = attrsRes?.data ?? [];
 		const termSqlAttrs = sqlAttrsRes?.data ?? [];
+		// The header reads this when the term isn't on a page the list loaded,
+		// which is the normal case for a link straight into a term.
+		setFocusedTermDetail(term);
 		const relatedTerms = term.related_terms ?? [];
 		// Populate the sqlAttrs/columnAttrs caches from this term's own
 		// attributes (fetched per-term above) rather than a global list —
@@ -1050,7 +1084,10 @@ export const TermsView = () => {
 		};
 	}, []);
 
-	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
+	const listedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
+	const focusedTerm =
+		listedTerm ??
+		(focusId != null && focusedTermDetail?.id === focusId ? focusedTermDetail : null);
 	const focusedSqlAttr =
 		sqlAttrId != null ? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ?? null) : null;
 	const focusedColAttr =
@@ -1398,7 +1435,16 @@ export const TermsView = () => {
 				</h1>
 			</header>
 
-			<div className="flex-1 overflow-y-auto px-6 py-6">
+			<InfiniteScroll
+				className="flex-1 px-6 py-6"
+				onLoadMore={loadMoreTerms}
+				isLoading={loadingMoreTerms}
+				hasMore={hasMoreTerms}
+				// Only a failed *first* page is shown below — a failed later page
+				// keeps the cards already loaded and gets its own retry control
+				// instead (see `error` on `InfiniteScroll`).
+				error={terms.length > 0 ? error : null}
+			>
 				{hasLoadedTerms && (
 					<SearchInput
 						value={searchQuery}
@@ -1411,7 +1457,7 @@ export const TermsView = () => {
 
 				{loading && <TermsLoadingSkeleton />}
 
-				{!loading && error != null && (
+				{!loading && error != null && terms.length === 0 && (
 					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
 						<h2 className="text-lg font-semibold tracking-tight text-red-800 dark:text-red-300">
 							Couldn&apos;t load terms
@@ -1433,22 +1479,24 @@ export const TermsView = () => {
 					/>
 				)}
 
-				{!loading && error == null && terms.length > 0 && (
+				{!loading && terms.length > 0 && (
 					<ul className="flex flex-col gap-4">
 						{terms.map((term) => (
 							<TermCard
 								key={term.id}
 								term={term}
-								columnAttributeCount={columnAttrCountsMap.get(term.id) ?? 0}
-								sqlAttributeCount={sqlAttrCountsMap.get(term.id) ?? 0}
-								relatedCount={relatedCountsMap.get(term.id) ?? 0}
+								columnAttributeCount={
+									badgeCounts.columnAttributes.get(term.id) ?? 0
+								}
+								sqlAttributeCount={badgeCounts.sqlAttributes.get(term.id) ?? 0}
+								relatedCount={badgeCounts.related.get(term.id) ?? 0}
 								certificationStatus={term.certification}
 								onClick={handleCardClick}
 							/>
 						))}
 					</ul>
 				)}
-			</div>
+			</InfiniteScroll>
 		</div>
 	);
 };

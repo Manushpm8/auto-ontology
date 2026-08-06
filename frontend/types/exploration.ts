@@ -89,7 +89,22 @@ export type DataGraphNodeDto = {
 	columns_count: number;
 	sql_count: number;
 	terms_count: number;
+	relationship_count: number;
 	zones: TermZone[];
+};
+
+export type RelatedExplorationNodeDto = {
+	id: string;
+	name: string;
+	relationship_count: number;
+	table_type?: string;
+	database_id?: string;
+	schema_id?: string;
+};
+
+export type ExplorationRelationshipsPageDto = {
+	nodes: RelatedExplorationNodeDto[];
+	total: number;
 };
 
 export type SemanticExplorationGraph = {
@@ -129,4 +144,6 @@ export type TableExplorationDetails = {
 		name: string;
 		description: string | null;
 	}>;
+
+	terms_total: number;
 };

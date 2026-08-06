@@ -9,7 +9,7 @@ import type { ParsedTable, TableRow } from '@/lib/parseSqlResponse';
 import { EmptyState } from '@/common/EmptyState';
 import { Table } from '@/common/Table';
 import { EmptyStateVariant } from '@/enums/emptyState';
-import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
+import { usePagination } from '@/hooks/usePagination';
 import type { TableColumn } from '@/types/table';
 
 type DynamicTableProps = {
@@ -18,7 +18,10 @@ type DynamicTableProps = {
 
 export const DynamicTable = ({ table }: DynamicTableProps) => {
 	const { columns, rows } = table;
-	const { pageRows, pagination } = usePagination(rows, DEFAULT_PAGE_SIZE);
+	const { skip, pageSize, pagination } = usePagination({ totalItems: rows.length });
+	// A fresh array every render would re-render `Table` on every parent render,
+	// which chat result sets are large enough to feel.
+	const pageRows = useMemo(() => rows.slice(skip, skip + pageSize), [rows, skip, pageSize]);
 
 	const tableColumns = useMemo<TableColumn<TableRow>[]>(
 		() =>

@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Query
 
 from gsf.server.exploration import service
+from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
 
 router = APIRouter()
 
@@ -52,10 +55,34 @@ def get_data_exploration_graph(
 def get_table_exploration_details(
     table_id: str,
     zone_ids: list[str] | None = Query(default=None),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
 ) -> dict:
-    """Columns-adjacent SQL and Term details for Exploration modals."""
+    """Columns-adjacent SQL and one ordered page of Term details for an Exploration modal."""
     return {
-        "data": service.fetch_table_exploration_details(table_id, zone_ids=zone_ids)
+        "data": service.fetch_table_exploration_details(
+            table_id, zone_ids=zone_ids, skip=skip, limit=limit
+        )
+    }
+
+
+@router.get("/exploration/nodes/{node_id}/relationships")
+def get_exploration_node_relationships(
+    node_id: str,
+    layer: Literal["data", "semantic"],
+    zone_ids: list[str] | None = Query(default=None),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """Return one ordered page of zone-visible nodes related to ``node_id``."""
+    return {
+        "data": service.fetch_exploration_related_nodes(
+            node_id,
+            layer,
+            zone_ids=zone_ids,
+            skip=skip,
+            limit=limit,
+        )
     }
 
 

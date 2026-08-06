@@ -209,15 +209,7 @@ export const ExplorationView = () => {
 		() => graph.nodes.find((node) => node.id === relationshipsNodeId) ?? null,
 		[graph.nodes, relationshipsNodeId],
 	);
-	const relatedNodes = useMemo(() => {
-		if (relationshipsNodeId == null) return [];
-		const relatedIds = new Set<string>();
-		graph.links.forEach((link) => {
-			if (link.source === relationshipsNodeId) relatedIds.add(link.target);
-			if (link.target === relationshipsNodeId) relatedIds.add(link.source);
-		});
-		return graph.nodes.filter((node) => relatedIds.has(node.id));
-	}, [graph.links, graph.nodes, relationshipsNodeId]);
+	const graphNodeIds = useMemo(() => new Set(graph.nodes.map((node) => node.id)), [graph.nodes]);
 	const columnAttributesNode = useMemo(() => {
 		const found = graph.nodes.find((node) => node.id === columnAttributesNodeId) ?? null;
 		return found?.layer === ExplorationLayer.Semantic ? found : null;
@@ -444,9 +436,9 @@ export const ExplorationView = () => {
 			/>
 			<RelationshipsModal
 				node={relationshipsNode}
-				rows={relatedNodes}
 				onClose={() => setRelationshipsNodeId(null)}
 				onFocus={handleSelectNode}
+				focusableNodeIds={graphNodeIds}
 			/>
 			<DataDetailsModal
 				target={activeNode?.layer === ExplorationLayer.Data ? activeNode : null}

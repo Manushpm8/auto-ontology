@@ -23,7 +23,7 @@ import { SqlBlock } from '@/common/SqlBlock';
 import { Table } from '@/common/Table';
 import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
-import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
+import { usePagination } from '@/hooks/usePagination';
 import { Modal } from './Modal';
 
 export type DataDetailsType = 'columns' | 'queries' | 'terms';
@@ -48,35 +48,40 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 	const [details, setDetails] = useState<TableExplorationDetails>({
 		queries: [],
 		terms: [],
+		terms_total: 0,
 	});
+	const [columnsTotal, setColumnsTotal] = useState(0);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const columnsPage = usePagination(columns, DEFAULT_PAGE_SIZE, target?.id ?? null);
-	const termsPage = usePagination(details.terms, DEFAULT_PAGE_SIZE, target?.id ?? null);
+	// Columns are read a page at a time, so `columns` already holds one page.
+	const columnsPage = usePagination({
+		totalItems: columnsTotal,
+		resetKey: target?.id ?? null,
+	});
+	const { skip: columnsSkip, pageSize: columnsPageSize } = columnsPage;
+	// Terms are read from the server one page at a time.
+	const termsPage = usePagination({
+		totalItems: details.terms_total,
+		resetKey: target?.id ?? null,
+	});
 
 	useEffect(() => {
-		if (target == null || type == null) return undefined;
+		if (target == null || type !== 'columns') return undefined;
 		let cancelled = false;
 
 		const load = async () => {
 			setLoading(true);
 			setError(null);
-			if (type === 'columns') {
-				const response = await datasources.getColumnsForTable(target.id);
-				if (cancelled) return;
-				if (response.error) {
-					setError(response.message ?? 'Failed to load columns');
-				} else {
-					setColumns(response.data ?? []);
-				}
+			const response = await datasources.getColumnsForTable(target.id, {
+				skip: columnsSkip,
+				limit: columnsPageSize,
+			});
+			if (cancelled) return;
+			if (response.error) {
+				setError(response.message ?? 'Failed to load columns');
 			} else {
-				const response = await explorationApi.getTableExplorationDetails(target.id);
-				if (cancelled) return;
-				if (response.error) {
-					setError(response.message ?? 'Failed to load details');
-				} else {
-					setDetails(response.data);
-				}
+				setColumns(response.data ?? []);
+				setColumnsTotal(response.total ?? 0);
 			}
 			setLoading(false);
 		};
@@ -85,7 +90,33 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 		return () => {
 			cancelled = true;
 		};
-	}, [type, target]);
+	}, [target, type, columnsSkip, columnsPageSize]);
+
+	useEffect(() => {
+		if (target == null || type == null || type === 'columns') return undefined;
+		let cancelled = false;
+
+		const load = async () => {
+			setLoading(true);
+			setError(null);
+			const response = await explorationApi.getTableExplorationDetails(target.id, {
+				skip: termsPage.skip,
+				limit: termsPage.pageSize,
+			});
+			if (cancelled) return;
+			if (response.error) {
+				setError(response.message ?? 'Failed to load details');
+			} else {
+				setDetails(response.data);
+			}
+			setLoading(false);
+		};
+
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [type, target, termsPage.skip, termsPage.pageSize]);
 
 	const title = type === 'columns' ? 'Columns' : type === 'queries' ? 'SQL Queries' : 'Terms';
 
@@ -121,7 +152,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 			return (
 				<Table
 					columns={tableColumns}
-					rows={columnsPage.pageRows}
+					rows={columns}
 					rowKey={(row) => row.id}
 					pagination={columnsPage.pagination}
 					containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
@@ -173,7 +204,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 		return (
 			<Table
 				columns={termColumns}
-				rows={termsPage.pageRows}
+				rows={details.terms}
 				rowKey={(row) => row.id}
 				pagination={termsPage.pagination}
 				containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"

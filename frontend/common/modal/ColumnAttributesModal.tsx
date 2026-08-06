@@ -17,7 +17,7 @@ import { LabelList } from '@/common/SinglePageComposer';
 import { Table } from '@/common/Table';
 import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
-import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
+import { usePagination } from '@/hooks/usePagination';
 import { Modal } from './Modal';
 
 /** Minimal Term reference — decoupled from any specific page's node/row shape. */
@@ -33,24 +33,30 @@ type ColumnAttributesModalProps = {
 
 /** Generic modal listing a Term's attribute Columns. Reusable from any page that has a term id. */
 export const ColumnAttributesModal = ({ term, onClose }: ColumnAttributesModalProps) => {
+	const termId = term?.id ?? null;
 	const [attributes, setAttributes] = useState<ColumnAttribute[]>([]);
+	const [total, setTotal] = useState(0);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const { pageRows, pagination } = usePagination(attributes, DEFAULT_PAGE_SIZE, term?.id ?? null);
+	const { skip, pageSize, pagination } = usePagination({ totalItems: total, resetKey: termId });
 
 	useEffect(() => {
-		if (term == null) return undefined;
+		if (termId == null) return undefined;
 		let cancelled = false;
 
 		const load = async () => {
 			setLoading(true);
 			setError(null);
-			const response = await termsApi.getColumnAttributes(term.id);
+			const response = await termsApi.getColumnAttributes(termId, {
+				skip,
+				limit: pageSize,
+			});
 			if (cancelled) return;
 			if (response.error) {
 				setError(response.message ?? 'Failed to load attribute columns');
 			} else {
 				setAttributes(response.data ?? []);
+				setTotal(response.total ?? 0);
 			}
 			setLoading(false);
 		};
@@ -59,7 +65,7 @@ export const ColumnAttributesModal = ({ term, onClose }: ColumnAttributesModalPr
 		return () => {
 			cancelled = true;
 		};
-	}, [term]);
+	}, [termId, skip, pageSize]);
 
 	const columns: TableColumn<ColumnAttribute>[] = [
 		{
@@ -91,7 +97,7 @@ export const ColumnAttributesModal = ({ term, onClose }: ColumnAttributesModalPr
 				<div className="flex min-w-0 items-center gap-2">
 					<Icon name={IconName.Column} className="h-5 w-5 shrink-0 text-[#76b900]" />
 					<Text as="h2" variant={TextVariant.Heading}>
-						{term?.name} — Attribute Columns ({attributes.length})
+						{term?.name} — Attribute Columns ({total})
 					</Text>
 				</div>
 				<Button
@@ -115,7 +121,7 @@ export const ColumnAttributesModal = ({ term, onClose }: ColumnAttributesModalPr
 				) : (
 					<Table
 						columns={columns}
-						rows={pageRows}
+						rows={attributes}
 						rowKey={(row) => row.id}
 						pagination={pagination}
 						containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
