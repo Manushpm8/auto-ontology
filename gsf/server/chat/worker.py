@@ -119,7 +119,7 @@ def _worker_loop(
         if tag != _MSG_ASK:
             continue
 
-        question, prediction, target_dbsubject_token = payload
+        question, prediction, target_db, subject_token = payload
         try:
             # Per-user Databricks auth trades the prewarmed connectors for ones
             # bound to the caller's exchanged token. Databricks connectors open
@@ -131,7 +131,6 @@ def _worker_loop(
             else:
                 ask_connectors = connectors
 
-            question, prediction, target_db = payload
             # Connections are resolved from Neo4j once at worker init. If that
             # lookup came back empty — Neo4j not yet reachable when this
             # subprocess booted, or the first connection created afterwards —
@@ -144,7 +143,7 @@ def _worker_loop(
             if not connectors:
                 connectors = get_connectors()
             agent_payload = {
-                "question": payload,
+                "question": question,
                 "prediction": prediction,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
