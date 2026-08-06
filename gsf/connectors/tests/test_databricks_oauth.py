@@ -244,3 +244,57 @@ def test_set_sso_federation_unknown_database_raises(monkeypatch: MonkeyPatch) ->
 
     with pytest.raises(ValueError, match="No connection found"):
         service.set_sso_federation(database_name="nope", enabled=True)
+
+
+def test_rotated_subject_token_does_not_strand_the_old_entry(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The cache is keyed by a hash of the subject token, so a rotation lands on a new
+    key. Without pruning, the superseded entry would live for the process's lifetime and
+    the cache would grow with every rotation."""
+
+    def fake_post(_url: str, **_kwargs: Any) -> httpx.Response:
+        # Already expired once the margin is subtracted, so the next write prunes it.
+        return _response(200, {"access_token": "db-token", "expires_in": 0})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    databricks_oauth.exchange_subject_token("example.databricks.com", "sso-token-v1")
+    assert len(databricks_oauth._cache) == 1
+
+    # The same caller comes back with a rotated SSO token.
+    databricks_oauth.exchange_subject_token("example.databricks.com", "sso-token-v2")
+
+    assert len(databricks_oauth._cache) == 1, (
+        "the superseded entry should have been purged, not accumulated"
+    )
+
+
+def test_live_entries_survive_a_purge(monkeypatch: MonkeyPatch) -> None:
+    """Pruning must only drop expired entries — evicting live ones would force a
+    needless exchange on every query."""
+
+    def fake_post(_url: str, **_kwargs: Any) -> httpx.Response:
+        return _response(200, {"access_token": "db-token", "expires_in": 3600})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    databricks_oauth.exchange_subject_token("example.databricks.com", "caller-a")
+    databricks_oauth.exchange_subject_token("example.databricks.com", "caller-b")
+
+    # Two distinct, unexpired callers both remain cached.
+    assert len(databricks_oauth._cache) == 2
+
+
+def test_purge_expired_removes_only_lapsed_tokens() -> None:
+    databricks_oauth.clear_cache()
+    databricks_oauth._cache[("host", "live")] = databricks_oauth._CachedToken(
+        "t1", expires_at=1_000.0
+    )
+    databricks_oauth._cache[("host", "lapsed")] = databricks_oauth._CachedToken(
+        "t2", expires_at=10.0
+    )
+
+    databricks_oauth._purge_expired(now=100.0)
+
+    assert set(databricks_oauth._cache) == {("host", "live")}

@@ -98,6 +98,24 @@ def clear_cache() -> None:
         _cache.clear()
 
 
+def _purge_expired(now: float) -> None:
+    """Drop entries whose tokens have expired. Caller must hold ``_cache_lock``.
+
+    Entries are keyed by a hash of the *subject token*, so a caller whose SSO token
+    rotates lands on a new key and strands the old one. Nothing else removes entries —
+    an expired one is ignored and overwritten, never deleted — so without this the cache
+    grows with (workspaces x users x token rotations) for the life of the process.
+
+    Linear in the cache size, which is fine: exchanges happen about once per user per
+    token lifetime, and pruning keeps the size proportional to *active* callers.
+    """
+    expired = [key for key, token in _cache.items() if token.expires_at <= now]
+    for key in expired:
+        del _cache[key]
+    if expired:
+        logger.debug("Purged %d expired Databricks token(s) from cache", len(expired))
+
+
 def exchange_subject_token(host: str, subject_token: str) -> str:
     """Return a Databricks access token for *subject_token* on *host*.
 
@@ -168,8 +186,12 @@ def exchange_subject_token(host: str, subject_token: str) -> str:
         raise DatabricksOAuthError("Databricks token exchange returned an empty token")
 
     ttl = max(expires_in - _EXPIRY_MARGIN_S, 0.0)
+    # The exchange itself took real time, so measure against the clock now rather than
+    # the reading taken before the request went out.
+    stored_at = time.monotonic()
     with _cache_lock:
-        _cache[key] = _CachedToken(access_token, time.monotonic() + ttl)
+        _purge_expired(stored_at)
+        _cache[key] = _CachedToken(access_token, stored_at + ttl)
 
     logger.info(
         "Exchanged SSO token for Databricks access token on %s (ttl %.0fs)", host, ttl

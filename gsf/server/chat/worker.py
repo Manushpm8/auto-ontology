@@ -121,6 +121,22 @@ def _worker_loop(
 
         question, prediction, target_db, subject_token = payload
         try:
+            # Connections are resolved from Neo4j once at worker init. If that
+            # lookup came back empty — Neo4j not yet reachable when this
+            # subprocess booted, or the first connection created afterwards —
+            # the snapshot would stay empty for the life of the process and
+            # every question would fail with "missing required 'connectors'"
+            # until the pod restarted. Re-resolve lazily so the worker heals
+            # itself; get_connectors() caches a non-empty result and only
+            # retries while there is nothing to cache, so this costs nothing
+            # on the normal path.
+            #
+            # This has to run BEFORE ``ask_connectors`` is bound: binding first
+            # would capture the stale empty list, and rebinding ``connectors``
+            # here would not update it, leaving the healing ineffective.
+            if not connectors:
+                connectors = get_connectors()
+
             # Per-user Databricks auth trades the prewarmed connectors for ones
             # bound to the caller's exchanged token. Databricks connectors open
             # connections per operation, so rebuilding them here is cheap.
@@ -131,17 +147,6 @@ def _worker_loop(
             else:
                 ask_connectors = connectors
 
-            # Connections are resolved from Neo4j once at worker init. If that
-            # lookup came back empty — Neo4j not yet reachable when this
-            # subprocess booted, or the first connection created afterwards —
-            # the snapshot would stay empty for the life of the process and
-            # every question would fail with "missing required 'connectors'"
-            # until the pod restarted. Re-resolve lazily so the worker heals
-            # itself; get_connectors() caches a non-empty result and only
-            # retries while there is nothing to cache, so this costs nothing
-            # on the normal path.
-            if not connectors:
-                connectors = get_connectors()
             agent_payload = {
                 "question": question,
                 "prediction": prediction,
