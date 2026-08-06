@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # import time (which requires NVIDIA_API_KEY to be set).
 from concurrent.futures import ThreadPoolExecutor
 
-from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, expand_kg_with_children, _STUCK_PHRASES
+from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, expand_kg_with_children, _STUCK_PHRASES, should_inject_default_sort, _DEFAULT_SORT_HINT
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from .completeness import detect_incomplete_formulas
@@ -364,6 +364,9 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     evidence = _generate_evidence(session.working_question, combined_kg)
     if session._named_column_evidence:
         evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
+    if should_inject_default_sort(session.working_question, evidence):
+        evidence = "\n".join(filter(None, [evidence, _DEFAULT_SORT_HINT]))
+        logger.info("[%s] SQL gen — injected default DESC sort hint", session.task_id)
     if evidence:
         question = f"{question}\n\nEvidence: {evidence}"
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence[:200])

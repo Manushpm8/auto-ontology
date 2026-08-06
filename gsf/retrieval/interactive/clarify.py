@@ -43,7 +43,7 @@ User question: {question}
 Prior clarifications (Q&A):
 {history}
 
-Topics already asked about that went UNANSWERED (do NOT ask the exact same question again, but you MAY ask about the same concept from a different angle — e.g. ask for a definition instead of a column location):
+Topics already asked about that went UNANSWERED:
 {unanswered_topics}
 
 Terms not found in the database schema or external knowledge (ask the user to define these):
@@ -58,7 +58,7 @@ Formulas or conditions whose exact specification is still missing, ranked most-c
 STRICT RULES — follow every one of these exactly:
 1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', or 'schema'. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, or history: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
-3. Never re-ask about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED") — not even rephrased. You MAY ask follow-up questions on topics the user did answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
+3. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If turns remain AND no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 4. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
 5. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
 6. If anything else in the user's question seems unclear, you may ask about it - for example, ambiguous grouping term, thresholds, or normalization methods.
@@ -141,9 +141,38 @@ _SORT_DIRECTION = re.compile(
 )
 
 
+_LIMIT_TRIGGERS = re.compile(
+    r"\btop\s+\d+|bottom\s+\d+|first\s+\d+|last\s+\d+|"
+    r"most\s+\d+|least\s+\d+|\blimit\b|\brownum\b|fetch\s+first",
+    re.IGNORECASE,
+)
+
+_DEFAULT_SORT_HINT = (
+    "DefaultSort: when results include a computed score or metric and the question "
+    "does not suggest ascending order, prefer ORDER BY the primary output metric DESC. "
+    "The primary metric is the one most central to the query — typically the one used "
+    "in a filter condition or explicitly requested as the main output value. "
+    "If no single metric is clearly primary, do not add an ORDER BY."
+)
+
+
 def _ambiguous_sort_direction(question: str) -> bool:
     """True when the question implies sorting but doesn't specify direction."""
     return bool(_SORT_TRIGGERS.search(question)) and not bool(_SORT_DIRECTION.search(question))
+
+
+def should_inject_default_sort(question: str, evidence: str) -> bool:
+    """True when a DESC default hint should be appended to evidence.
+
+    Conditions (all must hold):
+    - Evidence contains a computed formula (proxy for an orderable metric existing)
+    - Question contains no LIMIT/TOP trigger (wrong default sort + LIMIT = wrong rows)
+    - Question contains no explicit sort direction signal (either ASC or DESC)
+    """
+    has_formula = bool(evidence) and "=" in evidence
+    has_limit = bool(_LIMIT_TRIGGERS.search(question))
+    has_direction = bool(_SORT_DIRECTION.search(question))
+    return has_formula and not has_limit and not has_direction
 
 
 _ARTICLES = frozenset(["a", "an", "the"])
@@ -333,17 +362,52 @@ def _filter_covered_by_external_knowledge(
                 # Always record which original term matched this entry, even if the
                 # entry is a duplicate (seen_names dedup below).
                 entry_to_original_terms.setdefault(match, []).append(term)
-            if match and match not in seen_names:
-                seen_names.add(match)
-                relevant_lines.append(kg_entries[match])
-                covered.add(term)  # confirmed: real KB entry exists
-                # Inject children of this matched parent (full text, no coverage LLM needed)
-                for child_text in norm_children_map.get(match, [])[:_MAX_CHILDREN_PER_PARENT]:
+            if match:
+                if match not in seen_names:
+                    seen_names.add(match)
+                    relevant_lines.append(kg_entries[match])
+                    covered.add(term)  # confirmed: real KB entry exists
+                # Inject children even if parent text was already added (dedup via seen_names
+                # prevents duplicate text, but grandchildren would be silently skipped if we
+                # only entered this block on first sight of the parent).
+                children = norm_children_map.get(match, [])[:_MAX_CHILDREN_PER_PARENT]
+                if children:
+                    logger.debug(
+                        "Clarify — KB entry %r has %d child(ren)", match, len(children)
+                    )
+                for child_text in children:
                     child_name = _norm_key(child_text.split("\n")[0].lstrip("- ").strip())
                     if child_name and child_name not in seen_names:
                         seen_names.add(child_name)
                         relevant_lines.append(child_text)
-                        logger.debug("Clarify — injected child KB entry: %r (parent: %r)", child_name, match)
+                        logger.debug(
+                            "Clarify — injected child KB entry: %r (parent: %r)",
+                            child_name, match,
+                        )
+                    # Inject grandchildren — covers 2-level KB hierarchies (e.g. PAR→CGPI→SPR).
+                    grandchildren = norm_children_map.get(child_name, [])[:_MAX_CHILDREN_PER_PARENT] if child_name else []
+                    if grandchildren:
+                        logger.debug(
+                            "Clarify — KB entry %r has %d grandchild(ren) via %r",
+                            child_name, len(grandchildren), match,
+                        )
+                    for gc_text in grandchildren:
+                        gc_name = _norm_key(gc_text.split("\n")[0].lstrip("- ").strip())
+                        if gc_name and gc_name not in seen_names:
+                            seen_names.add(gc_name)
+                            relevant_lines.append(gc_text)
+                            logger.debug(
+                                "Clarify — injected grandchild KB entry: %r (child: %r, parent: %r)",
+                                gc_name, child_name, match,
+                            )
+                        # Great-grandchildren not injected — warn if they exist so we know
+                        # to extend injection depth if KB hierarchies deepen.
+                        if gc_name and norm_children_map.get(gc_name):
+                            logger.warning(
+                                "Clarify — KB entry %r has children (great-grandchildren of %r) "
+                                "that are NOT injected — consider extending injection depth",
+                                gc_name, match,
+                            )
 
     relevant_kg_text = "\n".join(relevant_lines)
     logger.info("Clarify — external_kg covers: %s", covered or "none")
