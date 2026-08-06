@@ -181,8 +181,7 @@ def test_neighbourhood_memo_is_not_advanced_by_intermittent_gpu_faults() -> None
 
 
 _QUOTED_PQL = (
-    "PREDICT COUNT(ORDERS.*, 0, 30, days) = 0 "
-    "FOR EACH `My People`.`Customer ID`"
+    "PREDICT COUNT(ORDERS.*, 0, 30, days) = 0 FOR EACH `My People`.`Customer ID`"
 )
 
 

@@ -103,10 +103,9 @@ def quote_name(name: str) -> str:
         return name
     return f"`{name}`"
 
+
 _PREDICT_LINE_START = re.compile(r"(?im)^[ \t]*PREDICT\b")
-_QUALIFIED_IDENTIFIER = re.compile(
-    rf"(?P<table>{_IDENT})\.(?P<column>{_IDENT})"
-)
+_QUALIFIED_IDENTIFIER = re.compile(rf"(?P<table>{_IDENT})\.(?P<column>{_IDENT})")
 _GRAPH_TABLE_LINE = re.compile(
     rf"(?m)^(?P<table>{_IDENT}|[^(\r\n]+?)\((?P<columns>[^()]*)\)(?:\s+--.*)?$"
 )
@@ -147,9 +146,7 @@ _AGG_OPEN = re.compile(r"\b(COUNT|SUM|AVG|MIN|MAX|LIST_DISTINCT)\s*\(", re.IGNOR
 _TABLE_COL = re.compile(rf"({_IDENT})\s*\.\s*({_IDENT}|\*)")
 # The trailing ``, <start>, <end>, <unit>`` window args inside an aggregation (e.g. ``, 0, 90, days``).
 _WINDOW_TAIL = re.compile(r",\s*-?\d+\s*,\s*-?\d+\s*,\s*[A-Za-z]+\s*$")
-_REL_COMPARISON = re.compile(
-    rf"({_IDENT})\s*\.\s*({_IDENT})\s*(>=|<=|>|<(?!>))"
-)
+_REL_COMPARISON = re.compile(rf"({_IDENT})\s*\.\s*({_IDENT})\s*(>=|<=|>|<(?!>))")
 _NON_ORDINAL_STYPES = frozenset({"categorical", "multicategorical", "ID", "text"})
 
 
@@ -285,7 +282,8 @@ def validate_pql_static(
     if col_stypes:
         for tbl, col, op in _REL_COMPARISON.findall(text):
             stype = col_stypes.get(unquote_name(tbl).lower(), {}).get(
-                unquote_name(col).lower())
+                unquote_name(col).lower()
+            )
             if stype in _NON_ORDINAL_STYPES:
                 raise PqlStaticError(
                     f"'{tbl}.{col}' is a {stype} column and cannot be compared with '{op}'. Compare a "
@@ -1009,8 +1007,7 @@ def parse_entity(pql: str) -> tuple[str, str] | None:
     match = _FOR_ENTITY.search(pql)
     if match is None:
         return None
-    return (unquote_name(match.group("table")),
-            unquote_name(match.group("pk")))
+    return (unquote_name(match.group("table")), unquote_name(match.group("pk")))
 
 
 def _metric_stem(column: str) -> str:
@@ -1105,8 +1102,7 @@ def prefer_explicit_change_targets(
         )
         if not replacement:
             return match.group(0)
-        return (f"{agg}({table}.{quote_name(replacement)}, "
-                f"{start}, {end}, {unit})")
+        return f"{agg}({table}.{quote_name(replacement)}, {start}, {end}, {unit})"
 
     return _WINDOWED_AGG_TARGET.sub(repl, pql)
 
