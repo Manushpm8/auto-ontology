@@ -31,7 +31,27 @@ export type ConnectionFieldKey =
 	| 'database'
 	| 'protocol'
 	| 'schema'
+	| 'auth_mode'
+	| 'ssa_client_id'
+	| 'ssa_client_secret'
+	| 'databricks_client_id'
+	| 'ssa_token_url'
+	| 'ssa_scope'
+	| 'ssa_audience'
 	| 'sso_federation';
+
+/** How a Databricks connection obtains its access token. */
+export enum DatabricksAuthMode {
+	/** A stored personal access token, entered directly. */
+	TOKEN = 'token',
+	/** Minted on demand from NVIDIA SSA service-account credentials. */
+	SSA = 'ssa',
+}
+
+/** Defaults for the SSA flow, per the Kratos CI/CD guide. Editable per connection. */
+export const DEFAULT_SSA_TOKEN_URL =
+	'https://w6rojyggn16dpp37xuunjjnvczxdhjrkobq393rkkae.ssa.nvidia.com/token';
+export const DEFAULT_SSA_SCOPE = 'pipelines-write';
 
 export type ConnectionField = {
 	key: ConnectionFieldKey;
@@ -44,6 +64,17 @@ export type ConnectionField = {
 	testOnly?: boolean;
 	/** Rendered as a checkbox and sent as a boolean rather than a string. */
 	boolean?: boolean;
+	/** Rendered as a dropdown of these choices rather than a free-text input. */
+	choices?: { value: string; label: string }[];
+	/** Prefilled when the form opens; the user can still change it. */
+	defaultValue?: string;
+	/**
+	 * Only rendered when another field holds one of these values — used to reveal the
+	 * credential set that matches the chosen authentication mode. Hidden fields are
+	 * also exempt from the required-field check, so the other mode's inputs cannot
+	 * block Test/Create.
+	 */
+	visibleWhen?: { key: ConnectionFieldKey; values: string[] };
 	/** Helper text shown under the field. */
 	hint?: string;
 };
@@ -61,7 +92,63 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 			label: 'HTTP path',
 			placeholder: '/sql/1.0/warehouses/a1b234c567d8e9fa',
 		},
-		{ key: 'password', label: 'Access token', secret: true },
+		{
+			key: 'auth_mode',
+			label: 'Authentication',
+			choices: [
+				{ value: DatabricksAuthMode.TOKEN, label: 'Access token' },
+				{ value: DatabricksAuthMode.SSA, label: 'Service account (SSA)' },
+			],
+			defaultValue: DatabricksAuthMode.TOKEN,
+			hint: 'A stored access token, or NVIDIA SSA service-account credentials that mint a short-lived token on demand.',
+		},
+		{
+			key: 'password',
+			label: 'Access token',
+			secret: true,
+			visibleWhen: { key: 'auth_mode', values: [DatabricksAuthMode.TOKEN] },
+		},
+		{
+			key: 'ssa_client_id',
+			label: 'SSA client ID',
+			placeholder: 'nvssa-prd-…',
+			hint: 'Issued by the Kratos team when the service account is registered.',
+			visibleWhen: { key: 'auth_mode', values: [DatabricksAuthMode.SSA] },
+		},
+		{
+			key: 'ssa_client_secret',
+			label: 'SSA client secret',
+			placeholder: 'ssap-…',
+			secret: true,
+			visibleWhen: { key: 'auth_mode', values: [DatabricksAuthMode.SSA] },
+		},
+		{
+			key: 'databricks_client_id',
+			label: 'Databricks client ID',
+			hint: 'Shared by the Kratos team after registration; identifies the workspace application the SSA token is exchanged for.',
+			visibleWhen: { key: 'auth_mode', values: [DatabricksAuthMode.SSA] },
+		},
+		{
+			key: 'ssa_token_url',
+			label: 'SSA token URL',
+			defaultValue: DEFAULT_SSA_TOKEN_URL,
+			optional: true,
+			visibleWhen: { key: 'auth_mode', values: [DatabricksAuthMode.SSA] },
+		},
+		{
+			key: 'ssa_scope',
+			label: 'SSA scope',
+			defaultValue: DEFAULT_SSA_SCOPE,
+			optional: true,
+			visibleWhen: { key: 'auth_mode', values: [DatabricksAuthMode.SSA] },
+		},
+		{
+			key: 'ssa_audience',
+			label: 'SSA audience',
+			placeholder: 'Leave empty unless your workspace requires one',
+			optional: true,
+			visibleWhen: { key: 'auth_mode', values: [DatabricksAuthMode.SSA] },
+		},
 		{ key: 'database', label: 'Catalog', placeholder: 'main' },
 		{
 			key: 'schema',

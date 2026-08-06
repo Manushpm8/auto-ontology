@@ -28,7 +28,7 @@ def _connection_string(token: str = "secret") -> str:
 
 
 def test_parse_connection_string() -> None:
-    kwargs, catalog, auth_mode = _parse_connection_string(
+    kwargs, catalog, auth_mode, _ssa = _parse_connection_string(
         _connection_string("secret/with@chars")
     )
 
@@ -182,7 +182,7 @@ def test_live_databricks_connector_end_to_end() -> None:
 
 
 def test_parse_connection_string_marks_sso_federation() -> None:
-    _kwargs, _catalog, auth_mode = _parse_connection_string(
+    _kwargs, _catalog, auth_mode, _ssa = _parse_connection_string(
         _connection_string() + "&auth=sso"
     )
 

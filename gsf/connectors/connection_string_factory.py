@@ -14,6 +14,11 @@ from __future__ import annotations
 from typing import Any, Mapping
 from urllib.parse import quote
 
+# Stand-in for the password of an SSA-authenticated Databricks connection, which stores
+# no token: the connector mints a short-lived one per use. The URL grammar requires a
+# non-empty password, so this marks the slot as "resolve at connect time".
+_SSA_TOKEN_PLACEHOLDER = "ssa"
+
 DEFAULT_POSTGRES_PORT = "5432"
 DEFAULT_HEAVYDB_PORT = "6274"
 DEFAULT_HEAVYDB_PROTOCOL = "binary"
@@ -61,13 +66,21 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         if host.startswith(("https://", "http://")):
             host = host.split("://", 1)[1]
         http_path = _require(connection, "http_path")
+        from gsf.connectors.databricks_ssa import SSA_FIELDS, uses_ssa
+
         # ``access_token_override`` carries a Databricks token exchanged from the
         # caller's SSO identity, so the query runs with that user's privileges
         # instead of the connection's stored PAT.
         access_token = str(connection.get("access_token_override") or "").strip()
         federated = bool(access_token)
+        ssa = not federated and uses_ssa(connection)
         if not access_token:
-            access_token = _require(connection, "password")
+            # An SSA connection stores no token at all — the connector mints a
+            # short-lived one per use — so the URL carries a placeholder in the
+            # password position, which the connector replaces before connecting.
+            access_token = (
+                _SSA_TOKEN_PLACEHOLDER if ssa else _require(connection, "password")
+            )
         catalog = _require(connection, "database")
         url = (
             f"databricks://token:{_enc(access_token)}@{host}/{_enc(catalog)}"
@@ -77,6 +90,14 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         # connector logs this alongside every statement it runs.
         if federated:
             url += "&auth=sso"
+        # SSA service-account credentials, when the connection mints its token instead
+        # of storing a PAT. Carried on the URL like every other connector setting; the
+        # connector mints (and refreshes) the token itself — see databricks_ssa.
+        if ssa:
+            for field in SSA_FIELDS:
+                value = str(connection.get(field) or "").strip()
+                if value:
+                    url += f"&{field}={_enc(value)}"
         return url
 
     if conn_type == "heavydb":

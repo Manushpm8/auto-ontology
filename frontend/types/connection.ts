@@ -2,14 +2,29 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectionType } from '@/enums/connection';
+import { ConnectionType, type DatabricksAuthMode } from '@/enums/connection';
 
 export type DatabricksConnectionParams = {
 	type: ConnectionType.DATABRICKS;
 	host: string;
 	http_path: string;
-	password: string;
 	database: string;
+	/**
+	 * How the connection obtains its Databricks token. `token` stores the PAT below;
+	 * `ssa` stores service-account credentials and mints a short-lived token per use.
+	 */
+	auth_mode?: DatabricksAuthMode;
+	/** Stored personal access token. Present in `token` mode only. */
+	password?: string;
+	/** NVIDIA SSA service account, in `ssa` mode. Client id looks like `nvssa-prd-…`. */
+	ssa_client_id?: string;
+	ssa_client_secret?: string;
+	/** Workspace application id the SSA token is exchanged for, issued by Kratos. */
+	databricks_client_id?: string;
+	/** Endpoint/scope/audience for the exchange; defaulted, overridable per connection. */
+	ssa_token_url?: string;
+	ssa_scope?: string;
+	ssa_audience?: string;
 	/** Optional ingestion allowlist: only these schemas are ingested. Empty/absent = all. */
 	schemas?: string[];
 	/**

@@ -57,16 +57,34 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 	// `testOnly` fields (the Databricks schema filter) shape the connection test
 	// but must not end up on the stored connection, so they are dropped unless
 	// the payload is headed for the test endpoint.
+	// A field gated on another field's value (the Databricks credential sets) only
+	// counts when that value matches: the hidden mode's inputs must neither be
+	// submitted nor block Test/Create.
+	const isVisible = useCallback(
+		(field: (typeof CONNECTION_FIELDS)[ConnectionType][number]) =>
+			field.visibleWhen == null ||
+			field.visibleWhen.values.includes(values[field.visibleWhen.key] ?? ''),
+		[values],
+	);
+
+	// Untouched fields fall back to their default, so the SSA endpoint/scope are sent
+	// as shown on the form rather than as empty strings.
+	const valueOf = useCallback(
+		(field: (typeof CONNECTION_FIELDS)[ConnectionType][number]) =>
+			(values[field.key] ?? field.defaultValue ?? '').trim(),
+		[values],
+	);
+
 	const buildConnection = useCallback(
 		({ forTest = false }: { forTest?: boolean } = {}): ConnectionInput => {
 			const fields = CONNECTION_FIELDS[connectionType].filter(
-				(field) => forTest || !field.testOnly,
+				(field) => (forTest || !field.testOnly) && isVisible(field),
 			);
 			const entries = fields.map((field) => [
 				field.key,
 				// Checkbox fields go over the wire as real booleans; the form
 				// stores them as 'true'/'' like every other value.
-				field.boolean ? values[field.key] === 'true' : (values[field.key] ?? '').trim(),
+				field.boolean ? values[field.key] === 'true' : valueOf(field),
 			]);
 			const base = { type: connectionType, ...Object.fromEntries(entries) };
 			if (supportsSchemaSelection) {
@@ -80,15 +98,23 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 			}
 			return base as ConnectionInput;
 		},
-		[connectionType, values, supportsSchemaSelection, selectedSchemas, explicitSchema],
+		[
+			connectionType,
+			values,
+			supportsSchemaSelection,
+			selectedSchemas,
+			explicitSchema,
+			isVisible,
+			valueOf,
+		],
 	);
 
 	const fieldsComplete = useMemo(
 		() =>
 			CONNECTION_FIELDS[connectionType].every(
-				(field) => field.optional || (values[field.key] ?? '').trim().length > 0,
+				(field) => field.optional || !isVisible(field) || valueOf(field).length > 0,
 			),
-		[connectionType, values],
+		[connectionType, isVisible, valueOf],
 	);
 
 	const canContinue = activeStep === 0 ? false : fieldsComplete;

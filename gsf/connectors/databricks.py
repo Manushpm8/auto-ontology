@@ -34,6 +34,7 @@ logging.getLogger("databricks.sql").setLevel(logging.WARNING)
 # token, so the query carries that user's own Unity Catalog grants.
 AUTH_SSO_FEDERATION = "the signed-in user (SSO federation)"
 AUTH_STORED_TOKEN = "the stored access token"
+AUTH_SSA_SERVICE_ACCOUNT = "an SSA service account"
 
 
 def _quoted_identifier(name: str) -> str:
@@ -68,12 +69,13 @@ def _split_qualified(reference: str) -> tuple[str, str]:
 
 def _parse_connection_string(
     connection_string: str,
-) -> tuple[dict[str, Any], str, str]:
-    """Parse a Databricks URL into connector kwargs, catalog, and auth mode.
+) -> tuple[dict[str, Any], str, str, dict[str, str]]:
+    """Parse a Databricks URL into kwargs, catalog, auth mode, and SSA config.
 
     Expected format::
 
-        databricks://token:ACCESS_TOKEN@HOST/CATALOG?http_path=SQL_HTTP_PATH[&auth=sso]
+        databricks://token:ACCESS_TOKEN@HOST/CATALOG?http_path=SQL_HTTP_PATH
+            [&auth=sso][&ssa_client_id=...&ssa_client_secret=...&databricks_client_id=...]
     """
     parsed = urlparse(connection_string)
     if parsed.scheme.split("+", 1)[0].lower() != "databricks":
@@ -111,6 +113,18 @@ def _parse_connection_string(
         else AUTH_STORED_TOKEN
     )
 
+    # SSA service-account credentials, when the connection mints its Databricks token
+    # instead of storing one. Absent for PAT and per-user SSO connections.
+    from gsf.connectors.databricks_ssa import SSA_FIELDS
+
+    ssa_config = {
+        field: unquote(query.get(field, [""])[0]).strip()
+        for field in SSA_FIELDS
+        if unquote(query.get(field, [""])[0]).strip()
+    }
+    if ssa_config:
+        auth_mode = AUTH_SSA_SERVICE_ACCOUNT
+
     return (
         {
             "server_hostname": parsed.hostname,
@@ -125,6 +139,7 @@ def _parse_connection_string(
         },
         catalog,
         auth_mode,
+        ssa_config,
     )
 
 
@@ -144,6 +159,7 @@ class DatabricksDatabase(SQLDatabase):
             self._connect_kwargs,
             self._database_name,
             self._auth_mode,
+            self._ssa_config,
         ) = _parse_connection_string(connection_string)
         self._schema_filter: set[str] | None = (
             {schema.casefold() for schema in schemas if schema.strip()}
@@ -199,7 +215,11 @@ class DatabricksDatabase(SQLDatabase):
             # Already inside a block; the outermost one owns the connection.
             yield
             return
-        connection = sql.connect(**self._connect_kwargs)
+        kwargs = dict(self._connect_kwargs)
+        ssa_token = self._resolve_access_token()
+        if ssa_token:
+            kwargs["access_token"] = ssa_token
+        connection = sql.connect(**kwargs)
         self._shared_connection = connection
         try:
             yield
@@ -212,6 +232,37 @@ class DatabricksDatabase(SQLDatabase):
                     "databricks: shared connection close failed", exc_info=True
                 )
 
+    def _resolve_access_token(self) -> str | None:
+        """The token to connect with, minted now for SSA connections.
+
+        An SSA connection stores no token: the URL carries the service-account
+        credentials and a placeholder in the password slot, and a short-lived Databricks
+        token is minted per use (cached until shortly before expiry). Resolving it here
+        rather than at construction means a long-lived connector refreshes the token
+        instead of holding one until it lapses.
+
+        Returns ``None`` for PAT and per-user SSO connections, whose token is already in
+        ``_connect_kwargs``.
+        """
+        if not self._ssa_config:
+            return None
+
+        from gsf.connectors.databricks_ssa import (
+            DEFAULT_SSA_SCOPE,
+            DEFAULT_SSA_TOKEN_URL,
+            get_access_token,
+        )
+
+        return get_access_token(
+            host=str(self._connect_kwargs.get("server_hostname") or ""),
+            client_id=self._ssa_config.get("ssa_client_id", ""),
+            client_secret=self._ssa_config.get("ssa_client_secret", ""),
+            databricks_client_id=self._ssa_config.get("databricks_client_id", ""),
+            token_url=self._ssa_config.get("ssa_token_url") or DEFAULT_SSA_TOKEN_URL,
+            scope=self._ssa_config.get("ssa_scope") or DEFAULT_SSA_SCOPE,
+            audience=self._ssa_config.get("ssa_audience", ""),
+        )
+
     @contextmanager
     def _connect(self, timeout_s: int | None = None) -> Iterator[Connection]:
         # Inside reuse_connection, statements share that connection and must not close
@@ -221,6 +272,9 @@ class DatabricksDatabase(SQLDatabase):
             return
 
         kwargs = dict(self._connect_kwargs)
+        ssa_token = self._resolve_access_token()
+        if ssa_token:
+            kwargs["access_token"] = ssa_token
         if timeout_s is not None:
             # Server-side cap: Databricks cancels the statement itself and
             # returns an error, so a runaway query cannot pin the caller.
