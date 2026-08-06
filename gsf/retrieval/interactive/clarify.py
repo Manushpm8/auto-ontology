@@ -4,17 +4,21 @@ import logging
 import re
 import time
 import unicodedata
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, TYPE_CHECKING
 
 import requests
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage
 
-from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionModel
-from gsf.retrieval.text_to_sql.prompts import create_entity_extraction_prompt
-from gsf.retrieval.data_access.semantic_search import search_semantic_index
-from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
-from gsf.utils.llm_invoke import get_non_reasoning_llm_client, invoke_with_structured_output, safe_invoke_text, LLM_INVOKE_TIMEOUT_S, RETRY_MAX_ATTEMPTS
+from gsf.retrieval.entity_coverage.graph import create_graph as _create_entity_coverage_graph
+from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client, safe_invoke_text, RETRY_MAX_ATTEMPTS
+
+# Distance threshold for VDB resolution: entity score must be <= this value with
+# no ambiguous second hit to count as "found in schema". Lower = stricter.
+# Main uses DEFAULT_MAX_DISTANCE=0.75; we keep 0.65 until we have benchmarks to compare.
+CLARIFY_MAX_DISTANCE: float = 0.65
+
+# Compiled entity-coverage LangGraph — shared across calls, compiled once at import.
+_ec_app = _create_entity_coverage_graph().compile()
 
 if TYPE_CHECKING:
     from .state import InteractiveSessionState
@@ -512,6 +516,91 @@ def expand_kg_with_children(formatted_kg: str, children_map: dict[str, list[str]
     return formatted_kg + "\n" + "\n".join(extra)
 
 
+# Generic standalone tokens that reliably produce false-positive VDB matches via
+# substring coincidence (e.g. "id" → "idle power"). The new extraction prompt also
+# instructs the LLM to omit these, but a runtime guard is kept as a safety net.
+# Compound entities like "customer id" are multi-token and pass through normally.
+_GENERIC_STANDALONE = frozenset({
+    "id", "ids", "key", "keys", "value", "values",
+    "code", "codes", "type", "types",
+})
+
+
+def _run_entity_coverage_pipeline(
+    question: str,
+    semantic_retriever: object,
+    db_name: str | None,
+) -> dict:
+    """Invoke the entity-coverage LangGraph and return its final path_state.
+
+    Uses the reasoning LLM (state["llm"]) for extraction per main's decision.
+    Returns an empty dict on any failure so callers degrade gracefully.
+    """
+    try:
+        llm = get_llm_client()
+    except Exception as exc:
+        logger.error("Clarify — could not init reasoning LLM for entity coverage: %s", exc)
+        return {}
+
+    path_state: dict = {
+        "max_distance": CLARIFY_MAX_DISTANCE,
+        "return_uncovered_entities": True,
+    }
+    if db_name:
+        path_state["target_db"] = db_name
+
+    state = {
+        "llm": llm,
+        "initial_question": question,
+        "messages": [HumanMessage(content=question)],
+        "path_state": path_state,
+        "semantic_retriever": semantic_retriever,
+        "decision": "",
+        "domain_rules": [],
+        # data_retriever and connectors are not used by the 3-node entity-coverage
+        # graph (question_extraction → retrieve_candidates → coverage_grade) but are
+        # present in AgentState; we omit them and bypass _build_state intentionally.
+    }
+    try:
+        final_state = _ec_app.invoke(state, config={"recursion_limit": 10})
+        return final_state.get("path_state", {})
+    except Exception as exc:
+        logger.error("Clarify — entity-coverage pipeline failed: %s", exc)
+        return {}
+
+
+def _ambiguity_check(
+    path_state: dict,
+) -> set[str]:
+    """Return entity strings whose column-attribute hits are ambiguous.
+
+    An entity is ambiguous when it retrieved 2+ column-attribute hits that both
+    fall within CLARIFY_MAX_DISTANCE, meaning the VDB cannot single out one column.
+    These are demoted to unresolvable even if CoverageGradeAgent counted them covered.
+    """
+    hits: list[dict] = path_state.get("retrieved_column_attributes") or []
+    # Group best score and second-best score per query_entity.
+    best: dict[str, float] = {}
+    second: dict[str, float] = {}
+    for hit in hits:
+        score = hit.get("score")
+        if score is None:
+            continue
+        score = float(score)
+        if score > CLARIFY_MAX_DISTANCE:
+            continue
+        for entity in (hit.get("query_entities") or ([hit["query_entity"]] if hit.get("query_entity") else [])):
+            if entity not in best or score < best[entity]:
+                second[entity] = best.get(entity, float("inf"))
+                best[entity] = score
+            elif entity not in second or score < second[entity]:
+                second[entity] = score
+    ambiguous = {e for e, s in second.items() if s <= CLARIFY_MAX_DISTANCE}
+    if ambiguous:
+        logger.info("Clarify — ambiguous entities (2+ close VDB hits): %s", ambiguous)
+    return ambiguous
+
+
 def _find_unresolvable_entities(
     question: str,
     semantic_retriever: object,
@@ -521,103 +610,110 @@ def _find_unresolvable_entities(
 ) -> tuple[list[tuple[str, str | None]], list[tuple[str, str, float]], str, set[str], dict[str, list[str]]]:
     """Return (unresolvable_entities, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms).
 
-    KB check runs first so entities covered by external knowledge are never
-    sent to the VDB. relevant_kg_text is '' when nothing is covered.
-    resolved_hits contains (entity, hit_text, score) for entities found in the
-    schema (score <= 0.65); the caller uses score <= 0.63 for evidence generation.
-    entry_to_original_terms maps each confirmed KB entry name to the original
-    natural-language terms that matched it (for cumulative_grounded_kg annotation).
+    Flow:
+      1. Entity-coverage pipeline (reasoning LLM): extracts entities + runs VDB for all
+         of them against column attributes, SQL attributes, and custom analyses.
+      2. Ambiguity check: any entity with 2+ column-attribute hits within CLARIFY_MAX_DISTANCE
+         is demoted to unresolvable regardless of coverage grade.
+      3. KB check on ALL extracted entities (not just VDB-uncovered): populates
+         relevant_kg_text for the prompt and identifies KB-covered entities.
+      4. Final unresolvable = (VDB-uncovered ∪ ambiguous) − KB-covered.
+
+    resolved_hits contains (entity, hit_text, score) for entities cleanly resolved
+    by VDB (score <= CLARIFY_MAX_DISTANCE, unambiguous); the caller uses score <= 0.63
+    for evidence generation. entry_to_original_terms maps each confirmed KB entry name
+    to the original natural-language terms that matched it (for cumulative_grounded_kg).
     """
-    try:
-        extraction_llm = get_non_reasoning_llm_client()
-        messages = [SystemMessage(content=create_entity_extraction_prompt(question))]
-        result = invoke_with_structured_output(extraction_llm, messages, EntitiesExtractionModel)
-        if result is None:
-            return [], [], "", set(), {}
-        entities = [e.strip() for e in (result.required_entity_name or []) if e.strip()]
-    except Exception:
+    if semantic_retriever is None:
         return [], [], "", set(), {}
 
-    if not entities or semantic_retriever is None:
+    # --- Step 1: run entity-coverage pipeline ---
+    ec_path_state = _run_entity_coverage_pipeline(question, semantic_retriever, db_name)
+    if not ec_path_state:
         return [], [], "", set(), {}
 
-    # Normalize (strip filler/structural words) and deduplicate before any search.
-    # "median signal quality" and "signal quality" both → "signal quality" (one search).
+    raw_entities: list[str] = list(ec_path_state.get("entities") or [])
+    if not raw_entities:
+        return [], [], "", set(), {}
+
+    # Normalize and deduplicate for consistent downstream handling.
+    # "median signal quality" and "signal quality" both → "signal quality" (one entry).
     norm_to_original: dict[str, str] = {}
-    for entity in entities:
+    for entity in raw_entities:
         norm = _normalize_entity(entity)
         if norm and norm not in norm_to_original:
             norm_to_original[norm] = entity
-    # Drop entities whose normalized form is a strict substring of another entity in the batch
+    # Drop entities whose normalized form is a strict substring of another in the batch.
     # e.g. "condition" ⊂ "atmospheric conditions" → drop; "signal dynamics" ⊄ "signal quality" → keep both
     all_norms = set(norm_to_original.keys())
-    search_entities = [e for e in all_norms if not any(e != o and e in o for o in all_norms)]
-    logger.info("Clarify — normalized entities: %s", search_entities)
+    search_norms = {e for e in all_norms if not any(e != o and e in o for o in all_norms)}
+    logger.info("Clarify — extracted entities (normalized): %s", sorted(search_norms))
 
-    # KB check before VDB — no need to score terms external knowledge already explains.
-    # Use original entity names for KB matching (e.g. "bandwidth ratio" matches
-    # "Bandwidth-Frequency Ratio (BFR)") but keep normalized names for VDB column search.
+    # Strip generic standalone tokens — the prompt already excludes them but LLMs
+    # occasionally emit them; a second VDB hit on "id" or "type" would be misleading.
+    generic_skipped = search_norms & _GENERIC_STANDALONE
+    if generic_skipped:
+        logger.info("Clarify — dropping generic standalone terms: %s", generic_skipped)
+    search_norms -= generic_skipped
+
+    # --- Step 2: ambiguity check on column-attribute hits ---
+    ambiguous_entities = _ambiguity_check(ec_path_state)
+
+    # Build VDB-uncovered set: entities the pipeline marked uncovered + ambiguous ones.
+    vdb_uncovered: set[str] = set(ec_path_state.get("uncovered_entities") or [])
+    # Normalize uncovered_entities to match our norm keys (pipeline emits raw strings).
+    vdb_uncovered_norms: set[str] = set()
+    for raw in vdb_uncovered:
+        norm = _normalize_entity(raw)
+        if norm:
+            vdb_uncovered_norms.add(norm)
+        else:
+            vdb_uncovered_norms.add(raw.lower().strip())
+    # Merge in ambiguous entities (they came back "covered" by score but are not reliable).
+    needs_kb_rescue = vdb_uncovered_norms | (ambiguous_entities & search_norms)
+
+    # Build resolved_hits from entities cleanly covered at VDB (unambiguous, within threshold).
+    # The pipeline stores per-entity best hit in retrieved_column_attributes; reconstruct here.
+    resolved_hits: list[tuple[str, str, float]] = []
+    col_hits: list[dict] = ec_path_state.get("retrieved_column_attributes") or []
+    best_hit_per_entity: dict[str, dict] = {}
+    for hit in col_hits:
+        score = hit.get("score")
+        if score is None or float(score) > CLARIFY_MAX_DISTANCE:
+            continue
+        for entity in (hit.get("query_entities") or ([hit["query_entity"]] if hit.get("query_entity") else [])):
+            if entity not in best_hit_per_entity or float(score) < float(best_hit_per_entity[entity].get("score", float("inf"))):
+                best_hit_per_entity[entity] = hit
+    for entity, hit in best_hit_per_entity.items():
+        norm = _normalize_entity(entity) or entity.lower().strip()
+        if norm not in needs_kb_rescue and norm in search_norms:
+            resolved_hits.append((norm, hit.get("text") or "", float(hit.get("score", 1.0))))
+
+    # --- Step 3: KB check on ALL extracted entities ---
+    # Run on all search_norms (not just uncovered) so relevant_kg_text is complete
+    # and entities explained by KB don't end up in the unresolvable list.
     relevant_kg_text = ""
     entry_to_original_terms: dict[str, list[str]] = {}
-    if formatted_kg and search_entities:
-        kb_entities = [norm_to_original.get(norm, norm) for norm in search_entities]
-        orig_lower_to_norm = {norm_to_original.get(n, n).lower(): n for n in search_entities}
-        covered_originals, relevant_kg_text, entry_to_original_terms = _filter_covered_by_external_knowledge(kb_entities, formatted_kg, question, children_map)
-        covered_norms = {orig_lower_to_norm.get(orig, orig) for orig in covered_originals}
-        search_entities = [e for e in search_entities if e not in covered_norms]
-        logger.info("Clarify — after KB filter, sending to VDB: %s", search_entities or "none")
+    kb_covered_norms: set[str] = set()
+    if formatted_kg and search_norms:
+        kb_entities = [norm_to_original.get(norm, norm) for norm in search_norms]
+        orig_lower_to_norm = {norm_to_original.get(n, n).lower(): n for n in search_norms}
+        covered_originals, relevant_kg_text, entry_to_original_terms = _filter_covered_by_external_knowledge(
+            kb_entities, formatted_kg, question, children_map
+        )
+        kb_covered_norms = {orig_lower_to_norm.get(orig, orig) for orig in covered_originals}
+        logger.info("Clarify — KB covers: %s", kb_covered_norms or "none")
 
-    if not search_entities:
-        return [], [], relevant_kg_text, all_norms, entry_to_original_terms
+    # --- Step 4: final unresolvable = (VDB-uncovered ∪ ambiguous) − KB-covered ---
+    final_unresolvable_norms = needs_kb_rescue - kb_covered_norms
+    # Also mark generics as unresolvable (they were never sent to VDB).
+    final_unresolvable_norms |= {_normalize_entity(e) or e for e in generic_skipped}
 
-    # Standalone generic terms (single token, no domain meaning) reliably produce
-    # false-positive VDB matches via substring coincidence (e.g. "id" → "idle power").
-    # Compound entities like "customer id" are multi-token and pass through normally.
-    _GENERIC_STANDALONE = frozenset({
-        "id", "ids", "key", "keys", "value", "values",
-        "code", "codes", "type", "types",
-    })
-    vdb_entities = [e for e in search_entities if e not in _GENERIC_STANDALONE]
-    skipped = [e for e in search_entities if e in _GENERIC_STANDALONE]
-    if skipped:
-        logger.info("Clarify — skipping VDB for generic standalone terms: %s", skipped)
-    unresolvable: list[tuple[str, str | None]] = [(e, None) for e in skipped]
-    resolved_hits: list[tuple[str, str, float]] = []  # (entity, hit_text, score)
+    unresolvable: list[tuple[str, str | None]] = [
+        (norm, None) for norm in final_unresolvable_norms
+    ]
 
-    if not vdb_entities:
-        return unresolvable, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms
-
-    with ThreadPoolExecutor(max_workers=len(vdb_entities)) as pool:
-        futures = {
-            pool.submit(
-                search_semantic_index,
-                semantic_retriever,
-                norm,
-                [LABEL_COLUMN_ATTRIBUTE],
-                2,
-                db_name,
-            ): norm
-            for norm in vdb_entities
-        }
-        for future in as_completed(futures):
-            norm = futures[future]
-            try:
-                hits = future.result()
-                best_score = hits[0].get("score") if hits else None
-                top_text = hits[0].get("text") if hits else None
-                second_score = hits[1].get("score") if len(hits) >= 2 else None
-                logger.info("Clarify — entity %r: %d hit(s), best score=%s, top hit=%s", norm, len(hits), best_score, top_text)
-                ambiguous = second_score is not None and second_score <= 0.65
-                if not hits or best_score is None or best_score > 0.65 or ambiguous:
-                    if ambiguous:
-                        logger.info("Clarify — entity %r: ambiguous (2nd hit score=%s), treating as unresolvable", norm, second_score)
-                    unresolvable.append((norm, top_text))
-                else:
-                    resolved_hits.append((norm, top_text or "", best_score))
-            except Exception:
-                pass
-
-    logger.info("Clarify — unresolvable after VDB: %s", [e for e, _ in unresolvable] or "none")
+    logger.info("Clarify — unresolvable after VDB+KB: %s", [e for e, _ in unresolvable] or "none")
     logger.info("Clarify — resolved by VDB: %s", [(e, f"{s:.3f}") for e, _, s in resolved_hits] or "none")
     return unresolvable, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms
 
