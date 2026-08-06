@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
@@ -52,7 +51,6 @@ class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
     llm: ChatNVIDIA
-    non_reasoning_llm: NotRequired[BaseChatModel]
     initial_question: str
     messages: list[HumanMessage]
     decision: str

@@ -2,12 +2,15 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Orchestration for ``text-to-data`` / ``text-to-pql`` — the text → data / PQL flows.
+"""Orchestration for ``text-to-data`` / ``text-to-pql`` / ``question-entity-coverage``.
 
 Reuses the front of the text-to-SQL prediction pipeline in-process: it runs the
 graph up to ``prepare_candidates`` to gather the data objects (relevant tables,
 join paths, columns), then — for ``text_to_pql`` — reuses the ``prepare_prediction_graph``
 node to build the KumoRFM context and generates the PQL WITHOUT running inference.
+
+``entity_coverage`` runs a separate fast LangGraph that extracts entities,
+retrieves semantic candidates, and returns a deterministic coverage grade.
 
 The pipeline shares retriever/connector state and is not safe to run in parallel
 (the same constraint that makes chat single-slot), so runs are serialized here.
@@ -20,6 +23,12 @@ import threading
 from typing import Any
 
 from gsf.dal.datasources import fetch_columns_for_table
+from gsf.retrieval.entity_coverage.main import get_coverage_response
+from gsf.retrieval.entity_coverage.main import llm_client as coverage_llm_client
+from gsf.retrieval.entity_coverage.state import (
+    DEFAULT_MAX_DISTANCE,
+    EntityCoveragePayload,
+)
 from gsf.retrieval.kumo import PredictionContext
 from gsf.retrieval.kumo.pql_gen import generate_pql_only
 from gsf.retrieval.text_to_sql.agents.prediction_graph import PredictionGraphAgent
@@ -68,6 +77,25 @@ def _build_payload(
     if target_db:
         payload["target_db"] = target_db
     return payload
+
+
+def _build_coverage_payload(
+    question: str,
+    max_distance: float = DEFAULT_MAX_DISTANCE,
+) -> EntityCoveragePayload:
+    """Assemble the payload for the entity-coverage pipeline."""
+    connectors = get_connectors()
+    if not connectors:
+        raise PredictionFlowError("No database connection is configured.")
+    return {
+        "question": question,
+        "data_retriever": get_data_objects_retriever(),
+        "semantic_retriever": get_semantic_objects_retriever(),
+        "connectors": connectors,
+        "acronyms": fetch_acronyms(),
+        "custom_prompts": fetch_custom_prompts(),
+        "max_distance": max_distance,
+    }
 
 
 def _relevant_table_columns(
@@ -164,3 +192,22 @@ def text_to_pql(question: str, target_db: str | None = None) -> dict:
             "entity_sql": result.entity_sql,
             "attempts": result.attempts,
         }
+
+
+def entity_coverage(
+    question: str,
+    max_distance: float = DEFAULT_MAX_DISTANCE,
+) -> dict:
+    """Return ranked semantic candidates and a 0–1 entity coverage grade.
+
+    Raises :class:`PredictionFlowError` when the flow cannot produce a result.
+    """
+    if coverage_llm_client is None:
+        raise PredictionFlowError("LLM client is not configured.")
+    with _run_lock:
+        try:
+            return get_coverage_response(
+                _build_coverage_payload(question, max_distance=max_distance)
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise PredictionFlowError(str(exc)) from exc

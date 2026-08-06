@@ -18,11 +18,10 @@ blank thinking step.
 from __future__ import annotations
 
 NODE_LABELS: dict[str, str] = {
-    "sanitize_question": "Understanding the question",
+    "question_extraction": "Understanding the question",
     "classify_prediction": "Checking for a prediction",
     "prepare_prediction_graph": "Preparing prediction",
     "kumo_predict": "Preparing prediction",
-    "entities_extraction": "Extracting entities",
     "retrieve_candidates": "Retrieving candidates",
     "prepare_candidates": "Preparing candidates",
     "precheck_value_repair": "Checking filter values",
