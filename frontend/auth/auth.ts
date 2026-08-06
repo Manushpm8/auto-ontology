@@ -27,6 +27,15 @@ export const auth = betterAuth({
 	secret: process.env.AUTH_SECRET ?? (isBuildPhase ? 'next-build-time-placeholder' : undefined),
 	baseURL: process.env.APP_URL,
 	database: prismaAdapter(prisma, { provider: 'postgresql' }),
+	// Better Auth caps any /sign-in* path at 3 requests per 10s by default, which
+	// rejects legitimate bursts: several parallel sessions for one account, or many
+	// users behind one egress IP (the bucket is keyed by IP + path). Raise just that
+	// path; the global default (100/10s) still applies everywhere else.
+	rateLimit: {
+		customRules: {
+			'/sign-in/*': { window: 10, max: 20 },
+		},
+	},
 	// Email/password sign-IN is enabled, but self-service sign-UP is disabled:
 	// the only credential account is the bootstrap admin seeded from
 	// GSF_ADMIN_EMAIL / GSF_ADMIN_PASSWORD (see lib/seed-admin.ts). Further users
