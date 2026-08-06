@@ -673,9 +673,15 @@ def _find_unresolvable_entities(
     needs_kb_rescue = vdb_uncovered_norms | (ambiguous_entities & search_norms)
 
     # Build resolved_hits from entities cleanly covered at VDB (unambiguous, within threshold).
-    # The pipeline stores per-entity best hit in retrieved_column_attributes; reconstruct here.
+    # Use the pipeline's enriched candidates (Neo4j-resolved attribute+term names) rather than
+    # raw VDB text blobs. Fall back to raw text when no enriched candidate is available.
     resolved_hits: list[tuple[str, str, float]] = []
     col_hits: list[dict] = ec_path_state.get("retrieved_column_attributes") or []
+    candidates_by_id: dict[str, dict] = {
+        c["id"]: c
+        for c in (ec_path_state.get("final_response") or {}).get("candidates", [])
+        if c.get("id")
+    }
     best_hit_per_entity: dict[str, dict] = {}
     for hit in col_hits:
         score = hit.get("score")
@@ -687,7 +693,13 @@ def _find_unresolvable_entities(
     for entity, hit in best_hit_per_entity.items():
         norm = _normalize_entity(entity) or entity.lower().strip()
         if norm not in needs_kb_rescue and norm in search_norms:
-            resolved_hits.append((norm, hit.get("text") or "", float(hit.get("score", 1.0))))
+            candidate = candidates_by_id.get(str(hit.get("id") or ""))
+            if candidate and candidate.get("attribute"):
+                term = candidate.get("term") or ""
+                hit_text = f'{candidate["attribute"]} ({term})' if term else candidate["attribute"]
+            else:
+                hit_text = hit.get("text") or ""
+            resolved_hits.append((norm, hit_text, float(hit.get("score", 1.0))))
 
     # --- Step 3: KB check on ALL extracted entities ---
     # Run on all search_norms (not just uncovered) so relevant_kg_text is complete
