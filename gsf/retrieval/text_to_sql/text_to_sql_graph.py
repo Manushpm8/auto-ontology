@@ -24,9 +24,8 @@ from gsf.retrieval.text_to_sql.agents.empty_result_value_repair import (
 from gsf.retrieval.text_to_sql.agents.proactive_value_check import (
     ProactiveValueCheckAgent,
 )
-from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionAgent
-from gsf.retrieval.text_to_sql.agents.question_sanitization import (
-    QuestionSanitizationAgent,
+from gsf.retrieval.entity_coverage.agents.question_extraction import (
+    QuestionExtractionAgent,
 )
 from gsf.retrieval.text_to_sql.agents.prediction_classification import (
     PredictionClassificationAgent,
@@ -213,7 +212,7 @@ def wrap_node_with_logging(node_name: str, fn):
 
 
 def _entry_router_fn(state):
-    return state["path_state"].get("_resume_from", "sanitize_question")
+    return state["path_state"].get("_resume_from", "question_extraction")
 
 
 def create_graph():
@@ -226,8 +225,7 @@ def create_graph():
     # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
-    question_sanitization_agent = QuestionSanitizationAgent()
-    entities_extraction_agent = EntitiesExtractionAgent()
+    question_extraction_agent = QuestionExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
     sql_from_tables_agent = SQLFromTablesAgent()
@@ -244,11 +242,8 @@ def create_graph():
 
     # Routing nodes (using agent_wrapper)
 
-    sanitize_question_node = _make_node(
-        "sanitize_question", agent_wrapper(question_sanitization_agent)
-    )
-    entities_extraction_node = _make_node(
-        "entities_extraction", agent_wrapper(entities_extraction_agent)
+    question_extraction_node = _make_node(
+        "question_extraction", agent_wrapper(question_extraction_agent)
     )
     retrieve_candidates_node = _make_node(
         "retrieve_candidates", agent_wrapper(retrieval_agent)
@@ -310,14 +305,13 @@ def create_graph():
         "_entry_router",
         _entry_router_fn,
         {
-            "sanitize_question": "sanitize_question",
+            "question_extraction": "question_extraction",
             "reconstruct_sql": "reconstruct_sql",
         },
     )
 
     # Add only nodes instantiated above.
-    graph.add_node("sanitize_question", sanitize_question_node)
-    graph.add_node("entities_extraction", entities_extraction_node)
+    graph.add_node("question_extraction", question_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node("check_value_repair", value_repair_node)
@@ -336,8 +330,7 @@ def create_graph():
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
     # Minimal flow using only the defined nodes.
-    graph.add_edge("sanitize_question", "entities_extraction")
-    graph.add_edge("entities_extraction", "retrieve_candidates")
+    graph.add_edge("question_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
 
     after_prepare = (
