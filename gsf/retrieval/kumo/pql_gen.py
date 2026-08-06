@@ -86,15 +86,31 @@ def _qualify_from_clauses(sql: str, table_names: dict[str, str] | None) -> str:
 
 _PQL_FENCE = re.compile(r"```pql\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _GENERIC_FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+
+_IDENT = r"(?:`[^`\r\n]+`|[A-Za-z_]\w*)"
+
+
+def unquote_name(name: str) -> str:
+    """Strips the backticks a quoted PQL name carries."""
+    if len(name) >= 2 and name.startswith("`") and name.endswith("`"):
+        return name[1:-1]
+    return name
+
+
+def quote_name(name: str) -> str:
+    """Quotes a name only when PQL's bare identifier cannot spell it."""
+    if name == "*" or re.fullmatch(r"[A-Za-z_]\w*", name):
+        return name
+    return f"`{name}`"
+
+
 _PREDICT_LINE_START = re.compile(r"(?im)^[ \t]*PREDICT\b")
-_QUALIFIED_IDENTIFIER = re.compile(
-    r"\b(?P<table>[A-Za-z_]\w*)\.(?P<column>[A-Za-z_]\w*)\b"
-)
+_QUALIFIED_IDENTIFIER = re.compile(rf"(?P<table>{_IDENT})\.(?P<column>{_IDENT})")
 _GRAPH_TABLE_LINE = re.compile(
-    r"(?m)^(?P<table>[A-Za-z_]\w*)\((?P<columns>.*)\)(?:\s+--.*)?$"
+    rf"(?m)^(?P<table>{_IDENT}|[^(\r\n]+?)\((?P<columns>[^()]*)\)(?:\s+--.*)?$"
 )
 _FOR_ENTITY = re.compile(
-    r"\bFOR\s+(?P<each>EACH\s+)?(?P<table>[A-Za-z_][\w]*)\.(?P<pk>[A-Za-z_][\w]*)",
+    rf"\bFOR\s+(?P<each>EACH\s+)?(?P<table>{_IDENT})\.(?P<pk>{_IDENT})",
     re.IGNORECASE,
 )
 _LIST_DISTINCT = re.compile(r"\bLIST_DISTINCT\b", re.IGNORECASE)
@@ -107,7 +123,7 @@ _CHANGE_COL_MARKER = re.compile(
     r"(?:^|_)(?:change|delta|qoq|mom|yoy)(?:_|$)", re.IGNORECASE
 )
 _WINDOWED_AGG_TARGET = re.compile(
-    r"\b(SUM|AVG|MIN|MAX)\s*\(\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)"
+    rf"\b(SUM|AVG|MIN|MAX)\s*\(\s*({_IDENT})\s*\.\s*({_IDENT})"
     r"\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*([A-Za-z]+)\s*\)",
     re.IGNORECASE,
 )
@@ -127,12 +143,10 @@ _PQL_BANNED_TIME_FUNCS = re.compile(
 _RANK_TOP = re.compile(r"\bRANK\s+TOP\b", re.IGNORECASE)
 _FOR_EACH_KW = re.compile(r"\bFOR\s+EACH\b", re.IGNORECASE)
 _AGG_OPEN = re.compile(r"\b(COUNT|SUM|AVG|MIN|MAX|LIST_DISTINCT)\s*\(", re.IGNORECASE)
-_TABLE_COL = re.compile(r"\b([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*|\*)")
+_TABLE_COL = re.compile(rf"({_IDENT})\s*\.\s*({_IDENT}|\*)")
 # The trailing ``, <start>, <end>, <unit>`` window args inside an aggregation (e.g. ``, 0, 90, days``).
 _WINDOW_TAIL = re.compile(r",\s*-?\d+\s*,\s*-?\d+\s*,\s*[A-Za-z]+\s*$")
-_REL_COMPARISON = re.compile(
-    r"\b([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*(>=|<=|>|<(?!>))"
-)
+_REL_COMPARISON = re.compile(rf"({_IDENT})\s*\.\s*({_IDENT})\s*(>=|<=|>|<(?!>))")
 _NON_ORDINAL_STYPES = frozenset({"categorical", "multicategorical", "ID", "text"})
 
 
@@ -228,7 +242,7 @@ def validate_pql_static(
         if not where_clause:
             continue
         for tbl, _col in _TABLE_COL.findall(where_clause):
-            if tbl.lower() != agg_table.lower():
+            if unquote_name(tbl).lower() != agg_table.lower():
                 raise PqlStaticError(
                     f"The WHERE inside the {agg_table} aggregation can only filter columns of '{agg_table}' "
                     f"(the aggregated event table); it references '{tbl}', which PQL cannot express as a "
@@ -267,7 +281,9 @@ def validate_pql_static(
 
     if col_stypes:
         for tbl, col, op in _REL_COMPARISON.findall(text):
-            stype = col_stypes.get(tbl.lower(), {}).get(col.lower())
+            stype = col_stypes.get(unquote_name(tbl).lower(), {}).get(
+                unquote_name(col).lower()
+            )
             if stype in _NON_ORDINAL_STYPES:
                 raise PqlStaticError(
                     f"'{tbl}.{col}' is a {stype} column and cannot be compared with '{op}'. Compare a "
@@ -318,7 +334,9 @@ def _is_forecast(pql: str) -> bool:
     return re.search(r"\bFORECAST\b", pql, re.IGNORECASE) is not None
 
 
-_EXISTENCE_COUNT = re.compile(r"PREDICT\s+COUNT\s*\(\s*\w+\s*\.\s*\*", re.IGNORECASE)
+_EXISTENCE_COUNT = re.compile(
+    rf"PREDICT\s+COUNT\s*\(\s*{_IDENT}\s*\.\s*\*", re.IGNORECASE
+)
 
 
 def _is_existence_count_pql(pql: str) -> bool:
@@ -951,24 +969,22 @@ def canonicalize_pql_identifiers(pql: str, graph_ddl: str) -> str:
     """
     tables: dict[str, tuple[str, dict[str, str]]] = {}
     for match in _GRAPH_TABLE_LINE.finditer(graph_ddl):
-        table = match.group("table")
+        table = unquote_name(match.group("table"))
         columns: dict[str, str] = {}
         for definition in match.group("columns").split(","):
-            parts = definition.strip().split(maxsplit=1)
+            parts = definition.strip().rsplit(maxsplit=1)
             if parts:
                 columns[parts[0].casefold()] = parts[0]
         tables[table.casefold()] = (table, columns)
 
     def replace(match: re.Match[str]) -> str:
-        entry = tables.get(match.group("table").casefold())
+        entry = tables.get(unquote_name(match.group("table")).casefold())
         if entry is None:
             return match.group(0)
         table, columns = entry
-        column = columns.get(
-            match.group("column").casefold(),
-            match.group("column"),
-        )
-        return f"{table}.{column}"
+        raw_column = unquote_name(match.group("column"))
+        column = columns.get(raw_column.casefold(), raw_column)
+        return f"{quote_name(table)}.{quote_name(column)}"
 
     return _QUALIFIED_IDENTIFIER.sub(replace, pql)
 
@@ -989,7 +1005,9 @@ def extract_entity_sql(text: str) -> str | None:
 def parse_entity(pql: str) -> tuple[str, str] | None:
     """Parse the entity from population and single-entity PQL ``FOR`` clauses."""
     match = _FOR_ENTITY.search(pql)
-    return (match.group("table"), match.group("pk")) if match else None
+    if match is None:
+        return None
+    return (unquote_name(match.group("table")), unquote_name(match.group("pk")))
 
 
 def _metric_stem(column: str) -> str:
@@ -1077,11 +1095,14 @@ def prefer_explicit_change_targets(
     def repl(match: re.Match[str]) -> str:
         agg, table, column, start, end, unit = match.groups()
         replacement = _explicit_change_candidate(
-            table, column, col_stypes=col_stypes, schema_text=schema_text
+            unquote_name(table),
+            unquote_name(column),
+            col_stypes=col_stypes,
+            schema_text=schema_text,
         )
         if not replacement:
             return match.group(0)
-        return f"{agg}({table}.{replacement}, {start}, {end}, {unit})"
+        return f"{agg}({table}.{quote_name(replacement)}, {start}, {end}, {unit})"
 
     return _WINDOWED_AGG_TARGET.sub(repl, pql)
 
@@ -1164,7 +1185,7 @@ def _persist_full_prediction(
 
 
 _ANCHOR_TABLE_RE = re.compile(
-    r"(?:SUM|COUNT|AVG|MIN|MAX|FIRST|LAST|LIST_DISTINCT)\s*\(\s*([A-Za-z_]\w*)\.",
+    rf"(?:SUM|COUNT|AVG|MIN|MAX|FIRST|LAST|LIST_DISTINCT)\s*\(\s*({_IDENT})\.",
     re.IGNORECASE,
 )
 _ANCHOR_WINDOW_RE = re.compile(
@@ -1206,7 +1227,8 @@ def _forecast_anchor(
     wm = _ANCHOR_WINDOW_RE.search(pql or "")
     if not tm or not wm:
         return None
-    time_col = time_columns.get(tm.group(1))
+    anchor_table = unquote_name(tm.group(1))
+    time_col = time_columns.get(anchor_table)
     if not time_col:
         return None
     horizon_days = int(wm.group(1)) * _ANCHOR_UNIT_DAYS[wm.group(2).lower()]
@@ -1215,7 +1237,7 @@ def _forecast_anchor(
 
         df = connector.execute(
             f"SELECT MAX({quote_ident(time_col)}) AS m "
-            f"FROM {_sql_table(tm.group(1), table_names)}"
+            f"FROM {_sql_table(anchor_table, table_names)}"
         )
         data_max = (
             pd.Timestamp(df.iloc[0, 0])
@@ -1297,8 +1319,8 @@ def _scope_explain_entity(pql: str, entity: str) -> str:
 
 
 _GENERIC_ENTITY_FILTER_RE = re.compile(
-    r"(?P<head>\bFOR\s+EACH\s+(?P<table>[A-Za-z_]\w*)\.(?P<pk>[A-Za-z_]\w*))"
-    r"\s+WHERE\s+(?P=table)\.(?P<column>[A-Za-z_]\w*)\s*=\s*'(?P<value>[^']+)'"
+    rf"(?P<head>\bFOR\s+EACH\s+(?P<table>{_IDENT})\.(?P<pk>{_IDENT}))"
+    rf"\s+WHERE\s+(?P=table)\.(?P<column>{_IDENT})\s*=\s*'(?P<value>[^']+)'"
     r"(?P<tail>\s*(?:ASSUMING\b.*)?$)",
     re.IGNORECASE,
 )
