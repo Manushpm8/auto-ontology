@@ -22,7 +22,7 @@ import { TextVariant } from '@/enums/text';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import { useInfiniteList } from '@/hooks/useInfiniteList';
+import { DEFAULT_PAGE_SIZE, useInfiniteList } from '@/hooks/useInfiniteList';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
 import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
@@ -322,7 +322,10 @@ export const TermsView = () => {
 		error,
 		hasMore: hasMoreTerms,
 		loadMore: loadMoreTerms,
-	} = useInfiniteList(fetchTermsPage, { itemKey: (term) => term.id });
+	} = useInfiniteList(fetchTermsPage, {
+		pageSize: DEFAULT_PAGE_SIZE,
+		itemKey: (term) => term.id,
+	});
 
 	/**
 	 * Applies a saved change to both copies of a term: the card in the list

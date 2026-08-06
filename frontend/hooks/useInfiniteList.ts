@@ -10,11 +10,11 @@ import type { Dispatch, SetStateAction } from 'react';
 /**
  * Rows requested per page, unless the caller says otherwise.
  *
- * Comfortably more than one screenful: a page that fits in the viewport leaves
- * the sentinel visible, so the next one is requested the moment it lands, and
- * the list walks itself forward a request at a time until the screen fills.
+ * A page that fits inside the viewport leaves the sentinel visible, so the next
+ * one is requested the moment it lands, and the list walks itself forward a
+ * request at a time until the screen fills.
  */
-export const DEFAULT_INFINITE_PAGE_SIZE = 30;
+export const DEFAULT_PAGE_SIZE = 10;
 
 /** One page as the hook needs it: the rows, and how many exist in total. */
 export type InfinitePage<T> = { items: T[]; total: number };
@@ -116,7 +116,7 @@ export function useInfiniteList<T>(
 	fetchPage: FetchPage<T>,
 	options: UseInfiniteListOptions<T> = {},
 ): UseInfiniteListResult<T> {
-	const { pageSize = DEFAULT_INFINITE_PAGE_SIZE, itemKey, enabled = true } = options;
+	const { pageSize = DEFAULT_PAGE_SIZE, itemKey, enabled = true } = options;
 	const [state, setState] = useState<State<T>>(EMPTY_STATE);
 	// Identifies the request a response belongs to. A page that arrives after
 	// the query changed describes a list that is no longer on screen.
