@@ -28,7 +28,7 @@ from gsf.dal.terms import (
     fetch_related_terms_counts,
     fetch_term_table_pairs,
     fetch_terms_by_ids,
-    term_is_visible,
+    term_is_in_scope,
 )
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 from gsf.semantic.constants import (
@@ -442,8 +442,8 @@ def _fetch_semantic_exploration_related_nodes(
 ) -> dict[str, Any]:
     """Page Terms related under the existing three-path, zone-safe semantics.
 
-    ``term_is_visible`` checks just ``node_id`` rather than building the
-    whole visible-terms set via ``fetch_all_terms``, and the relationship
+    ``term_is_in_scope`` checks just ``node_id`` rather than building the
+    whole in-scope set via ``fetch_all_terms``, and the relationship
     counts are scoped to the page just fetched.
 
     Which terms are related has to be resolved in full — it is what ``total``
@@ -458,7 +458,7 @@ def _fetch_semantic_exploration_related_nodes(
     the same zones, otherwise, for one request.
     """
     data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
-    if not term_is_visible(node_id, zone_ids, data_ids_by_zone):
+    if not term_is_in_scope(node_id, zone_ids, data_ids_by_zone):
         return {"nodes": [], "total": 0}
 
     related_ids = fetch_related_term_ids(node_id, zone_ids, data_ids_by_zone)

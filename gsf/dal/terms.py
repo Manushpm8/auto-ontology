@@ -68,6 +68,17 @@ _TERM_TABLE_SCOPE_CONDITION = (
     f" }}"
 )
 
+# What it means for a Term to exist as far as the UI is concerned: a semantic
+# Term with at least one Table representing it. Binds `t` and `term`, expects a
+# `$source` param, and pairs with the _semantic_term_filter clause. fetch_all_terms,
+# count_terms and term_is_in_scope all interpolate this rather than spelling the
+# pattern out, so the list, its total and the single-id check cannot come to
+# disagree about which terms are real.
+_SEMANTIC_TERM_MATCH = (
+    f"MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->"
+    f"(term:{LABEL_TERM} {{source: $source}})"
+)
+
 # Maps the `flags` list built by _certification_flags_clause onto the
 # three-state status the frontend renders.
 _CERTIFICATION_CASE = """CASE
@@ -75,6 +86,34 @@ _CERTIFICATION_CASE = """CASE
                    WHEN size([f IN flags WHERE f]) = 0           THEN 'pending'
                    ELSE 'partial'
                END"""
+
+
+def _term_zone_condition(
+    zone_ids: list[str] | None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+) -> tuple[str, dict[str, Any], dict[str, set[str]] | None]:
+    """Pair :data:`_TERM_TABLE_SCOPE_CONDITION` with the ``$table_ids`` it needs.
+
+    Returns ``(condition, params, resolved_data_ids_by_zone)``. *condition* is
+    ``""`` when there is no zone scoping, so the caller decides whether it
+    opens a ``WHERE`` or extends one; an empty *condition* also means
+    ``$table_ids`` is absent, which is exactly when
+    ``_certification_flags_clause`` must not be zone-scoped.
+
+    Every Term read that applies the all-or-nothing rule resolves it here.
+    Four call sites used to do this plumbing themselves, in two different
+    spellings of one rule — half branching on *zone_ids*, half on the resolved
+    ids — which held only because ``resolve_accessible_catalog_ids`` returns
+    ``None`` for exactly ``zone_ids is None``.
+    """
+    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
+    if resolved is None:
+        return "", {}, None
+    return (
+        _TERM_TABLE_SCOPE_CONDITION,
+        {"table_ids": list(resolved["table_ids"])},
+        resolved,
+    )
 
 
 def _certification_flags_clause(*, zone_scoped: bool) -> str:
@@ -128,21 +167,15 @@ def get_term_certification(
     aggregate, so the Terms list card can be updated without the frontend
     duplicating the rollup rule (or refetching the whole list).
     """
-    if zone_ids is None:
-        term_filter = ""
-        params: dict[str, Any] = {"term_id": term_id}
-    else:
-        term_filter = f"WHERE {_TERM_TABLE_SCOPE_CONDITION}"
-        params = {
-            "term_id": term_id,
-            "table_ids": list(resolve_accessible_catalog_ids(zone_ids)["table_ids"]),
-        }
+    condition, params, _ = _term_zone_condition(zone_ids)
+    term_filter = f"WHERE {condition}" if condition else ""
+    params["term_id"] = term_id
 
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         {term_filter}
-        WITH term, {_certification_flags_clause(zone_scoped=zone_ids is not None)}
+        WITH term, {_certification_flags_clause(zone_scoped=bool(condition))}
         RETURN {_CERTIFICATION_CASE} AS certification
         LIMIT 1
         """,
@@ -151,39 +184,35 @@ def get_term_certification(
     return rows[0]["certification"] if rows else None
 
 
-def term_is_visible(
+def term_is_in_scope(
     term_id: str,
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> bool:
     """True if *term_id* is a semantic Term that ``fetch_all_terms`` would return.
 
-    Mirrors ``fetch_all_terms``'s own base match — a REPRESENTS edge from a
-    Table to a Term with ``source: SEMANTIC_SOURCE`` — plus its all-or-nothing
-    zone rule (``_TERM_TABLE_SCOPE_CONDITION``), without scanning every term.
-    For callers that only need to check one id (e.g. before paging a single
-    term's related nodes) instead of building the whole visible-terms set.
+    Runs ``fetch_all_terms``'s own :data:`_SEMANTIC_TERM_MATCH` and
+    ``_semantic_term_filter``, narrowed to one id, so it can never answer for
+    a single term something the list would contradict — for callers that only
+    need to check one id (e.g. before paging a single term's related nodes)
+    instead of building the whole in-scope set.
+
+    Scope is that glossary set, not whichever nodes an Exploration graph
+    payload happens to carry: a term dropped by
+    ``MAX_EXPLORATION_GRAPH_NODES`` truncation is still in scope, and has to
+    be, since the graph's relationship counts are computed untruncated.
 
     Pass a pre-resolved *data_ids_by_zone* (see
     ``resolve_accessible_catalog_ids``) when the caller already resolved
     *zone_ids* for this request, to skip a repeat Neo4j round trip.
     """
-    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
-    if resolved is None:
-        term_filter = ""
-        params: dict[str, Any] = {"term_id": term_id, "source": SEMANTIC_SOURCE}
-    else:
-        term_filter = f"AND {_TERM_TABLE_SCOPE_CONDITION}"
-        params = {
-            "term_id": term_id,
-            "source": SEMANTIC_SOURCE,
-            "table_ids": list(resolved["table_ids"]),
-        }
+    term_filter, params, _ = _semantic_term_filter(
+        zone_ids, data_ids_by_zone=data_ids_by_zone, term_id=term_id
+    )
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{id: $term_id, source: $source}})
-        WHERE true {term_filter}
+        {_SEMANTIC_TERM_MATCH}
+        {term_filter}
         RETURN term.id AS id LIMIT 1
         """,
         params,
@@ -198,43 +227,6 @@ def semantic_layer_calculated() -> bool:
         {"source": SEMANTIC_SOURCE},
     )
     return bool(rows)
-
-
-def table_has_term(table_id: str) -> bool:
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
-        RETURN term.name AS name LIMIT 1
-        """,
-        {"table_id": table_id, "source": SEMANTIC_SOURCE},
-    )
-    return bool(rows)
-
-
-def get_term_for_table(table_id: str) -> str | None:
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
-        RETURN term.name AS name LIMIT 1
-        """,
-        {"table_id": table_id, "source": SEMANTIC_SOURCE},
-    )
-    return rows[0]["name"] if rows else None
-
-
-def get_term_id_for_table(table_id: str) -> str | None:
-    """Return the Term id linked via REPRESENTS, or None."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
-        RETURN term.id AS id LIMIT 1
-        """,
-        {"table_id": table_id, "source": SEMANTIC_SOURCE},
-    )
-    return rows[0]["id"] if rows else None
 
 
 def get_term_record_for_table(table_id: str) -> dict[str, str] | None:
@@ -362,25 +354,35 @@ def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
     return result
 
 
-def _term_scope(
+def _semantic_term_filter(
     zone_ids: list[str] | None,
-    search: str | None,
-    data_ids_by_zone: dict[str, set[str]] | None,
+    search: str | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+    *,
+    term_id: str | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, set[str]] | None]:
-    """Build the ``WHERE`` clause shared by the Term list and its total count.
+    """Build the ``WHERE`` clause every read of the visible Term set applies.
 
-    Returns ``(where_clause, params, resolved_data_ids_by_zone)``.
-    ``fetch_all_terms`` and ``count_terms`` have to select exactly the same
-    terms — otherwise the total wouldn't describe the list being paged — so
-    both take their filter from here.
+    Returns ``(where_clause, params, resolved_data_ids_by_zone)``, to be
+    interpolated after :data:`_SEMANTIC_TERM_MATCH`. ``fetch_all_terms`` and
+    ``count_terms`` have to select exactly the same terms — otherwise the
+    total wouldn't describe the list being paged — and ``term_is_in_scope``
+    has to answer for one id whatever those two would answer for the whole
+    set, so all three take their filter from here.
+
+    *search* filters on the term's name (case-insensitively); *term_id*
+    narrows to a single term. Both are optional and independent of the zone
+    scoping, which is resolved by ``_term_zone_condition``.
     """
-    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
-    params: dict[str, Any] = {"source": SEMANTIC_SOURCE}
-    conditions: list[str] = []
+    condition, params, data_ids_by_zone = _term_zone_condition(
+        zone_ids, data_ids_by_zone
+    )
+    params["source"] = SEMANTIC_SOURCE
+    conditions = [condition] if condition else []
 
-    if data_ids_by_zone is not None:
-        params["table_ids"] = list(data_ids_by_zone["table_ids"])
-        conditions.append(_TERM_TABLE_SCOPE_CONDITION)
+    if term_id is not None:
+        params["term_id"] = term_id
+        conditions.append("term.id = $term_id")
 
     if search:
         params["search"] = search.strip().lower()
@@ -436,15 +438,14 @@ def fetch_all_terms(
     (the Exploration graph and the bulk re-embed both need the whole set).
     """
     conn = get_neo4j_conn()
-    term_filter, term_params, data_ids_by_zone = _term_scope(
+    term_filter, term_params, data_ids_by_zone = _semantic_term_filter(
         zone_ids, search, data_ids_by_zone
     )
     paging = paging_clause(skip, limit, term_params)
 
     terms = conn.query_read(
         f"""
-        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
+        {_SEMANTIC_TERM_MATCH}
         {term_filter}
         OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
         WITH term, collect(DISTINCT sch.name) AS schemas
@@ -481,11 +482,12 @@ def count_terms(
     query. Takes the same arguments, and the same filter, as
     ``fetch_all_terms``.
     """
-    term_filter, term_params, _ = _term_scope(zone_ids, search, data_ids_by_zone)
+    term_filter, term_params, _ = _semantic_term_filter(
+        zone_ids, search, data_ids_by_zone
+    )
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
+        {_SEMANTIC_TERM_MATCH}
         {term_filter}
         RETURN count(DISTINCT term) AS total
         """,
@@ -564,13 +566,9 @@ def get_full_term_by_id(
     zones (with ``enabled: False``) so admins can see and manage them.
     """
     conn = get_neo4j_conn()
-    if zone_ids is None:
-        term_filter = ""
-        term_params: dict[str, Any] = {"term_id": term_id}
-    else:
-        table_ids = list(resolve_accessible_catalog_ids(zone_ids)["table_ids"])
-        term_filter = f"WHERE {_TERM_TABLE_SCOPE_CONDITION}"
-        term_params = {"term_id": term_id, "table_ids": table_ids}
+    condition, term_params, _ = _term_zone_condition(zone_ids)
+    term_filter = f"WHERE {condition}" if condition else ""
+    term_params["term_id"] = term_id
 
     rows = conn.query_read(
         f"""
@@ -587,7 +585,7 @@ def get_full_term_by_id(
              }} END) AS raw_tables
         WITH term, [tbl IN raw_tables WHERE tbl IS NOT NULL] AS tables
         WITH term, tables,
-             {_certification_flags_clause(zone_scoped=zone_ids is not None)}
+             {_certification_flags_clause(zone_scoped=bool(condition))}
         RETURN term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id,
                size(tables) AS table_count,
