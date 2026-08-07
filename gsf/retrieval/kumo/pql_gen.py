@@ -974,7 +974,11 @@ def canonicalize_pql_identifiers(pql: str, graph_ddl: str) -> str:
         for definition in match.group("columns").split(","):
             parts = definition.strip().rsplit(maxsplit=1)
             if parts:
-                columns[parts[0].casefold()] = parts[0]
+                # The DDL quotes a name PQL cannot spell bare, and the lookup is by
+                # the name itself: keyed with the backticks still on, a quoted column
+                # would never match and would keep whatever casing the model guessed.
+                column = unquote_name(parts[0])
+                columns[column.casefold()] = column
         tables[table.casefold()] = (table, columns)
 
     def replace(match: re.Match[str]) -> str:
