@@ -44,41 +44,7 @@ class KumoModel:
 
         if self._graph_def is None:
             self._graph_def = self.graph._to_api_graph_definition()
-        return parse_query_locally(self._local_entity_spelling(query), self._graph_def)
-
-    def _local_entity_spelling(self, query: str) -> str:
-        """Name a composite entity the one way the bundled parser accepts.
-
-        The service resolves ``FOR EACH PEOPLE.`Customer ID``` on a table keyed on
-        ``('Customer ID', 'REGION')`` — any column of an identity names it. The parser
-        shipped in the wheel does not, and rejects it as "not a primary key"; only the
-        surrogate column standing in for the whole key gets through. Since validation
-        gates every prediction, the query would otherwise never reach the service that
-        accepts it. Only the spelling handed to the parser changes: the query that is
-        predicted on, repaired and shown keeps the column the question is about.
-
-        Remove once the bundled parser matches the service.
-        """
-        from gsf.retrieval.kumo.pql_gen import _FOR_ENTITY, unquote_name
-
-        match = _FOR_ENTITY.search(query)
-        if match is None:
-            return query
-        wanted = unquote_name(match.group("table")).casefold()
-        table = next(
-            (t for n, t in self.graph.tables.items() if n.casefold() == wanted), None
-        )
-        if table is None:
-            return query
-        keys = key_columns(table)
-        surrogate = _col_name(table.primary_key)
-        if len(keys) < 2 or not is_synthetic_key(surrogate):
-            return query
-        named = unquote_name(match.group("pk")).casefold()
-        if named not in {k.casefold() for k in keys}:
-            return query
-        start, end = match.span("pk")
-        return f"{query[:start]}{surrogate}{query[end:]}"
+        return parse_query_locally(query, self._graph_def)
 
     def predict(
         self,

@@ -158,31 +158,37 @@ def _surrogate(graph, table: str) -> str:
 
 @pytest.mark.parametrize(
     "entity",
-    ["PEOPLE.`Customer ID`", "PEOPLE.REGION", "people.`customer id`"],
-    ids=["named-part", "other-part", "mis-cased"],
+    ["PEOPLE.`Customer ID`", "PEOPLE.REGION"],
+    ids=["named-part", "other-part"],
 )
-def test_local_entity_spelling_swaps_a_composite_part_for_the_surrogate(
-    entity: str,
-) -> None:
+def test_validate_accepts_any_column_of_a_composite_identity(entity: str) -> None:
+    """The rule the service applies, applied by the parser bundled in the wheel.
+
+    Until kumorfm 2.28.0 the identity reached the parser through an argument only
+    ``KumoRFM`` passed, so a caller holding the graph definition -- which is all a
+    pre-check has -- rejected the spelling the service accepts, and had to swap in
+    the surrogate to get past its own gate.
+    """
     graph = _graph()
+    _apply_join_paths(graph, CUSTOMER_ID_JOIN)
     model = KumoModel(model=None, graph=graph)
 
-    rewritten = model._local_entity_spelling(f"PREDICT X FOR EACH {entity}")
+    validated = model.validate_pql(
+        f"PREDICT COUNT(ORDERS.*, 0, 30, days) > 0 FOR EACH {entity}"
+    )
 
-    assert rewritten.endswith(_surrogate(graph, "PEOPLE"))
+    assert validated.entity_column == f"PEOPLE.{_surrogate(graph, 'PEOPLE')}"
 
 
-@pytest.mark.parametrize(
-    "entity",
-    ["ORDERS.`Order ID`", "PEOPLE.Segment", "NOPE.whatever"],
-    ids=["single-key-table", "not-a-key-column", "unknown-table"],
-)
-def test_local_entity_spelling_leaves_everything_else_alone(entity: str) -> None:
+def test_validate_still_rejects_a_column_that_is_not_the_key() -> None:
     graph = _graph()
+    _apply_join_paths(graph, CUSTOMER_ID_JOIN)
     model = KumoModel(model=None, graph=graph)
-    query = f"PREDICT X FOR EACH {entity}"
 
-    assert model._local_entity_spelling(query) == query
+    with pytest.raises(Exception, match="(?i)primary key"):
+        model.validate_pql(
+            "PREDICT COUNT(ORDERS.*, 0, 30, days) > 0 FOR EACH PEOPLE.Segment"
+        )
 
 
 def test_graph_context_quotes_spaced_names_and_hides_the_surrogate() -> None:

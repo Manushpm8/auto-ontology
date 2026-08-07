@@ -1375,7 +1375,7 @@ wheels = [
 
 [[package]]
 name = "kumorfm"
-version = "2.27.0"
+version = "2.28.0"
 source = { registry = "vendor/wheels" }
 dependencies = [
     { name = "antlr4-python3-runtime" },
@@ -1393,9 +1393,9 @@ dependencies = [
     { name = "urllib3" },
 ]
 wheels = [
-    { path = "kumorfm-2.27.0-cp312-cp312-macosx_11_0_arm64.whl" },
-    { path = "kumorfm-2.27.0-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl" },
-    { path = "kumorfm-2.27.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
+    { path = "kumorfm-2.28.0-cp312-cp312-macosx_11_0_arm64.whl" },
+    { path = "kumorfm-2.28.0-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl" },
+    { path = "kumorfm-2.28.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
 ]
 
 [[package]]
@@ -1878,7 +1878,7 @@ wheels = [
 
 [[package]]
 name = "nemo-retriever"
-version = "2026.6.23.dev20260623113708"
+version = "2026.7.17.dev20260717010429"
 source = { git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever#ee3230910b7d25a267386a11a8a4fec2882ac324" }
 dependencies = [
     { name = "backoff" },
