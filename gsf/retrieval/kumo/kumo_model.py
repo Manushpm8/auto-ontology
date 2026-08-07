@@ -44,7 +44,41 @@ class KumoModel:
 
         if self._graph_def is None:
             self._graph_def = self.graph._to_api_graph_definition()
-        return parse_query_locally(query, self._graph_def)
+        return parse_query_locally(self._local_entity_spelling(query), self._graph_def)
+
+    def _local_entity_spelling(self, query: str) -> str:
+        """Name a composite entity the one way the bundled parser accepts.
+
+        The service resolves ``FOR EACH PEOPLE.`Customer ID``` on a table keyed on
+        ``('Customer ID', 'REGION')`` — any column of an identity names it. The parser
+        shipped in the wheel does not, and rejects it as "not a primary key"; only the
+        surrogate column standing in for the whole key gets through. Since validation
+        gates every prediction, the query would otherwise never reach the service that
+        accepts it. Only the spelling handed to the parser changes: the query that is
+        predicted on, repaired and shown keeps the column the question is about.
+
+        Remove once the bundled parser matches the service.
+        """
+        from gsf.retrieval.kumo.pql_gen import _FOR_ENTITY, unquote_name
+
+        match = _FOR_ENTITY.search(query)
+        if match is None:
+            return query
+        wanted = unquote_name(match.group("table")).casefold()
+        table = next(
+            (t for n, t in self.graph.tables.items() if n.casefold() == wanted), None
+        )
+        if table is None:
+            return query
+        keys = key_columns(table)
+        surrogate = _col_name(table.primary_key)
+        if len(keys) < 2 or not is_synthetic_key(surrogate):
+            return query
+        named = unquote_name(match.group("pk")).casefold()
+        if named not in {k.casefold() for k in keys}:
+            return query
+        start, end = match.span("pk")
+        return f"{query[:start]}{surrogate}{query[end:]}"
 
     def predict(
         self,
@@ -72,6 +106,31 @@ def _col_name(col: Any) -> str | None:
     return getattr(col, "name", None) if col is not None else None
 
 
+def is_synthetic_key(name: Any) -> bool:
+    """True for the surrogate column KumoRFM materializes for a composite key.
+
+    Declaring ``primary_key = ('Customer ID', 'REGION')`` adds a hashed
+    ``__kumo_key_*`` column to both ends of the relationship and states the edge in
+    terms of it. It names no warehouse column, so it must not reach the DDL the LLM
+    reads, the entity-selection SQL, or the seed values.
+    """
+    return bool(name) and str(name).startswith("__kumo_key")
+
+
+def key_columns(table: Any) -> list[str]:
+    """Real primary-key columns of a graph table, composite or single.
+
+    ``primary_key_columns`` carries the tuple a composite key was declared with.
+    ``primary_key`` collapses to the surrogate column in that case, so it is only
+    read when it names a real column.
+    """
+    declared = tuple(getattr(table, "primary_key_columns", ()) or ())
+    if declared:
+        return [str(c) for c in declared]
+    name = _col_name(getattr(table, "primary_key", None))
+    return [] if not name or is_synthetic_key(name) else [str(name)]
+
+
 def build_graph_context(
     graph: Any,
 ) -> tuple[
@@ -85,32 +144,52 @@ def build_graph_context(
       direct-foreign-key check.
     * ``col_stypes`` — ``{table_lower: {col_lower: stype}}`` for the ordinal-comparison lint.
     * ``time_columns`` — ``{table: time_column_name | None}`` for forecast anchoring.
+
+    Names are quoted the way PQL has to spell them, so a column called ``Customer ID``
+    reaches the model as ``` `Customer ID` ``` and comes back written that way. The
+    surrogate column standing in for a composite key is left out throughout: it names
+    nothing the model could reference, and a composite key is instead shown as its
+    real columns.
     """
-    edges: list[tuple[str, str, str]] = [
-        (e.src_table, e.fkey, e.dst_table) for e in graph.edges
-    ]
+    from gsf.retrieval.kumo.pql_gen import quote_name
+
+    edges: list[tuple[str, str, str]] = []
+    for e in graph.edges:
+        # A composite edge reports the surrogate on both ends, which spells no real
+        # column; the destination's identity is what a query can actually name. Its
+        # parts are bracketed so the pair reads as one key rather than two columns.
+        dst_key = key_columns(graph[e.dst_table]) if is_synthetic_key(e.fkey) else []
+        if len(dst_key) > 1:
+            fkey = f"({', '.join(quote_name(c) for c in dst_key)})"
+        elif dst_key:
+            fkey = quote_name(dst_key[0])
+        else:
+            fkey = quote_name(str(e.fkey))
+        edges.append((e.src_table, fkey, e.dst_table))
 
     col_stypes: dict[str, dict[str, str]] = {}
     time_columns: dict[str, str | None] = {}
     ddl_lines: list[str] = []
 
     for name, table in graph.tables.items():
-        columns = list(table.columns)
+        columns = [c for c in table.columns if not is_synthetic_key(c.name)]
         col_stypes[name.lower()] = {c.name.lower(): str(c.stype) for c in columns}
-        pk = _col_name(table.primary_key)
+        pk_cols = key_columns(table)
         time_col = _col_name(table.time_column)
         time_columns[name] = time_col
 
-        col_txt = ", ".join(f"{c.name} {c.stype}" for c in columns)
+        col_txt = ", ".join(f"{quote_name(c.name)} {c.stype}" for c in columns)
         markers = []
-        if pk:
-            markers.append(f"PRIMARY KEY ({pk})")
+        if pk_cols:
+            markers.append(f"PRIMARY KEY ({', '.join(quote_name(c) for c in pk_cols)})")
         if time_col:
-            markers.append(f"TIME COLUMN ({time_col})")
+            markers.append(f"TIME COLUMN ({quote_name(time_col)})")
         suffix = f"  -- {'; '.join(markers)}" if markers else ""
-        ddl_lines.append(f"{name}({col_txt}){suffix}")
+        ddl_lines.append(f"{quote_name(name)}({col_txt}){suffix}")
 
     for src, fkey, dst in edges:
-        ddl_lines.append(f"FOREIGN KEY {src}.{fkey} -> {dst}.<pk>")
+        ddl_lines.append(
+            f"FOREIGN KEY {quote_name(src)}.{fkey} -> {quote_name(dst)}.<pk>"
+        )
 
     return "\n".join(ddl_lines), edges, col_stypes, time_columns
