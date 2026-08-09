@@ -42,6 +42,7 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_custom_analyses_section,
     format_dialect_rules,
     format_dual_question_block,
 )
@@ -363,23 +364,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                     observation_block += f"\n{evidence_hints}\n"
 
             # Build custom analyses section for user prompt
-            ca_section = ""
-            if custom_analyses:
-                ca_lines = []
-                for a in custom_analyses:
-                    line = f"- {a.get('name', '(unnamed)')}"
-                    desc = (a.get("description") or "").strip()
-                    if desc:
-                        line += f": {desc}"
-                    sql = (a.get("sql") or "").strip()
-                    if sql:
-                        line += f"\n  SQL: {sql}"
-                    ca_lines.append(line)
-                ca_section = (
-                    "DOMAIN-SPECIFIC CUSTOM ANALYSES (use their SQL patterns as guidance):\n"
-                    + "\n".join(ca_lines)
-                    + "\n\n"
-                )
+            ca_section = format_custom_analyses_section(custom_analyses)
 
             # Build sql attributes section for user prompt
             sa_section = ""
