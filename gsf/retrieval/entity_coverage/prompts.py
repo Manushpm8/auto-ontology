@@ -4,11 +4,42 @@
 
 """Prompts for the entity-coverage question_extraction node."""
 
+from __future__ import annotations
 
-def create_question_extraction_prompt(question: str) -> str:
-    """Single prompt: sanitize the question and extract entity noun phrases."""
-    return f"""You rewrite conversational user requests into concise, SQL-ready questions \
-AND extract database entity noun phrases from the sanitized intent.
+
+def _glossary_section(glossary: list[dict[str, str]] | None) -> str:
+    """Render the user-curated Glossary, or "" when there is nothing to inject.
+
+    Entries are a flat list rather than ``rules_to_text``'s ``## name`` headings,
+    which would sit at the same level as this prompt's own ``## Part N`` sections.
+    """
+    entries = [
+        f"- {name}: {(entry.get('description') or '').strip()}"
+        for entry in glossary or []
+        if (name := (entry.get("name") or "").strip())
+    ]
+    if not entries:
+        return ""
+    definitions = "\n".join(entries)
+    return f"""## Glossary
+
+Definitions the user's organization has registered. Use them to resolve \
+abbreviations, shortcuts, and internal jargon in the question.
+
+{definitions}
+
+"""
+
+
+def create_question_extraction_prompt(
+    question: str,
+    glossary: list[dict[str, str]] | None = None,
+) -> str:
+    """Single prompt: sanitize, extract entity noun phrases, name the subject."""
+    glossary_section = _glossary_section(glossary)
+    return f"""You rewrite conversational user requests into concise, SQL-ready questions, \
+extract database entity noun phrases from the sanitized intent, AND name the question's \
+main subject.
 
 ## Part 1 — sanitized_question
 
@@ -36,6 +67,14 @@ tables, columns, or relationships. Extract from the sanitized intent.
 
 Preserve the exact casing of terms as they appear in the question. Do not lowercase,
 uppercase, or normalize them.
+
+Glossary rule: when a word or phrase in the question matches a Glossary entry — an
+abbreviation, a shortcut, or internal jargon — resolve it in place using that entry's
+definition instead of emitting the raw shortcut. Resolving rewrites an existing entry;
+it never adds an extra one, so the number of entries stays what it would have been
+without the Glossary. Leave a phrase untouched when no Glossary entry applies.
+  Example (Glossary: "MRR" = "monthly recurring revenue"):
+  "show MRR by region" → ["monthly recurring revenue", "region"], not ["MRR", "region"]
 
 Guidelines for what to include in required_entity_name:
 - Subject nouns and domain terms ("invoice", "customer", "shipment")
@@ -77,7 +116,38 @@ Examples:
   Q: "Find a waterproof hiking tent for family camping."
   → required_entity_name: ["waterproof hiking tent for family camping"]
 
-## Input
+## Part 3 — subject
+
+Populate "subject" with one short noun phrase naming what the question is about — the
+single thing being asked for. Derive it from the sanitized question, resolving any
+Glossary entry that applies, and preserve casing the same way Part 2 does.
+
+Exclude from the subject: filters and qualifiers, aggregation words ("count", "total",
+"average"), date and time qualifiers, and number literals.
+
+Examples:
+  Q: "How many shipments were delivered last month?"
+  → subject: "shipment"
+
+  Q: "Find a waterproof hiking tent for family camping."
+  → subject: "tent"
+
+  Q: "Which vendors had the highest invoice totals in Q2?"
+  → subject: "vendor"
+
+## Part 4 — used_acronyms
+
+Populate "used_acronyms" with the names of only the Glossary entries you actually used
+to interpret, sanitize, resolve entities in, or determine the subject of this question.
+Copy each name exactly as written in the Glossary. Do not infer entries by lexical
+matching alone: include an entry only when its definition is semantically relevant.
+Return an empty list when no Glossary definition applies.
+
+Example (Glossary contains "MRR: monthly recurring revenue"):
+  Q: "Show MRR by region."
+  → used_acronyms: ["MRR"]
+
+{glossary_section}## Input
 
 {question}
 """

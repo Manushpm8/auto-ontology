@@ -34,6 +34,22 @@ class QuestionExtractionModel(BaseModel):
             "number-based thresholds."
         ),
     )
+    subject: str = Field(
+        ...,
+        description=(
+            "Main subject of the question - the single thing the user is asking "
+            "about, resolved through the glossary when the question uses a "
+            "shortcut. Excludes filters, aggregations, and date qualifiers."
+        ),
+    )
+    used_acronyms: list[str] = Field(
+        ...,
+        description=(
+            "Names of glossary entries used to interpret the question. "
+            "Return each name exactly as it appears in the glossary, or an "
+            "empty list when no glossary definition applies."
+        ),
+    )
 
 
 class EntityCoverageResponse(BaseModel):

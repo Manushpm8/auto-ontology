@@ -20,6 +20,27 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 logger = logging.getLogger(__name__)
 
 
+def _canonical_used_acronyms(
+    glossary: list[dict[str, str]],
+    llm_names: list[str],
+) -> list[str]:
+    """Return configured glossary names selected by the LLM, without duplicates."""
+    configured = {
+        name.casefold(): name
+        for entry in glossary
+        if (name := (entry.get("name") or "").strip())
+    }
+    used: list[str] = []
+    seen: set[str] = set()
+    for llm_name in llm_names:
+        key = (llm_name or "").strip().casefold()
+        canonical = configured.get(key)
+        if canonical and key not in seen:
+            used.append(canonical)
+            seen.add(key)
+    return used
+
+
 class QuestionExtractionAgent(BaseAgent):
     """Sanitize the question and extract entities in one structured LLM call."""
 
@@ -37,12 +58,17 @@ class QuestionExtractionAgent(BaseAgent):
         llm = state["llm"]
         path_state = state.get("path_state", {})
         original_question = get_original_question(state)
+        glossary = state.get("glossary") or []
+        path_state["glossary_used"] = []
         result: Dict[str, Any] = {"path_state": path_state}
 
         try:
             messages = [
                 SystemMessage(
-                    content=create_question_extraction_prompt(original_question)
+                    content=create_question_extraction_prompt(
+                        original_question,
+                        glossary,
+                    )
                 )
             ]
             extraction = invoke_with_structured_output(
@@ -57,6 +83,7 @@ class QuestionExtractionAgent(BaseAgent):
                 )
                 path_state["normalized_question"] = original_question
                 path_state["entities"] = [original_question]
+                path_state["subject"] = original_question
                 return result
 
             sanitized = (extraction.sanitized_question or "").strip()
@@ -73,13 +100,30 @@ class QuestionExtractionAgent(BaseAgent):
                 )
                 entities = [sanitized]
 
+            subject = (extraction.subject or "").strip()
+            if not subject:
+                self.logger.warning(
+                    "Question extraction returned empty subject — using sanitized"
+                )
+                subject = sanitized
+
+            glossary_used = _canonical_used_acronyms(
+                glossary,
+                extraction.used_acronyms or [],
+            )
             path_state["normalized_question"] = sanitized
             path_state["entities"] = entities
+            path_state["subject"] = subject
+            path_state["glossary_used"] = glossary_used
             self.logger.info(
-                "Extracted question:\n  raw: %s\n  sanitized: %s\n  entities: %s",
+                "Extracted question:\n  raw: %s\n  sanitized: %s\n  entities: %s"
+                "\n  subject: %s\n  glossary used: %d/%d",
                 original_question,
                 sanitized,
                 entities,
+                subject,
+                len(glossary_used),
+                len(glossary),
             )
         except Exception as exc:
             self.logger.warning(
@@ -88,5 +132,6 @@ class QuestionExtractionAgent(BaseAgent):
             )
             path_state["normalized_question"] = original_question
             path_state["entities"] = [original_question]
+            path_state["subject"] = original_question
 
         return result
