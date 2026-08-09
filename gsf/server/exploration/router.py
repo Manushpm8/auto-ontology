@@ -8,10 +8,19 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path, Query
 
 from gsf.server.exploration import service
 from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
+from gsf.server.params import ZONE_IDS_QUERY
+from gsf.server.responses import (
+    DataExplorationGraphResponse,
+    ExplorationEdgeListResponse,
+    ExplorationRelatedNodesResponse,
+    SemanticExplorationGraphResponse,
+    TableExplorationDetailsResponse,
+    TableZonesResponse,
+)
 
 router = APIRouter()
 
@@ -25,18 +34,18 @@ _LIMIT_QUERY = Query(
 )
 
 
-@router.get("/exploration/edges")
+@router.get("/exploration/edges", response_model=ExplorationEdgeListResponse)
 def list_data_exploration_edges(
-    zone_ids: list[str] | None = Query(default=None),
+    zone_ids: list[str] | None = ZONE_IDS_QUERY,
 ) -> dict:
     """Table connections backed by a shared SQL query or a foreign key, scoped to visible tables."""
     rows = service.fetch_data_exploration_edges(zone_ids=zone_ids)
     return {"data": rows, "count": len(rows)}
 
 
-@router.get("/exploration/graph")
+@router.get("/exploration/graph", response_model=DataExplorationGraphResponse)
 def get_data_exploration_graph(
-    zone_ids: list[str] | None = Query(default=None),
+    zone_ids: list[str] | None = ZONE_IDS_QUERY,
     limit: int = _LIMIT_QUERY,
 ) -> dict:
     """Return the full data-layer Exploration graph (``{nodes, links}``).
@@ -51,10 +60,13 @@ def get_data_exploration_graph(
     }
 
 
-@router.get("/exploration/tables/{table_id}/details")
+@router.get(
+    "/exploration/tables/{table_id}/details",
+    response_model=TableExplorationDetailsResponse,
+)
 def get_table_exploration_details(
     table_id: str,
-    zone_ids: list[str] | None = Query(default=None),
+    zone_ids: list[str] | None = ZONE_IDS_QUERY,
     skip: int = SKIP_QUERY,
     limit: int | None = LIMIT_QUERY,
 ) -> dict:
@@ -66,11 +78,21 @@ def get_table_exploration_details(
     }
 
 
-@router.get("/exploration/nodes/{node_id}/relationships")
+@router.get(
+    "/exploration/nodes/{node_id}/relationships",
+    response_model=ExplorationRelatedNodesResponse,
+)
 def get_exploration_node_relationships(
-    node_id: str,
-    layer: Literal["data", "semantic"],
-    zone_ids: list[str] | None = Query(default=None),
+    node_id: str = Path(
+        description="Table id when *layer* is ``data``, Term id when it is ``semantic``."
+    ),
+    layer: Literal["data", "semantic"] = Query(
+        description=(
+            "Which graph to walk: ``data`` relates tables sharing a SQL query or "
+            "a foreign key, ``semantic`` relates terms sharing a table."
+        )
+    ),
+    zone_ids: list[str] | None = ZONE_IDS_QUERY,
     skip: int = SKIP_QUERY,
     limit: int | None = LIMIT_QUERY,
 ) -> dict:
@@ -86,8 +108,8 @@ def get_exploration_node_relationships(
     }
 
 
-@router.get("/exploration/tables/zones")
-def list_table_zones(zone_ids: list[str] | None = Query(default=None)) -> dict:
+@router.get("/exploration/tables/zones", response_model=TableZonesResponse)
+def list_table_zones(zone_ids: list[str] | None = ZONE_IDS_QUERY) -> dict:
     """Return ``{table_id: [zone, ...]}`` for every visible Table.
 
     Used by the Exploration graph to render Zone chips on every data node
@@ -96,9 +118,11 @@ def list_table_zones(zone_ids: list[str] | None = Query(default=None)) -> dict:
     return {"data": service.fetch_table_zones_map(zone_ids=zone_ids)}
 
 
-@router.get("/exploration/semantic-graph")
+@router.get(
+    "/exploration/semantic-graph", response_model=SemanticExplorationGraphResponse
+)
 def get_semantic_exploration_graph(
-    zone_ids: list[str] | None = Query(default=None),
+    zone_ids: list[str] | None = ZONE_IDS_QUERY,
     limit: int = _LIMIT_QUERY,
 ) -> dict:
     """Return the full semantic-layer Exploration graph (``{nodes, links}``).

@@ -1,0 +1,30 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { z } from 'zod';
+import { errorSchema, messageSchema } from '@/lib/openapiSchemas';
+import type { OpenApiRoute } from '@/types/openapi';
+
+export const openapi: OpenApiRoute = {
+	post: {
+		body: {
+			description:
+				'Chat turns are written by `POST /api/chat/completions` itself; this route is ' +
+				'for callers that persist a turn they produced some other way.',
+			schema: z.object({
+				role: z.string().describe('`user` or `assistant`.'),
+				content: z.string().optional(),
+				sqlCode: z.string().nullish(),
+				sqlResponse: z.string().nullish(),
+			}),
+		},
+		responses: {
+			201: { description: 'The created message.', schema: messageSchema },
+			404: {
+				description: 'No such conversation, or it belongs to another user.',
+				schema: errorSchema,
+			},
+		},
+	},
+};

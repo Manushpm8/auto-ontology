@@ -8,13 +8,22 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from gsf.dal import sql_attributes as sql_attr_dal
 from gsf.dal import terms as terms_dal
 from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
+from gsf.server.params import ZONE_IDS_QUERY
 from gsf.server.terms import service as term_service
+from gsf.server.responses import (
+    ColumnAttributePageResponse,
+    ColumnAttributeResponse,
+    SqlAttributePageResponse,
+    TermDetailResponse,
+    TermResponse,
+    TermsPageResponse,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -34,10 +43,13 @@ class ColumnAttributeUpdate(BaseModel):
     certified: bool | None = None
 
 
-@router.get("/terms")
+@router.get("/terms", response_model=TermsPageResponse)
 def list_terms(
-    zone_ids: list[str] | None = Query(default=None),
-    q: str | None = Query(default=None),
+    zone_ids: list[str] | None = ZONE_IDS_QUERY,
+    q: str | None = Query(
+        default=None,
+        description="Case-insensitive substring filter on the term name.",
+    ),
     skip: int = SKIP_QUERY,
     limit: int | None = LIMIT_QUERY,
 ) -> dict:
@@ -72,10 +84,12 @@ def list_terms(
     )
 
 
-@router.get("/terms/{term_id}/column-attributes")
+@router.get(
+    "/terms/{term_id}/column-attributes", response_model=ColumnAttributePageResponse
+)
 def list_term_column_attributes_by_id(
     term_id: str,
-    zone_ids: list[str] | None = Query(default=None),
+    zone_ids: list[str] | None = ZONE_IDS_QUERY,
     skip: int = SKIP_QUERY,
     limit: int | None = LIMIT_QUERY,
 ) -> dict:
@@ -105,11 +119,14 @@ def list_term_column_attributes_by_id(
     return {"data": attrs, "count": len(attrs), "total": total}
 
 
-@router.patch("/terms/{term_id}/column-attributes/{attr_id}")
+@router.patch(
+    "/terms/{term_id}/column-attributes/{attr_id}",
+    response_model=ColumnAttributeResponse,
+)
 def update_column_attribute(
     term_id: str,
-    attr_id: str,
     body: ColumnAttributeUpdate,
+    attr_id: str = Path(description="ColumnAttribute id, not a SqlAttribute id."),
 ) -> dict:
     """Update ColumnAttribute name/description/sample_values and refresh embeddings.
 
@@ -159,10 +176,10 @@ def update_column_attribute(
     }
 
 
-@router.get("/terms/{term_id}/sql-attributes")
+@router.get("/terms/{term_id}/sql-attributes", response_model=SqlAttributePageResponse)
 def list_term_sql_attributes_by_id(
     term_id: str,
-    zone_ids: list[str] | None = Query(default=None),
+    zone_ids: list[str] | None = ZONE_IDS_QUERY,
     skip: int = SKIP_QUERY,
     limit: int | None = LIMIT_QUERY,
 ) -> dict:
@@ -189,7 +206,7 @@ def list_term_sql_attributes_by_id(
     return {"data": attrs, "count": len(attrs), "total": total}
 
 
-@router.patch("/terms/{term_id}")
+@router.patch("/terms/{term_id}", response_model=TermResponse)
 def update_term(term_id: str, body: TermUpdate) -> dict:
     """Update a Term and invalidate dependent SqlAttribute suggestions."""
     patch = body.model_dump(exclude_unset=True)
@@ -243,10 +260,10 @@ def update_term(term_id: str, body: TermUpdate) -> dict:
     }
 
 
-@router.get("/terms/{term_id}")
+@router.get("/terms/{term_id}", response_model=TermDetailResponse)
 def get_term(
     term_id: str,
-    zone_ids: list[str] | None = Query(default=None),
+    zone_ids: list[str] | None = ZONE_IDS_QUERY,
 ) -> dict:
     """Return a single Term node by id, including zones and related terms.
 
