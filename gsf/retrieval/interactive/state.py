@@ -34,6 +34,7 @@ class InteractiveSessionState:
     incomplete_formula_terms: list = field(default_factory=list)  # [(term, what_is_missing)]
     persistent_unresolved: list[str] = field(default_factory=list)  # terms never resolved by KB/VDB; pruned after each answered turn
     resolved_persistent: set[str] = field(default_factory=set)  # terms pruned from persistent; blocked from re-accumulation
+    initial_extracted_entities: list[str] = field(default_factory=list)  # all entities extracted on the first clarify call (turn 0)
     external_kg_children_map: dict[str, list[str]] = field(default_factory=dict)  # parent entry name → [full child texts]
     _named_column_evidence: str = ""  # direct column→schema hints extracted from user answers
     data_retriever: Any = None

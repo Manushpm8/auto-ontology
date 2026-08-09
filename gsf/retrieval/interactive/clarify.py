@@ -10,7 +10,7 @@ import requests
 from langchain_core.messages import HumanMessage
 
 from gsf.retrieval.entity_coverage.graph import create_graph as _create_entity_coverage_graph
-from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client, safe_invoke_text, RETRY_MAX_ATTEMPTS
+from gsf.utils.llm_invoke import get_llm_client, safe_invoke_text, safe_invoke_text_nr, RETRY_MAX_ATTEMPTS
 
 # Distance threshold for VDB resolution: entity score must be <= this value with
 # no ambiguous second hit to count as "found in schema". Lower = stricter.
@@ -271,7 +271,6 @@ def _filter_covered_by_external_knowledge(
     to relevant_kg_text with their full text (name + description + definition),
     bypassing the coverage LLM. Capped at _MAX_CHILDREN_PER_PARENT per parent.
     """
-    fast_llm = get_non_reasoning_llm_client()
     entity_list = "\n".join(f"- {e}" for e in entities)
     slim_kg = _slim_kg_for_coverage(formatted_kg)
     prompt = _KG_COVERAGE_PROMPT.format(
@@ -294,7 +293,7 @@ def _filter_covered_by_external_knowledge(
     response = ""
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
-            response = safe_invoke_text(fast_llm, prompt).strip()
+            response = safe_invoke_text_nr(prompt).strip()
             if response and _is_valid_coverage_response(response, len(entities)):
                 break
             if response:
@@ -827,6 +826,9 @@ def should_clarify(
                         if session.cumulative_grounded_kg
                         else text
                     )
+        # Capture all extracted entities on the very first clarify call (turn 0).
+        if not session.initial_extracted_entities:
+            session.initial_extracted_entities = sorted(extracted_norms)
         # Confident VDB resolutions (score <= 0.63) go to evidence generation.
         _update_vdb_resolved_hits(session, resolved_hits)
         # Prune persistent terms that were extracted this turn but are no longer

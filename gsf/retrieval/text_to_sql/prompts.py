@@ -2,6 +2,11 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+
+# Shared with entity_coverage — controls how many entity noun phrases are extracted.
+_MAX_ENTITIES: int = int(os.environ.get("ENTITY_EXTRACTION_MAX_ENTITIES", "5"))
+
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
     "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
@@ -507,7 +512,7 @@ Provide your analysis."""
 
 def create_entity_extraction_prompt(question: str) -> str:
     return f"""You are a database schema analyst. Given a question, populate the field \
-"required_entity_name" with 1–5 noun phrases that correspond to database tables, \
+"required_entity_name" with 1–{_MAX_ENTITIES} noun phrases that correspond to database tables, \
 columns, or relationships.
 
 Preserve the exact casing of terms as they appear in the question. Do not lowercase,

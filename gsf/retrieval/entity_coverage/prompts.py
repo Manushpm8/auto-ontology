@@ -4,6 +4,12 @@
 
 """Prompts for the entity-coverage question_extraction node."""
 
+import os
+
+# Maximum number of entity noun phrases to extract per question.
+# Raise via ENTITY_EXTRACTION_MAX_ENTITIES env var for complex multi-metric queries.
+_MAX_ENTITIES: int = int(os.environ.get("ENTITY_EXTRACTION_MAX_ENTITIES", "5"))
+
 
 def create_question_extraction_prompt(question: str) -> str:
     """Single prompt: sanitize the question and extract entity noun phrases."""
@@ -31,7 +37,7 @@ sanitized_question: How many shipments were delivered last month?
 
 ## Part 2 — required_entity_name
 
-Populate "required_entity_name" with 1–5 noun phrases that correspond to database \
+Populate "required_entity_name" with 1–{_MAX_ENTITIES} noun phrases that correspond to database \
 tables, columns, or relationships. Extract from the sanitized intent.
 
 Preserve the exact casing of terms as they appear in the question. Do not lowercase,

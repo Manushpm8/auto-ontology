@@ -19,7 +19,7 @@ from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
-from gsf.utils.llm_invoke import safe_invoke_text
+from gsf.utils.llm_invoke import safe_invoke_text, safe_invoke_text_nr
 
 
 # ── Message classifier ──────────────────────────────────────────────────────
@@ -160,29 +160,30 @@ _FOLLOW_UP_MERGE_PROMPT = """\
 You are rewriting a follow-up database question into a clear, self-contained question \
 for a SQL generator.
 
-Previous question (Phase 1):
-{p1_question}
-
-Previous SQL:
-{p1_sql}
-{cross_phase_section}
 Follow-up question:
 {p2_question}
 
-Task: Write a single, complete, standalone question that fully describes what the SQL \
-generator should produce next.
+Previous question (Phase 1):
+{p1_question}
+Previous SQL:
+{p1_sql}
+{cross_phase_section}
+
+
+Task: Rewrite the follow-up question into a single, complete, standalone question \
+for the SQL generator. Resolve any underspecified terms, references, or concepts \
+in the follow-up using the previous question and SQL — pull in the exact column names, \
+table names, formulas, thresholds, and conditions that the follow-up depends on. \
+Include as much or as little of the previous SQL's structure as the follow-up requires.
 
 Rules:
-- If the follow-up extends or refines the previous query (adds columns, narrows or \
-changes filters, adjusts aggregation, changes sort order, modifies the result limit), \
-incorporate the relevant column names, table names, and conditions from the previous \
-SQL directly into the question text — this removes ambiguity for the SQL generator.
-- If the follow-up asks for something substantially different or shifts focus to an \
-unrelated entity or dataset, treat the previous SQL as background context only. \
-Do not force its columns or structure into the new question.
-- Always produce a standalone question: someone reading only your output should \
-understand exactly what data to retrieve, including column names where known.
-- Do not add assumptions beyond what the context together implies.
+- Resolve references to prior concepts (e.g. "that category", "the same score", "those \
+signals") using the previous SQL and question. If resolved mappings are provided above, \
+use them as the authoritative definition for any matching terms.
+- Carry forward table names, column names, formulas, and conditions that the follow-up \
+references or implicitly depends on.
+- If the follow-up reuses or extends the previous query's full structure, incorporate it. \
+If it only borrows part of it, incorporate only that part.
 - Output only the rewritten question, no preamble or explanation."""
 
 
@@ -205,7 +206,7 @@ def _merge_follow_up_question(
         cross_phase_section=cross_phase_section,
         p2_question=p2_question,
     )
-    merged = safe_invoke_text(_get_fast_llm(), prompt).strip()
+    merged = safe_invoke_text_nr(prompt).strip()
     if not merged:
         logger.warning("Follow-up merge returned empty; falling back to raw follow-up question")
         return p2_question
@@ -291,7 +292,8 @@ def _generate_evidence(question: str, grounded_kg: str) -> str:
     if not grounded_kg:
         return ""
     prompt = _EVIDENCE_PROMPT.format(question=question, grounded_kg=grounded_kg)
-    response = safe_invoke_text(_get_fast_llm(), prompt).strip()
+    response = safe_invoke_text_nr(prompt).strip()
+    logger.debug("SQL gen — Evidence raw response: %s", response)
     if not response or response.upper() == "NONE":
         return ""
     # Valid output is "Term = <expression>" anchored at the start of the line.
@@ -344,6 +346,10 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     # column names and conditions from Phase 1 SQL so the SQL generator doesn't have to
     # guess the relationship between the two phases. Persist as working_question so debug
     # re-runs and logging reflect the enriched question.
+    # Save the raw follow-up question before merge: evidence extraction should use it,
+    # not the merged question — the merged question is long and P1-dominated, causing the
+    # evidence LLM to miss Phase 2-specific formulas (e.g. a new output column like CSR).
+    evidence_question = session.working_question
     if p1_sql and p1_question:
         merged_q = _merge_follow_up_question(
             p1_question, p1_sql, cross_phase, session.working_question
@@ -361,7 +367,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             f"thresholds, and formulas from this SQL where applicable]\n{p1_sql}"
         )
 
-    evidence = _generate_evidence(session.working_question, combined_kg)
+    evidence = _generate_evidence(evidence_question, combined_kg)
     if session._named_column_evidence:
         evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
     if should_inject_default_sort(session.working_question, evidence):
