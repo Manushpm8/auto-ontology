@@ -20,23 +20,23 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 logger = logging.getLogger(__name__)
 
 
-def _canonical_used_acronyms(
+def _filter_glossary_by_used_names(
     glossary: list[dict[str, str]],
     llm_names: list[str],
-) -> list[str]:
-    """Return configured glossary names selected by the LLM, without duplicates."""
-    configured = {
-        name.casefold(): name
+) -> list[dict[str, str]]:
+    """Keep configured glossary entries the LLM reported using, without duplicates."""
+    by_name = {
+        name.casefold(): entry
         for entry in glossary
         if (name := (entry.get("name") or "").strip())
     }
-    used: list[str] = []
+    used: list[dict[str, str]] = []
     seen: set[str] = set()
     for llm_name in llm_names:
         key = (llm_name or "").strip().casefold()
-        canonical = configured.get(key)
-        if canonical and key not in seen:
-            used.append(canonical)
+        entry = by_name.get(key)
+        if entry is not None and key not in seen:
+            used.append(entry)
             seen.add(key)
     return used
 
@@ -59,8 +59,8 @@ class QuestionExtractionAgent(BaseAgent):
         path_state = state.get("path_state", {})
         original_question = get_original_question(state)
         glossary = state.get("glossary") or []
-        path_state["glossary_used"] = []
-        result: Dict[str, Any] = {"path_state": path_state}
+        # After this node, ``glossary`` means only the entries actually used.
+        result: Dict[str, Any] = {"path_state": path_state, "glossary": []}
 
         try:
             messages = [
@@ -107,23 +107,22 @@ class QuestionExtractionAgent(BaseAgent):
                 )
                 subject = sanitized
 
-            glossary_used = _canonical_used_acronyms(
+            glossary = _filter_glossary_by_used_names(
                 glossary,
                 extraction.used_acronyms or [],
             )
             path_state["normalized_question"] = sanitized
             path_state["entities"] = entities
             path_state["subject"] = subject
-            path_state["glossary_used"] = glossary_used
+            result["glossary"] = glossary
             self.logger.info(
                 "Extracted question:\n  raw: %s\n  sanitized: %s\n  entities: %s"
-                "\n  subject: %s\n  glossary used: %d/%d",
+                "\n  subject: %s\n  glossary: %s",
                 original_question,
                 sanitized,
                 entities,
                 subject,
-                len(glossary_used),
-                len(glossary),
+                [e.get("name") for e in glossary],
             )
         except Exception as exc:
             self.logger.warning(
