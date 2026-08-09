@@ -33,6 +33,7 @@ from gsf.retrieval.data_access.custom_analyses import (
     build_custom_analyses_section,
     get_custom_analyses_ids,
 )
+from gsf.retrieval.entity_coverage.prompts import format_glossary_section
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -353,6 +354,9 @@ class SQLFromCandidatesAgent(BaseAgent):
                         f"  {term_name}: also known as {', '.join(syns)}"
                     )
                 observation_block += "\n" + "\n".join(gloss_lines) + "\n"
+            glossary_section = format_glossary_section(state.get("glossary") or [])
+            if glossary_section:
+                observation_block += f"\n{glossary_section}"
             if extract_evidence(original_question):
                 evidence_hints = build_evidence_hints_block(original_question)
                 if evidence_hints:

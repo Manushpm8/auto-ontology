@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 
-def _glossary_section(glossary: list[dict[str, str]] | None) -> str:
+def format_glossary_section(glossary: list[dict[str, str]] | None) -> str:
     """Render the user-curated Glossary, or "" when there is nothing to inject.
 
     Entries are a flat list rather than ``rules_to_text``'s ``## name`` headings,
-    which would sit at the same level as this prompt's own ``## Part N`` sections.
+    which would collide with surrounding ``##`` prompt sections.
     """
     entries = [
         f"- {name}: {(entry.get('description') or '').strip()}"
@@ -36,7 +36,7 @@ def create_question_extraction_prompt(
     glossary: list[dict[str, str]] | None = None,
 ) -> str:
     """Single prompt: sanitize, extract entity noun phrases, name the subject."""
-    glossary_section = _glossary_section(glossary)
+    glossary_section = format_glossary_section(glossary)
     return f"""You rewrite conversational user requests into concise, SQL-ready questions, \
 extract database entity noun phrases from the sanitized intent, AND name the question's \
 main subject.
