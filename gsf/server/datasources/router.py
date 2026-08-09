@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from gsf.server.custom_analyses import service as custom_analyses_dal
 from gsf.server.datasources import service as dal
+from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from gsf.server.pql_analyses import service as pql_analyses_dal
 
 
@@ -79,10 +80,40 @@ def list_tables_by_schema(
 
 
 @router.get("/columns/{table_id}")
-def list_columns_by_table(table_id: str) -> dict:
-    """Columns for a table."""
-    result = dal.fetch_columns_for_table(table_id)
-    return _count_payload(result)
+def list_columns_by_table(
+    table_id: str,
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """Columns for a table.
+
+    Columns come back ordered by ordinal position, and *skip*/*limit* select
+    one page of that order; ``total`` reports how many the table has in full,
+    so a pager knows when to stop asking. Omitting *limit* returns every
+    column, which is what the lazy catalog tree loads.
+    """
+    # `fetch_columns_for_table` returns None only when the table is missing —
+    # falling back to an empty envelope keeps the response shape
+    # `{data: {columns: [...]}, count: 1}` instead of `data: null`, which
+    # crashes callers (e.g. `frontend/api/datasources.ts`) that read
+    # `envelope.columns` unconditionally.
+    result = dal.fetch_columns_for_table(table_id, skip=skip, limit=limit) or {
+        "columns": []
+    }
+    columns = result.get("columns") or []
+    # `len(columns)` only equals the table's full count when neither paging
+    # argument was given — a `skip` alone (no `limit`) still returns a
+    # partial read, so it needs the same separate count query.
+    total = (
+        dal.count_columns_for_table(table_id)
+        if skip or limit is not None
+        else len(columns)
+    )
+    # `columns_count` describes the table, not the page: the envelope would
+    # otherwise carry two numbers for the same thing that disagree as soon as
+    # a page is requested (see `mergeTable` in
+    # `frontend/lib/data/datasource-tree-merge.ts`, which maxes them together).
+    return {**_count_payload({**result, "columns_count": total}), "total": total}
 
 
 # ---------------------------------------------------------------------------

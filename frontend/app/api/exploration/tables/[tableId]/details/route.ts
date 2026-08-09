@@ -11,6 +11,6 @@ export const GET = withPermission({ catalog: ['read'] })(async (req, { user }) =
 	const zoneIds = await resolveZoneIds(user.id, user.role);
 	return proxyToBackend(req, {
 		zoneIds: zoneIds ?? undefined,
-		emptyResponse: { data: { queries: [], terms: [] } },
+		emptyResponse: { data: { queries: [], terms: [], terms_total: 0 } },
 	});
 });
