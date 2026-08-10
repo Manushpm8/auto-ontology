@@ -1185,6 +1185,70 @@
         "x-gsf-proxied": true
       }
     },
+    "/api/connections/{database_name}/sso-federation": {
+      "patch": {
+        "description": "connectionsApi.setSsoFederation — toggle \"authenticate as signed-in user\"\non an existing connection (admin only).",
+        "operationId": "patch_api_connections_database_name_sso_federation",
+        "parameters": [
+          {
+            "description": "Catalog database name, which doubles as the connection's identity.",
+            "in": "path",
+            "name": "database_name",
+            "required": true,
+            "schema": {
+              "description": "Catalog database name, which doubles as the connection's identity.",
+              "title": "Database Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoFederationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SsoFederationState_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Sso Federation",
+        "tags": ["connections"],
+        "x-gsf-source": "frontend/app/api/connections/[database_name]/sso-federation/route.ts",
+        "x-gsf-permissions": {
+          "connection": ["manage"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
     "/api/connections/source": {
       "get": {
         "description": "connectionsApi.isEnvSource — whether connections come from env config.",
@@ -5696,6 +5760,17 @@
         "title": "DataResponse[SqlValidationResult]",
         "type": "object"
       },
+      "DataResponse_SsoFederationState_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SsoFederationState"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[SsoFederationState]",
+        "type": "object"
+      },
       "DataResponse_TableExplorationDetails_": {
         "additionalProperties": true,
         "properties": {
@@ -6492,7 +6567,7 @@
       },
       "PublicConnection": {
         "additionalProperties": true,
-        "description": "A UI-managed connection with its credentials stripped.\n\n``connection`` is optional because the create/list reads project it away\nfor connectors that store no config; the delete response echoes the full\nrow it tore down.",
+        "description": "A UI-managed connection with its credentials stripped.\n\n``connection`` is absent from the delete response, which echoes only the\ndatabase name it tore down; the list and create reads carry the full\ncredential-free config.",
         "properties": {
           "connection": {
             "anyOf": [
@@ -7034,6 +7109,34 @@
         },
         "required": ["valid", "sql"],
         "title": "SqlValidationResult",
+        "type": "object"
+      },
+      "SsoFederationBody": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": ["enabled"],
+        "title": "SsoFederationBody",
+        "type": "object"
+      },
+      "SsoFederationState": {
+        "additionalProperties": true,
+        "description": "The one flag ``PATCH /connections/{database_name}/sso-federation`` sets.\n\nThe route deliberately echoes just the flag rather than the connection, so\na caller never has to re-send credentials to toggle it.",
+        "properties": {
+          "database_name": {
+            "title": "Database Name",
+            "type": "string"
+          },
+          "sso_federation": {
+            "title": "Sso Federation",
+            "type": "boolean"
+          }
+        },
+        "required": ["database_name", "sso_federation"],
+        "title": "SsoFederationState",
         "type": "object"
       },
       "StatusResponse": {

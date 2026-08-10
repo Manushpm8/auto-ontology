@@ -55,6 +55,7 @@ __all__ = [
     "SqlAttribute",
     "SqlExpressionValidationResult",
     "SqlValidationResult",
+    "SsoFederationState",
     "TableColumns",
     "TableExplorationDetails",
     "TableSqlQuery",
@@ -500,13 +501,24 @@ class ExplorationRelatedNodes(ApiModel):
 class PublicConnection(ApiModel):
     """A UI-managed connection with its credentials stripped.
 
-    ``connection`` is optional because the create/list reads project it away
-    for connectors that store no config; the delete response echoes the full
-    row it tore down.
+    ``connection`` is absent from the delete response, which echoes only the
+    database name it tore down; the list and create reads carry the full
+    credential-free config.
     """
 
     database_name: str
     connection: dict[str, Any] | None = None
+
+
+class SsoFederationState(ApiModel):
+    """The one flag ``PATCH /connections/{database_name}/sso-federation`` sets.
+
+    The route deliberately echoes just the flag rather than the connection, so
+    a caller never has to re-send credentials to toggle it.
+    """
+
+    database_name: str
+    sso_federation: bool
 
 
 # ---------------------------------------------------------------------------

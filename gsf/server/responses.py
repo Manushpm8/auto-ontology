@@ -37,6 +37,7 @@ from gsf.server.models import (
     SchemaSummary,
     SemanticExplorationGraph,
     SqlAttribute,
+    SsoFederationState,
     SqlExpressionValidationResult,
     SqlValidationResult,
     TableColumns,
@@ -90,6 +91,7 @@ __all__ = [
     "SqlAttributeResponse",
     "SqlExpressionValidationResponse",
     "SqlValidationResponse",
+    "SsoFederationResponse",
     "StatusResponse",
     "TableColumnsPageResponse",
     "TableExplorationDetailsResponse",
@@ -278,6 +280,7 @@ TableZonesResponse = DataResponse[dict[str, list[ZoneChip]]]
 # Connections
 ConnectionResponse = DataResponse[PublicConnection]
 ConnectionListResponse = ListResponse[PublicConnection]
+SsoFederationResponse = DataResponse[SsoFederationState]
 
 # Metadata
 EntityCoverageResponse = DataResponse[EntityCoverageResult]
