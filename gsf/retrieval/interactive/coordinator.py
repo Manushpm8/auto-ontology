@@ -68,20 +68,21 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
         # Inject targeted hints based on observed failure patterns in this benchmark.
         session.path_state["error"] = (
             "The SQL produced incorrect results. "
+            "Column and field names are likely correct — focus on how tables are joined "
+            "or how JSON objects are traversed, not on renaming. "
             "Do NOT modify formula coefficients, formula structure, or aggregation logic — "
-            "those were confirmed correct during clarification. "
-            "The following are the most likely causes — address whichever applies, "
-            "or fix a different issue you identify:\n\n"
+            "these were confirmed during clarification. "
+            "Address whichever of the following applies, or fix a different issue you identify:\n\n"
             "1. JOIN PATH: You may be joining tables too directly. "
-            "Check whether an intermediate table is required to reach the target data — "
-            "a direct join between two tables may need to route through a third. "
+            "Check whether an intermediate table is required — "
+            "a direct join may need to route through a third table. "
             "Verify the exact foreign key column names on each side.\n\n"
             "2. LIMIT / ORDER BY: If the question asks for top-N results, add LIMIT N. "
             "If an ORDER BY is present, verify it sorts by the column or expression "
-            "the question actually requests\n\n"
-            "3. JSONB KEY NAMES: If accessing JSONB columns, the actual stored key names "
-            "are likely short and abbreviated rather than human-readable English phrases. "
-            "Paths may also be nested (->'outer'->>'inner'), but check abbreviation first."
+            "the question actually requests.\n\n"
+            "3. JSONB PATH: If accessing a JSONB column, verify the path and key name "
+            "are correct — keys are typically short and abbreviated, and may be nested "
+            "within intermediate objects."
         )
         logger.info("Debug seed: wrong results — injecting targeted benchmark hints")
     session.path_state["sql_attempts"] = 0
@@ -200,6 +201,10 @@ use them as the authoritative definition for any matching terms.
 references or implicitly depends on.
 - If the follow-up reuses or extends the previous query's full structure, incorporate it. \
 If it only borrows part of it, incorporate only that part.
+- For any concept or metric in the follow-up that does not clearly map 1:1 to a term \
+in the previous SQL, do NOT assign it to a table or column — leave it unresolved so \
+the SQL generator can discover it from the schema. Only carry forward table/column \
+assignments for concepts explicitly present in the previous SQL.
 - Output only the rewritten question, no preamble or explanation."""
 
 
@@ -226,7 +231,7 @@ def _merge_follow_up_question(
     if not merged:
         logger.warning("Follow-up merge returned empty; falling back to raw follow-up question")
         return p2_question
-    logger.info("Follow-up merged question: %s", merged[:300])
+    logger.info("Follow-up merged question: %s", merged)
     return merged
 
 _EVIDENCE_PROMPT = """\
@@ -315,9 +320,19 @@ def _generate_evidence(question: str, grounded_kg: str) -> str:
     # Valid output is "Term = <expression>" anchored at the start of the line.
     # The old "=" in l" check passed long prose lines that contained "=" anywhere.
     _FORMULA_LINE = re.compile(r"^\s*[\w][\w\s/()-]*\s*=\s*\S")
+    _CONTINUATION = re.compile(r"^\s+(AND|OR)\b", re.IGNORECASE)
     _AGG_ONLY = re.compile(r"^\s*[\w][\w\s/()-]*\s*=\s*(STDDEV|AVG|COUNT|SUM|MIN|MAX)\s*\(", re.IGNORECASE)
+    # Join AND/OR continuation lines onto the preceding valid formula line before filtering,
+    # so multi-condition expressions like "A = x AND y IN (...)" survive even if the LLM
+    # wraps the second clause onto a new line.
+    joined_lines: list[str] = []
+    for line in response.splitlines():
+        if _CONTINUATION.match(line) and joined_lines:
+            joined_lines[-1] = joined_lines[-1].rstrip() + " " + line.strip()
+        else:
+            joined_lines.append(line)
     valid_lines = [
-        l for l in response.splitlines()
+        l for l in joined_lines
         if _FORMULA_LINE.match(l) and not l.lstrip().startswith("#") and not _AGG_ONLY.match(l)
     ]
     if not valid_lines:
@@ -362,16 +377,15 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     # column names and conditions from Phase 1 SQL so the SQL generator doesn't have to
     # guess the relationship between the two phases. Persist as working_question so debug
     # re-runs and logging reflect the enriched question.
-    # Save the raw follow-up question before merge: evidence extraction should use it,
-    # not the merged question — the merged question is long and P1-dominated, causing the
-    # evidence LLM to miss Phase 2-specific formulas (e.g. a new output column like CSR).
-    evidence_question = session.working_question
+    # Evidence extraction uses the merged question so it is calibrated to the same
+    # question the SQL generator receives, rather than the shorter raw follow-up.
     if p1_sql and p1_question:
         merged_q = _merge_follow_up_question(
             p1_question, p1_sql, cross_phase, session.working_question
         )
         session.working_question = merged_q
         logger.info("[%s] SQL gen — follow-up merged question (p1 sql %d chars)", session.task_id, len(p1_sql))
+    evidence_question = session.working_question
 
     question = session.working_question
     # For Phase 2, append the raw Phase 1 SQL as an exact reference so numeric thresholds,
@@ -391,7 +405,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         logger.info("[%s] SQL gen — injected default DESC sort hint", session.task_id)
     if evidence:
         question = f"{question}\n\nEvidence: {evidence}"
-        logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence[:200])
+        logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence)
 
     payload: TextToSQLPayload = {
         "question": question,

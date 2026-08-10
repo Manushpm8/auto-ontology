@@ -25,6 +25,8 @@ Rewrite the current question to incorporate the new clarification. Rules:
   structure but write variable names as natural-language phrases, not as snake_case or SQL \
   function calls (e.g. write "total point count, defaulting to 1,000,000 when unavailable" \
   rather than "COALESCE(total_point_count, 1000000)").
+- If the user explicitly names a field or column identifier in parentheses, \
+  preserve that identifier name exactly — do not paraphrase or drop it.
 - If the answer describes a calculation vaguely (no exact operator or constants), or indicates a misunderstanding has occured,\
   reflect the description using the user's words — do NOT invent a specific formula or add a guessed example.
 - Do NOT introduce external definitions, formulas, or example expressions beyond what the user \
