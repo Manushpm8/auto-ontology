@@ -13,6 +13,10 @@ type NavItem = { label: string; href: string };
 
 const CONNECTIONS_NAV_ITEM: NavItem = { label: 'Connections', href: '/settings/connections' };
 const ZONES_NAV_ITEM: NavItem = { label: 'Zones', href: '/settings/zones' };
+const SEMANTIC_INPUT_NAV_ITEM: NavItem = {
+	label: 'Semantic Input',
+	href: '/settings/semantic-input',
+};
 const USERS_NAV_ITEM: NavItem = { label: 'Users', href: '/settings/users' };
 const SSO_NAV_ITEM: NavItem = { label: 'Single Sign-On', href: '/settings/sso' };
 const SEMANTIC_COMPILATION_NAV_ITEM: NavItem = {
@@ -22,6 +26,10 @@ const SEMANTIC_COMPILATION_NAV_ITEM: NavItem = {
 const AGENT_SETTINGS_NAV_ITEM: NavItem = {
 	label: 'Agent Settings',
 	href: '/settings/agent-settings',
+};
+const IMPORT_EXPORT_NAV_ITEM: NavItem = {
+	label: 'Import / Export',
+	href: '/settings/import-export',
 };
 
 function rowClassName(selected: boolean) {
@@ -57,10 +65,12 @@ export const SettingsNav = () => {
 	if (!envManaged) items.push(CONNECTIONS_NAV_ITEM);
 	items.push(
 		ZONES_NAV_ITEM,
+		SEMANTIC_INPUT_NAV_ITEM,
 		USERS_NAV_ITEM,
 		SSO_NAV_ITEM,
 		SEMANTIC_COMPILATION_NAV_ITEM,
 		AGENT_SETTINGS_NAV_ITEM,
+		IMPORT_EXPORT_NAV_ITEM,
 	);
 
 	return (

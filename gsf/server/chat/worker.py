@@ -120,14 +120,29 @@ def _worker_loop(
             continue
 
         try:
+            question, prediction, target_db = payload
+            # Connections are resolved from Neo4j once at worker init. If that
+            # lookup came back empty — Neo4j not yet reachable when this
+            # subprocess booted, or the first connection created afterwards —
+            # the snapshot would stay empty for the life of the process and
+            # every question would fail with "missing required 'connectors'"
+            # until the pod restarted. Re-resolve lazily so the worker heals
+            # itself; get_connectors() caches a non-empty result and only
+            # retries while there is nothing to cache, so this costs nothing
+            # on the normal path.
+            if not connectors:
+                connectors = get_connectors()
             agent_payload = {
-                "question": payload,
+                "question": question,
+                "prediction": prediction,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
                 "connectors": connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": fetch_custom_prompts(),
             }
+            if target_db:
+                agent_payload["target_db"] = target_db
             for event in stream_agent_response(agent_payload):
                 out_q.put((_TAG_EVENT, event))
         except BaseException as exc:  # noqa: BLE001 — surface to parent
@@ -170,8 +185,19 @@ class PrewarmedWorker:
     def is_alive(self) -> bool:
         return self._proc.is_alive()
 
-    def submit(self, question: str) -> None:
-        self._in_q.put((_MSG_ASK, question))
+    def submit(
+        self,
+        question: str,
+        prediction: bool | None = None,
+        target_db: str | None = None,
+    ) -> None:
+        """Ask *question*, optionally forcing the prediction/SQL branch.
+
+        *prediction* mirrors the API parameter: True or False skips the
+        classification step, None classifies as usual.
+        *target_db* scopes the run to one connected database when set.
+        """
+        self._in_q.put((_MSG_ASK, (question, prediction, target_db)))
 
     def events(self) -> Generator[dict[str, Any] | None, None, None]:
         """Yield agent events for the current question.

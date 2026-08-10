@@ -16,12 +16,10 @@ export type SinglePageFormat = SinglePageComposerProps;
 
 export type SinglePageViewProps = {
 	dataId: string;
-	title: string;
 	getSinglePage: (dataId: string, treeFocusId: string | null) => Promise<SinglePageFormat>;
 	treeFocusId?: string | null;
 	/** Increment when explorer tree merges API data so details re-render without changing focus. */
 	treeDataEpoch?: number;
-	parentId?: string;
 	isEditing?: boolean;
 	onPatchEdits?: (
 		edits: Record<string, ComposerEditValue>,
@@ -43,8 +41,6 @@ export type SinglePageViewProps = {
 
 export const SinglePageView = ({
 	dataId,
-	parentId,
-	title,
 	getSinglePage,
 	treeFocusId = null,
 	treeDataEpoch = 0,
@@ -117,12 +113,10 @@ export const SinglePageView = ({
 			<SinglePageComposer
 				header={{
 					header: {
-						...(hasTreeFocus ? { entityId: dataId, parentId } : {}),
-						title,
-						withBorder: true,
-						...props.header?.header,
+						...(hasTreeFocus ? { entityId: dataId } : {}),
+						...props.header.header,
 					},
-					errorBanner: props.header?.errorBanner,
+					errorBanner: props.header.errorBanner,
 				}}
 				sections={props.sections}
 				rightPanel={props?.rightPanel}

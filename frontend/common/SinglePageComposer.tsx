@@ -23,7 +23,7 @@ import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
 import { TagInput } from '@/common/TagInput';
 import { Table } from '@/common/Table';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { SqlBlock } from '@/common/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
@@ -33,6 +33,7 @@ import { Toast } from '@/common/Toast';
 import { Label } from '@/common/Label';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
+import { TextVariant } from '@/enums/text';
 
 export type ComposerEditValue = string | string[];
 
@@ -45,7 +46,7 @@ export const LabelList = ({ values }: { values: unknown[] }) => {
 		<ul className="flex flex-wrap gap-1">
 			{nonEmptyValues.map((v, i) => (
 				<li key={`${v}-${i}`}>
-					<Label label={v} maxWidthClass="max-w-[16rem]" />
+					<Label label={v} />
 				</li>
 			))}
 		</ul>
@@ -65,10 +66,23 @@ export const ZonesRow = ({ zones }: { zones: TermZone[] }) => (
 	</div>
 );
 
+export type ComposerPageHeader = {
+	/** Rendered as the page title. Every composed page names the entity it shows. */
+	title: string;
+	/** Catalog node the default save path patches. Without it the Edit button stays hidden. */
+	entityId?: string;
+	titleEditable?: boolean;
+	certification?: ComposerCertification;
+	pdfProps?: {
+		pageName?: string;
+		handleIsPDF?: (isPDF: boolean) => void;
+	};
+};
+
 export type SinglePageComposerProps = {
 	sections: unknown[];
-	header?: {
-		header?: Record<string, unknown>;
+	header: {
+		header: ComposerPageHeader;
 		errorBanner?: unknown;
 	};
 	leftPanel?: { bulks: unknown[]; width: string; slot?: ReactNode };
@@ -341,7 +355,7 @@ const ReadOnlyTagList = ({
 				<ul className="mt-3 flex flex-wrap gap-1.5">
 					{nonEmptyValues.map((v, i) => (
 						<li key={`${v}-${i}`}>
-							<Label label={v} maxWidthClass="max-w-[24rem]" />
+							<Label label={v} />
 						</li>
 					))}
 				</ul>
@@ -391,7 +405,7 @@ function renderComposerSection(
 			return (
 				<div
 					id={section.id === 'description' ? 'description-section' : undefined}
-					className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+					className="space-y-3 rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
 				>
 					<div className="flex items-start justify-between gap-3">
 						<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
@@ -404,9 +418,7 @@ function renderComposerSection(
 							/>
 						) : null}
 					</div>
-					<p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
-						{section.body}
-					</p>
+					<Text as="p" text={section.body} lines={3} variant={TextVariant.Body} />
 				</div>
 			);
 		case ComposerSectionKind.TAG_LIST:
@@ -464,12 +476,18 @@ function renderComposerSection(
 									: col.align === 'right'
 										? 'text-right'
 										: undefined;
+							const textColumn =
+								col.type == null || col.type === ComposerColumnType.TEXT
+									? col
+									: undefined;
 							return {
 								key: col.key,
 								header: col.label,
 								width: col.width,
 								headerClassName: alignClass,
 								className: alignClass,
+								truncate: textColumn?.truncate,
+								maxWidthClass: textColumn?.maxWidthClass,
 								cell: (row: Record<string, string | string[]>) => {
 									const value = row[col.key];
 									if (col.type === ComposerColumnType.TAGS) {
@@ -519,15 +537,7 @@ function renderComposerSection(
 										);
 									}
 									const text = typeof value === 'string' ? value : '';
-									if (!text) return '—';
-									return col.truncate ? (
-										<TruncatedText
-											text={text}
-											maxWidthClass={col.maxWidthClass}
-										/>
-									) : (
-										text
-									);
+									return text || '—';
 								},
 							};
 						})}
@@ -579,7 +589,6 @@ function renderComposerSection(
 								<li key={term.id}>
 									<Label
 										label={term.name}
-										title={term.description ?? undefined}
 										onClick={
 											onTermClick ? () => onTermClick(term.id) : undefined
 										}
@@ -604,7 +613,6 @@ function renderComposerSection(
 								<li key={entity.id}>
 									<Label
 										label={entity.name}
-										title={entity.name}
 										onClick={
 											onEntityClick
 												? () => onEntityClick(entity.focusId)
@@ -701,15 +709,11 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			[router],
 		);
 
-		const hh = header?.header;
-		const title = (hh?.title as string) ?? 'Untitled';
-		const entityId = (hh?.entityId as string) ?? '';
-		const showContentHeader = hh?.showContentHeader === true;
-		const titleEditable = hh?.titleEditable === true;
-		const headerCertification = hh?.certification as ComposerCertification | undefined;
-		const shouldAutofocusTitle = showContentHeader && titleEditable;
-		const pdfPageName = (hh?.pdfProps as { pageName?: string } | undefined)?.pageName;
-		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
+		const { title, entityId = '', certification: headerCertification } = header.header;
+		const titleEditable = header.header.titleEditable === true;
+		const shouldAutofocusTitle = titleEditable;
+		const pdfPageName = header.header.pdfProps?.pageName;
+		const handleIsPDF = header.header.pdfProps?.handleIsPDF;
 
 		const firstEditableId =
 			sections.find(
@@ -869,7 +873,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				ref={ref}
 				className="box-border flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-0 overflow-hidden bg-white dark:bg-zinc-950"
 			>
-				{header?.errorBanner ? (
+				{header.errorBanner ? (
 					<div className="border-b border-amber-200/90 bg-amber-50 px-7 py-4 text-sm text-amber-950 sm:px-10 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
 						{String(header.errorBanner)}
 					</div>
@@ -962,53 +966,52 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						</aside>
 					) : null}
 
-					<main className="min-h-0 min-w-0 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
-						{sections.length === 0 ? (
-							<EmptyState
-								illustration={
-									<div
-										className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
-										aria-hidden
-									>
-										◇
-									</div>
-								}
-								title="Nothing selected yet"
-								description="Pick a database, schema, table, column, or field in the explorer to load metadata, descriptions, and related entities."
-							/>
-						) : (
-							<div className="space-y-5">
-								{showContentHeader ? (
-									<div className="flex items-start justify-between gap-3">
-										<div className="min-w-0 flex-1">
-											{isEditingActive && titleEditable ? (
-												<input
-													ref={titleInputRef}
-													key={title}
-													type="text"
-													autoFocus
-													defaultValue={title}
-													onChange={(e) => {
-														pendingEditsRef.current.name =
-															e.target.value;
-													}}
-													className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-zinc-900 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-													aria-label="Name"
-												/>
-											) : (
-												<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-													{title}
-												</h1>
-											)}
-										</div>
-										{headerCertification ? (
-											<div className="shrink-0 pt-1">
-												{renderCertControl('name', headerCertification)}
-											</div>
-										) : null}
+					<main className="min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
+						<div className="space-y-5">
+							<div className="flex items-start justify-between gap-3">
+								<div className="min-w-0 flex-1">
+									{isEditingActive && titleEditable ? (
+										<input
+											ref={titleInputRef}
+											key={title}
+											type="text"
+											autoFocus
+											defaultValue={title}
+											onChange={(e) => {
+												pendingEditsRef.current.name = e.target.value;
+											}}
+											className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-zinc-900 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+											aria-label="Name"
+										/>
+									) : (
+										<Text
+											as="h1"
+											text={title}
+											variant={TextVariant.PageTitle}
+										/>
+									)}
+								</div>
+								{headerCertification ? (
+									<div className="shrink-0 pt-1">
+										{renderCertControl('name', headerCertification)}
 									</div>
 								) : null}
-								{sections.map((section, i) => {
+							</div>
+							{sections.length === 0 ? (
+								<EmptyState
+									illustration={
+										<div
+											className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
+											aria-hidden
+										>
+											◇
+										</div>
+									}
+									title="Nothing selected yet"
+									description="Pick a database, schema, table, column, or field in the explorer to load metadata, descriptions, and related entities."
+								/>
+							) : (
+								sections.map((section, i) => {
 									if (!isComposerSection(section)) {
 										return (
 											<section
@@ -1098,9 +1101,9 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 											)}
 										</div>
 									);
-								})}
-							</div>
-						)}
+								})
+							)}
+						</div>
 
 						{entityUpdatingProperties &&
 						Object.keys(entityUpdatingProperties).length > 0 ? (

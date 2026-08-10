@@ -139,7 +139,7 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
 
     Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
     col_name, column_description, table_id, table_name, table_description,
-    schema_name}.
+    schema_name, term_name}.
     """
     if not attr_ids:
         return {}
@@ -148,13 +148,12 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     MATCH (attr:ColumnAttribute {{id: attr_id}})
     OPTIONAL MATCH (col:Column)-[:SEMANTIC_FK|HAS_ATTRIBUTE]->(attr)
     OPTIONAL MATCH (col)<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
+    OPTIONAL MATCH (attr)-[:PROPERTY_OF]->(term:Term)
     RETURN attr.id AS attr_id, attr.name AS attr_name,
            attr.description AS attr_description,
            col.id AS col_id, col.name AS col_name,
-           {column_description_expr("col")} AS column_description,
-           tbl.id AS table_id, tbl.name AS table_name,
-           {table_description_expr("tbl")} AS table_description,
-           sch.name AS schema_name
+           tbl.id AS table_id, tbl.name AS table_name, sch.name AS schema_name,
+           term.name AS term_name
     """
     try:
         rows = get_neo4j_conn().query_read(query, {"attr_ids": attr_ids})
@@ -176,6 +175,7 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
             "table_name": row.get("table_name") or "",
             "table_description": row.get("table_description") or "",
             "schema_name": row.get("schema_name") or "",
+            "term_name": row.get("term_name") or "",
         }
     return result
 

@@ -42,7 +42,7 @@ export const CertificationBadge = ({
 
 	if (iconOnly) {
 		return (
-			<span className={`group relative inline-flex ${className}`}>
+			<span className={`group relative inline-flex shrink-0 ${className}`}>
 				<Icon name={IconName.Certification} className={`h-4 w-4 ${ICON_CLASS[status]}`} />
 				<span
 					role="tooltip"
@@ -57,7 +57,7 @@ export const CertificationBadge = ({
 	return (
 		<span
 			title={title}
-			className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${PILL_CLASS[status]} ${className}`}
+			className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium ${PILL_CLASS[status]} ${className}`}
 		>
 			<Icon name={IconName.Certification} className="h-3.5 w-3.5" />
 			{title}

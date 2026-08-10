@@ -140,6 +140,27 @@ class BaseAgent(ABC):
         )
 
 
+def record_thought(
+    path_state: Dict[str, Any], node_name: str, text: str
+) -> Dict[str, Any]:
+    """Append a human-readable thought entry for *node_name* to the run's trace.
+
+    ``path_state["thoughts_log"]`` accumulates one entry per node that has
+    something genuine to say (LLM reasoning it already computed for its own
+    purposes, or a data-driven summary of what it did). ``stream_agent_response``
+    reads the tail of this list to attach a real "thinking" message to each
+    step event, and concatenates the whole list into the final answer's
+    ``thoughts`` attribute. No-op when *text* is empty so nodes that skip
+    their LLM path (e.g. returning early) don't add a blank entry.
+    """
+    if not text:
+        return path_state
+    log = list(path_state.get("thoughts_log") or [])
+    log.append({"node": node_name, "text": text})
+    path_state["thoughts_log"] = log
+    return path_state
+
+
 class AgentExecutionError(Exception):
     """
     Custom exception for agent execution errors.

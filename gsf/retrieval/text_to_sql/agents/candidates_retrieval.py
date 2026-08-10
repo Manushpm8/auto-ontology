@@ -9,10 +9,10 @@ Searches the semantic VDB per extracted entity, applies an LLM intent filter on
 each entity's raw hits, and stores typed results in path_state.
 
 Responsibilities:
-- Search the semantic VDB for ColumnAttribute candidates (top-12 per entity).
-- Search the semantic VDB for CustomAnalysis candidates.
-- Do not retrieve SqlAttribute candidates.
-- Filter CustomAnalysis hits by intent using the LLM (full question).
+- Search the semantic VDB (ontology_retriever) for ColumnAttribute candidates.
+- Search the semantic VDB (semantic_retriever) for CustomAnalysis candidates.
+- Search the semantic VDB for one Term hit using path_state["subject"].
+- Filter each entity's hits by intent using the LLM (full question, not entity).
 - Deduplicate across entities and store results in path_state.
 """
 
@@ -25,7 +25,11 @@ from langchain_core.messages import SystemMessage
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
-from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
+from gsf.semantic.constants import (
+    LABEL_COLUMN_ATTRIBUTE,
+    LABEL_SQL_ATTRIBUTE,
+    LABEL_TERM,
+)
 
 from gsf.dal.attributes import (
     fetch_attr_column_contexts,
@@ -78,29 +82,34 @@ def _search_by_label(
 
 
 def _dedupe_best_score(hits: list[dict]) -> list[dict]:
-    """Deduplicate and rank by semantic score, using FK count as a tie-break."""
+    """Deduplicate by id, keeping the hit with the lowest score.
+
+    When hits carry ``query_entity``, accumulate all entities that retrieved
+    the same id into ``query_entities`` so per-entity coverage is preserved.
+    """
     best: dict[str, dict] = {}
+    entities_by_id: dict[str, set[str]] = {}
     for hit in hits:
         hid = hit.get("id")
         if hid is None:
             continue
         key = str(hid)
+        qe = hit.get("query_entity")
+        if qe:
+            entities_by_id.setdefault(key, set()).add(str(qe))
         prev = best.get(key)
         if prev is None:
             best[key] = hit
-        else:
-            cur_fk = int(hit.get("fk_count") or 0)
-            prev_fk = int(prev.get("fk_count") or 0)
-            cur_score = float(hit.get("score") or float("inf"))
-            prev_score = float(prev.get("score") or float("inf"))
-            if (cur_score, -cur_fk) < (prev_score, -prev_fk):
-                best[key] = hit
+    result: list[dict] = []
+    for key, hit in best.items():
+        out = dict(hit)
+        ents = entities_by_id.get(key)
+        if ents:
+            out["query_entities"] = sorted(ents)
+        result.append(out)
     return sorted(
-        best.values(),
-        key=lambda h: (
-            float(h.get("score") or float("inf")),
-            -int(h.get("fk_count") or 0),
-        ),
+        result,
+        key=lambda h: float(h.get("score") or float("inf")),
     )
 
 
@@ -432,16 +441,20 @@ def _build_column_attribute_spec(hit: dict) -> ColumnAttributeSpec | None:
 
 
 class CandidateRetrievalAgent(BaseAgent):
-    """Retrieve ColumnAttribute and CustomAnalysis candidates.
+    """Retrieve ColumnAttribute, CustomAnalysis, SqlAttribute, and subject Term candidates.
 
     - ColumnAttributes: searched per entity from the semantic VDB (top-12 each).
     - CustomAnalysis: searched once with the full question from the semantic VDB.
-    - SqlAttribute retrieval is disabled; ``retrieved_sql_attributes`` is always empty.
+    - SqlAttribute: searched once with the full question from the semantic VDB.
+    - Subject Term: searched once with ``path_state["subject"]`` (top-1 hit).
 
     Deduplicate across entities and store:
     - ``path_state["retrieved_column_attributes"]``: ``list[dict]``
+      (each ColumnAttribute hit may include ``query_entity`` /
+      ``query_entities`` naming the extraction string(s) that retrieved it)
     - ``path_state["retrieved_custom_analyses"]``:   ``list[dict]``
-    - ``path_state["retrieved_sql_attributes"]``:    ``list[dict]`` (always ``[]``)
+    - ``path_state["retrieved_sql_attributes"]``:    ``list[dict]``
+    - ``path_state["retrieved_subject_term"]``:      ``dict | None``
     """
 
     def __init__(self):
@@ -458,6 +471,7 @@ class CandidateRetrievalAgent(BaseAgent):
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
         entities: list[str] = path_state.get("entities") or []
+        subject = (path_state.get("subject") or "").strip()
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
@@ -465,6 +479,7 @@ class CandidateRetrievalAgent(BaseAgent):
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
         all_sql_attr_hits: list[dict] = []
+        subject_term_hits: list[dict] = []
 
         if semantic_retriever is not None:
             clean_entities = [e.strip() for e in entities if (e or "").strip()]
@@ -494,6 +509,19 @@ class CandidateRetrievalAgent(BaseAgent):
                     for entity in clean_entities
                 ],
             ]
+            if subject:
+                search_tasks.append(
+                    (
+                        "subject_term",
+                        (
+                            semantic_retriever,
+                            subject,
+                            LABEL_TERM,
+                            1,
+                            target_db,
+                        ),
+                    )
+                )
 
             with ThreadPoolExecutor(max_workers=len(search_tasks) or 1) as pool:
                 futures = {
@@ -505,8 +533,17 @@ class CandidateRetrievalAgent(BaseAgent):
                     result = future.result()
                     if key == "custom":
                         all_custom_hits = result
+                    elif key == "sql_attr":
+                        all_sql_attr_hits = result
+                    elif key == "subject_term":
+                        subject_term_hits = result
                     else:
-                        all_col_attr_hits.extend(result)
+                        # key is "col_attr:{entity}" — tag each hit for coverage.
+                        entity = key.split(":", 1)[1]
+                        for hit in result:
+                            tagged = dict(hit)
+                            tagged["query_entity"] = entity
+                            all_col_attr_hits.append(tagged)
 
         # Annotate each ColumnAttribute hit with its incoming SEMANTIC_FK count so
         # that join-central candidates are ranked higher than VDB-score alone.
@@ -519,6 +556,7 @@ class CandidateRetrievalAgent(BaseAgent):
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
         deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)
+        subject_term = subject_term_hits[0] if subject_term_hits else None
 
         # Fetch Neo4j context (table names, descriptions) for the deduped candidates
         # and evaluate them by SQL-construction relevance via the LLM.  This catches
@@ -546,14 +584,22 @@ class CandidateRetrievalAgent(BaseAgent):
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = deduped_sql_attr
         path_state["col_attr_contexts"] = col_attr_contexts
+        path_state["retrieved_subject_term"] = subject_term
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "
-            "and %d SqlAttribute candidates (%d entities queried)",
+            "%d SqlAttribute candidates, and subject Term %s "
+            "(%d entities queried, subject=%r)",
             len(deduped_col_attr),
             len(deduped_custom),
             len(deduped_sql_attr),
+            (
+                f"id={subject_term.get('id')!r} score={subject_term.get('score')}"
+                if subject_term
+                else "None"
+            ),
             len(entities),
+            subject,
         )
 
         return {"path_state": path_state}

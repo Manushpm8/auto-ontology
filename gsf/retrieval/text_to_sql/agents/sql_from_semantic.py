@@ -27,12 +27,13 @@ from typing import Any, Dict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from gsf.utils.llm_invoke import safe_invoke_with_structured_output
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.data_access.custom_analyses import (
     build_custom_analyses_section,
     get_custom_analyses_ids,
 )
+from gsf.retrieval.entity_coverage.prompts import format_glossary_section
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -41,6 +42,7 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_custom_analyses_section,
     format_dialect_rules,
     format_dual_question_block,
     format_projection_rules,
@@ -52,6 +54,12 @@ from gsf.retrieval.text_to_sql.evidence_hints import (
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 
 logger = logging.getLogger(__name__)
+
+# Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
+# (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
+# so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
+# right step event and ``NODE_LABELS`` entry.
+_GRAPH_NODE_NAME = "construct_sql_from_candidates"
 
 
 def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
@@ -342,29 +350,16 @@ class SQLFromCandidatesAgent(BaseAgent):
                         f"  {term_name}: also known as {', '.join(syns)}"
                     )
                 observation_block += "\n" + "\n".join(gloss_lines) + "\n"
+            glossary_section = format_glossary_section(state.get("glossary") or [])
+            if glossary_section:
+                observation_block += f"\n{glossary_section}"
             if extract_evidence(original_question):
                 evidence_hints = build_evidence_hints_block(original_question)
                 if evidence_hints:
                     observation_block += f"\n{evidence_hints}\n"
 
             # Build custom analyses section for user prompt
-            ca_section = ""
-            if custom_analyses:
-                ca_lines = []
-                for a in custom_analyses:
-                    line = f"- {a.get('name', '(unnamed)')}"
-                    desc = (a.get("description") or "").strip()
-                    if desc:
-                        line += f": {desc}"
-                    sql = (a.get("sql") or "").strip()
-                    if sql:
-                        line += f"\n  SQL: {sql}"
-                    ca_lines.append(line)
-                ca_section = (
-                    "DOMAIN-SPECIFIC CUSTOM ANALYSES (use their SQL patterns as guidance):\n"
-                    + "\n".join(ca_lines)
-                    + "\n\n"
-                )
+            ca_section = format_custom_analyses_section(custom_analyses)
 
             # Build sql attributes section for user prompt
             sa_section = ""
@@ -499,6 +494,10 @@ class SQLFromCandidatesAgent(BaseAgent):
                 },
                 "decision": "unconstructable",
             }
+
+        thought = (getattr(response, "thought", "") or "").strip()
+        if thought:
+            record_thought(path_state, _GRAPH_NODE_NAME, thought)
 
         # Check if we have a valid response (either SQL or text-based answer from file contents)
         has_sql = bool(response.sql_code and response.sql_code.strip())

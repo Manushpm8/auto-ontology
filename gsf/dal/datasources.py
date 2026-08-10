@@ -23,7 +23,11 @@ from typing import Any
 import pandas as pd
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 
-from gsf.dal.cypher_fragments import column_description_expr, table_description_expr
+from gsf.dal.cypher_fragments import (
+    column_description_expr,
+    paging_clause,
+    table_description_expr,
+)
 from gsf.dal.neo4j_tx import graph
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 from gsf.semantic.constants import (
@@ -499,30 +503,54 @@ RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name
 """
 
 
-def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
-    """Return a table dict with nested columns, or None if the table is missing."""
+def fetch_columns_for_table(
+    table_id: str,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
+) -> dict[str, Any] | None:
+    """Return a table dict with nested columns, or None if the table is missing.
+
+    Columns are ordered by ordinal position, so *skip* and *limit* read one
+    page of that order; pair them with ``count_columns_for_table`` for the
+    table's full column count, which no paged read can report. Omit *limit*
+    for every column of the table, which is what the catalog tree and the
+    text-to-SQL context need.
+
+    Paging happens inside a subquery scoped to the table, so the table's own
+    fields (``table_name``, ``schema_name``, ``database_name``) come back the
+    same way whether the page holds rows or not — ``None`` means the table
+    itself (or its Schema/Database path) is missing, never that *skip* landed
+    past the last column.
+    """
+    params: dict[str, Any] = {"table_id": table_id}
+    paging = paging_clause(skip, limit, params)
     rows = graph().query_read(
         f"""
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-        WITH t, c, s, db ORDER BY c.ordinal_position
-        WITH t, s, db, collect({{
-                 id: c.id,
-                 ordinal_position: c.ordinal_position,
-                 column_name: c.name,
-                 data_type: c.data_type,
-                 description: {column_description_expr("c")},
-                 description_certified: coalesce(c.description_certified, false),
-                 sample_values: c.sample_values
-             }}) AS columns
+              (t:{Labels.TABLE} {{id: $table_id}})
+        CALL (t) {{
+            MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+            WITH c ORDER BY c.ordinal_position
+            {paging}
+            RETURN collect({{
+                       id: c.id,
+                       ordinal_position: c.ordinal_position,
+                       column_name: c.name,
+                       data_type: c.data_type,
+                       description: {column_description_expr("c")},
+                       description_certified: coalesce(c.description_certified, false),
+                       sample_values: c.sample_values
+                   }}) AS columns
+        }}
         RETURN t.name AS table_name,
                t.table_type AS table_type,
                s.name AS schema_name,
                db.name AS database_name,
-               size(columns) AS columns_count,
                columns
+        LIMIT 1
         """,
-        {"table_id": table_id},
+        params,
     )
     if not rows:
         return None
@@ -530,6 +558,23 @@ def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
     for column in table.get("columns") or []:
         column["sample_values"] = parse_sample_values(column.get("sample_values"))
     return table
+
+
+def count_columns_for_table(table_id: str) -> int:
+    """Return how many Columns a table has.
+
+    Companion to ``fetch_columns_for_table`` when it is called with a *limit*:
+    Neo4j won't report the unpaged size of a ``LIMIT``-ed result, so the
+    caller's pager needs this second query.
+    """
+    rows = graph().query_read(
+        f"""
+        MATCH (:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+        RETURN count(c) AS total
+        """,
+        {"table_id": table_id},
+    )
+    return rows[0]["total"] if rows else 0
 
 
 def fetch_parent_table_id_for_column(column_id: str) -> str | None:

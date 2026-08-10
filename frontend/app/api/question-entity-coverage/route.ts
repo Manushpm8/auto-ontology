@@ -5,7 +5,7 @@
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
 
-// Turn free-text into the pre-PQL data objects (relevant tables, join paths,
-// columns) via the backend prediction flow. Same capability as chat, so it is
-// gated on `chat: ['use']`.
+// Grade how well the semantic layer covers the entities in a free-text
+// question. Same retrieval capability as chat, so it is gated on
+// `chat: ['use']`.
 export const POST = withPermission({ chat: ['use'] })((req) => proxyToBackend(req));

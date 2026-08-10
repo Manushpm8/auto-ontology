@@ -27,12 +27,14 @@ export type AgentAnswer = {
 	response?: string | null;
 	sql_code?: string | null;
 	sql_response_from_db?: unknown;
+	thoughts?: string | null;
 };
 
 export type AnswerMessage = {
 	content: string;
 	sql?: string;
 	sqlResponse?: string;
+	thoughts?: string;
 };
 
 const hasChartFence = (content: string): boolean =>
@@ -62,10 +64,12 @@ export const isResultMessage = (message: {
 
 /** Message 1 — prose + SQL, ready the moment the agent's answer lands. */
 export const buildSqlAnswerMessage = (answer: AgentAnswer): AnswerMessage | null => {
-	const { response, sql_code: sqlCode } = answer;
+	const { response, sql_code: sqlCode, thoughts } = answer;
 	const prose = stripChartFences(response ?? '');
 
-	if (prose || sqlCode) return { content: prose, sql: sqlCode ?? undefined };
+	if (prose || sqlCode) {
+		return { content: prose, sql: sqlCode ?? undefined, thoughts: thoughts ?? undefined };
+	}
 
 	// Nothing to say and no executed result for Message 2 to fall back on —
 	// surface something rather than leaving the user without a reply.

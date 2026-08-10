@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_TERM,
@@ -13,6 +15,34 @@ from gsf.semantic.constants import (
     REL_REPRESENTS,
     REL_SEMANTIC_FK,
 )
+
+
+def and_condition(where_clause: str, condition: str) -> str:
+    """Add *condition* to a ``WHERE`` clause that may be empty.
+
+    The DAL filter builders (``resolve_table_filter``,
+    ``_sql_attr_zone_filter``) return either ``""`` or a complete ``WHERE ...``
+    clause, so a caller narrowing the query further can't just concatenate.
+    """
+    return f"{where_clause} AND {condition}" if where_clause else f"WHERE {condition}"
+
+
+def paging_clause(skip: int, limit: int | None, params: dict[str, Any]) -> str:
+    """Return a ``SKIP``/``LIMIT`` fragment, binding its values into *params*.
+
+    Goes last, after an ``ORDER BY`` that fully determines the row order —
+    without one Neo4j may return rows in any order, so consecutive pages
+    would both repeat and drop rows. ``skip=0`` and ``limit=None`` each
+    contribute nothing.
+    """
+    parts: list[str] = []
+    if skip:
+        params["skip"] = skip
+        parts.append("SKIP $skip")
+    if limit is not None:
+        params["limit"] = limit
+        parts.append("LIMIT $limit")
+    return " ".join(parts)
 
 
 def _attr_description_head(col_var: str, rel: str) -> str:

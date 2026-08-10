@@ -39,7 +39,11 @@ const themeClasses: Record<SelectButtonTheme, ThemeClasses> = {
 	[SelectButtonTheme.ListItemTwoLine]: {
 		// The extra right padding keeps the two text rows clear of the trailing
 		// action button that these rows are overlaid with.
-		base: `${listItemBase} flex-col items-start rounded-lg px-3 py-2 pr-8`,
+		//
+		// The rows stretch to the row's width rather than shrinking to their
+		// text (`items-start`), so a long value has a width to be clipped
+		// against instead of running past the edge.
+		base: `${listItemBase} flex-col items-stretch rounded-lg px-3 py-2 pr-8`,
 		selected: listItemSelected,
 		unselected:
 			'text-zinc-700 hover:bg-zinc-100 hover:text-black dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100',

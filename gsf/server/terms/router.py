@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from gsf.dal import sql_attributes as sql_attr_dal
 from gsf.dal import terms as terms_dal
+from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from gsf.server.terms import service as term_service
 
 router = APIRouter()
@@ -38,6 +39,8 @@ class ColumnAttributeUpdate(BaseModel):
 def list_terms(
     zone_ids: list[str] | None = Query(default=None),
     q: str | None = Query(default=None),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
 ) -> dict:
     """Return Term nodes zone-scoped to the provided zones.
 
@@ -48,46 +51,59 @@ def list_terms(
     *q*, when given, additionally filters to terms whose name contains it
     (case-insensitive).
 
+    Terms come back ordered by name, and *skip*/*limit* select one page of
+    that order; ``total`` reports how many match in full, so a caller knows
+    when to stop asking. Omitting *limit* returns every matching term.
+
     Each returned term carries its resolved ``zones``, so the Terms list
     and the Exploration graph can render Zone chips from this single
     response without a separate per-page zones request.
+
+    ``column_attribute_counts``, ``sql_attribute_counts`` and
+    ``related_counts`` are per-term breakdowns (``[{term_id, count}, ...]``)
+    that let the Terms list render per-card badges without an N+1 fetch, and
+    cover the terms on this page (see ``service.list_terms_page``). The
+    underlying ColumnAttribute/SqlAttribute nodes are fetched separately, only
+    for the focused Term, via ``/terms/{term_id}/column-attributes`` and
+    ``/terms/{term_id}/sql-attributes`` below — this endpoint stays
+    counts-only so the Terms list never pulls attribute nodes it won't show.
     """
-    terms = terms_dal.fetch_all_terms(zone_ids=zone_ids, search=q)
-    # These three are per-term breakdowns (``[{term_id, count}, ...]``), used
-    # by the Terms list to render per-card badges without an N+1 fetch. They
-    # are plain lists (not a ``{data, count}`` envelope) — an outer ``count``
-    # here would mean "terms with a nonzero count", not a useful total, and
-    # the frontend never reads it. The underlying ColumnAttribute/SqlAttribute
-    # nodes themselves are fetched separately, only for the focused Term, via
-    # ``/terms/{term_id}/column-attributes`` and ``/terms/{term_id}/sql-attributes``
-    # below — this endpoint stays counts-only so the Terms list doesn't pull
-    # every attribute node in the graph on every load.
-    column_attribute_counts = terms_dal.fetch_column_attribute_counts(zone_ids=zone_ids)
-    sql_attribute_counts = sql_attr_dal.fetch_sql_attribute_counts(zone_ids=zone_ids)
-    related_counts = terms_dal.fetch_related_terms_counts(zone_ids=zone_ids)
-    return {
-        "terms": terms,
-        "column_attribute_counts": column_attribute_counts,
-        "sql_attribute_counts": sql_attribute_counts,
-        "related_counts": related_counts,
-    }
+    return term_service.list_terms_page(
+        zone_ids=zone_ids, search=q, skip=skip, limit=limit
+    )
 
 
 @router.get("/terms/{term_id}/column-attributes")
 def list_term_column_attributes_by_id(
     term_id: str,
     zone_ids: list[str] | None = Query(default=None),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
 ) -> dict:
     """Return ColumnAttribute nodes for a single Term.
 
     Zone-scoped when zone_ids are provided, so a viewer can't see attributes
     of out-of-zone tables just because they belong to a term they can see.
 
+    Attributes come back ordered by name, and *skip*/*limit* select one page
+    of that order. ``count`` is the length of ``data`` (this page), ``total``
+    the number of attributes the term has in full.
+
     Each attribute includes ``primary_column`` and ``referenced_columns``
     (catalog path ids + names) for navigation from the detail page.
     """
-    attrs = terms_dal.fetch_column_attributes_by_term_id(term_id, zone_ids=zone_ids)
-    return {"data": attrs, "count": len(attrs)}
+    attrs = terms_dal.fetch_column_attributes_by_term_id(
+        term_id, zone_ids=zone_ids, skip=skip, limit=limit
+    )
+    # `len(attrs)` only equals the term's full count when neither paging
+    # argument was given — a `skip` alone (no `limit`) still returns a
+    # partial read, so it needs the same separate count query.
+    total = (
+        terms_dal.count_column_attributes_by_term_id(term_id, zone_ids=zone_ids)
+        if skip or limit is not None
+        else len(attrs)
+    )
+    return {"data": attrs, "count": len(attrs), "total": total}
 
 
 @router.patch("/terms/{term_id}/column-attributes/{attr_id}")
@@ -148,14 +164,30 @@ def update_column_attribute(
 def list_term_sql_attributes_by_id(
     term_id: str,
     zone_ids: list[str] | None = Query(default=None),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
 ) -> dict:
     """Return SqlAttribute nodes for a single Term.
 
     Zone-scoped when zone_ids are provided, matching the term visibility
     rules used by the single-term detail endpoint.
+
+    Attributes come back ordered by name, and *skip*/*limit* select one page
+    of that order. ``count`` is the length of ``data`` (this page), ``total``
+    the number of attributes the term has in full.
     """
-    attrs = sql_attr_dal.fetch_sql_attributes_by_term_id(term_id, zone_ids=zone_ids)
-    return {"data": attrs, "count": len(attrs)}
+    attrs = sql_attr_dal.fetch_sql_attributes_by_term_id(
+        term_id, zone_ids=zone_ids, skip=skip, limit=limit
+    )
+    # `len(attrs)` only equals the term's full count when neither paging
+    # argument was given — a `skip` alone (no `limit`) still returns a
+    # partial read, so it needs the same separate count query.
+    total = (
+        sql_attr_dal.count_sql_attributes_by_term_id(term_id, zone_ids=zone_ids)
+        if skip or limit is not None
+        else len(attrs)
+    )
+    return {"data": attrs, "count": len(attrs), "total": total}
 
 
 @router.patch("/terms/{term_id}")

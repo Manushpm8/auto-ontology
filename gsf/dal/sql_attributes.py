@@ -17,7 +17,11 @@ from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 
-from gsf.dal.cypher_fragments import column_description_expr
+from gsf.dal.cypher_fragments import (
+    and_condition,
+    column_description_expr,
+    paging_clause,
+)
 from gsf.dal.neo4j_tx import graph
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.constants import (
@@ -97,22 +101,15 @@ def _sql_attr_zone_filter(
 # ---------------------------------------------------------------------------
 
 
-def _query_sql_attributes(
-    *,
-    attr_id: str | None = None,
-    term_id: str | None = None,
-    zone_ids: list[str] | None = None,
-    order_by: str | None = None,
-) -> list[dict[str, Any]]:
-    """Run the shared SqlAttribute ↔ Term ↔ Sql traversal behind every read below.
+def _sql_attribute_anchor(
+    attr_id: str | None,
+    term_id: str | None,
+    zone_ids: list[str] | None,
+) -> tuple[str, dict[str, Any]]:
+    """Build the MATCH prefix + params shared by every SqlAttribute read.
 
-    Every SqlAttribute read joins the same three things: the SqlAttribute
-    itself, its Term (via PROPERTY_OF), and its SQL text (via HAS_SQL) —
-    this factors that join, the zone scoping (``_sql_attr_zone_filter``), and
-    the shared RETURN projection into one place. Anchor on *attr_id* or
-    *term_id* (mutually exclusive) to scope to one attribute/term, or leave
-    both ``None`` for every SqlAttribute. Pass *order_by* as a raw ``ORDER
-    BY`` expression (e.g. ``"attr.name"``); omitted when ``None``.
+    Anchor on *attr_id* or *term_id* (mutually exclusive) to scope to one
+    attribute/term, or pass ``None`` for both to select every SqlAttribute.
     """
     extra_params: dict[str, Any] = {}
     if attr_id is not None:
@@ -138,15 +135,52 @@ def _query_sql_attributes(
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         {attr_filter}
         """
+    return anchor, params
+
+
+def _query_sql_attributes(
+    *,
+    attr_id: str | None = None,
+    term_id: str | None = None,
+    zone_ids: list[str] | None = None,
+    order_by: str | None = None,
+    skip: int = 0,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Run the shared SqlAttribute ↔ Term ↔ Sql traversal behind every read below.
+
+    Every SqlAttribute read joins the same three things: the SqlAttribute
+    itself, its Term (via PROPERTY_OF), and its SQL text (via HAS_SQL) —
+    this factors that join, the zone scoping (``_sql_attr_zone_filter``), and
+    the shared RETURN projection into one place. Anchor on *attr_id* or
+    *term_id* (mutually exclusive) to scope to one attribute/term, or leave
+    both ``None`` for every SqlAttribute. Pass *order_by* as a raw ``ORDER
+    BY`` expression (e.g. ``"attr.name"``); omitted when ``None``.
+
+    *skip* and *limit* read one page of *order_by*; only pass them together
+    with an *order_by* that fully determines the row order, or a page's
+    contents won't be stable between requests.
+
+    One row per attribute, even for an attribute carrying several HAS_SQL
+    edges: the SQL text comes from the lowest-id Sql node. Without that
+    collapse the rows would outnumber the ``count(DISTINCT attr)`` total
+    ``count_sql_attributes_by_term_id`` hands the pager, putting the last
+    attributes out of its reach.
+    """
+    anchor, params = _sql_attribute_anchor(attr_id, term_id, zone_ids)
+    paging = paging_clause(skip, limit, params)
 
     return graph().query_read(
         f"""
         {anchor}
         MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        WITH term, attr, sql ORDER BY sql.id
+        WITH term, attr, head(collect(sql)) AS sql
         RETURN {_SQL_ATTRIBUTE_FIELDS},
                term.id   AS term_id,
                term.name AS term_name
         {f"ORDER BY {order_by}" if order_by else ""}
+        {paging}
         """,
         params,
     )
@@ -160,6 +194,7 @@ def list_sql_attributes() -> list[dict[str, Any]]:
 def fetch_sql_attribute_counts(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
+    term_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return per-term SqlAttribute counts, zone-scoped when zone_ids are provided.
 
@@ -169,16 +204,29 @@ def fetch_sql_attribute_counts(
     (see ``resolve_accessible_catalog_ids``) when the caller already
     resolved *zone_ids* for this request, to skip a repeat Neo4j round trip.
 
+    *term_ids* narrows the scan to those terms — the paged Terms list passes
+    the ids on the page it is about to render, so the response doesn't carry
+    counts for the rest of the glossary. ``None`` counts every term.
+
+    The ``HAS_SQL`` match mirrors ``_query_sql_attributes``, which drops
+    attributes with no Sql node: a count that included them would show a
+    badge larger than the list behind it (and larger than
+    ``count_sql_attributes_by_term_id``, which applies the same match).
+
     Each entry is ``{term_id: str, count: int}``. Terms with zero
     SqlAttributes are omitted.
     """
     attr_filter, params = _sql_attr_zone_filter(
         zone_ids, data_ids_by_zone=data_ids_by_zone
     )
+    if term_ids is not None:
+        params["term_ids"] = term_ids
+        attr_filter = and_condition(attr_filter, "term.id IN $term_ids")
     return graph().query_read(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         {attr_filter}
+        MATCH (attr)-[:{Edges.HAS_SQL}]->(:{Labels.SQL})
         RETURN term.id AS term_id, count(DISTINCT attr) AS count
         """,
         params,
@@ -242,16 +290,52 @@ def get_full_sql_attribute_by_id(
 def fetch_sql_attributes_by_term_id(
     term_id: str,
     zone_ids: list[str] | None = None,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return SqlAttribute nodes linked to a single Term via PROPERTY_OF.
 
     When *zone_ids* is supplied, each attribute is scoped independently via
     ``_sql_attr_zone_filter`` — an attribute of an otherwise-visible term is
     still excluded when its own SQL touches a table outside *zone_ids*.
+
+    Rows are ordered by name (then id, to break ties between same-named
+    attributes), so *skip* and *limit* read one page of that order; pair them
+    with ``count_sql_attributes_by_term_id`` for the total. Omit *limit* for
+    every attribute of the term.
     """
     return _query_sql_attributes(
-        term_id=term_id, zone_ids=zone_ids, order_by="attr.name"
+        term_id=term_id,
+        zone_ids=zone_ids,
+        order_by="attr.name, attr.id",
+        skip=skip,
+        limit=limit,
     )
+
+
+def count_sql_attributes_by_term_id(
+    term_id: str,
+    zone_ids: list[str] | None = None,
+) -> int:
+    """Return how many SqlAttributes one Term has, under the same zone scoping.
+
+    Companion to ``fetch_sql_attributes_by_term_id`` when it is called with a
+    *limit*: Neo4j won't report the unpaged size of a ``LIMIT``-ed result, so
+    the caller's pager needs this second query. The ``HAS_SQL`` match is
+    repeated here because that read drops attributes with no Sql node, and a
+    total that counted them would exceed the rows the pager can reach.
+    """
+    anchor, params = _sql_attribute_anchor(None, term_id, zone_ids)
+    rows = graph().query_read(
+        f"""
+        {anchor}
+        MATCH (attr)-[:{Edges.HAS_SQL}]->(:{Labels.SQL})
+        RETURN count(DISTINCT attr) AS total
+        """,
+        params,
+    )
+    return rows[0]["total"] if rows else 0
 
 
 def find_attr_by_name(name: str, exclude_id: str | None) -> dict[str, str] | None:
