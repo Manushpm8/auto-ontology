@@ -20,6 +20,10 @@ CLARIFY_MAX_DISTANCE: float = 0.65
 # Compiled entity-coverage LangGraph — shared across calls, compiled once at import.
 _ec_app = _create_entity_coverage_graph().compile()
 
+# Regex for detecting calculation-context queries.
+# Covers: calculate/calculated/calculation, compute/computed/computation, derive/derived/derivation.
+_CALC_TRIGGER = re.compile(r'\b(calculat|comput|deriv)', re.IGNORECASE)
+
 if TYPE_CHECKING:
     from .state import InteractiveSessionState
 
@@ -60,7 +64,7 @@ Formulas or conditions whose exact specification is still missing, ranked most-c
 {turns_hint}
 
 STRICT RULES — follow every one of these exactly:
-1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', or 'schema'. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
+1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, or history: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
 3. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If turns remain AND no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 4. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
@@ -720,13 +724,17 @@ def _find_unresolvable_entities(
     # Also mark generics as unresolvable (they were never sent to VDB).
     final_unresolvable_norms |= {_normalize_entity(e) or e for e in generic_skipped}
 
+    # VDB-only: resolved by VDB but not covered by external KB.
+    # Returned so the caller can check for missing calculation formulas.
+    vdb_only_norms: set[str] = {norm for norm, _, _ in resolved_hits} - kb_covered_norms
+
     unresolvable: list[tuple[str, str | None]] = [
         (norm, None) for norm in final_unresolvable_norms
     ]
 
     logger.info("Clarify — unresolvable after VDB+KB: %s", [e for e, _ in unresolvable] or "none")
     logger.info("Clarify — resolved by VDB: %s", [(e, f"{s:.3f}") for e, _, s in resolved_hits] or "none")
-    return unresolvable, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms
+    return unresolvable, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms, vdb_only_norms
 
 
 _PRUNE_RESOLVED_PROMPT = """\
@@ -796,7 +804,7 @@ def should_clarify(
     unanswered_topics_text = "\n".join(f"- {q}" for q in unanswered) if unanswered else "None"
 
     if session._cached_unresolvable_for != session.working_question:
-        unresolvable, resolved_hits, relevant_kg, extracted_norms, entry_to_original_terms = _find_unresolvable_entities(
+        unresolvable, resolved_hits, relevant_kg, extracted_norms, entry_to_original_terms, vdb_only_norms = _find_unresolvable_entities(
             session.working_question,
             session.semantic_retriever,
             session.db_name,
@@ -805,6 +813,7 @@ def should_clarify(
         )
         session._cached_unresolvable = unresolvable
         session._cached_unresolvable_for = session.working_question
+        session._cached_vdb_only_norms = vdb_only_norms
         # Always replace with the fresh KB result — never carry stale content forward.
         # An empty result is valid (entities not covered by KB this turn).
         session._grounded_kg = relevant_kg
@@ -882,20 +891,29 @@ def should_clarify(
         grounded_kg_for_prompt[:300],
     )
 
-    # Turn-0 KB scan: run completeness on the initial KB before any Q&A so
-    # KB-sourced ambiguities surface in the decide prompt immediately.
-    if not session.clarify_history and not session.incomplete_formula_terms and session._grounded_kg:
+    # Turn-0 scan: run completeness before any Q&A to surface missing formulas.
+    # Fires when KB has content OR when the question implies a calculation and there
+    # are VDB-only entities (schema hits with no KB formula).
+    has_calc_vdb = (
+        _CALC_TRIGGER.search(session.working_question)
+        and bool(session._cached_vdb_only_norms)
+    )
+    if not session.clarify_history and not session.incomplete_formula_terms and (
+        session._grounded_kg or has_calc_vdb
+    ):
         from .completeness import detect_incomplete_formulas
-        kb_gaps = detect_incomplete_formulas(
+        vdb_only = sorted(session._cached_vdb_only_norms) if has_calc_vdb else []
+        gaps = detect_incomplete_formulas(
             session.working_question,
             last_turn=None,
             relevant_kg=session._grounded_kg,
             current_gaps=[],
             llm=llm,
+            vdb_only_entities=vdb_only,
         )
-        if kb_gaps:
-            session.incomplete_formula_terms = kb_gaps
-            logger.info("Completeness (turn-0 KB scan) — gaps: %s", kb_gaps)
+        if gaps:
+            session.incomplete_formula_terms = gaps
+            logger.info("Completeness (turn-0 scan) — gaps: %s", gaps)
 
     if session.incomplete_formula_terms:
         incomplete_formulas_note = "\n".join(
@@ -973,7 +991,7 @@ def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
     if session._cached_unresolvable_for == session.working_question:
         logger.info("Clarify — KB already current for Phase 2 question (cached)")
         return
-    unresolvable, resolved_hits, relevant_kg, _, entry_to_original_terms = _find_unresolvable_entities(
+    unresolvable, resolved_hits, relevant_kg, _, entry_to_original_terms, _vdb_only = _find_unresolvable_entities(
         session.working_question,
         session.semantic_retriever,
         session.db_name,

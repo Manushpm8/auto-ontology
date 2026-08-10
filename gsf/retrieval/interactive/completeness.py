@@ -56,8 +56,8 @@ If no gaps remain, output:
   COMPLETE"""
 
 _COMPLETENESS_PROMPT_KB_ONLY = """\
-You are scanning external knowledge entries for formulas or conditions that are \
-ambiguously defined and would prevent writing correct SQL.
+You are scanning for formulas or conditions that are missing or ambiguously defined \
+and would prevent writing correct SQL.
 
 Working question (for context on what SQL operations are needed):
 {working_question}
@@ -65,12 +65,18 @@ Working question (for context on what SQL operations are needed):
 Relevant external knowledge:
 {relevant_kg}
 
-Identify any terms, formulas, or conditions in the external knowledge that:
-- Are expressed with hedged language ("typically", "often", "approximately")
-- Reference sub-conditions or sub-metrics that are not mapped to specific column values
-- Cannot be directly translated to SQL without further information from the user
-- Use natural language that does not map to a unique equation — e.g. "adjusted by X" \
-  or "modified with Y" where the placement of the adjustment is ambiguous
+Schema entities found in the database but with NO formula in the external knowledge base \
+(the question may or may not require computing a formula for these — check each one):
+{vdb_only_section}
+
+Identify gaps in either of the following categories:
+1. Terms in the external knowledge that are ambiguously defined:
+   - Expressed with hedged language ("typically", "often", "approximately")
+   - Reference sub-conditions not mapped to specific column values
+   - Use natural language that does not map to a unique equation
+2. Schema entities (listed above) that the working question asks to CALCULATE using a \
+   specific formula, where no formula exists anywhere — flag only if a SQL generator \
+   would have to invent the computation. Standard aggregations (SUM, AVG, COUNT) do NOT count.
 
 A gap is only significant if it would prevent writing correct SQL.
 
@@ -111,18 +117,24 @@ def detect_incomplete_formulas(
     relevant_kg: str,
     current_gaps: list[tuple[str, str]],
     llm,
+    vdb_only_entities: list[str] | None = None,
 ) -> list[tuple[str, str]]:
     """Return an updated (term, what_is_missing) gap list.
 
-    When last_turn is None (turn 0): scans only the relevant KB for ambiguous
-    conditions — no user answer to evaluate.
+    When last_turn is None (turn 0): scans the KB and any VDB-only entities for
+    missing formulas — no user answer to evaluate.
     When last_turn is provided: evaluates the answer against prior gaps and KB,
     dropping resolved terms, keeping unresolved ones, adding new gaps.
     """
     if last_turn is None:
+        vdb_section = (
+            "\n".join(f"- {e}" for e in vdb_only_entities)
+            if vdb_only_entities else "None"
+        )
         prompt = _COMPLETENESS_PROMPT_KB_ONLY.format(
             working_question=working_question,
             relevant_kg=relevant_kg or "None",
+            vdb_only_section=vdb_section,
         )
     else:
         prior_text = "\n".join(f"- {t}: {m}" for t, m in current_gaps) if current_gaps else "None"
@@ -139,3 +151,5 @@ def detect_incomplete_formulas(
     gaps = _parse_gaps(response)
     logger.info("Completeness — gaps found: %s", gaps)
     return gaps
+
+
