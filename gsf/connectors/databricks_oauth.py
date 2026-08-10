@@ -56,6 +56,15 @@ class _CachedToken:
 _cache: dict[tuple[str, str], _CachedToken] = {}
 _cache_lock = threading.Lock()
 
+# --- SSO-federation flag cache -----------------------------------------------
+# any_connection_uses_sso_federation() queries Neo4j + Vault on every call.
+# Cache the result for a short window so the check is cheap on the chat hot
+# path. 30 s means a toggled connection is effective within half a minute.
+_SSO_FEDERATION_TTL_S = 30.0
+_sso_federation_result: bool | None = None
+_sso_federation_expires: float = 0.0
+_sso_federation_lock = threading.Lock()
+
 
 def uses_sso_federation(connection: Mapping[str, Any]) -> bool:
     """Whether *connection* runs chat queries as the signed-in user.
@@ -76,14 +85,37 @@ def any_connection_uses_sso_federation() -> bool:
     request proceeds without a token, exactly as before this feature existed.
     Lookup failures return False so a storage blip degrades to the stored access
     token rather than taking chat down.
+
+    The result is cached for :data:`_SSO_FEDERATION_TTL_S` seconds to avoid a
+    Neo4j + Vault round-trip on every chat completion request.
     """
+    global _sso_federation_result, _sso_federation_expires
+
+    now = time.monotonic()
+    with _sso_federation_lock:
+        if _sso_federation_result is not None and now < _sso_federation_expires:
+            return _sso_federation_result
+
     try:
         from gsf.dal.connections import list_connections
 
-        return any(uses_sso_federation(conn) for conn in list_connections())
+        result = any(uses_sso_federation(conn) for conn in list_connections())
     except Exception:
         logger.exception("Failed to check connections for SSO federation")
-        return False
+        result = False
+
+    with _sso_federation_lock:
+        _sso_federation_result = result
+        _sso_federation_expires = now + _SSO_FEDERATION_TTL_S
+
+    return result
+
+
+def invalidate_sso_federation_cache() -> None:
+    """Force the next call to re-query. Call after toggling a connection's SSO setting."""
+    global _sso_federation_result
+    with _sso_federation_lock:
+        _sso_federation_result = None
 
 
 def _cache_key(host: str, subject_token: str) -> tuple[str, str]:
