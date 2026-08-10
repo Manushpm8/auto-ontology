@@ -454,10 +454,16 @@ class SemanticExplorationGraph(ApiModel):
 
 
 class TableSqlQuery(ApiModel):
-    """A stored SQL query that references the table."""
+    """A stored SQL query that references the table.
+
+    ``sql`` is nullable: unlike the other Sql reads in ``gsf/dal/exploration``
+    this query has no ``_NON_EMPTY_SQL`` filter, so a Sql node with a null or
+    blank ``sql_full_query`` reaches the response. Declaring it required would
+    turn that row into a 500 for the whole table-detail modal.
+    """
 
     id: str
-    sql: str
+    sql: str | None = None
 
 
 class TableExplorationDetails(ApiModel):
@@ -494,8 +500,9 @@ class ExplorationRelatedNodes(ApiModel):
 class PublicConnection(ApiModel):
     """A UI-managed connection with its credentials stripped.
 
-    ``connection`` is absent from the delete response, which only echoes the
-    database name it tore down.
+    ``connection`` is optional because the create/list reads project it away
+    for connectors that store no config; the delete response echoes the full
+    row it tore down.
     """
 
     database_name: str

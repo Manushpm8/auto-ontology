@@ -251,6 +251,32 @@
         "title": "ColumnAttribute",
         "type": "object"
       },
+      "ColumnAttributePatchResponse": {
+        "additionalProperties": true,
+        "description": "``term_certification`` is the owning Term's badge, recomputed on write.\n\nThe patch returns it alongside ``data`` so the Terms list can update the\nbadge without a second request, which is why this needs its own model\nrather than the plain ``DataResponse`` envelope.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ColumnAttribute"
+          },
+          "term_certification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Certification"
+          }
+        },
+        "required": [
+          "data",
+          "term_certification"
+        ],
+        "title": "ColumnAttributePatchResponse",
+        "type": "object"
+      },
       "ColumnAttributeUpdate": {
         "properties": {
           "certified": {
@@ -746,19 +772,6 @@
           "id"
         ],
         "title": "DataGraphNode",
-        "type": "object"
-      },
-      "DataResponse_ColumnAttribute_": {
-        "additionalProperties": true,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ColumnAttribute"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "DataResponse[ColumnAttribute]",
         "type": "object"
       },
       "DataResponse_CustomAnalysis_": {
@@ -1896,7 +1909,7 @@
       },
       "PublicConnection": {
         "additionalProperties": true,
-        "description": "A UI-managed connection with its credentials stripped.\n\n``connection`` is absent from the delete response, which only echoes the\ndatabase name it tore down.",
+        "description": "A UI-managed connection with its credentials stripped.\n\n``connection`` is optional because the create/list reads project it away\nfor connectors that store no config; the delete response echoes the full\nrow it tore down.",
         "properties": {
           "connection": {
             "anyOf": [
@@ -2594,20 +2607,26 @@
       },
       "TableSqlQuery": {
         "additionalProperties": true,
-        "description": "A stored SQL query that references the table.",
+        "description": "A stored SQL query that references the table.\n\n``sql`` is nullable: unlike the other Sql reads in ``gsf/dal/exploration``\nthis query has no ``_NON_EMPTY_SQL`` filter, so a Sql node with a null or\nblank ``sql_full_query`` reaches the response. Declaring it required would\nturn that row into a 500 for the whole table-detail modal.",
         "properties": {
           "id": {
             "title": "Id",
             "type": "string"
           },
           "sql": {
-            "title": "Sql",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
           }
         },
         "required": [
-          "id",
-          "sql"
+          "id"
         ],
         "title": "TableSqlQuery",
         "type": "object"
@@ -6119,7 +6138,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataResponse_ColumnAttribute_"
+                  "$ref": "#/components/schemas/ColumnAttributePatchResponse"
                 }
               }
             },

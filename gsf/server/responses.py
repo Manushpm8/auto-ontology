@@ -58,6 +58,7 @@ __all__ = [
     "ChartsResponse",
     "ChatCancelResponse",
     "ColumnAttributePageResponse",
+    "ColumnAttributePatchResponse",
     "ColumnAttributeResponse",
     "ConnectionListResponse",
     "ConnectionResponse",
@@ -199,6 +200,18 @@ class DescriptionSuggestionResponse(_Payload):
     """``data`` is null when no description could be suggested."""
 
     data: str | None
+
+
+class ColumnAttributePatchResponse(_Payload):
+    """``term_certification`` is the owning Term's badge, recomputed on write.
+
+    The patch returns it alongside ``data`` so the Terms list can update the
+    badge without a second request, which is why this needs its own model
+    rather than the plain ``DataResponse`` envelope.
+    """
+
+    data: ColumnAttribute
+    term_certification: str | None
 
 
 class SqlAttributePatchResponse(_Payload):

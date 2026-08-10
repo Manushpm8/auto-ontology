@@ -18,7 +18,7 @@ from gsf.server.params import ZONE_IDS_QUERY
 from gsf.server.terms import service as term_service
 from gsf.server.responses import (
     ColumnAttributePageResponse,
-    ColumnAttributeResponse,
+    ColumnAttributePatchResponse,
     SqlAttributePageResponse,
     TermDetailResponse,
     TermResponse,
@@ -121,7 +121,7 @@ def list_term_column_attributes_by_id(
 
 @router.patch(
     "/terms/{term_id}/column-attributes/{attr_id}",
-    response_model=ColumnAttributeResponse,
+    response_model=ColumnAttributePatchResponse,
 )
 def update_column_attribute(
     term_id: str,

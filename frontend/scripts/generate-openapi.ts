@@ -137,6 +137,32 @@ const leadingComment = (statement: VariableStatement): string | undefined => {
 	return !text || text.includes('SPDX-') ? undefined : text;
 };
 
+/**
+ * The HTTP methods a `export const …` statement contributes.
+ *
+ * Usually one per statement (`export const GET = …`), but Better Auth's
+ * catch-all mounts several at once via a destructuring export:
+ * `export const { GET, POST } = toNextJsHandler(auth)`. Reading only the first
+ * declaration's name yields the binding-pattern text and silently drops the
+ * whole file.
+ */
+const exportedMethods = (statement: VariableStatement): HttpMethod[] => {
+	const isMethod = (name: string): name is HttpMethod =>
+		HTTP_METHODS.includes(name.toLowerCase() as HttpMethod);
+
+	return statement
+		.getDeclarations()
+		.flatMap((declaration) => {
+			const nameNode = declaration.getNameNode();
+			if (Node.isObjectBindingPattern(nameNode)) {
+				return nameNode.getElements().map((element) => element.getName());
+			}
+			return [declaration.getName()];
+		})
+		.filter(isMethod)
+		.map((name) => name.toLowerCase() as HttpMethod);
+};
+
 const collectOperations = (): Operation[] => {
 	const project = new Project({ skipAddingFilesFromTsConfig: true });
 	project.addSourceFilesAtPaths(`${apiDir}/**/route.ts`);
@@ -145,33 +171,46 @@ const collectOperations = (): Operation[] => {
 	project.getSourceFiles().forEach((sourceFile) => {
 		const path = routePath(sourceFile.getFilePath());
 		const file = relative(repoRoot, sourceFile.getFilePath());
+		let found = 0;
 
 		sourceFile.getVariableStatements().forEach((statement) => {
 			if (!statement.isExported()) return;
-			const name = statement.getDeclarations()[0]?.getName() ?? '';
-			const method = name.toLowerCase() as HttpMethod;
-			if (!HTTP_METHODS.includes(method)) return;
 
 			const scope = searchScope(statement);
 			const permissionCall = scope
 				.flatMap((node) => node.getDescendantsOfKind(SyntaxKind.CallExpression))
 				.find((call) => call.getExpression().getText().endsWith('withPermission'));
 			const permissionArg = permissionCall?.getArguments()[0];
+			if (permissionCall && !Node.isObjectLiteralExpression(permissionArg)) {
+				// Falling back to "public" here would document a gated route as
+				// needing no auth, so refuse to guess.
+				throw new Error(
+					`${file}: withPermission(${permissionArg?.getText() ?? ''}) is not an inline ` +
+						'object literal, so the required permission cannot be read.',
+				);
+			}
 
-			operations.push({
-				path,
-				method,
-				permissions:
-					permissionArg && Node.isObjectLiteralExpression(permissionArg)
-						? readPermissions(permissionArg)
+			exportedMethods(statement).forEach((method) => {
+				found += 1;
+				operations.push({
+					path,
+					method,
+					permissions: permissionArg
+						? readPermissions(permissionArg as ObjectLiteralExpression)
 						: null,
-				proxied: callsFunction(scope, 'proxyToBackend'),
-				injectsZoneIds: callsFunction(scope, 'resolveZoneIds'),
-				upstreamPath: upstreamFetchPath(scope),
-				description: leadingComment(statement),
-				file,
+					proxied: callsFunction(scope, 'proxyToBackend'),
+					injectsZoneIds: callsFunction(scope, 'resolveZoneIds'),
+					upstreamPath: upstreamFetchPath(scope),
+					description: leadingComment(statement),
+					file,
+				});
 			});
 		});
+
+		// A route file that yields nothing is almost always an export shape this
+		// walker doesn't understand, and silently dropping it publishes a spec
+		// that claims to cover the whole surface while missing part of it.
+		if (found === 0) throw new Error(`${file}: no HTTP method exports were recognised.`);
 	});
 
 	return operations.sort(

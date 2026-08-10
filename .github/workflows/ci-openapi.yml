@@ -12,6 +12,12 @@ on:
     paths:
       - 'frontend/app/api/**'
       - 'frontend/scripts/generate-openapi.ts'
+      # Also inputs to gsf-api.json: the shared zod shapes are inlined into it,
+      # the contract types shape what the declarations may express, and the
+      # package version is written to `info.version`.
+      - 'frontend/lib/openapiSchemas.ts'
+      - 'frontend/types/openapi.ts'
+      - 'frontend/package.json'
       - 'gsf/**'
       - 'dev_tools/generate_backend_openapi.py'
       - 'docs/openapi/**'
