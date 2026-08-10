@@ -15,14 +15,16 @@ export const openapi: OpenApiRoute = {
 		}),
 		responses: {
 			200: {
-				description: 'The endpoints the SSO registration form needs.',
+				description:
+					'The endpoints the SSO registration form needs, under their OpenID ' +
+					'Connect Discovery names. `discovery_endpoint` is added by this route.',
 				schema: z.object({
 					issuer: z.string(),
-					authorizationEndpoint: z.string(),
-					tokenEndpoint: z.string(),
-					userInfoEndpoint: z.string().nullable(),
-					jwksEndpoint: z.string().nullable(),
-					discoveryEndpoint: z.string().describe('The URL that was fetched.'),
+					authorization_endpoint: z.string(),
+					token_endpoint: z.string(),
+					userinfo_endpoint: z.string().nullable(),
+					jwks_uri: z.string().nullable(),
+					discovery_endpoint: z.string().describe('The URL that was fetched.'),
 				}),
 			},
 			400: {

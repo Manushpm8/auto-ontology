@@ -15,8 +15,8 @@ export const openapi: OpenApiRoute = {
 			schema: z.object({
 				role: z.string().describe('`user` or `assistant`.'),
 				content: z.string().optional(),
-				sqlCode: z.string().nullish(),
-				sqlResponse: z.string().nullish(),
+				sql_code: z.string().nullish(),
+				sql_response: z.string().nullish(),
 			}),
 		},
 		responses: {

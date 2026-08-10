@@ -5,16 +5,17 @@
 import { z } from 'zod';
 import type { OpenApiRoute } from '@/types/openapi';
 
-// The row carries only `userId`; the handler joins the User so the report can
+// The row carries only `user_id`; the handler joins the User so the report can
 // show a name without a second request.
-const analyticsRow = z.object({
+// Exported so `lib/apiContract.ts` can prove it matches the Prisma select.
+export const analyticsRow = z.object({
 	id: z.string().meta({ format: 'uuid' }),
-	userId: z.string(),
+	user_id: z.string(),
 	source: z.string().describe('`app` for the web UI, `api` for direct/API callers.'),
 	question: z.string(),
-	questionTimestamp: z.string().meta({ format: 'date-time' }),
+	question_timestamp: z.string().meta({ format: 'date-time' }),
 	response: z.string().nullable().describe('Null while the answer is still streaming.'),
-	responseTimestamp: z.string().meta({ format: 'date-time' }).nullable(),
+	response_timestamp: z.string().meta({ format: 'date-time' }).nullable(),
 	sql: z.string().nullable(),
 	user: z.object({
 		id: z.string(),

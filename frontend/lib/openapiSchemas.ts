@@ -28,23 +28,23 @@ export const errorSchema = z.object({ error: z.string() });
 
 export const conversationSchema = z.object({
 	id: uuid(),
-	userId: z.string().describe('Owner of the conversation; always the caller.'),
+	user_id: z.string().describe('Owner of the conversation; always the caller.'),
 	title: z.string(),
-	createdAt: timestamp(),
-	updatedAt: timestamp(),
+	created_at: timestamp(),
+	updated_at: timestamp(),
 });
 
 export const messageSchema = z.object({
 	id: uuid(),
-	conversationId: uuid(),
+	conversation_id: uuid(),
 	role: z.string().describe('`user` or `assistant`.'),
 	content: z.string(),
-	sqlCode: z.string().nullable().describe('SQL the assistant produced, when it produced any.'),
-	sqlResponse: z
+	sql_code: z.string().nullable().describe('SQL the assistant produced, when it produced any.'),
+	sql_response: z
 		.string()
 		.nullable()
 		.describe('Serialised result table / chart payload for the bubble.'),
-	createdAt: timestamp(),
+	created_at: timestamp(),
 });
 
 export const promptSchema = z.object({
@@ -56,8 +56,8 @@ export const acronymSchema = z.object({
 	id: uuid(),
 	name: z.string(),
 	description: z.string(),
-	createdAt: timestamp(),
-	updatedAt: timestamp(),
+	created_at: timestamp(),
+	updated_at: timestamp(),
 });
 
 /** The instance-wide on/off settings under `/api/configurations/*`. */

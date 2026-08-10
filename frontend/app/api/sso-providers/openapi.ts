@@ -15,7 +15,7 @@ export const openapi: OpenApiRoute = {
 				schema: z.object({
 					providers: z.array(
 						z.object({
-							providerId: z.string(),
+							provider_id: z.string(),
 							issuer: z.string(),
 							domain: z.string(),
 						}),

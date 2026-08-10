@@ -75,7 +75,8 @@ Or paste the file into <https://docs.scalar.com/swagger-editor>.
   guaranteed exhaustive.
 - `PATCH /api/nodes/{node_id}` returns `object | null`: its shape depends on
   which properties the request patched.
-- Paths, query parameters and backend request bodies are snake_case, but the
-  Prisma-backed handlers still return their model's camelCase field names
-  (`createdAt`, `updatedAt`, `userId`, `sqlCode`, `sqlResponse`, …) because they
-  serialise the row as-is.
+- Every path, parameter, request body and response field is snake_case. The
+  Prisma models that back the frontend-only routes use snake_case field names
+  too, so a row serialises straight to the API shape; the Better Auth models
+  (`User`, `Session`, `Account`, `SsoProvider`) keep their generated camelCase
+  and are mapped at the handler.

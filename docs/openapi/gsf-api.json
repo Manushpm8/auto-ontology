@@ -43,11 +43,11 @@
                           "description": {
                             "type": "string"
                           },
-                          "createdAt": {
+                          "created_at": {
                             "type": "string",
                             "format": "date-time"
                           },
-                          "updatedAt": {
+                          "updated_at": {
                             "type": "string",
                             "format": "date-time"
                           }
@@ -56,8 +56,8 @@
                           "id",
                           "name",
                           "description",
-                          "createdAt",
-                          "updatedAt"
+                          "created_at",
+                          "updated_at"
                         ],
                         "additionalProperties": false
                       }
@@ -131,11 +131,11 @@
                     "description": {
                       "type": "string"
                     },
-                    "createdAt": {
+                    "created_at": {
                       "type": "string",
                       "format": "date-time"
                     },
-                    "updatedAt": {
+                    "updated_at": {
                       "type": "string",
                       "format": "date-time"
                     }
@@ -144,8 +144,8 @@
                     "id",
                     "name",
                     "description",
-                    "createdAt",
-                    "updatedAt"
+                    "created_at",
+                    "updated_at"
                   ],
                   "additionalProperties": false
                 }
@@ -233,11 +233,11 @@
                     "description": {
                       "type": "string"
                     },
-                    "createdAt": {
+                    "created_at": {
                       "type": "string",
                       "format": "date-time"
                     },
-                    "updatedAt": {
+                    "updated_at": {
                       "type": "string",
                       "format": "date-time"
                     }
@@ -246,8 +246,8 @@
                     "id",
                     "name",
                     "description",
-                    "createdAt",
-                    "updatedAt"
+                    "created_at",
+                    "updated_at"
                   ],
                   "additionalProperties": false
                 }
@@ -318,7 +318,7 @@
                             "type": "string",
                             "format": "uuid"
                           },
-                          "userId": {
+                          "user_id": {
                             "type": "string"
                           },
                           "source": {
@@ -328,7 +328,7 @@
                           "question": {
                             "type": "string"
                           },
-                          "questionTimestamp": {
+                          "question_timestamp": {
                             "type": "string",
                             "format": "date-time"
                           },
@@ -343,7 +343,7 @@
                             ],
                             "description": "Null while the answer is still streaming."
                           },
-                          "responseTimestamp": {
+                          "response_timestamp": {
                             "anyOf": [
                               {
                                 "type": "string",
@@ -387,12 +387,12 @@
                         },
                         "required": [
                           "id",
-                          "userId",
+                          "user_id",
                           "source",
                           "question",
-                          "questionTimestamp",
+                          "question_timestamp",
                           "response",
-                          "responseTimestamp",
+                          "response_timestamp",
                           "sql",
                           "user"
                         ],
@@ -1232,28 +1232,28 @@
                         "type": "string",
                         "format": "uuid"
                       },
-                      "userId": {
+                      "user_id": {
                         "type": "string",
                         "description": "Owner of the conversation; always the caller."
                       },
                       "title": {
                         "type": "string"
                       },
-                      "createdAt": {
+                      "created_at": {
                         "type": "string",
                         "format": "date-time"
                       },
-                      "updatedAt": {
+                      "updated_at": {
                         "type": "string",
                         "format": "date-time"
                       }
                     },
                     "required": [
                       "id",
-                      "userId",
+                      "user_id",
                       "title",
-                      "createdAt",
-                      "updatedAt"
+                      "created_at",
+                      "updated_at"
                     ],
                     "additionalProperties": false
                   }
@@ -1305,28 +1305,28 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "userId": {
+                    "user_id": {
                       "type": "string",
                       "description": "Owner of the conversation; always the caller."
                     },
                     "title": {
                       "type": "string"
                     },
-                    "createdAt": {
+                    "created_at": {
                       "type": "string",
                       "format": "date-time"
                     },
-                    "updatedAt": {
+                    "updated_at": {
                       "type": "string",
                       "format": "date-time"
                     }
                   },
                   "required": [
                     "id",
-                    "userId",
+                    "user_id",
                     "title",
-                    "createdAt",
-                    "updatedAt"
+                    "created_at",
+                    "updated_at"
                   ],
                   "additionalProperties": false
                 }
@@ -1400,18 +1400,18 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "userId": {
+                    "user_id": {
                       "type": "string",
                       "description": "Owner of the conversation; always the caller."
                     },
                     "title": {
                       "type": "string"
                     },
-                    "createdAt": {
+                    "created_at": {
                       "type": "string",
                       "format": "date-time"
                     },
-                    "updatedAt": {
+                    "updated_at": {
                       "type": "string",
                       "format": "date-time"
                     },
@@ -1424,7 +1424,7 @@
                             "type": "string",
                             "format": "uuid"
                           },
-                          "conversationId": {
+                          "conversation_id": {
                             "type": "string",
                             "format": "uuid"
                           },
@@ -1435,7 +1435,7 @@
                           "content": {
                             "type": "string"
                           },
-                          "sqlCode": {
+                          "sql_code": {
                             "anyOf": [
                               {
                                 "type": "string"
@@ -1446,7 +1446,7 @@
                             ],
                             "description": "SQL the assistant produced, when it produced any."
                           },
-                          "sqlResponse": {
+                          "sql_response": {
                             "anyOf": [
                               {
                                 "type": "string"
@@ -1457,19 +1457,19 @@
                             ],
                             "description": "Serialised result table / chart payload for the bubble."
                           },
-                          "createdAt": {
+                          "created_at": {
                             "type": "string",
                             "format": "date-time"
                           }
                         },
                         "required": [
                           "id",
-                          "conversationId",
+                          "conversation_id",
                           "role",
                           "content",
-                          "sqlCode",
-                          "sqlResponse",
-                          "createdAt"
+                          "sql_code",
+                          "sql_response",
+                          "created_at"
                         ],
                         "additionalProperties": false
                       }
@@ -1477,10 +1477,10 @@
                   },
                   "required": [
                     "id",
-                    "userId",
+                    "user_id",
                     "title",
-                    "createdAt",
-                    "updatedAt",
+                    "created_at",
+                    "updated_at",
                     "messages"
                   ],
                   "additionalProperties": false
@@ -1549,28 +1549,28 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "userId": {
+                    "user_id": {
                       "type": "string",
                       "description": "Owner of the conversation; always the caller."
                     },
                     "title": {
                       "type": "string"
                     },
-                    "createdAt": {
+                    "created_at": {
                       "type": "string",
                       "format": "date-time"
                     },
-                    "updatedAt": {
+                    "updated_at": {
                       "type": "string",
                       "format": "date-time"
                     }
                   },
                   "required": [
                     "id",
-                    "userId",
+                    "user_id",
                     "title",
-                    "createdAt",
-                    "updatedAt"
+                    "created_at",
+                    "updated_at"
                   ],
                   "additionalProperties": false
                 }
@@ -1627,7 +1627,7 @@
                   "content": {
                     "type": "string"
                   },
-                  "sqlCode": {
+                  "sql_code": {
                     "anyOf": [
                       {
                         "type": "string"
@@ -1637,7 +1637,7 @@
                       }
                     ]
                   },
-                  "sqlResponse": {
+                  "sql_response": {
                     "anyOf": [
                       {
                         "type": "string"
@@ -1665,7 +1665,7 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "conversationId": {
+                    "conversation_id": {
                       "type": "string",
                       "format": "uuid"
                     },
@@ -1676,7 +1676,7 @@
                     "content": {
                       "type": "string"
                     },
-                    "sqlCode": {
+                    "sql_code": {
                       "anyOf": [
                         {
                           "type": "string"
@@ -1687,7 +1687,7 @@
                       ],
                       "description": "SQL the assistant produced, when it produced any."
                     },
-                    "sqlResponse": {
+                    "sql_response": {
                       "anyOf": [
                         {
                           "type": "string"
@@ -1698,19 +1698,19 @@
                       ],
                       "description": "Serialised result table / chart payload for the bubble."
                     },
-                    "createdAt": {
+                    "created_at": {
                       "type": "string",
                       "format": "date-time"
                     }
                   },
                   "required": [
                     "id",
-                    "conversationId",
+                    "conversation_id",
                     "role",
                     "content",
-                    "sqlCode",
-                    "sqlResponse",
-                    "createdAt"
+                    "sql_code",
+                    "sql_response",
+                    "created_at"
                   ],
                   "additionalProperties": false
                 }
@@ -3719,7 +3719,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The endpoints the SSO registration form needs.",
+            "description": "The endpoints the SSO registration form needs, under their OpenID Connect Discovery names. `discovery_endpoint` is added by this route.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3728,13 +3728,13 @@
                     "issuer": {
                       "type": "string"
                     },
-                    "authorizationEndpoint": {
+                    "authorization_endpoint": {
                       "type": "string"
                     },
-                    "tokenEndpoint": {
+                    "token_endpoint": {
                       "type": "string"
                     },
-                    "userInfoEndpoint": {
+                    "userinfo_endpoint": {
                       "anyOf": [
                         {
                           "type": "string"
@@ -3744,7 +3744,7 @@
                         }
                       ]
                     },
-                    "jwksEndpoint": {
+                    "jwks_uri": {
                       "anyOf": [
                         {
                           "type": "string"
@@ -3754,18 +3754,18 @@
                         }
                       ]
                     },
-                    "discoveryEndpoint": {
+                    "discovery_endpoint": {
                       "type": "string",
                       "description": "The URL that was fetched."
                     }
                   },
                   "required": [
                     "issuer",
-                    "authorizationEndpoint",
-                    "tokenEndpoint",
-                    "userInfoEndpoint",
-                    "jwksEndpoint",
-                    "discoveryEndpoint"
+                    "authorization_endpoint",
+                    "token_endpoint",
+                    "userinfo_endpoint",
+                    "jwks_uri",
+                    "discovery_endpoint"
                   ],
                   "additionalProperties": false
                 }
@@ -3855,7 +3855,7 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "providerId": {
+                          "provider_id": {
                             "type": "string"
                           },
                           "issuer": {
@@ -3865,7 +3865,7 @@
                             "type": "string"
                           }
                         },
-                        "required": ["providerId", "issuer", "domain"],
+                        "required": ["provider_id", "issuer", "domain"],
                         "additionalProperties": false
                       }
                     }
