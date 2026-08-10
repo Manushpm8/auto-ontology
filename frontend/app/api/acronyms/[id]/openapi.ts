@@ -12,8 +12,13 @@ const unknownId = {
 	description: 'The acronym does not exist (the Prisma error is not mapped to a 404).',
 };
 
+const pathParams = z.object({
+	id: z.string().describe('Acronym id.'),
+});
+
 export const openapi: OpenApiRoute = {
 	patch: {
+		path: pathParams,
 		body: {
 			description: 'Both fields are optional; non-string values are ignored.',
 			schema: z.object({
@@ -27,6 +32,7 @@ export const openapi: OpenApiRoute = {
 		},
 	},
 	delete: {
+		path: pathParams,
 		responses: {
 			204: { description: 'Deleted. No body.' },
 			500: unknownId,

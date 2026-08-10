@@ -13,8 +13,15 @@ const notFound = {
 	schema: errorSchema,
 };
 
+const pathParams = z.object({
+	id: z
+		.string()
+		.describe('Conversation id. Must belong to the caller; someone else’s id answers 404.'),
+});
+
 export const openapi: OpenApiRoute = {
 	get: {
+		path: pathParams,
 		responses: {
 			200: {
 				description: 'The conversation with its messages in chronological order.',
@@ -24,6 +31,7 @@ export const openapi: OpenApiRoute = {
 		},
 	},
 	patch: {
+		path: pathParams,
 		body: {
 			description: 'Rename the conversation.',
 			schema: z.object({ title: z.string().optional() }),
@@ -34,6 +42,7 @@ export const openapi: OpenApiRoute = {
 		},
 	},
 	delete: {
+		path: pathParams,
 		responses: {
 			204: { description: 'Deleted. No body.' },
 			404: notFound,

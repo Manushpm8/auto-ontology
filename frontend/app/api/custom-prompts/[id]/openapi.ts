@@ -13,14 +13,20 @@ const unknownId = {
 	description: 'The prompt does not exist (the Prisma error is not mapped to a 404).',
 };
 
+const pathParams = z.object({
+	id: z.string().describe('Custom prompt id.'),
+});
+
 export const openapi: OpenApiRoute = {
 	get: {
+		path: pathParams,
 		responses: {
 			200: { description: 'The prompt.', schema: promptSchema },
 			404: { description: 'No prompt with that id.', schema: errorSchema },
 		},
 	},
 	patch: {
+		path: pathParams,
 		body: {
 			description: 'Only `content` is writable; a non-string value is ignored.',
 			schema: z.object({ content: z.string().optional() }),
@@ -31,6 +37,7 @@ export const openapi: OpenApiRoute = {
 		},
 	},
 	delete: {
+		path: pathParams,
 		responses: {
 			204: { description: 'Deleted. No body.' },
 			500: unknownId,

@@ -41,8 +41,6 @@ type Operation = {
 	/** `null` for `withPublic`, otherwise the required permission map. */
 	permissions: Record<string, string[]> | null;
 	proxied: boolean;
-	/** True when the handler derives `zone_ids` from the session. */
-	injectsZoneIds: boolean;
 	/** Backend path this handler calls directly, for hand-rolled proxies. */
 	upstreamPath?: string;
 	description?: string;
@@ -199,7 +197,6 @@ const collectOperations = (): Operation[] => {
 						? readPermissions(permissionArg as ObjectLiteralExpression)
 						: null,
 					proxied: callsFunction(scope, 'proxyToBackend'),
-					injectsZoneIds: callsFunction(scope, 'resolveZoneIds'),
 					upstreamPath: upstreamFetchPath(scope),
 					description: leadingComment(statement),
 					file,
@@ -346,6 +343,60 @@ const declaredResponse = (response: OpenApiResponse): Json => {
 	return body;
 };
 
+/**
+ * Declare every `{param}` in the path that nothing else already declared.
+ *
+ * Proxied routes inherit their path parameters from FastAPI, but the
+ * frontend-only routes have no upstream to inherit from — and OpenAPI requires
+ * a matching `in: path` parameter for every template expression, so omitting
+ * them makes the document invalid rather than merely thin. Deriving them from
+ * the path means they cannot go missing whatever the route's provenance.
+ *
+ * A sibling `openapi.ts` may describe them via `path` to add a description or
+ * a tighter schema; anything already present wins over the derived default.
+ */
+const assertPathParametersDeclared = (paths: Record<string, Json>): void => {
+	const broken = Object.entries(paths).flatMap(([path, methods]) => {
+		const names = [...path.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
+		if (!names.length) return [];
+		return Object.entries(methods as Record<string, Json>).flatMap(([method, operation]) => {
+			const declared = ((operation.parameters ?? []) as Json[])
+				.filter((parameter) => parameter.in === 'path')
+				.map((parameter) => parameter.name);
+			const gaps = names.filter((name) => !declared.includes(name));
+			return gaps.length ? [`${method.toUpperCase()} ${path} (${gaps.join(', ')})`] : [];
+		});
+	});
+	if (broken.length) {
+		throw new Error(
+			`Path templates with undeclared parameters, which OpenAPI rejects:\n  ${broken.join('\n  ')}`,
+		);
+	}
+};
+
+const ensurePathParameters = (operation: Json, path: string, described: Json[]): void => {
+	const names = [...path.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
+	if (!names.length) return;
+
+	const existing = (operation.parameters ?? []) as Json[];
+	const declared = new Set(
+		existing.filter((parameter) => parameter.in === 'path').map((parameter) => parameter.name),
+	);
+	const byName = new Map(described.map((parameter) => [parameter.name, parameter]));
+
+	const added = names
+		.filter((name) => !declared.has(name))
+		.map((name) => ({
+			schema: { type: 'string' },
+			...(byName.get(name) ?? {}),
+			name,
+			in: 'path',
+			required: true,
+		}));
+
+	if (added.length) operation.parameters = [...existing, ...added];
+};
+
 /** A zod object of query params → one OpenAPI parameter per property. */
 const declaredQuery = (schema: ZodObject): Json[] => {
 	const json = toJsonSchema(schema, 'input');
@@ -457,11 +508,15 @@ const build = async (): Promise<{
 		if (operation.description) merged.description = operation.description;
 		merged.operationId = `${operation.method}${operation.path.replace(/[^a-zA-Z0-9]+/g, '_')}`;
 
-		if (operation.injectsZoneIds && Array.isArray(merged.parameters)) {
-			// `zone_ids` is derived from the caller's session by the proxy, so it
-			// is not part of the public contract even though FastAPI declares it.
+		if (Array.isArray(merged.parameters)) {
+			// `zone_ids` is deliberately not part of the public contract, on 15
+			// FastAPI operations that accept it. Stripped unconditionally rather
+			// than only where the handler resolves zones: that call is a no-op
+			// since zone membership stopped being an authorization boundary, so a
+			// new proxy route would reasonably omit it — and would then publish
+			// `zone_ids` by accident.
 			merged.parameters = (merged.parameters as Json[]).filter(
-				(parameter) => parameter.name !== 'zone_ids',
+				(parameter) => !(parameter.in === 'query' && parameter.name === 'zone_ids'),
 			);
 		}
 
@@ -492,6 +547,11 @@ const build = async (): Promise<{
 			const names = new Set(added.map((parameter) => parameter.name));
 			merged.parameters = [...existing.filter((p) => !names.has(p.name)), ...added];
 		}
+		ensurePathParameters(
+			merged,
+			operation.path,
+			declared?.path ? declaredQuery(declared.path) : [],
+		);
 
 		const upstreamResponses = ((upstream ?? relayed)?.responses ?? {}) as Json;
 		const responses: Json = { ...upstreamResponses };
@@ -524,6 +584,8 @@ const build = async (): Promise<{
 
 		paths[operation.path] = { ...(paths[operation.path] ?? {}), [operation.method]: merged };
 	});
+
+	assertPathParametersDeclared(paths);
 
 	const spec: Json = {
 		openapi: '3.1.0',

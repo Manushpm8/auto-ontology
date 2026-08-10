@@ -173,6 +173,17 @@
       "delete": {
         "tags": ["acronyms"],
         "operationId": "delete_api_acronyms_id_",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Acronym id."
+          }
+        ],
         "responses": {
           "204": {
             "description": "Deleted. No body."
@@ -215,6 +226,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Acronym id."
+          }
+        ],
         "responses": {
           "200": {
             "description": "The updated acronym.",
@@ -429,6 +451,16 @@
       "get": {
         "tags": ["auth"],
         "operationId": "get_api_auth_all_",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "all",
+            "in": "path",
+            "required": true
+          }
+        ],
         "responses": {
           "200": {
             "description": "Handled by Better Auth; the body depends on `{all}`. See https://better-auth.com/docs for the per-endpoint contracts.",
@@ -455,6 +487,16 @@
       "post": {
         "tags": ["auth"],
         "operationId": "post_api_auth_all_",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "all",
+            "in": "path",
+            "required": true
+          }
+        ],
         "responses": {
           "200": {
             "description": "Handled by Better Auth; the body depends on `{all}`. See https://better-auth.com/docs for the per-endpoint contracts.",
@@ -1469,6 +1511,17 @@
       "delete": {
         "tags": ["conversations"],
         "operationId": "delete_api_conversations_id_",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Conversation id. Must belong to the caller; someone else’s id answers 404."
+          }
+        ],
         "responses": {
           "204": {
             "description": "Deleted. No body."
@@ -1506,6 +1559,17 @@
       "get": {
         "tags": ["conversations"],
         "operationId": "get_api_conversations_id_",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Conversation id. Must belong to the caller; someone else’s id answers 404."
+          }
+        ],
         "responses": {
           "200": {
             "description": "The conversation with its messages in chronological order.",
@@ -1655,6 +1719,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Conversation id. Must belong to the caller; someone else’s id answers 404."
+          }
+        ],
         "responses": {
           "200": {
             "description": "The updated conversation.",
@@ -1771,6 +1846,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Conversation to append the message to. Must belong to the caller."
+          }
+        ],
         "responses": {
           "201": {
             "description": "The created message.",
@@ -2221,6 +2307,17 @@
       "delete": {
         "tags": ["custom-prompts"],
         "operationId": "delete_api_custom_prompts_id_",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Custom prompt id."
+          }
+        ],
         "responses": {
           "204": {
             "description": "Deleted. No body."
@@ -2244,6 +2341,17 @@
       "get": {
         "tags": ["custom-prompts"],
         "operationId": "get_api_custom_prompts_id_",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Custom prompt id."
+          }
+        ],
         "responses": {
           "200": {
             "description": "The prompt.",
@@ -2315,6 +2423,17 @@
             }
           }
         },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Custom prompt id."
+          }
+        ],
         "responses": {
           "200": {
             "description": "The updated prompt.",
@@ -3546,7 +3665,7 @@
         "x-gsf-proxied": true
       },
       "get": {
-        "description": "sqlAttributesApi.get — fetch one SqlAttribute node, zone-scoped for viewers.\n\nThis returns a single object (`{ data: SqlAttribute }`), not a list, so a\nzero-zone viewer gets a 404 rather than an empty list — matching the backend\nbehaviour for an out-of-zone/missing attribute.",
+        "description": "sqlAttributesApi.get — fetch one SqlAttribute node.",
         "operationId": "get_api_sql_attributes_attr_id_",
         "parameters": [
           {
@@ -3587,7 +3706,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "sqlAttributesApi.get — fetch one SqlAttribute node, zone-scoped for viewers.",
+        "summary": "sqlAttributesApi.get — fetch one SqlAttribute node.",
         "tags": ["sql-attributes"],
         "x-gsf-source": "frontend/app/api/sql-attributes/[attr_id]/route.ts",
         "x-gsf-permissions": {
@@ -4166,7 +4285,7 @@
     },
     "/api/terms/{term_id}": {
       "get": {
-        "description": "termsApi.getById — fetch one Term node, zone-scoped for viewers.\n\nThis returns a single object (`{ data: TermDetail }`), not a list, so it\ncan't reuse proxyToBackend's empty-zone-viewer shortcut (which returns the\nlist-shaped `{ data: [], count: 0 }`) — a zero-zone viewer gets a 404\ninstead, matching what the backend returns for an out-of-zone/missing term.",
+        "description": "termsApi.getById — fetch one Term node.",
         "operationId": "get_api_terms_term_id_",
         "parameters": [
           {
@@ -4207,7 +4326,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "termsApi.getById — fetch one Term node, zone-scoped for viewers.",
+        "summary": "termsApi.getById — fetch one Term node.",
         "tags": ["terms"],
         "x-gsf-source": "frontend/app/api/terms/[term_id]/route.ts",
         "x-gsf-permissions": {

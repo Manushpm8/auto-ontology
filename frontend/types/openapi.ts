@@ -45,6 +45,14 @@ export type OpenApiRequestBody = {
 export type OpenApiOperation = {
 	/** One query parameter per property; optional properties are not required. */
 	query?: z.ZodObject;
+	/**
+	 * Descriptions/schemas for the path parameters this route's folder names.
+	 *
+	 * Optional: every `{param}` in the path is declared automatically as a
+	 * required string, since OpenAPI rejects a path template whose parameters
+	 * are undeclared. Use this only to add a description or a tighter schema.
+	 */
+	path?: z.ZodObject;
 	body?: OpenApiRequestBody;
 	/**
 	 * Keyed by status code. A declared status replaces the one inherited from
