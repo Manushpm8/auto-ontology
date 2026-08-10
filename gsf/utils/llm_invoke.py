@@ -285,16 +285,29 @@ def safe_invoke_with_structured_output(
             raise
         except ValidationError as e:
             if attempt < RETRY_MAX_ATTEMPTS - 1:
-                current_messages.append(
-                    SystemMessage(
-                        content=(
-                            "Your previous output did not validate. "
-                            f"Validation errors:\n{str(e)}\n"
-                            "Please return a **fully valid** object that satisfies the schema. "
-                            "Do not omit required fields. Do not include extra keys."
+                if attempt == 0:
+                    # First retry: append the error so the model can self-correct.
+                    current_messages.append(
+                        SystemMessage(
+                            content=(
+                                "Your previous output did not validate. "
+                                f"Validation errors:\n{str(e)}\n"
+                                "Please return a **fully valid** object that satisfies the schema. "
+                                "Do not omit required fields. Do not include extra keys."
+                            )
                         )
                     )
-                )
+                else:
+                    # Subsequent retries: the accumulated error context didn't help —
+                    # reset to fresh messages to avoid compounding the confusion.
+                    logger.warning(
+                        "Structured output still failing after error-context retry "
+                        "(attempt %d/%d) for %s — resetting to fresh messages",
+                        attempt + 1,
+                        RETRY_MAX_ATTEMPTS,
+                        schema_name,
+                    )
+                    current_messages = _ensure_non_system_message(messages.copy())
                 continue
             else:
                 logger.error(

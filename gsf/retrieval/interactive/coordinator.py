@@ -73,7 +73,8 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
             "Do NOT modify formula coefficients, formula structure, or aggregation logic — "
             "these were confirmed during clarification. "
             "Address whichever of the following applies, or fix a different issue you identify:\n\n"
-            "1. JOIN PATH: You may be joining tables too directly. "
+            "1. JOIN PATH (only if the current join path seems semantically wrong):"
+            "You may be joining tables too directly. "
             "Check whether an intermediate table is required — "
             "a direct join may need to route through a third table. "
             "Verify the exact foreign key column names on each side.\n\n"
@@ -250,6 +251,8 @@ Skip any entry not required by the working question. \
 Entries may include a "# matched from: <terms>" annotation line listing the original \
 natural-language phrases from the question that correspond to this KB entry — use these \
 to connect KB entries to the working question even when the phrasing differs. \
+If an entry is marked [DISAMBIGUATION], it means a KB formula and a direct schema column \
+both matched the same term — include only whichever is correct given the question context. \
 If nothing applies, output: NONE"""
 
 
@@ -400,7 +403,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     evidence = _generate_evidence(evidence_question, combined_kg)
     if session._named_column_evidence:
         evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
-    if should_inject_default_sort(session.working_question, evidence):
+    if should_inject_default_sort(session.working_question):
         evidence = "\n".join(filter(None, [evidence, _DEFAULT_SORT_HINT]))
         logger.info("[%s] SQL gen — injected default DESC sort hint", session.task_id)
     if evidence:

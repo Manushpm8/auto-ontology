@@ -66,12 +66,13 @@ Formulas or conditions whose exact specification is still missing, ranked most-c
 STRICT RULES — follow every one of these exactly:
 1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, or history: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
-3. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If turns remain AND no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
-4. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time. Suggested format: "As a metric, what does [TERM] measure and what is its exact formula?"
-5. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
-6. If anything else in the user's question seems unclear, you may ask about it - for example, ambiguous grouping term, thresholds, or normalization methods.
-7. Output a single focused question only — never two questions joined with "and" or "or".
-8. Output PROCEED only when ALL of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question, AND (c) "Formulas or conditions whose exact specification is still missing" lists "None". If any condition fails, ASK about the most critical unresolved item before proceeding.
+3. If the question is vague about what to output (e.g., "show relevant metrics", "list the details", "show the information", "provide a summary"), prioritize asking the user which specific metrics or fields they want in the output.
+4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If turns remain AND no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
+5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time. Suggested format: "As a metric, what does [TERM] measure and what is its exact formula?"
+6. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
+7. If anything else in the user's question seems unclear, you may ask about it - for example, ambiguous grouping term, thresholds, or normalization methods.
+8. Output a single focused question only — never two questions joined with "and" or "or".
+9. Output PROCEED only when ALL of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question, AND (c) "Formulas or conditions whose exact specification is still missing" lists "None". If any condition fails, ASK about the most critical unresolved item before proceeding.
 
 Output PROCEED or ASK: <question>:"""
 
@@ -130,10 +131,6 @@ Output only the question text, nothing else.\
 """
 
 
-_SORT_TRIGGERS = re.compile(
-    r"\b(sort(ed)?|order(ed)?\s+by|rank(ed)?|arrange(d)?)\b",
-    re.IGNORECASE,
-)
 _SORT_DIRECTION = re.compile(
     r"\b(asc\b|desc\b|ascending|descending|"
     # bare high/low etc. only count when followed by "first" — otherwise they're adjectives
@@ -148,13 +145,6 @@ _SORT_DIRECTION = re.compile(
     re.IGNORECASE,
 )
 
-
-_LIMIT_TRIGGERS = re.compile(
-    r"\btop\s+\d+|bottom\s+\d+|first\s+\d+|last\s+\d+|"
-    r"most\s+\d+|least\s+\d+|\blimit\b|\brownum\b|fetch\s+first",
-    re.IGNORECASE,
-)
-
 _DEFAULT_SORT_HINT = (
     "DefaultSort: when results include a computed score or metric and the question "
     "does not suggest ascending order, prefer ORDER BY the primary output metric DESC. "
@@ -164,23 +154,16 @@ _DEFAULT_SORT_HINT = (
 )
 
 
-def _ambiguous_sort_direction(question: str) -> bool:
-    """True when the question implies sorting but doesn't specify direction."""
-    return bool(_SORT_TRIGGERS.search(question)) and not bool(_SORT_DIRECTION.search(question))
+def should_inject_default_sort(question: str) -> bool:
+    """Inject the default DESC sort hint unless the question already specifies a direction.
 
-
-def should_inject_default_sort(question: str, evidence: str) -> bool:
-    """True when a DESC default hint should be appended to evidence.
-
-    Conditions (all must hold):
-    - Evidence contains a computed formula (proxy for an orderable metric existing)
-    - Question contains no LIMIT/TOP trigger (wrong default sort + LIMIT = wrong rows)
-    - Question contains no explicit sort direction signal (either ASC or DESC)
+    When an explicit direction is present (ascending/descending/highest first/etc.) the hint
+    would create a contradictory signal, so we suppress it. In all other cases the hint is
+    safe — its text is self-limiting ("when results include a computed score or metric",
+    "does not suggest ascending order", "if no single metric is clearly primary, do not add
+    an ORDER BY").
     """
-    has_formula = bool(evidence) and "=" in evidence
-    has_limit = bool(_LIMIT_TRIGGERS.search(question))
-    has_direction = bool(_SORT_DIRECTION.search(question))
-    return has_formula and not has_limit and not has_direction
+    return not bool(_SORT_DIRECTION.search(question))
 
 
 _ARTICLES = frozenset(["a", "an", "the"])
@@ -407,14 +390,22 @@ def _filter_covered_by_external_knowledge(
                                 "Clarify — injected grandchild KB entry: %r (child: %r, parent: %r)",
                                 gc_name, child_name, match,
                             )
-                        # Great-grandchildren not injected — warn if they exist so we know
-                        # to extend injection depth if KB hierarchies deepen.
-                        if gc_name and norm_children_map.get(gc_name):
-                            logger.warning(
-                                "Clarify — KB entry %r has children (great-grandchildren of %r) "
-                                "that are NOT injected — consider extending injection depth",
-                                gc_name, match,
+                        # Inject great-grandchildren — covers 3-level KB hierarchies.
+                        great_grandchildren = norm_children_map.get(gc_name, [])[:_MAX_CHILDREN_PER_PARENT] if gc_name else []
+                        if great_grandchildren:
+                            logger.debug(
+                                "Clarify — KB entry %r has %d great-grandchild(ren) via %r",
+                                gc_name, len(great_grandchildren), match,
                             )
+                        for ggc_text in great_grandchildren:
+                            ggc_name = _norm_key(ggc_text.split("\n")[0].lstrip("- ").strip())
+                            if ggc_name and ggc_name not in seen_names:
+                                seen_names.add(ggc_name)
+                                relevant_lines.append(ggc_text)
+                                logger.debug(
+                                    "Clarify — injected great-grandchild KB entry: %r (grandchild: %r, parent: %r)",
+                                    ggc_name, gc_name, match,
+                                )
 
     relevant_kg_text = "\n".join(relevant_lines)
     logger.info("Clarify — external_kg covers: %s", covered or "none")
@@ -835,6 +826,45 @@ def should_clarify(
                         if session.cumulative_grounded_kg
                         else text
                     )
+        # For terms covered by BOTH KB and VDB (score < 0.62), inject a
+        # disambiguation note so the evidence LLM can choose between the KB
+        # formula and the direct schema column rather than blindly applying both.
+        _KB_VDB_DISAMBIG_THRESHOLD = 0.62
+        kb_covered_hits = [
+            (norm, col_text, score) for norm, col_text, score in resolved_hits
+            if norm not in vdb_only_norms and score < _KB_VDB_DISAMBIG_THRESHOLD
+        ]
+        if kb_covered_hits:
+            # Build term → (entry_name, kb_text) from entry_to_original_terms + parsed KB
+            kb_entries_parsed = _parse_kg_entries(relevant_kg)
+            term_to_kb_entry: dict[str, tuple[str, str]] = {}
+            for entry_name, matched_terms in entry_to_original_terms.items():
+                entry_text = next(
+                    (v for k, v in kb_entries_parsed.items()
+                     if k.startswith(entry_name) or entry_name.startswith(k)), ""
+                )
+                for t in matched_terms:
+                    term_to_kb_entry.setdefault(t, (entry_name, entry_text))
+            for norm, col_text, score in kb_covered_hits:
+                entry_name, kb_text = term_to_kb_entry.get(norm, ("", ""))
+                if not kb_text:
+                    continue
+                # Dedup by KB entry name — stable across turns unlike norm phrasing
+                marker = f"[DISAMBIGUATION for KB:'{entry_name}'"
+                if marker in session.cumulative_grounded_kg:
+                    continue
+                note = (
+                    f"\n{marker}: "
+                    f"KB defines it as: {kb_text[:200].strip()} "
+                    f"— but schema also has a direct column: {col_text[:120].strip()}. "
+                    f"In evidence, choose whichever fits the question domain — not both.]"
+                )
+                session.cumulative_grounded_kg += note
+                logger.info(
+                    "Clarify — KB+VDB disambiguation note added for KB entry %r (VDB score=%.3f)",
+                    entry_name, score,
+                )
+
         # Capture all extracted entities on the very first clarify call (turn 0).
         if not session.initial_extracted_entities:
             session.initial_extracted_entities = sorted(extracted_norms)
@@ -873,16 +903,7 @@ def should_clarify(
 
     resolved_schema_text = _format_resolved_schema_terms(resolved_hits) or "None"
 
-    sort_ambiguous = _ambiguous_sort_direction(session.working_question)
-    sort_direction_note = (
-        "IMPORTANT: The question mentions sorting/ordering but does not specify "
-        "ascending or descending. You MUST ask the user for the sort direction before proceeding. "
-        "If the query groups or filters by multiple fields, also consider whether a secondary sort key "
-        "is needed and ask about it if it would meaningfully affect the result order."
-        if sort_ambiguous else ""
-    )
-    if sort_ambiguous:
-        logger.info("Clarify — sort direction ambiguous: %s", sort_ambiguous)
+    sort_direction_note = ""  # Sort direction is handled by the default DESC hint at SQL gen time.
 
     grounded_kg_for_prompt = session._grounded_kg or "None"
     logger.info(
