@@ -14,12 +14,12 @@ from gsf.server.datasources import service as dal
 from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from gsf.server.params import ZONE_IDS_QUERY
 from gsf.server.pql_analyses import service as pql_analyses_dal
+from gsf.server.models import NodeUpdateResult
 from gsf.server.responses import (
     CustomAnalysisListResponse,
     CustomAnalysisResponse,
     DatabaseListResponse,
     IdResponse,
-    JsonObject,
     PqlAnalysisListResponse,
     PqlAnalysisResponse,
     SchemasPayload,
@@ -336,7 +336,15 @@ def delete_pql_analysis(analysis_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.patch("/nodes/{node_id}", response_model=JsonObject | None)
+@router.patch(
+    "/nodes/{node_id}",
+    response_model=NodeUpdateResult | None,
+    # The body echoes only the properties the patch actually sent, so the
+    # model's other fields must not be filled in with nulls that the handler
+    # never returned — this keeps the response byte-identical to before it was
+    # typed.
+    response_model_exclude_unset=True,
+)
 def update_node(
     node_id: str = Path(
         description="Id of any catalog node — a Database, Schema, Table or Column."

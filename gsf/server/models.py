@@ -46,6 +46,7 @@ __all__ = [
     "ForeignKeyRef",
     "GraphLink",
     "IdRef",
+    "NodeUpdateResult",
     "PqlAnalysis",
     "PublicConnection",
     "SchemaSummary",
@@ -91,6 +92,22 @@ class IdRef(ApiModel):
     """``{"id": ...}`` — echoed by the delete endpoints to confirm the target."""
 
     id: str
+
+
+class NodeUpdateResult(ApiModel):
+    """Echo of a catalog node patch: ``{id, ...the properties you sent}``.
+
+    ``update_node_properties`` builds the body as ``{"id": ..., **{k: props[k]
+    for k in patch}}``, so only the keys the request actually patched come
+    back — every one of them is optional here for that reason, and each may be
+    null when the node has no value for it. The route as a whole answers null
+    when the patch was empty or the node does not exist.
+    """
+
+    id: str
+    description: str | None = None
+    sample_values: list[str] | None = None
+    description_certified: bool | None = None
 
 
 # ---------------------------------------------------------------------------

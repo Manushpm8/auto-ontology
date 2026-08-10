@@ -2922,8 +2922,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "additionalProperties": true,
-                      "type": "object"
+                      "$ref": "#/components/schemas/NodeUpdateResult"
                     },
                     {
                       "type": "null"
@@ -6242,6 +6241,55 @@
           }
         },
         "title": "NodeUpdate",
+        "type": "object"
+      },
+      "NodeUpdateResult": {
+        "additionalProperties": true,
+        "description": "Echo of a catalog node patch: ``{id, ...the properties you sent}``.\n\n``update_node_properties`` builds the body as ``{\"id\": ..., **{k: props[k]\nfor k in patch}}``, so only the keys the request actually patched come\nback — every one of them is optional here for that reason, and each may be\nnull when the node has no value for it. The route as a whole answers null\nwhen the patch was empty or the node does not exist.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "sample_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Values"
+          }
+        },
+        "required": ["id"],
+        "title": "NodeUpdateResult",
         "type": "object"
       },
       "ObjectPageResponse_TableColumns_": {
