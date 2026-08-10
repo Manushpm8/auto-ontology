@@ -85,6 +85,7 @@ def test_calculate_columns_profiling(
     assert set(result) == {"id", "status", "created_at", "token"}
     assert result["status"]["sample_values"][0] == "open"
     assert len(result["created_at"]["sample_values"]) == 4
+    assert result["id"]["sample_values"] == [1, 2, 3, 4]
     assert result["id"]["is_unique"] is True
     assert result["status"]["is_unique"] is False
     assert result["created_at"]["is_unique"] is True
@@ -103,6 +104,7 @@ def test_calculate_columns_profiling(
     stored = mock_store_samples.call_args[0][1]
     assert "created_at" not in stored
     assert "token" not in stored
+    assert stored["id"] == [1, 2, 3, 4]
     assert stored["status"][0] == "open"
 
 

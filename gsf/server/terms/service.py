@@ -26,7 +26,7 @@ def update_column_attribute(
     *,
     name: str | None = None,
     description: str | None = None,
-    sample_values: list[str] | None = None,
+    sample_values: list[Any] | None = None,
     certified: bool | None = None,
 ) -> dict[str, Any] | None:
     """Update ColumnAttribute metadata and refresh related VDB rows.

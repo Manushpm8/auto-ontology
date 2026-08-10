@@ -36,8 +36,10 @@ import { Size, ButtonTheme } from '@/enums/button';
 
 export type ComposerEditValue = string | string[];
 
-export const LabelList = ({ values }: { values: string[] }) => {
-	const nonEmptyValues = values.filter((v) => v.trim() !== '');
+export const LabelList = ({ values }: { values: unknown[] }) => {
+	const nonEmptyValues = values
+		.map((value) => String(value))
+		.filter((value) => value.trim() !== '');
 	if (nonEmptyValues.length === 0) return <span>—</span>;
 	return (
 		<ul className="flex flex-wrap gap-1">

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -50,6 +51,21 @@ _EXCLUDED_SAMPLE_TYPES = ("date", "time", "timestamp", "datetime", "uuid")
 _LOW_CARDINALITY_MAX = 25
 # Declared data-type substrings treated as free/categorical text.
 _TEXT_SAMPLE_TYPES = ("char", "text", "string", "clob", "enum")
+
+
+def _profile_sample_value(value: Any) -> Any:
+    """Return a hashable, JSON-safe sample while preserving scalar types."""
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            value = item()
+        except (TypeError, ValueError):
+            pass
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
 
 # Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
 # the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
@@ -239,10 +255,10 @@ def calculate_columns_profiling(
     for column in df.columns:
         col_name = str(column)
         try:
-            # Cast to string first: some columns hold unhashable values (e.g.
-            # Postgres array columns come back as Python lists, JSON/JSONB as
-            # dict/list), and both is_unique and value_counts hash values.
-            series = df[column].dropna().map(str)
+            # Keep scalar types so SQL generation can distinguish 1 from '1'.
+            # Canonically render unhashable arrays/objects so value_counts can
+            # still hash them.
+            series = df[column].dropna().map(_profile_sample_value)
 
             is_unique = bool(len(series) > 0 and series.is_unique)
             top5 = list(series.value_counts().head(_PROFILING_TOP_N).index)
@@ -285,7 +301,11 @@ def calculate_columns_profiling(
 
         if _is_excluded_sample_type(declared_type):
             continue
-        filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
+        filtered = [
+            value
+            for value in col_values
+            if len(str(value)) <= _MAX_SAMPLE_VALUE_LEN
+        ]
         if filtered:
             sample_values[col_name] = filtered
 

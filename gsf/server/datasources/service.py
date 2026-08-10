@@ -11,6 +11,7 @@ and its helpers that mix Neo4j reads with pgvector upserts.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -31,6 +32,7 @@ from gsf.dal.datasources import (
 )
 from gsf.dal.terms import fetch_column_attribute_embedding_contexts_by_column_id
 from gsf.semantic.embed import build_semantic_embedder
+from gsf.utils import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +59,22 @@ def update_node_properties(
     if not properties:
         return None
 
-    patched = patch_catalog_node(node_id, properties)
+    stored_properties = dict(properties)
+    if isinstance(stored_properties.get("sample_values"), list):
+        # Store one JSON string rather than a Neo4j native list: JSON preserves
+        # mixed scalar types, while Neo4j property lists must be homogeneous.
+        stored_properties["sample_values"] = json.dumps(
+            stored_properties["sample_values"], ensure_ascii=False
+        )
+
+    patched = patch_catalog_node(node_id, stored_properties)
     if not patched:
         return None
 
     node_props = patched["props"]
     result = {"id": patched["id"], **{k: node_props.get(k) for k in properties}}
+    if "sample_values" in result:
+        result["sample_values"] = parse_sample_values(result["sample_values"])
 
     reembed_ids = _get_node_ids_for_embedding_update(
         node_id=node_id,

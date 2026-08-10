@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -16,7 +18,7 @@ from gsf.server.pql_analyses import service as pql_analyses_dal
 
 class NodeUpdate(BaseModel):
     description: str | None = None
-    sample_values: list[str] | None = None
+    sample_values: list[Any] | None = None
     description_certified: bool | None = None
 
 

@@ -10,12 +10,12 @@ import json
 from typing import Any
 
 
-def parse_sample_values(raw: Any) -> list[str] | None:
-    """Normalize Column.sample_values (JSON string or list) to a string list.
+def parse_sample_values(raw: Any) -> list[Any] | None:
+    """Normalize Column.sample_values while preserving JSON scalar types.
 
     Profiling persists ``col.sample_values`` as a JSON string (see
     ``store_column_sample_values``); catalog PATCH may store a list. Callers
-    expect ``list[str] | None``.
+    receive the decoded values without coercing numbers or booleans to strings.
     """
     if raw is None:
         return None
@@ -31,4 +31,4 @@ def parse_sample_values(raw: Any) -> list[str] | None:
         values = parsed
     else:
         return None
-    return [str(value) for value in values]
+    return values

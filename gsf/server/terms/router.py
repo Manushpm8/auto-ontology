@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -29,7 +30,7 @@ class TermUpdate(BaseModel):
 class ColumnAttributeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     description: str | None = None
-    sample_values: list[str] | None = None
+    sample_values: list[Any] | None = None
     certified: bool | None = None
 
 
