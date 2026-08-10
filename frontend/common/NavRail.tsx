@@ -23,8 +23,8 @@ const navItems: NavItem[] = [
 	{ icon: IconName.Exploration, href: '/exploration', label: 'Exploration' },
 	{ icon: IconName.Database, href: '/data', label: 'Data' },
 	{ icon: IconName.ChartLine, href: '/analytics', label: 'Analytics', adminOnly: true },
-	// Settings is admin-only and now also contains Users, Single Sign-On and
-	// Semantic Input (see app/settings/*). Viewers don't see it.
+	// Settings is admin-only and now also contains Users and Single Sign-On
+	// (see app/settings/*). Viewers don't see it.
 	{ icon: IconName.Settings, href: '/settings', label: 'Settings', adminOnly: true },
 ];
 

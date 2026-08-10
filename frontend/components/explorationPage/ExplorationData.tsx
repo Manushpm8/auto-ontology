@@ -32,7 +32,7 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 		description: table.description ?? null,
 		layer: ExplorationLayer.Data,
 		nodeType: getTableType(table.table_type) as TableType,
-		relationshipCount: 0,
+		relationshipCount: table.relationship_count ?? 0,
 		databaseId: table.database_id,
 		databaseName: table.database_name,
 		schemaId: table.schema_id,
@@ -64,19 +64,11 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 			})),
 		}));
 
-	const relationshipCountById = new Map<string, number>();
-	links.forEach(({ source, target }) => {
-		relationshipCountById.set(source, (relationshipCountById.get(source) ?? 0) + 1);
-		relationshipCountById.set(target, (relationshipCountById.get(target) ?? 0) + 1);
-	});
-
-	return {
-		nodes: nodes.map((node) => ({
-			...node,
-			relationshipCount: relationshipCountById.get(node.id) ?? 0,
-		})),
-		links,
-	};
+	// `relationshipCount` is taken from the server rather than counted off
+	// `links`: the graph is capped at a fixed number of nodes, so a table can
+	// have neighbours that were never drawn — counting the drawn ones would
+	// disagree with the related-entities modal the card opens.
+	return { nodes, links };
 };
 
 type ActiveDataCardProps = {
