@@ -34,6 +34,13 @@ class QuestionExtractionModel(BaseModel):
             "number-based thresholds."
         ),
     )
+    subject: str = Field(
+        ...,
+        description=(
+            "Main subject of the question — the single thing the user is asking "
+            "about. Excludes filters, aggregations, and date qualifiers."
+        ),
+    )
 
 
 class EntityCoverageResponse(BaseModel):

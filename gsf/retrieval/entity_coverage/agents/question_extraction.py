@@ -57,6 +57,7 @@ class QuestionExtractionAgent(BaseAgent):
                 )
                 path_state["normalized_question"] = original_question
                 path_state["entities"] = [original_question]
+                path_state["subject"] = original_question
                 return result
 
             sanitized = (extraction.sanitized_question or "").strip()
@@ -73,13 +74,23 @@ class QuestionExtractionAgent(BaseAgent):
                 )
                 entities = [sanitized]
 
+            subject = (extraction.subject or "").strip()
+            if not subject:
+                self.logger.warning(
+                    "Question extraction returned empty subject — using sanitized"
+                )
+                subject = sanitized
+
             path_state["normalized_question"] = sanitized
             path_state["entities"] = entities
+            path_state["subject"] = subject
             self.logger.info(
-                "Extracted question:\n  raw: %s\n  sanitized: %s\n  entities: %s",
+                "Extracted question:\n  raw: %s\n  sanitized: %s\n  entities: %s"
+                "\n  subject: %s",
                 original_question,
                 sanitized,
                 entities,
+                subject,
             )
         except Exception as exc:
             self.logger.warning(
@@ -88,5 +99,6 @@ class QuestionExtractionAgent(BaseAgent):
             )
             path_state["normalized_question"] = original_question
             path_state["entities"] = [original_question]
+            path_state["subject"] = original_question
 
         return result

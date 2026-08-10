@@ -12,9 +12,10 @@ _MAX_ENTITIES: int = int(os.environ.get("ENTITY_EXTRACTION_MAX_ENTITIES", "5"))
 
 
 def create_question_extraction_prompt(question: str) -> str:
-    """Single prompt: sanitize the question and extract entity noun phrases."""
-    return f"""You rewrite conversational user requests into concise, SQL-ready questions \
-AND extract database entity noun phrases from the sanitized intent.
+    """Single prompt: sanitize, extract entity noun phrases, and name the subject."""
+    return f"""You rewrite conversational user requests into concise, SQL-ready questions, \
+extract database entity noun phrases from the sanitized intent, AND name the question's \
+main subject.
 
 ## Part 1 — sanitized_question
 
@@ -82,6 +83,25 @@ Examples:
 
   Q: "Find a waterproof hiking tent for family camping."
   → required_entity_name: ["waterproof hiking tent for family camping"]
+
+## Part 3 — subject
+
+Populate "subject" with one short noun phrase naming what the question is about — the
+single thing being asked for. Derive it from the sanitized question and preserve casing
+the same way Part 2 does.
+
+Exclude from the subject: filters and qualifiers, aggregation words ("count", "total",
+"average"), date and time qualifiers, and number literals.
+
+Examples:
+  Q: "How many shipments were delivered last month?"
+  → subject: "shipment"
+
+  Q: "Find a waterproof hiking tent for family camping."
+  → subject: "tent"
+
+  Q: "Which vendors had the highest invoice totals in Q2?"
+  → subject: "vendor"
 
 ## Input
 
