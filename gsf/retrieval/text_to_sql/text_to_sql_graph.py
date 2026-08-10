@@ -438,8 +438,8 @@ def create_graph():
         },
     )
 
-    # After the empty-LIKE check, run the value-repair check (also gated on an
-    # empty result at run time).
+    # After the empty-LIKE check, run the value-repair check (empty-result
+    # probes, plus non-empty dead-column / singular-superlative cardinality).
     graph.add_conditional_edges(
         "check_empty_like_result",
         route_decision,

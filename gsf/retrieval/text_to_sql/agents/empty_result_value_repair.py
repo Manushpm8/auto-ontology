@@ -11,10 +11,15 @@ reconstruction node with a targeted hint. Failing that it probes the joins, sinc
 a join whose two sides share no values empties the result no matter how sound the
 filters are. The date-parse check runs either way, because a date that fails to
 parse yields a result full of NULLs at least as often as an empty one. When the
-query returned rows it also looks for a column that is 0/NULL in every row beside
-populated ones, which signals an aggregate whose rows were filtered away. Every
-check routes at most once, and the non-empty path costs a single scan — no
-probes, no LLM call.
+query returned rows it also looks for:
+
+* a singular superlative question that returned more than one row (missing
+  ``LIMIT 1`` / uncollapsed duplicates);
+* a column that is 0/NULL in every row beside populated ones, which signals an
+  aggregate whose rows were filtered away.
+
+Every check routes at most once, and the non-empty path costs a single scan —
+no probes, no LLM call.
 """
 
 from __future__ import annotations
@@ -42,9 +47,13 @@ from gsf.retrieval.text_to_sql.db_probe.literal_check import (
 )
 from gsf.retrieval.text_to_sql.agents.result_health import (
     build_dead_column_error,
+    build_superlative_cardinality_error,
+    count_result_rows,
     find_dead_result_columns,
+    has_exact_duplicate_rows,
+    should_repair_superlative_cardinality,
 )
-from gsf.retrieval.text_to_sql.state import AgentState
+from gsf.retrieval.text_to_sql.state import AgentState, get_question_for_processing
 
 
 
@@ -60,6 +69,36 @@ class EmptyResultValueRepairAgent(BaseAgent):
             self.logger.warning("No SQL execution result found for value repair")
             return False
         return True
+
+    def _check_superlative_cardinality(
+        self,
+        state: AgentState,
+        path_state: Dict[str, Any],
+        db_result: Any,
+        sql_code: str,
+    ) -> Dict[str, Any] | None:
+        if path_state.get("superlative_cardinality_repair_attempted"):
+            self.logger.info(
+                "Superlative-cardinality repair already attempted — continuing"
+            )
+            return None
+
+        question = get_question_for_processing(state)
+        if not should_repair_superlative_cardinality(question, db_result, sql_code):
+            return None
+
+        n_rows = count_result_rows(db_result)
+        duplicates = has_exact_duplicate_rows(db_result)
+        path_state["superlative_cardinality_repair_attempted"] = True
+        path_state["error"] = build_superlative_cardinality_error(
+            n_rows, has_duplicates=duplicates
+        )
+        self.logger.info(
+            "Singular superlative returned %d row(s)%s — routing to reconstruction",
+            n_rows,
+            " with exact duplicates" if duplicates else "",
+        )
+        return {"decision": "invalid_sql", "path_state": path_state}
 
     def _check_dead_columns(
         self, path_state: Dict[str, Any], db_result: Any
@@ -119,6 +158,11 @@ class EmptyResultValueRepairAgent(BaseAgent):
                     broken_dates = find_date_faults(executor, dialect, sql_code)
                 if broken_dates:
                     return self._route_broken_dates(path_state, broken_dates)
+            cardinality_repair = self._check_superlative_cardinality(
+                state, path_state, db_result, sql_code
+            )
+            if cardinality_repair is not None:
+                return cardinality_repair
             return self._check_dead_columns(path_state, db_result)
 
         if already_tried:
