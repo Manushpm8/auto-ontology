@@ -157,6 +157,52 @@ GSF resolves the source databases it connects to from two sources:
 GSF Supports SSO for authentication.
 The Redirect URI should be configured in the IdP as: APP_URL/api/auth/sso/callback
 
+### API tokens (scripting)
+
+A browser signs in and gets a session cookie, which a script cannot obtain. For
+scripts, notebooks, and scheduled jobs, mint an **API token** instead:
+
+1. Open the user menu (top right) → **API Tokens** → **New token**.
+2. Name it, optionally pick an expiry (default: never), and **copy the token**.
+   GSF stores only a SHA-256 hash of it, so it is shown exactly once. Losing it
+   means minting a new one.
+
+Send it as `x-api-key` on any `/api/...` call — `Authorization: Bearer <token>`
+works too:
+
+```sh
+curl -H "x-api-key: $GSF_API_TOKEN" https://gsf.example.com/api/terms
+```
+
+```python
+import os
+import requests
+
+session = requests.Session()
+session.headers["x-api-key"] = os.environ["GSF_API_TOKEN"]
+
+terms = session.get("https://gsf.example.com/api/terms").json()
+
+answer = session.post(
+    "https://gsf.example.com/api/chat/completions",
+    json={"question": "How many orders shipped last week?"},
+).json()
+```
+
+Things worth knowing:
+
+- **A token acts as its owner.** It carries no permissions of its own — every
+  call is authorized against the owner's role, exactly as it would be in the
+  browser. A viewer's token cannot do admin things.
+- **The whole API surface accepts it.** Authentication is resolved in one place
+  (`frontend/auth/resolve-user.ts`) for every route, so any endpoint in
+  [`docs/openapi/gsf-api.json`](./docs/openapi/gsf-api.json) that is not
+  `withPublic` works with a token.
+- **Revocation is immediate.** Delete the token in the UI, or delete/ban the
+  owning user, and the next request with it gets a 401.
+- **Tokens cannot manage tokens.** Creating and revoking requires a signed-in
+  session, so a leaked token cannot issue itself successors.
+  
 ## Agent API conversations
 
 Public clients call the authenticated Next.js gateway at
