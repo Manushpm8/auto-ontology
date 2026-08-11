@@ -503,22 +503,15 @@ const build = async (): Promise<{
 		// viewers would file them under a nameless default group.
 		merged.tags = [resourceOf(operation.path)];
 
-		const summary = titleOf(operation.description);
-		if (summary) merged.summary = summary;
+		// A single-sentence route comment *is* the whole description, so deriving
+		// the summary from it would print the same line twice in the docs. Keep
+		// the upstream (FastAPI) summary in that case, and fall back to the
+		// derived title only where nothing was inherited.
+		const title = titleOf(operation.description);
+		const description = operation.description?.replace(/\s+/g, ' ').trim();
+		if (title && (title !== description || !merged.summary)) merged.summary = title;
 		if (operation.description) merged.description = operation.description;
 		merged.operationId = `${operation.method}${operation.path.replace(/[^a-zA-Z0-9]+/g, '_')}`;
-
-		if (Array.isArray(merged.parameters)) {
-			// `zone_ids` is deliberately not part of the public contract, on 15
-			// FastAPI operations that accept it. Stripped unconditionally rather
-			// than only where the handler resolves zones: that call is a no-op
-			// since zone membership stopped being an authorization boundary, so a
-			// new proxy route would reasonably omit it — and would then publish
-			// `zone_ids` by accident.
-			merged.parameters = (merged.parameters as Json[]).filter(
-				(parameter) => !(parameter.in === 'query' && parameter.name === 'zone_ids'),
-			);
-		}
 
 		// A hand-rolled proxy relays the upstream response verbatim, so its
 		// responses are borrowed even though its request shape is its own.
