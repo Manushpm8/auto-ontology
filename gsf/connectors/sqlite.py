@@ -68,6 +68,8 @@ class SQLiteDatabase(SQLDatabase):
         self._local = threading.local()
         self._all_conns: list[sqlite3.Connection] = []
         self._conns_lock = threading.Lock()
+        # Relations sqlite_master lists but cannot introspect; see _resolves.
+        self._unresolvable: set[str] = set()
         # Open eagerly on the constructing thread to surface connection errors early.
         self._conn
         logger.debug(
@@ -129,23 +131,62 @@ class SQLiteDatabase(SQLDatabase):
             [dict(row) for row in rows], columns=[col[0] for col in cur.description]
         )
 
+    def _resolves(self, table_name: str) -> bool:
+        """Whether SQLite can resolve *table_name* to a column list.
+
+        A view's definition is validated when it is created, not when its base
+        tables change, so a database can ship a view naming a column that no
+        longer exists. It is listed in ``sqlite_master`` like any other, and only
+        ``PRAGMA table_info`` reveals the breakage. spider2's ``oracle_sql`` has
+        one: the Oracle-to-SQLite conversion renamed ``emp_hire_periods``'s
+        ``start_date``/``end_date`` to ``start_``/``end_`` without rewriting
+        ``emp_hire_periods_with_name``, which still selects the old names.
+
+        Dropping such a relation here keeps one unusable view from failing an
+        entire ingest, and covers columns, primary keys and foreign keys at once
+        since all three enumerate :meth:`get_tables`.
+        """
+        if table_name in self._unresolvable:
+            return False
+        try:
+            self._conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+        except sqlite3.Error as exc:
+            self._unresolvable.add(table_name)
+            logger.warning(
+                "Skipping %r in database %r — SQLite cannot resolve its columns: %s",
+                table_name,
+                self._database_name,
+                exc,
+            )
+            return False
+        return True
+
+    def _drop_unresolvable(self, relations: pd.DataFrame) -> pd.DataFrame:
+        """Remove rows naming a relation SQLite cannot introspect."""
+        if relations.empty:
+            return relations
+        keep = relations["table_name"].map(self._resolves)
+        return relations[keep].reset_index(drop=True)
+
     def get_tables(self) -> pd.DataFrame:
         view_type = TableTypes.VIEW
         base_table_type = TableTypes.BASE_TABLE
-        return self.execute(
-            f"""
-            SELECT
-                'main' AS table_schema,
-                name   AS table_name,
-                CASE type
-                    WHEN 'view' THEN '{view_type}'
-                    ELSE '{base_table_type}'
-                END AS table_type
-            FROM sqlite_master
-            WHERE type IN ('table', 'view')
-              AND name NOT LIKE 'sqlite_%'
-            ORDER BY name
-            """
+        return self._drop_unresolvable(
+            self.execute(
+                f"""
+                SELECT
+                    'main' AS table_schema,
+                    name   AS table_name,
+                    CASE type
+                        WHEN 'view' THEN '{view_type}'
+                        ELSE '{base_table_type}'
+                    END AS table_type
+                FROM sqlite_master
+                WHERE type IN ('table', 'view')
+                  AND name NOT LIKE 'sqlite_%'
+                ORDER BY name
+                """
+            )
         )
 
     def get_columns(self) -> pd.DataFrame:
@@ -170,16 +211,18 @@ class SQLiteDatabase(SQLDatabase):
         return pd.DataFrame(columns=["end_time", "query_text"])
 
     def get_views(self) -> pd.DataFrame:
-        return self.execute(
-            """
-            SELECT
-                'main' AS table_schema,
-                name   AS table_name,
-                sql    AS view_definition
-            FROM sqlite_master
-            WHERE type = 'view'
-            ORDER BY name
-            """
+        return self._drop_unresolvable(
+            self.execute(
+                """
+                SELECT
+                    'main' AS table_schema,
+                    name   AS table_name,
+                    sql    AS view_definition
+                FROM sqlite_master
+                WHERE type = 'view'
+                ORDER BY name
+                """
+            )
         )
 
     def get_pks(self) -> pd.DataFrame:
