@@ -336,7 +336,10 @@ class CandidatePreparationAgent(BaseAgent):
             str(subject_term.get("id") or "") if isinstance(subject_term, dict) else ""
         )
         if subject_term_id:
-            pairs = fetch_term_table_pairs(term_ids=[subject_term_id])
+            pairs = [
+                p for p in fetch_term_table_pairs()
+                if str(p.get("term_id") or "") == subject_term_id
+            ]
             subject_table_ids = list(
                 dict.fromkeys(str(p["table_id"]) for p in pairs if p.get("table_id"))
             )
