@@ -32,6 +32,11 @@ from typing import Any, Dict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from gsf.utils.llm_invoke import get_llm_client, safe_invoke_with_structured_output
+from gsf.semantic.deterministic import (
+    VALUE_SUFFIX_MARKERS,
+    enrich_column_description,
+    profile_from_column,
+)
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.agents.sql_execution import _run_sql
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
@@ -176,8 +181,10 @@ def _schema_directive(index: int, entity_columns: list[dict] | None) -> str:
         # No measured ambiguity: a "pick something else" instruction with nothing
         # to point at invites an arbitrary swap, so fall back to the join reading.
         return _JOIN_PREFERRING
-    return _ALTERNATIVE_BINDING + "\nAmbiguous terms: " + ", ".join(
-        f'"{t}"' for t in terms[:6]
+    return (
+        _ALTERNATIVE_BINDING
+        + "\nAmbiguous terms: "
+        + ", ".join(f'"{t}"' for t in terms[:6])
     )
 
 
@@ -706,8 +713,9 @@ def _format_semantic_context(
 
 
 # A column description written at ingest ends in "— samples: a, b" or, for a
-# closed enumeration, "— one of: a, b".
-_VALUE_SUFFIX_MARKERS = ("samples:", "one of:")
+# closed enumeration, "— one of: a, b". Sourced from the module that writes the
+# suffix, so the two cannot drift.
+_VALUE_SUFFIX_MARKERS = VALUE_SUFFIX_MARKERS
 
 
 def _entity_columns_enabled() -> bool:
@@ -756,9 +764,7 @@ def format_entity_columns_for_prompt(entity_columns: list[dict]) -> str:
             # lookalike as a peer of the column gold needed, and the model took the
             # single-table shortcut rather than joining.
             if len(tables_here) > 1:
-                partners = [
-                    p for p in (c.get("fk_partners") or []) if p in tables_here
-                ]
+                partners = [p for p in (c.get("fk_partners") or []) if p in tables_here]
                 bits.append(
                     f"[in {c.get('table')}; FK to {', '.join(partners)}]"
                     if partners
@@ -799,7 +805,9 @@ def _short_description(description: str, column: str) -> str:
     # Cut the value enumeration before comparing to the column name, or a description
     # that is just the name plus its codes ("Charter School (Y/N), 0: N;1: Y") fails to
     # match and prints anyway. The values follow on the same line regardless.
-    desc = re.split(r"(?:Values are as follows|The field is coded as follows|, 0:)", desc)[0]
+    desc = re.split(
+        r"(?:Values are as follows|The field is coded as follows|, 0:)", desc
+    )[0]
     desc = desc.strip().rstrip(",.")
     norm = re.sub(r"[^a-z0-9]+", "", desc.lower())
     if norm == re.sub(r"[^a-z0-9]+", "", column.lower()):
@@ -816,10 +824,43 @@ def _description_lists_values(description: str | None) -> bool:
 
 # SQL keywords and probe scaffolding, so `_ev_cols` holds column names only.
 _SQL_WORDS = {
-    "SELECT", "DISTINCT", "FROM", "WHERE", "LIMIT", "AND", "OR", "NOT", "NULL",
-    "IS", "LIKE", "JOIN", "INNER", "LEFT", "OUTER", "ON", "AS", "GROUP", "BY",
-    "ORDER", "HAVING", "COUNT", "SUM", "AVG", "MIN", "MAX", "CAST", "REAL",
-    "CASE", "WHEN", "THEN", "ELSE", "END", "MAIN", "ASC", "DESC", "IN",
+    "SELECT",
+    "DISTINCT",
+    "FROM",
+    "WHERE",
+    "LIMIT",
+    "AND",
+    "OR",
+    "NOT",
+    "NULL",
+    "IS",
+    "LIKE",
+    "JOIN",
+    "INNER",
+    "LEFT",
+    "OUTER",
+    "ON",
+    "AS",
+    "GROUP",
+    "BY",
+    "ORDER",
+    "HAVING",
+    "COUNT",
+    "SUM",
+    "AVG",
+    "MIN",
+    "MAX",
+    "CAST",
+    "REAL",
+    "CASE",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "END",
+    "MAIN",
+    "ASC",
+    "DESC",
+    "IN",
 }
 
 
@@ -869,6 +910,14 @@ def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -
         if table_description:
             table_parts.append(f"  Description: {table_description}")
 
+        # Table size, which decides things no description states: two tables with
+        # equal counts are probably 1:1 so a join between them cannot fan out,
+        # while joining across a large size gap multiplies rows and makes a plain
+        # COUNT(*) count the wrong entity.
+        n_rows = table.get("n_rows")
+        if isinstance(n_rows, int):
+            table_parts.append(f"  Rows: {n_rows:,}")
+
         # Primary key
         if "primary_key" in table:
             table_parts.append(f"  Primary Key: {table['primary_key']}")
@@ -886,18 +935,24 @@ def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -
                     col_name = col.get("name", "UNKNOWN")
                     col_type = col.get("data_type", "UNKNOWN")
                     col_desc = col.get("description", "")
-                    sample_values = col.get("sample_values")
+
+                    # An FK column gets no ColumnAttribute — the semantic layer
+                    # models attributes, not joins — so nothing ever folded its
+                    # profile into a description, and it reached the prompt as a
+                    # bare sentence while every other column arrived with its
+                    # values and cardinality. The profile is on the Column node
+                    # either way, so fold it in here, reusing the compile-time
+                    # formatter so both channels read identically. Unconditional
+                    # because that formatter is idempotent: an already-enriched
+                    # description is returned unchanged.
+                    col_desc = (
+                        enrich_column_description(col, profile_from_column(col))
+                        or col_desc
+                    )
 
                     col_line = f"    - {col_name} ({col_type})"
                     if col_desc:
                         col_line += f" - {col_desc}"
-                    # Candidate expansion projects the description *and*
-                    # sample_values, so printing both repeats every value — the
-                    # second time with JSON quoting. ``fetch_fk_neighbour_tables``
-                    # drops the field at fetch time; doing it here covers every
-                    # fetch path, including the candidate one that never did.
-                    if sample_values and not _description_lists_values(col_desc):
-                        col_line += f" | sample values: {sample_values}"
                     table_parts.append(col_line)
                 elif isinstance(col, str):
                     # If column is a string, use it directly
@@ -1002,6 +1057,7 @@ class SQLFromCandidatesAgent(BaseAgent):
         self.logger.info(
             f"Using {len(similar_questions)} similar questions from conversations."
         )
+
 
         def build_messages(
             tables_variant: list | None = None,
@@ -1149,7 +1205,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                 custom_analyses=ca_section + sa_section,
             )
 
-
             # Choose system prompt based on context
             has_evidence = extract_evidence(original_question) is not None
             system_prompt = create_sql_from_candidates_prompt(
@@ -1167,7 +1222,6 @@ class SQLFromCandidatesAgent(BaseAgent):
             if schema_directive:
                 messages.append(SystemMessage(content=schema_directive))
             messages.append(HumanMessage(content=user_prompt))
-
 
             # Add calendar time window reminder if needed
             if any(
@@ -1417,9 +1471,8 @@ class SQLFromCandidatesAgent(BaseAgent):
                 # fail on different questions than slot 0 (independence), not just
                 # different SQL text for the same wrong reading.
                 alt_directive = (
-                    (schema_directive + "\n\n" if schema_directive else "")
-                    + _ALT_TABLE_SET_STRATEGY
-                )
+                    schema_directive + "\n\n" if schema_directive else ""
+                ) + _ALT_TABLE_SET_STRATEGY
                 messages = build_messages(
                     tables_variant,
                     similar_questions_variant=few_shot_variant,
