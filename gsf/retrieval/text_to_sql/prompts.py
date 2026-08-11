@@ -150,6 +150,7 @@ _SCHEMALESS_DIALECTS = {"sqlite", "duckdb"}
 
 _POSTGRES_DIALECT_RULES = (
     "**PostgreSQL-specific (STRICT — these will error at execution)**\n"
+    "- WHERE and HAVING cannot reference SELECT aliases. Repeat the full expression or wrap in a subquery/CTE.\n"
     "- GROUP BY cannot reference SELECT aliases. Repeat the full expression "
     "(including CASE WHEN blocks) in GROUP BY, or wrap the query in a subquery/CTE.\n"
     "- LOG(x) is natural log (same as LN). For base-10 use LOG(10, x). "
