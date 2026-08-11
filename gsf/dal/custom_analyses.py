@@ -197,9 +197,22 @@ def embed_custom_analyses(
     from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
     from nemo_retriever.operators.vdb import IngestVdbOperator
 
+    # An analysis belongs to the database owning the tables its SQL touches, so
+    # scoping by *database_name* means walking out to the Schema. Without this the
+    # query returns every analysis in the graph and the caller appends them all
+    # under whichever database it happens to be ingesting, which both duplicates
+    # rows and files analyses under databases they do not belong to.
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        WHERE $analysis_id IS NULL OR ca.id = $analysis_id
+        WHERE ($analysis_id IS NULL OR ca.id = $analysis_id)
+          AND (
+            $database_name IS NULL
+            OR EXISTS {{
+                MATCH (sql)-[:{Edges.SQL}]->(:{Labels.TABLE})
+                      <-[:{Edges.CONTAINS}]-(sc:{Labels.SCHEMA})
+                WHERE sc.database_name = $database_name
+            }}
+          )
         WITH DISTINCT ca, sql,
              CASE
                  WHEN ca.description IS NOT NULL AND trim(toString(ca.description)) <> ''
@@ -222,13 +235,15 @@ def embed_custom_analyses(
     """
     result = get_neo4j_conn().query_read(
         query,
-        parameters={"analysis_id": analysis_id},
+        parameters={"analysis_id": analysis_id, "database_name": database_name},
     )
     docs = result[0].get("docs") if result else None
     if not docs:
         logger.info(
-            "No CustomAnalysis rows found for analysis_id=%r; skipping VDB upsert.",
+            "No CustomAnalysis rows found for analysis_id=%r database_name=%r; "
+            "skipping VDB upsert.",
             analysis_id,
+            database_name,
         )
         return
 
