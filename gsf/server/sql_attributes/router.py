@@ -10,7 +10,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from gsf.dal import terms as terms_dal
-from gsf.server.params import ZONE_IDS_QUERY
 from gsf.server.sql_attributes import service as dal
 from gsf.server.responses import (
     DescriptionSuggestionResponse,
@@ -60,17 +59,9 @@ def list_sql_attributes() -> dict:
 
 
 @router.get("/sql-attributes/{attr_id}", response_model=SqlAttributeResponse)
-def get_sql_attribute(
-    attr_id: str,
-    zone_ids: list[str] | None = ZONE_IDS_QUERY,
-) -> dict:
-    """One SqlAttribute by id, including its resolved zones.
-
-    Zone-scoped when zone_ids are provided: an attribute whose parent term
-    also represents an out-of-zone table is treated as not found, matching
-    the single-term detail endpoint's zone rules.
-    """
-    row = dal.get_full_sql_attribute_by_id(attr_id, zone_ids=zone_ids)
+def get_sql_attribute(attr_id: str) -> dict:
+    """One SqlAttribute by id, including its resolved zones."""
+    row = dal.get_full_sql_attribute_by_id(attr_id, zone_ids=None)
     if row is None:
         raise HTTPException(
             status_code=404,
