@@ -144,6 +144,15 @@ def get_llm_client(
         }
         if not omit_temperature:
             kwargs["temperature"] = temperature
+        # langchain sends parallel_tool_calls=False alongside a named tool_choice
+        # for method="function_calling". litellm's Bedrock adapter mistranslates
+        # that pair and the gateway rejects the request as
+        # "tool_choice/type conflicts with toolConfig.toolChoice.tool" — which
+        # names the wrong field, so it reads like a tool_choice problem. Dropping
+        # this one parameter makes the identical payload succeed; a single tool
+        # choice already implies no parallelism.
+        if resolved_model.startswith("aws/"):
+            kwargs["disabled_params"] = {"parallel_tool_calls": None}
         return ChatOpenAI(**kwargs)
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
