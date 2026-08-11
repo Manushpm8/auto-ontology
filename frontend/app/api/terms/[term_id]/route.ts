@@ -6,12 +6,11 @@ import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
 import { resolveZoneIds } from '@/auth/resolve-zones';
 
-// termsApi.getAllWithAttributes — list every term available to the user, each
-// with its merged attributes (ColumnAttributes + SqlAttributes), zone-scoped
-// for viewers.
+// termsApi.getById — fetch one Term node.
 export const GET = withPermission({ catalog: ['read'] })(async (req, { user }) => {
 	const zoneIds = await resolveZoneIds(user.id, user.role);
-	// The backend returns a bare list, so a zero-zone viewer gets `[]` (not the
-	// default `{ data: [], count: 0 }`) to keep the response shape consistent.
-	return proxyToBackend(req, { zoneIds: zoneIds ?? undefined, emptyResponse: [] });
+	return proxyToBackend(req, { zoneIds: zoneIds ?? undefined });
 });
+
+// Updating a Term name invalidates cached SqlAttribute description suggestions in backend.
+export const PATCH = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));

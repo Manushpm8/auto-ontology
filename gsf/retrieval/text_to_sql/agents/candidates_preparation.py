@@ -63,10 +63,11 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 
 
 def _qualified_name(t: dict) -> str:
-    """Build schema-qualified table name (e.g. 'public.users') for dedup/filtering."""
+    """Build a database/schema-qualified table name for deduplication."""
+    database = t.get("database_name", "")
     schema = t.get("schema_name", "")
     name = t.get("name", "")
-    return f"{schema}.{name}" if schema else name
+    return ".".join(part for part in (database, schema, name) if part)
 
 
 def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
@@ -214,7 +215,7 @@ class CandidatePreparationAgent(BaseAgent):
             cached_contexts: dict[str, dict] = path_state.get("col_attr_contexts") or {}
             missing_ids = [aid for aid in attr_ids if aid not in cached_contexts]
             if missing_ids:
-                fresh = fetch_attr_column_contexts(missing_ids)
+                fresh = fetch_attr_column_contexts(missing_ids, database_name=target_db)
                 attr_contexts = {**cached_contexts, **fresh}
             else:
                 attr_contexts = {
@@ -245,6 +246,7 @@ class CandidatePreparationAgent(BaseAgent):
                     "col_name": anchor_ctx["col_name"],
                     "table_name": anchor_ctx["table_name"],
                     "schema_name": anchor_ctx["schema_name"],
+                    "database_name": anchor_ctx["database_name"],
                 }
 
                 dest_items = [
@@ -269,6 +271,7 @@ class CandidatePreparationAgent(BaseAgent):
                                 "col_name": dest_ctx["col_name"],
                                 "table_name": dest_ctx["table_name"],
                                 "schema_name": dest_ctx["schema_name"],
+                                "database_name": dest_ctx["database_name"],
                                 "path": join_path,
                             }
                         )
@@ -430,6 +433,13 @@ class CandidatePreparationAgent(BaseAgent):
             )
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
+
+        if target_db:
+            relevant_tables = [
+                table
+                for table in relevant_tables
+                if table.get("database_name") == target_db
+            ]
 
         # --- 5. Filter tables by relevance ---
         relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(

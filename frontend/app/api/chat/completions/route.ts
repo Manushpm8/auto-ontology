@@ -20,6 +20,7 @@
 
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
+import { resolveSubjectToken } from '@/auth/sso-token';
 import { getPrisma } from '@/lib/prisma';
 import { resolveOrCreateOwnedConversation } from '@/lib/chatConversations';
 import { buildSqlAnswerMessage, type AgentAnswer, type AnswerMessage } from '@/lib/answerMessages';
@@ -116,12 +117,20 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	// completes, so the answer never waits on an extra LLM round trip.
 	const body = JSON.stringify(payload);
 
+	// Forward the caller's SSO token whenever we have one. Only the backend knows
+	// which connections are configured to authenticate as the signed-in user, so
+	// it owns the fail-closed decision; sending the token is a no-op otherwise.
+	const upstreamHeaders: Record<string, string> = {
+		'Content-Type': 'application/json',
+		Accept: 'text/event-stream',
+	};
+
+	const subjectToken = await resolveSubjectToken(req.headers, user.id);
+	if (subjectToken) upstreamHeaders.Authorization = `Bearer ${subjectToken}`;
+
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Accept: 'text/event-stream',
-		},
+		headers: upstreamHeaders,
 		body,
 		// Disable Node's transparent decompression so we can pipe bytes 1:1.
 		// @ts-expect-error — `duplex` is required by Node's fetch when
@@ -174,14 +183,14 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const prisma = getPrisma();
 	const [row, conversation] = await Promise.all([
 		prisma.conversationAnalytics.create({
-			data: { question, source, userId: user.id },
+			data: { question, source, user_id: user.id },
 		}),
 		resolveOrCreateOwnedConversation(user, conversationId, title),
 	]);
 
 	if (conversation) {
 		await prisma.message.create({
-			data: { conversationId: conversation.id, role: 'user', content: question },
+			data: { conversation_id: conversation.id, role: 'user', content: question },
 		});
 	}
 
@@ -193,7 +202,7 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 				await readFinalAnswer(toCapture);
 			await prisma.conversationAnalytics.update({
 				where: { id: row.id },
-				data: { response, sql, responseTimestamp: new Date() },
+				data: { response, sql, response_timestamp: new Date() },
 			});
 
 			if (conversation) {
@@ -214,16 +223,16 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 				if (rows.length > 0) {
 					await prisma.message.createMany({
 						data: rows.map((msg) => ({
-							conversationId: conversation.id,
+							conversation_id: conversation.id,
 							role: 'assistant',
 							content: msg.content,
-							sqlCode: msg.sql ?? null,
-							sqlResponse: msg.sqlResponse ?? null,
+							sql_code: msg.sql ?? null,
+							sql_response: msg.sqlResponse ?? null,
 						})),
 					});
 					await prisma.conversation.update({
 						where: { id: conversation.id },
-						data: { updatedAt: new Date() },
+						data: { updated_at: new Date() },
 					});
 				}
 			}
