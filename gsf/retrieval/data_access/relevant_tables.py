@@ -102,6 +102,11 @@ def _normalize_table_to_relevant_shape(table: dict) -> dict:
         entry["columns"] = table["columns"]
     if table.get("pk") is not None:
         entry["primary_key"] = table["pk"]
+    # Carried explicitly, like every other field here: a dict sourced from Neo4j
+    # loses any key this function does not copy, and the row count only exists on
+    # the Neo4j side (the vector index does not carry it).
+    if table.get("n_rows") is not None:
+        entry["n_rows"] = table["n_rows"]
     if not isinstance(entry.get("columns"), list):
         entry["columns"] = []
     return entry
