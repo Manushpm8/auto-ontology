@@ -10,16 +10,17 @@ on demand. Two legs, per the Kratos CI/CD guide:
 
 1. **SSA → OIDC JWT.** ``POST <ssa_token_url>`` with HTTP Basic auth (SSA client id and
    secret) and ``grant_type=client_credentials``. Returns the service account's JWT.
-2. **JWT → Databricks token.** ``POST https://<host>/oidc/v1/token`` with
-   ``grant_type=client_credentials`` and the JWT as a ``client_assertion``, identified by
-   the workspace's own client id. Returns the Databricks access token the SQL connector
-   uses.
+2. **JWT → Databricks token.** ``POST https://<host>/oidc/v1/token`` as an RFC 8693 token
+   exchange: ``grant_type=urn:ietf:params:oauth:grant-type:token-exchange`` with the SSA
+   JWT as the ``subject_token`` and the workspace service principal's application id as
+   ``client_id``. Returns the Databricks access token the SQL connector uses.
 
 The second leg is what the Databricks SDK performs internally for
-``DATABRICKS_AUTH_TYPE=env-oidc``; the docs describe it as "passing" the SSA token, but
-the workspace client id it also requires is only meaningful for this exchange — a bearer
-token would need no client id. Replicating it here keeps GSF on the plain SQL connector
-rather than pulling in the SDK's auth stack.
+``DATABRICKS_AUTH_TYPE=env-oidc``. Databricks matches the JWT against a *federation
+policy* on that service principal (issuer, subject and audience) rather than
+authenticating the client directly — it rejects ``private_key_jwt`` client assertions
+outright. Replicating the exchange here keeps GSF on the plain SQL connector rather than
+pulling in the SDK's auth stack.
 
 Tokens are short-lived, so they are minted per use and cached until shortly before
 expiry, keyed by the credentials that produced them.
@@ -46,9 +47,11 @@ DEFAULT_SSA_TOKEN_URL = (
 )
 DEFAULT_SSA_SCOPE = "pipelines-write"
 
-# Grant/assertion identifiers for leg 2 (RFC 7523 client authentication).
+# Grant identifiers: leg 1 is a plain client-credentials grant, leg 2 an RFC 8693 token
+# exchange (Databricks workload identity federation).
 _CLIENT_CREDENTIALS = "client_credentials"
-_JWT_BEARER_ASSERTION = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+_TOKEN_EXCHANGE = "urn:ietf:params:oauth:grant-type:token-exchange"
+_JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt"
 _DATABRICKS_SCOPE = "all-apis"
 
 _EXPIRY_MARGIN_S = 60.0
@@ -194,7 +197,7 @@ def exchange_jwt_for_databricks_token(
     jwt: str,
     audience: str = "",
 ) -> tuple[str, float]:
-    """Leg 2: the workspace token, presenting the SSA JWT as a client assertion."""
+    """Leg 2: the workspace token, exchanging the SSA JWT as the subject token."""
     host = _normalize_host(host)
     if not host:
         raise DatabricksSSAError("Databricks host is required")
@@ -205,10 +208,10 @@ def exchange_jwt_for_databricks_token(
         )
 
     data = {
-        "grant_type": _CLIENT_CREDENTIALS,
+        "grant_type": _TOKEN_EXCHANGE,
         "client_id": databricks_client_id,
-        "client_assertion_type": _JWT_BEARER_ASSERTION,
-        "client_assertion": jwt,
+        "subject_token_type": _JWT_TOKEN_TYPE,
+        "subject_token": jwt,
         "scope": _DATABRICKS_SCOPE,
     }
     if audience:

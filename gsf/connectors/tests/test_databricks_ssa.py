@@ -86,16 +86,18 @@ def test_get_access_token_performs_both_legs(monkeypatch: MonkeyPatch) -> None:
     assert leg1["data"]["grant_type"] == "client_credentials"
     assert leg1["data"]["scope"] == databricks_ssa.DEFAULT_SSA_SCOPE
 
-    # Leg 2: the JWT presented as a client assertion to the workspace.
+    # Leg 2: the JWT exchanged as the subject token. Databricks rejects
+    # private_key_jwt client assertions, so this must be an RFC 8693 exchange.
     leg2 = calls[1]
     assert leg2["url"] == (
         "https://nvidia-kratos-ca1.cloud.databricks.com/oidc/v1/token"
     )
-    assert leg2["data"]["client_id"] == "db-client-id"
-    assert leg2["data"]["client_assertion"] == "ssa-jwt"
-    assert leg2["data"]["client_assertion_type"] == (
-        "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+    assert leg2["data"]["grant_type"] == (
+        "urn:ietf:params:oauth:grant-type:token-exchange"
     )
+    assert leg2["data"]["client_id"] == "db-client-id"
+    assert leg2["data"]["subject_token"] == "ssa-jwt"
+    assert leg2["data"]["subject_token_type"] == "urn:ietf:params:oauth:token-type:jwt"
 
 
 def test_token_is_cached_across_calls(monkeypatch: MonkeyPatch) -> None:
