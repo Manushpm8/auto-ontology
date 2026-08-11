@@ -69,6 +69,30 @@ def _qualified_name(t: dict) -> str:
     return f"{schema}.{name}" if schema else name
 
 
+def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
+    """Merge *additions* into *base*, enriching existing entries.
+
+    Tables already present in *base* (matched by ``id``) are merged via
+    :func:`dedupe_merge_relevant_tables` so per-column fields such as
+    ``sample_values`` survive even when the candidate row arrived without
+    them.  New tables are appended after the original base order.
+    """
+    if not additions:
+        return list(base)
+    base_by_id = {str(t.get("id") or ""): i for i, t in enumerate(base)}
+    result = list(base)
+    for tbl in additions:
+        tid = str(tbl.get("id") or "")
+        if tid and tid in base_by_id:
+            merged = dedupe_merge_relevant_tables([result[base_by_id[tid]], tbl])
+            result[base_by_id[tid]] = merged[0]
+        else:
+            if tid:
+                base_by_id[tid] = len(result)
+            result.append(tbl)
+    return result
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -285,20 +309,38 @@ class CandidatePreparationAgent(BaseAgent):
             [_qualified_name(t) for t in relevant_tables],
         )
 
+        # --- 4a. Back-fill sample_values for any table that arrived without them ---
+        # Tables retrieved from the vector index carry only name/data_type/description;
+        # sample_values live only in the Neo4j graph. Fetch the rich rows for every
+        # table that has an id but whose columns are all missing sample_values, then
+        # merge per-column so nothing already present is overwritten.
+        sample_less_ids = [
+            str(t["id"])
+            for t in relevant_tables
+            if t.get("id")
+            and not any(
+                isinstance(c, dict) and c.get("sample_values")
+                for c in (t.get("columns") or [])
+            )
+        ]
+        if sample_less_ids:
+            enriched = fetch_tables_by_ids(sample_less_ids)
+            relevant_tables = _merge_tables(relevant_tables, enriched)
+            self.logger.info(
+                "Back-filled sample_values for %d/%d table(s)",
+                len(enriched),
+                len(sample_less_ids),
+            )
+
         # --- 4b. Add tables referenced by custom analyses via Neo4j ---
         if custom_analyses:
             ca_ids = [str(ca["id"]) for ca in custom_analyses if ca.get("id")]
             ca_linked_tables = fetch_tables_from_custom_analyses(ca_ids)
-            existing_ids = {t.get("id") for t in relevant_tables}
-            added = 0
-            for tbl in ca_linked_tables:
-                if tbl.get("id") not in existing_ids:
-                    relevant_tables.append(tbl)
-                    existing_ids.add(tbl.get("id"))
-                    added += 1
+            prev_len = len(relevant_tables)
+            relevant_tables = _merge_tables(relevant_tables, ca_linked_tables)
             self.logger.info(
                 "Added %d table(s) from custom analyses SQL references: %s",
-                added,
+                len(relevant_tables) - prev_len,
                 [t["name"] for t in ca_linked_tables],
             )
 
@@ -317,16 +359,11 @@ class CandidatePreparationAgent(BaseAgent):
             )
 
             sa_linked_tables = fetch_tables_from_sql_attributes(sa_ids)
-            existing_ids = {t.get("id") for t in relevant_tables}
-            added = 0
-            for tbl in sa_linked_tables:
-                if tbl.get("id") not in existing_ids:
-                    relevant_tables.append(tbl)
-                    existing_ids.add(tbl.get("id"))
-                    added += 1
+            prev_len = len(relevant_tables)
+            relevant_tables = _merge_tables(relevant_tables, sa_linked_tables)
             self.logger.info(
                 "Added %d table(s) from SqlAttribute SQL references: %s",
-                added,
+                len(relevant_tables) - prev_len,
                 [t["name"] for t in sa_linked_tables],
             )
 
