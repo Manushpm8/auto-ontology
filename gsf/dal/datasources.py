@@ -600,7 +600,7 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
              [e IN $entries WHERE e.column_name = col.name | e.sample_values][0]
              AS sv
         WHERE sv IS NOT NULL
-        SET col.sample_values = coalesce(col.sample_values, sv)
+        SET col.sample_values = sv
         """,
         {"table_id": table_id, "entries": entries},
     )

@@ -189,7 +189,12 @@ def calculate_columns_profiling(
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
-    qualified = f"{schema_name}.{table_name}" if schema_name else table_name
+    # Quote identifiers so mixed-case table/schema names (e.g. "RiskManagement")
+    # are preserved — Postgres folds unquoted names to lowercase.
+    def _q(ident: str) -> str:
+        return '"' + ident.replace('"', '""') + '"'
+
+    qualified = f"{_q(schema_name)}.{_q(table_name)}" if schema_name else _q(table_name)
 
     try:
         df = connector.execute(
@@ -254,6 +259,30 @@ def calculate_columns_profiling(
 
         if _is_excluded_sample_type(declared_type):
             continue
+
+        # JSONB columns: the raw value is a Python dict and its string
+        # representation always exceeds _MAX_SAMPLE_VALUE_LEN, so the normal
+        # filter would silently discard everything.  Instead, extract the
+        # unique key names from the sampled rows — flat keys at the top level
+        # and one level of nesting — so the SQL generator sees the actual
+        # field paths it needs to write correct ->/->> expressions.
+        if "json" in (declared_type or "").lower():
+            json_keys: list[str] = []
+            for raw_val in df[column].dropna():
+                if not isinstance(raw_val, dict):
+                    continue
+                for k, v in raw_val.items():
+                    if isinstance(v, dict):
+                        for nested_k in v:
+                            entry = f"{k}.{nested_k}"
+                            if entry not in json_keys:
+                                json_keys.append(entry)
+                    elif k not in json_keys:
+                        json_keys.append(k)
+            if json_keys:
+                sample_values[col_name] = json_keys[:10]
+            continue
+
         filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
         if filtered:
             sample_values[col_name] = filtered

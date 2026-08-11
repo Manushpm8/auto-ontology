@@ -198,8 +198,8 @@ Rules:
 - Resolve references to prior concepts (e.g. "that category", "the same score", "those \
 signals") using the previous SQL and question. If resolved mappings are provided above, \
 use them as the authoritative definition for any matching terms.
-- Carry forward table names, column names, formulas, and conditions that the follow-up \
-references or implicitly depends on.
+- Carry forward table names, column names, formulas, tresholds and conditions that the follow-up \
+references or implicitly depends on. Carry forward exact numeric values, if they exist.
 - If the follow-up reuses or extends the previous query's full structure, incorporate it. \
 If it only borrows part of it, incorporate only that part.
 - For any concept or metric in the follow-up that does not clearly map 1:1 to a term \
