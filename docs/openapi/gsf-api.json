@@ -909,7 +909,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "datasources.getColumnsForTable — list columns for one table.",
+        "summary": "List Columns By Table",
         "tags": ["columns"],
         "x-gsf-source": "frontend/app/api/columns/[table_id]/route.ts",
         "x-gsf-permissions": {
@@ -1114,7 +1114,7 @@
             "description": "The caller lacks the required permission"
           }
         },
-        "summary": "connectionsApi.getAll — list connections (viewable by all).",
+        "summary": "List Connections",
         "tags": ["connections"],
         "description": "connectionsApi.getAll — list connections (viewable by all).",
         "x-gsf-source": "frontend/app/api/connections/route.ts",
@@ -1163,7 +1163,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "connectionsApi.create — add a connection (admin only; carries credentials).",
+        "summary": "Create Connection",
         "tags": ["connections"],
         "description": "connectionsApi.create — add a connection (admin only; carries credentials).",
         "x-gsf-source": "frontend/app/api/connections/route.ts",
@@ -1217,7 +1217,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "connectionsApi.delete — remove a connection (admin only).",
+        "summary": "Delete Connection",
         "tags": ["connections"],
         "description": "connectionsApi.delete — remove a connection (admin only).",
         "x-gsf-source": "frontend/app/api/connections/[database_name]/route.ts",
@@ -1314,7 +1314,7 @@
             "description": "The caller lacks the required permission"
           }
         },
-        "summary": "connectionsApi.isEnvSource — whether connections come from env config.",
+        "summary": "Is Env Source",
         "tags": ["connections"],
         "x-gsf-source": "frontend/app/api/connections/source/route.ts",
         "x-gsf-permissions": {
@@ -1365,7 +1365,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "connectionsApi.test — validate a connection config (admin only).",
+        "summary": "Test Connection",
         "tags": ["connections"],
         "x-gsf-source": "frontend/app/api/connections/test/route.ts",
         "x-gsf-permissions": {
@@ -1956,7 +1956,6 @@
       "get": {
         "description": "Anyone may list custom analyses; only admins (analysis:manage) may add one.",
         "operationId": "get_api_custom_analyses",
-        "parameters": [],
         "responses": {
           "200": {
             "content": {
@@ -1973,19 +1972,9 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
-        "summary": "Anyone may list custom analyses; only admins (analysis:manage) may add one.",
+        "summary": "List Custom Analyses",
         "tags": ["custom-analyses"],
         "x-gsf-source": "frontend/app/api/custom-analyses/route.ts",
         "x-gsf-permissions": {
@@ -2146,7 +2135,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Editing/deleting a custom analysis is admin-only (analysis:manage).",
+        "summary": "Update Custom Analysis",
         "tags": ["custom-analyses"],
         "x-gsf-source": "frontend/app/api/custom-analyses/[analysis_id]/route.ts",
         "x-gsf-permissions": {
@@ -2475,9 +2464,8 @@
     },
     "/api/datasources/dbs": {
       "get": {
-        "description": "datasources.getDBs — list databases, zone-scoped for viewers.",
+        "description": "datasources.getDBs — list databases.",
         "operationId": "get_api_datasources_dbs",
-        "parameters": [],
         "responses": {
           "200": {
             "content": {
@@ -2494,19 +2482,9 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
-        "summary": "datasources.getDBs — list databases, zone-scoped for viewers.",
+        "summary": "List Databases",
         "tags": ["datasources"],
         "x-gsf-source": "frontend/app/api/datasources/dbs/route.ts",
         "x-gsf-permissions": {
@@ -2519,7 +2497,6 @@
       "get": {
         "description": "explorationApi.getEdges — table connections backed by a shared SQL query or a foreign key.",
         "operationId": "get_api_exploration_edges",
-        "parameters": [],
         "responses": {
           "200": {
             "content": {
@@ -2536,16 +2513,6 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "List Data Exploration Edges",
@@ -2559,7 +2526,7 @@
     },
     "/api/exploration/graph": {
       "get": {
-        "description": "explorationApi.getDataExplorationGraph — full data-layer graph ({nodes, links}), zone-scoped for viewers.",
+        "description": "explorationApi.getDataExplorationGraph — full data-layer graph ({nodes, links}).",
         "operationId": "get_api_exploration_graph",
         "parameters": [
           {
@@ -2615,7 +2582,7 @@
     },
     "/api/exploration/nodes/{node_id}/relationships": {
       "get": {
-        "description": "explorationApi.getRelatedNodes — a zone-scoped page of related Exploration nodes.",
+        "description": "explorationApi.getRelatedNodes — a page of related Exploration nodes.",
         "operationId": "get_api_exploration_nodes_node_id_relationships",
         "parameters": [
           {
@@ -2714,7 +2681,7 @@
     },
     "/api/exploration/semantic-graph": {
       "get": {
-        "description": "explorationApi.getSemanticExplorationGraph — full semantic-layer graph ({nodes, links}), zone-scoped for viewers.",
+        "description": "explorationApi.getSemanticExplorationGraph — full semantic-layer graph ({nodes, links}).",
         "operationId": "get_api_exploration_semantic_graph",
         "parameters": [
           {
@@ -2855,9 +2822,8 @@
     },
     "/api/exploration/tables/zones": {
       "get": {
-        "description": "explorationApi.getTableZonesMap — {table_id: [zone, ...]} map, zone-scoped for viewers.",
+        "description": "explorationApi.getTableZonesMap — {table_id: [zone, ...]} map.",
         "operationId": "get_api_exploration_tables_zones",
-        "parameters": [],
         "responses": {
           "200": {
             "content": {
@@ -2874,16 +2840,6 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "List Table Zones",
@@ -3219,7 +3175,7 @@
             "description": "The caller lacks the required permission"
           }
         },
-        "summary": "Anyone may list PQL analyses; only admins (analysis:manage) may add one.",
+        "summary": "List Pql Analyses",
         "tags": ["pql-analyses"],
         "x-gsf-source": "frontend/app/api/pql-analyses/route.ts",
         "x-gsf-permissions": {
@@ -3380,7 +3336,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Editing/deleting a PQL analysis is admin-only (analysis:manage).",
+        "summary": "Update Pql Analysis",
         "tags": ["pql-analyses"],
         "x-gsf-source": "frontend/app/api/pql-analyses/[analysis_id]/route.ts",
         "x-gsf-permissions": {
@@ -3442,7 +3398,7 @@
     },
     "/api/schemas/{db_id}": {
       "get": {
-        "description": "datasources.getSchemasForDatabase — list schemas for one database, zone-scoped for viewers.",
+        "description": "datasources.getSchemasForDatabase — list schemas for one database.",
         "operationId": "get_api_schemas_db_id_",
         "parameters": [
           {
@@ -3706,7 +3662,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "sqlAttributesApi.get — fetch one SqlAttribute node.",
+        "summary": "Get Sql Attribute",
         "tags": ["sql-attributes"],
         "x-gsf-source": "frontend/app/api/sql-attributes/[attr_id]/route.ts",
         "x-gsf-permissions": {
@@ -3766,7 +3722,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Patching name/description does not touch SQL expression.",
+        "summary": "Patch Sql Attribute",
         "tags": ["sql-attributes"],
         "x-gsf-source": "frontend/app/api/sql-attributes/[attr_id]/route.ts",
         "x-gsf-permissions": {
@@ -3826,7 +3782,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Updating a SqlAttribute re-parses SQL and refreshes its embedding in backend.",
+        "summary": "Update Sql Attribute",
         "tags": ["sql-attributes"],
         "x-gsf-source": "frontend/app/api/sql-attributes/[attr_id]/route.ts",
         "x-gsf-permissions": {
@@ -4121,7 +4077,7 @@
     },
     "/api/tables/{schema_id}": {
       "get": {
-        "description": "datasources.getTablesForSchema — list tables for one schema, zone-scoped for viewers.",
+        "description": "datasources.getTablesForSchema — list tables for one schema.",
         "operationId": "get_api_tables_schema_id_",
         "parameters": [
           {
@@ -4191,7 +4147,7 @@
     },
     "/api/terms": {
       "get": {
-        "description": "termsApi.list — one page of Terms and their per-card count breakdowns,\nzone-scoped for viewers. `skip`/`limit` pass straight through.",
+        "description": "termsApi.list — one page of Terms and their per-card count breakdowns.\n`skip`/`limit` pass straight through.",
         "operationId": "get_api_terms",
         "parameters": [
           {
@@ -4274,7 +4230,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Terms",
+        "summary": "termsApi.list — one page of Terms and their per-card count breakdowns.",
         "tags": ["terms"],
         "x-gsf-source": "frontend/app/api/terms/route.ts",
         "x-gsf-permissions": {
@@ -4326,7 +4282,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "termsApi.getById — fetch one Term node.",
+        "summary": "Get Term",
         "tags": ["terms"],
         "x-gsf-source": "frontend/app/api/terms/[term_id]/route.ts",
         "x-gsf-permissions": {
@@ -4397,7 +4353,7 @@
     },
     "/api/terms/{term_id}/column-attributes": {
       "get": {
-        "description": "termsApi.getColumnAttributes — ColumnAttribute nodes for one term (with\nprimary/referenced columns), zone-scoped for viewers.",
+        "description": "termsApi.getColumnAttributes — ColumnAttribute nodes for one term (with\nprimary/referenced columns).",
         "operationId": "get_api_terms_term_id_column_attributes",
         "parameters": [
           {
@@ -4555,7 +4511,7 @@
     },
     "/api/terms/{term_id}/sql-attributes": {
       "get": {
-        "description": "termsApi.getSqlAttributes — SqlAttribute nodes for one term, zone-scoped for viewers.",
+        "description": "termsApi.getSqlAttributes — SqlAttribute nodes for one term.",
         "operationId": "get_api_terms_term_id_sql_attributes",
         "parameters": [
           {
@@ -4683,7 +4639,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "zonesApi.getAll — list zones (viewable by all).",
+        "summary": "List Zones",
         "tags": ["zones"],
         "x-gsf-source": "frontend/app/api/zones/route.ts",
         "x-gsf-permissions": {
@@ -4732,7 +4688,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "zonesApi.create — add a zone (admin only).",
+        "summary": "Create Zone",
         "tags": ["zones"],
         "x-gsf-source": "frontend/app/api/zones/route.ts",
         "x-gsf-permissions": {
@@ -4784,7 +4740,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "zonesApi.delete — remove a zone (admin only).",
+        "summary": "Delete Zone",
         "tags": ["zones"],
         "x-gsf-source": "frontend/app/api/zones/[zone_id]/route.ts",
         "x-gsf-permissions": {
@@ -4845,7 +4801,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "zonesApi.getById — fetch one zone (viewable by all).",
+        "summary": "Get Zone",
         "tags": ["zones"],
         "x-gsf-source": "frontend/app/api/zones/[zone_id]/route.ts",
         "x-gsf-permissions": {
@@ -4905,7 +4861,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "zonesApi.update — edit a zone (admin only).",
+        "summary": "Update Zone",
         "tags": ["zones"],
         "x-gsf-source": "frontend/app/api/zones/[zone_id]/route.ts",
         "x-gsf-permissions": {
@@ -4978,7 +4934,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "zonesApi.setEnabled — enable/disable a zone (admin only).",
+        "summary": "Set Zone Status",
         "tags": ["zones"],
         "x-gsf-source": "frontend/app/api/zones/[zone_id]/status/route.ts",
         "x-gsf-permissions": {

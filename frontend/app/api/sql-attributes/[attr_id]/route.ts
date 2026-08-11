@@ -4,13 +4,9 @@
 
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
-import { resolveZoneIds } from '@/auth/resolve-zones';
 
 // sqlAttributesApi.get — fetch one SqlAttribute node.
-export const GET = withPermission({ catalog: ['read'] })(async (req, { user }) => {
-	const zoneIds = await resolveZoneIds(user.id, user.role);
-	return proxyToBackend(req, { zoneIds: zoneIds ?? undefined });
-});
+export const GET = withPermission({ catalog: ['read'] })((req) => proxyToBackend(req));
 
 // Updating a SqlAttribute re-parses SQL and refreshes its embedding in backend.
 export const PUT = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
