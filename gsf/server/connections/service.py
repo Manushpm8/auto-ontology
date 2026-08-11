@@ -142,6 +142,12 @@ def set_sso_federation(*, database_name: str, enabled: bool) -> dict[str, Any]:
     invalidate_connectors_cache()
     refresh_chat_workers()
 
+    # Bust the SSO-federation flag cache so the chat endpoint picks up the
+    # change on the very next request rather than waiting for the TTL to expire.
+    from gsf.connectors.databricks_oauth import invalidate_sso_federation_cache
+
+    invalidate_sso_federation_cache()
+
     return {"database_name": database_name, "sso_federation": enabled}
 
 

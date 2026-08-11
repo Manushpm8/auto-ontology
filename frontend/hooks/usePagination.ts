@@ -8,49 +8,81 @@ import { useCallback, useMemo, useState } from 'react';
 
 import type { TablePagination } from '@/types/table';
 
-/** Rows per page every paginated `Table` in the app uses. */
 export const DEFAULT_PAGE_SIZE = 10;
 
-type UsePaginationResult<T> = {
-	/** The slice of `rows` belonging to the current page. */
-	pageRows: T[];
+export type UsePaginationOptions = {
+	/**
+	 * Rows across all pages: the length of the array being paged when it is
+	 * held locally, or the count the server reported when it isn't.
+	 */
+	totalItems: number;
+	/** Rows per page. Defaults to `DEFAULT_PAGE_SIZE`. */
+	pageSize?: number;
+	/**
+	 * What the pages belong to — the term a modal was opened on, say. When it
+	 * changes the paging starts over, since the page the previous object was
+	 * left on says nothing about this one. It is derived rather than pushed
+	 * through an effect, so switching costs no extra render and, for a list read
+	 * from a server, no request for a page that is about to be abandoned.
+	 */
+	resetKey?: string | null;
+};
+
+export type UsePaginationResult = {
+	/** 1-based current page, never past the last one the rows reach. */
+	page: number;
+	pageSize: number;
+	/** Rows before the current page: it covers `[skip, skip + pageSize)`. */
+	skip: number;
+	setPage: (page: number) => void;
 	/** Ready to hand to `Table`'s `pagination` prop. */
 	pagination: TablePagination;
 };
 
 /**
- * Slices `rows` into pages and keeps the current one, for a `Table` that would
- * otherwise render every row it was given.
+ * Keeps the position within a paged list: which page is current, how wide a
+ * page is, and where that page starts.
  *
- * `resetKey` identifies what the rows belong to — the term a modal was opened
- * on, say. When it changes the paging starts over, since the page the previous
- * object was left on says nothing about this one. It is derived rather than
- * pushed through an effect, so switching costs no extra render.
+ * The rows themselves stay with the caller, which is what lets one hook serve
+ * both cases — slice a local array by `skip`, or read `[skip, skip + pageSize)`
+ * from a server and report what it says the total is.
  */
-export function usePagination<T>(
-	rows: T[],
-	pageSize: number,
-	resetKey: string | null = null,
-): UsePaginationResult<T> {
+export function usePagination({
+	totalItems,
+	pageSize = DEFAULT_PAGE_SIZE,
+	resetKey = null,
+}: UsePaginationOptions): UsePaginationResult {
 	const [paged, setPaged] = useState({ key: resetKey, page: 1 });
 
-	const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+	const pageCount = Math.max(1, Math.ceil(totalItems / pageSize));
 	// Rows can also shrink under a page that is still current — a list narrowed
 	// by a filter — which leaves the stored page out of range.
 	const page = Math.min(paged.key === resetKey ? paged.page : 1, pageCount);
 
-	const pageRows = useMemo(
-		() => rows.slice((page - 1) * pageSize, page * pageSize),
-		[rows, page, pageSize],
-	);
+	// Store what is being read. Leaving the clamp out of state means the two
+	// disagree, and the moment the rows come back the position springs back to
+	// the page nobody is on — asking the server for it on the way. Writing
+	// during render rather than from an effect keeps `skip` and the stored page
+	// in step within one commit, so no request goes out from the state between.
+	if (paged.key !== resetKey || paged.page !== page) {
+		setPaged({ key: resetKey, page });
+	}
 
-	const onPageChange = useCallback(
+	const setPage = useCallback(
 		(next: number) => setPaged({ key: resetKey, page: next }),
 		[resetKey],
 	);
 
+	const pagination = useMemo<TablePagination>(
+		() => ({ page, pageSize, totalItems, onPageChange: setPage }),
+		[page, pageSize, totalItems, setPage],
+	);
+
 	return {
-		pageRows,
-		pagination: { page, pageSize, totalItems: rows.length, onPageChange },
+		page,
+		pageSize,
+		skip: (page - 1) * pageSize,
+		setPage,
+		pagination,
 	};
 }

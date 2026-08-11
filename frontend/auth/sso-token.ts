@@ -148,18 +148,29 @@ const refreshIdToken = async (accountId: string, refreshToken: string): Promise<
 		return null;
 	}
 
-	await getPrisma().account.update({
-		where: { id: accountId },
-		data: {
-			idToken: payload.id_token,
-			...(payload.access_token != null ? { accessToken: payload.access_token } : {}),
-			// Providers may rotate the refresh token; keep the old one when they don't.
-			...(payload.refresh_token != null ? { refreshToken: payload.refresh_token } : {}),
-			...(payload.expires_in != null
-				? { accessTokenExpiresAt: new Date(Date.now() + payload.expires_in * 1000) }
-				: {}),
-		},
-	});
+	// Persist the new tokens. If the write fails (e.g. transient DB blip) we
+	// still return the fresh id_token so this request succeeds. On the next
+	// refresh the stored (now-invalid, rotated) refresh_token will fail and the
+	// user will be asked to re-authenticate — that is the correct degradation.
+	try {
+		await getPrisma().account.update({
+			where: { id: accountId },
+			data: {
+				idToken: payload.id_token,
+				...(payload.access_token != null ? { accessToken: payload.access_token } : {}),
+				// Providers may rotate the refresh token; keep the old one when they don't.
+				...(payload.refresh_token != null ? { refreshToken: payload.refresh_token } : {}),
+				...(payload.expires_in != null
+					? { accessTokenExpiresAt: new Date(Date.now() + payload.expires_in * 1000) }
+					: {}),
+			},
+		});
+	} catch (error) {
+		console.warn(
+			'[sso-token] failed to persist refreshed tokens — user may need to re-authenticate after next expiry',
+			error,
+		);
+	}
 
 	return payload.id_token;
 };

@@ -1,5 +1,7 @@
 import pandas as pd
+import pytest
 
+from gsf.retrieval.kumo import pql_gen
 from gsf.retrieval.kumo.pql_gen import (
     _NeighbourhoodMemo,
     _is_context_capacity_error,
@@ -10,6 +12,7 @@ from gsf.retrieval.kumo.pql_gen import (
     _retry_at_full_neighbourhood,
     canonicalize_pql_identifiers,
     extract_pql,
+    parse_entity,
 )
 
 # The SDK's client-side per-table row cap (kumorfm.rfm.payload.validate_payload_table_rows).
@@ -175,3 +178,45 @@ def test_neighbourhood_memo_is_not_advanced_by_intermittent_gpu_faults() -> None
 
     assert _predict_resilient(_record, memo=memo) == "ok"
     assert calls == [None]
+
+
+_QUOTED_PQL = (
+    "PREDICT COUNT(ORDERS.*, 0, 30, days) = 0 FOR EACH `My People`.`Customer ID`"
+)
+
+
+def test_parse_entity_reads_a_quoted_name_as_the_data_spells_it() -> None:
+    """Entity resolution feeds warehouse SQL and the entity-id map, so the
+    backticks must not survive parsing."""
+    assert parse_entity(_QUOTED_PQL) == ("My People", "Customer ID")
+
+
+def test_parse_entity_still_reads_a_bare_name() -> None:
+    assert parse_entity(
+        "PREDICT COUNT(ORDERS.*, 0, 30, days) = 0 FOR EACH PEOPLE.CUSTOMER_ID"
+    ) == ("PEOPLE", "CUSTOMER_ID")
+
+
+def test_canonicalisation_keeps_the_quoting_a_name_needs() -> None:
+    ddl = "My People(Customer ID ID, TIER categorical)"
+    assert canonicalize_pql_identifiers(_QUOTED_PQL, ddl) == _QUOTED_PQL
+
+
+def test_static_lint_reads_through_quotes() -> None:
+    """The aggregated table is compared against the entity table, so a quoted
+    name has to resolve or every quoted query would look cross-table."""
+    pql_gen.validate_pql_static(_QUOTED_PQL)
+
+    with pytest.raises(pql_gen.PqlStaticError, match="can only filter columns"):
+        pql_gen.validate_pql_static(
+            "PREDICT COUNT(ORDERS.* WHERE `My People`.TIER = 'pro', 0, 30, days) "
+            "> 0 FOR EACH `My People`.`Customer ID`"
+        )
+
+
+def test_unquote_and_quote_round_trip() -> None:
+    assert pql_gen.unquote_name("`Customer ID`") == "Customer ID"
+    assert pql_gen.unquote_name("CUSTOMER_ID") == "CUSTOMER_ID"
+    assert pql_gen.quote_name("Customer ID") == "`Customer ID`"
+    assert pql_gen.quote_name("CUSTOMER_ID") == "CUSTOMER_ID"
+    assert pql_gen.quote_name("*") == "*"

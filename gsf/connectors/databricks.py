@@ -177,6 +177,9 @@ class DatabricksDatabase(SQLDatabase):
         )
         # Columns/PKs/FKs from one DESCRIBE EXTENDED pass; see :meth:`_describe_pass`.
         self._describe_cache: tuple[pd.DataFrame, ...] | None = None
+        # Raw SHOW TABLES result from get_tables(); reused by _describe_pass to avoid
+        # a second round-trip to the warehouse for the same metadata.
+        self._show_tables_cache: pd.DataFrame | None = None
         # Connection held open across a batch of statements; see :meth:`reuse_connection`.
         self._shared_connection: Connection | None = None
 
@@ -431,27 +434,45 @@ class DatabricksDatabase(SQLDatabase):
     def _tables_via_show(self, schema: str) -> pd.DataFrame:
         """Table list from ``SHOW TABLES IN <catalog>.<schema>``.
 
-        Returns ``database`` / ``tableName`` / ``isTemporary``: no table type, so every
-        row is reported as a base table. Views live in the same listing and are
-        indistinguishable here — :meth:`get_views` still identifies them separately.
+        ``SHOW TABLES`` returns both tables and views with no type column. We run
+        ``SHOW VIEWS`` in the same schema to build a view-name set, then classify
+        each row correctly. This avoids storing views as ``BASE_TABLE`` in Neo4j,
+        which would break any downstream consumer that discriminates on node type.
         """
         catalog = _quoted_identifier(self._database_name)
-        return self._tables_frame(
-            self.execute(f"SHOW TABLES IN {catalog}.{_quoted_identifier(schema)}"),
-            schema,
-        )
+        schema_quoted = _quoted_identifier(schema)
+        tables_raw = self.execute(f"SHOW TABLES IN {catalog}.{schema_quoted}")
+        views_raw = self.execute(f"SHOW VIEWS IN {catalog}.{schema_quoted}")
+        view_names: set[str] = set()
+        if not views_raw.empty and "viewname" in views_raw.columns:
+            view_names = set(views_raw["viewname"].astype(str))
+        return self._tables_frame(tables_raw, schema, view_names)
 
     @staticmethod
-    def _tables_frame(frame: pd.DataFrame, schema: str) -> pd.DataFrame:
-        """Shape a ``SHOW TABLES`` result into the tables contract."""
+    def _tables_frame(
+        frame: pd.DataFrame, schema: str, view_names: set[str] | None = None
+    ) -> pd.DataFrame:
+        """Shape a ``SHOW TABLES`` result into the tables contract.
+
+        *view_names*, when provided, is used to classify rows — those whose
+        ``tableName`` appears in the set receive ``TableTypes.VIEW`` instead of
+        ``TableTypes.BASE_TABLE``.
+        """
         if frame.empty or "tablename" not in frame.columns:
             return pd.DataFrame(columns=["table_schema", "table_name", "table_type"])
+        names = frame["tablename"].astype(str)
+        if view_names:
+            table_type = names.map(
+                lambda n: TableTypes.VIEW if n in view_names else TableTypes.BASE_TABLE
+            )
+        else:
+            table_type = TableTypes.BASE_TABLE
         return pd.DataFrame(
             {
                 # SHOW TABLES reports the schema it listed; fall back to the requested one.
                 "table_schema": frame.get("database", schema).astype(str),
-                "table_name": frame["tablename"].astype(str),
-                "table_type": TableTypes.BASE_TABLE,
+                "table_name": names,
+                "table_type": table_type,
             }
         )
 
@@ -551,14 +572,19 @@ class DatabricksDatabase(SQLDatabase):
         started = time.perf_counter()
         with self._connect() as connection:
             connect_seconds = time.perf_counter() - started
-            tables = self._tables_frame(
-                self._run(
-                    connection,
-                    f"SHOW TABLES IN {catalog}.{_quoted_identifier(schema)}",
-                    connect_seconds=connect_seconds,
-                ),
-                schema,
-            )
+            if self._show_tables_cache is not None:
+                # get_tables() already ran SHOW TABLES; reuse its result so we
+                # don't issue a second round-trip for the same metadata.
+                tables = self._show_tables_cache
+            else:
+                tables = self._tables_frame(
+                    self._run(
+                        connection,
+                        f"SHOW TABLES IN {catalog}.{_quoted_identifier(schema)}",
+                        connect_seconds=connect_seconds,
+                    ),
+                    schema,
+                )
 
             for table_name in tables["table_name"].astype(str):
                 qualified = (
@@ -662,12 +688,17 @@ class DatabricksDatabase(SQLDatabase):
             )
 
     def get_tables(self) -> pd.DataFrame:
-        # First call of every extraction, so this is where the per-run cache resets.
+        # First call of every extraction, so this is where the per-run caches reset.
         self._describe_cache = None
+        self._show_tables_cache = None
         schema = self._single_schema()
         if schema:
             logger.info("databricks: listing tables via SHOW TABLES IN %s", schema)
-            return self._tables_via_show(schema)
+            result = self._tables_via_show(schema)
+            # Cache the raw table list so _describe_pass can reuse it without a
+            # second SHOW TABLES round-trip.
+            self._show_tables_cache = result
+            return result
 
         base_table = TableTypes.BASE_TABLE
         view = TableTypes.VIEW

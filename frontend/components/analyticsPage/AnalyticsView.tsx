@@ -15,7 +15,7 @@ import { Table } from '@/common/Table';
 import { Toast } from '@/common/Toast';
 import { analyticsApi } from '@/api/analytics';
 import { formatDate } from '@/common/date';
-import { DEFAULT_PAGE_SIZE, usePagination } from '@/hooks/usePagination';
+import { usePagination } from '@/hooks/usePagination';
 import type { ConversationAnalytics } from '@/types/analytics';
 import type { TableColumn } from '@/types/table';
 
@@ -24,12 +24,12 @@ const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 	{
-		key: 'questionTimestamp',
+		key: 'question_timestamp',
 		header: 'Timestamp',
 		width: 'w-44',
 		nowrap: true,
 		className: 'text-zinc-600 dark:text-zinc-300',
-		cell: (row) => formatDate(row.questionTimestamp),
+		cell: (row) => formatDate(row.question_timestamp),
 	},
 	{
 		key: 'user',
@@ -77,23 +77,31 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 
 export const AnalyticsView = () => {
 	const [rows, setRows] = useState<ConversationAnalytics[]>([]);
+	const [total, setTotal] = useState(0);
 	const [loading, setLoading] = useState(true);
+	const [downloading, setDownloading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const { pageRows, pagination } = usePagination(rows, DEFAULT_PAGE_SIZE);
+	// Kept apart from `error`: the table below only renders while `error` is
+	// null, so a failed export must not take the rows already on screen with it.
+	const [downloadError, setDownloadError] = useState<string | null>(null);
+	const { skip, pageSize, pagination } = usePagination({ totalItems: total });
 
 	useEffect(() => {
 		let cancelled = false;
 
 		(async () => {
 			setLoading(true);
-			const res = await analyticsApi.list();
+			const res = await analyticsApi.list({ skip, limit: pageSize });
 			if (cancelled) return;
 			if (res.error) {
+				// The page already on screen is left alone: dropping the total
+				// would collapse the pager to page one and send the request for
+				// it, so a single failed request would cost two.
 				setError(res.message ?? 'Failed to load analytics');
-				setRows([]);
 			} else {
 				setError(null);
 				setRows(res.data ?? []);
+				setTotal(res.total);
 			}
 			setLoading(false);
 		})();
@@ -101,14 +109,14 @@ export const AnalyticsView = () => {
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+	}, [skip, pageSize]);
 
-	const handleDownload = () => {
+	const downloadRows = (analytics: ConversationAnalytics[]) => {
 		const lines = [
 			CSV_HEADERS.join(','),
-			...rows.map((row) =>
+			...analytics.map((row) =>
 				[
-					formatDate(row.questionTimestamp),
+					formatDate(row.question_timestamp),
 					row.user.name || row.user.email,
 					row.source ?? '',
 					row.question ?? '',
@@ -133,6 +141,18 @@ export const AnalyticsView = () => {
 		URL.revokeObjectURL(url);
 	};
 
+	const handleDownload = async () => {
+		setDownloading(true);
+		setDownloadError(null);
+		const res = await analyticsApi.list();
+		setDownloading(false);
+		if (res.error) {
+			setDownloadError(res.message ?? 'Failed to download analytics');
+			return;
+		}
+		downloadRows(res.data ?? []);
+	};
+
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
@@ -146,10 +166,10 @@ export const AnalyticsView = () => {
 						size={Size.REGULAR}
 						type="button"
 						onClick={handleDownload}
-						disabled={rows.length === 0}
+						disabled={total === 0 || downloading}
 						shadow
 					>
-						Download
+						{downloading ? 'Preparing download…' : 'Download'}
 					</Button>
 				</div>
 			</header>
@@ -161,7 +181,7 @@ export const AnalyticsView = () => {
 					</div>
 				)}
 
-				{!loading && error == null && rows.length === 0 && (
+				{!loading && error == null && total === 0 && (
 					<EmptyState
 						icon={IconName.ChartLine}
 						title="No analytics recorded yet"
@@ -172,7 +192,7 @@ export const AnalyticsView = () => {
 				{!loading && error == null && rows.length > 0 && (
 					<Table
 						columns={COLUMNS}
-						rows={pageRows}
+						rows={rows}
 						rowKey={(row) => row.id}
 						pagination={pagination}
 					/>
@@ -185,6 +205,14 @@ export const AnalyticsView = () => {
 				title="Couldn't load analytics"
 				variant="error"
 				onClose={() => setError(null)}
+			/>
+
+			<Toast
+				open={downloadError !== null}
+				message={downloadError ?? ''}
+				title="Couldn't download analytics"
+				variant="error"
+				onClose={() => setDownloadError(null)}
 			/>
 		</div>
 	);
