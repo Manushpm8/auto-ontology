@@ -67,6 +67,16 @@ _CAND_RERANK = os.environ.get("BIRD_CAND_RERANK", "1").strip().lower() not in {
     "no",
     "off",
 }
+# SqlAttribute candidates reach the generator two ways: their expression and SQL
+# go into the prompt, and the tables their SQL names are added to the candidate
+# schema. Both are unwanted where the semantic layer is meant to carry the
+# knowledge on its own, so the search can be skipped entirely.
+_USE_SQL_ATTRS = os.environ.get("BIRD_USE_SQL_ATTRIBUTES", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
 
 
 def _rerank_hits(
@@ -418,15 +428,21 @@ class CandidateRetrievalAgent(BaseAgent):
                         target_db,
                     ),
                 ),
-                (
-                    "sql_attr",
-                    (
-                        semantic_retriever,
-                        search_question,
-                        LABEL_SQL_ATTRIBUTE,
-                        retrieve_k,
-                        target_db,
-                    ),
+                *(
+                    [
+                        (
+                            "sql_attr",
+                            (
+                                semantic_retriever,
+                                search_question,
+                                LABEL_SQL_ATTRIBUTE,
+                                retrieve_k,
+                                target_db,
+                            ),
+                        )
+                    ]
+                    if _USE_SQL_ATTRS
+                    else []
                 ),
                 *[
                     (
@@ -479,12 +495,14 @@ class CandidateRetrievalAgent(BaseAgent):
             keep_k=_CAND_KEEP_CUSTOM,
             label="custom_analysis",
         )
-        deduped_sql_attr = _rerank_hits(
-            search_question,
-            deduped_sql_attr,
-            keep_k=_CAND_KEEP_SQL,
-            label="sql_attribute",
-        )
+        if deduped_sql_attr:
+            deduped_sql_attr = _rerank_hits(
+                search_question,
+                deduped_sql_attr,
+                keep_k=_CAND_KEEP_SQL,
+                label="sql_attribute",
+            )
+
 
         # LLM intent filter on the (already-shrunk) custom/sql pools.
         deduped_custom, deduped_sql_attr = _llm_filter_both(
@@ -493,7 +511,9 @@ class CandidateRetrievalAgent(BaseAgent):
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom
-        path_state["retrieved_sql_attributes"] = deduped_sql_attr
+        path_state["retrieved_sql_attributes"] = (
+            deduped_sql_attr if _USE_SQL_ATTRS else []
+        )
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "
