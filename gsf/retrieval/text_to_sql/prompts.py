@@ -279,7 +279,9 @@ ORDER BY total_sales DESC;"""
   do NOT include that column in SELECT — it adds no information since every row has the same value.
 
 Output (fill fields in this exact order):
-- thought: 1-2 sentence internal reasoning — your approach and key decisions.
+- thought: 2-3 sentence internal reasoning — your approach and key decisions.
+  If the question is AMBIGUOUS, explicitly state the assumption you're making
+  to resolve it.
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
@@ -293,6 +295,8 @@ Example:
 
 thought:
 Join sales and customers, filter last full quarter, aggregate by country.
+"Total sales" means gross SUM(sales_amount), with no refund adjustment
+since the question didn't ask for one.
 
 sql_code:
 {example_sql}
@@ -313,7 +317,9 @@ If no tables are relevant, explain politely and suggest rephrasing.
 Otherwise, construct an optimized SQL query to answer the question.
 
 Output (fill fields in this exact order):
-- thought: 1-2 sentence internal reasoning — your approach and key decisions.
+- thought: 2-3 sentence internal reasoning — your approach and key decisions.
+  If the question is AMBIGUOUS, explicitly state the assumption you're making
+  to resolve it.
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time

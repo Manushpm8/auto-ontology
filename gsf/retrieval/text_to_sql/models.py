@@ -156,8 +156,9 @@ class SQLGenerationModel(StrictModel):
     thought: str = Field(
         ...,
         description=(
-            "Internal reasoning (1-2 sentences): briefly explain your approach "
-            "and key decisions. This is NOT shown to the user."
+            "Internal reasoning (2-3 sentences): briefly explain your approach "
+            "and key decisions. If the question was AMBIGUOUS, explicitly state "
+            "the assumption made to resolve it. This is NOT shown to the user."
         ),
     )
     sql_code: NonEmptyStr = Field(

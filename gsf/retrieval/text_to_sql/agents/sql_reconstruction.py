@@ -284,6 +284,7 @@ class SQLReconstructionAgent(BaseAgent):
         relevant_tables = list(path_state.get("relevant_tables") or [])
 
         sql_code = getattr(incorrect_response, "sql_code", "") or ""
+        previous_thought = (getattr(incorrect_response, "thought", "") or "").strip()
 
         # --- Step 1: Classify the error (once per reconstruction chain) ---
         if not path_state.get("error_analysis_done"):
@@ -349,13 +350,35 @@ class SQLReconstructionAgent(BaseAgent):
             if evidence_hints:
                 evidence_section = f"{evidence_hints}\n\n"
 
+        # Anchor ambiguous-term interpretation across repair attempts: without
+        # this, each reconstruction call independently re-derives things like
+        # "recently" from scratch and silently drifts (e.g. 5 months → 4
+        # months) even when the time window was never the flagged problem.
+        prior_interpretation_section = ""
+        if previous_thought:
+            prior_interpretation_section = (
+                "\nPRIOR INTERPRETATION (from the reasoning behind the SQL above):\n"
+                f"  {previous_thought}\n\n"
+                "Preserve user-intent assumptions when valid. Do not treat SQL "
+                "implementation choices—such as joins, columns, aliases, or "
+                "query structure—as fixed. Revise only parts contradicted by "
+                "the question, available schema, or validation error.\n\n"
+            )
+
         error_prompt = (
             "The following SQL contains an ERROR:\n\n"
             f"```sql\n{sql_code}\n```\n\n"
             f"Validation failed with the following message:\n{error}\n\n"
             f"{history_section}"
+            f"{prior_interpretation_section}"
             "Please correct the SQL. Do not return the same SQL — "
             "it is invalid.\n"
+            "Fix what the error requires while preserving every still-valid "
+            "user-intent assumption. Do not silently reinterpret an ambiguous "
+            "term merely because you're rewriting the query. In `thought`, "
+            "restate the assumptions that remain valid and clearly state any "
+            "assumption that had to change because it conflicted with the "
+            "user's question, the available schema, or the validation error.\n"
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"
