@@ -271,9 +271,14 @@ MATCH (tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: {column_description_expr("col")}}}) AS cols
+                         description: {column_description_expr("col")},
+                         sample_values: col.sample_values,
+                         is_unique: col.is_unique,
+                         exhaustive: col.exhaustive,
+                         n_distinct: col.n_distinct,
+                         date_format: col.date_format}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       sch.name AS schema_name, cols
+       sch.name AS schema_name, tbl.n_rows AS n_rows, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -425,6 +430,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "description": row.get("description") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
+                "n_rows": row.get("n_rows"),
                 "columns": cols,
             }
         )
@@ -443,9 +449,13 @@ MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH tbl, sch, col ORDER BY col.ordinal_position
 WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: {column_description_expr("col")},
-                         sample_values: col.sample_values}}) AS cols
+                         sample_values: col.sample_values,
+                         is_unique: col.is_unique,
+                         exhaustive: col.exhaustive,
+                         n_distinct: col.n_distinct,
+                         date_format: col.date_format}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       sch.name AS schema_name, cols
+       sch.name AS schema_name, tbl.n_rows AS n_rows, cols
 ORDER BY name
 """
 
@@ -499,6 +509,7 @@ def fetch_fk_neighbour_tables(
                 "description": row.get("description") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
+                "n_rows": row.get("n_rows"),
                 "columns": cols,
             }
         )
@@ -568,6 +579,7 @@ RETURN c.id AS id,
        c.sample_values AS sample_values,
        c.is_unique AS is_unique,
        c.exhaustive AS exhaustive,
+       c.n_distinct AS n_distinct,
        EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key
 ORDER BY c.ordinal_position
 """
@@ -646,6 +658,11 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "sample_values": r.get("sample_values"),
             "is_unique": r.get("is_unique"),
             "exhaustive": r.get("exhaustive"),
+            # Carried explicitly because this comprehension is a whitelist: the
+            # cardinality clause is gated on an exact count, so dropping the key
+            # here would silently cost every description both its distinct count
+            # and its uniqueness marker.
+            "n_distinct": r.get("n_distinct"),
         }
         for r in rows
         if r.get("id") is not None
@@ -763,6 +780,84 @@ def store_column_exhaustiveness(table_id: str, exhaustiveness: dict[str, bool]) 
              AS ex
         WHERE ex IS NOT NULL
         SET col.exhaustive = ex
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_table_row_count(table_id: str, n_rows: int) -> None:
+    """Write a table's total row count onto its Table node.
+
+    Row counts turn table sizes into evidence the model can reason from: two
+    tables with the same count are probably 1:1, so a join between them cannot
+    fan out, while a 4,500-row table joined to a 1,056,320-row one multiplies
+    rows by ~235 and makes a plain ``COUNT(*)`` count the wrong entity.
+    """
+    if n_rows is None:
+        return
+    get_neo4j_conn().query_write(
+        f"MATCH (t:{Labels.TABLE} {{id: $table_id}}) SET t.n_rows = $n_rows",
+        {"table_id": table_id, "n_rows": int(n_rows)},
+    )
+
+
+def store_column_cardinality(table_id: str, cardinality: dict[str, int]) -> None:
+    """Write exact distinct-value counts onto Column nodes for a given table.
+
+    Distinct from ``store_column_uniqueness``, whose flag is derived from a row
+    sample and so can be wrong: these counts come from a ``COUNT(DISTINCT)`` over
+    the whole column, which is what makes them safe to state in a description.
+
+    Skips silently when *cardinality* is empty.
+    """
+    if not cardinality:
+        return
+    entries = [
+        {"column_name": col, "n_distinct": int(n)} for col, n in cardinality.items()
+    ]
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.n_distinct][0]
+             AS nd
+        WHERE nd IS NOT NULL
+        SET col.n_distinct = nd
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:
+    """Write inferred storage notations onto date Column nodes for a table.
+
+    Date columns carry no sample values, so without this a temporal column
+    reaches the generation prompt as a name and a sentence, and the model has to
+    guess whether to compare against ``'1995-03-24'``, ``'950324'`` or
+    ``'24/03/1995'``. The notation is inferred, not declared, so it is stored
+    only where a single reading fits every sampled value.
+
+    Skips silently when *date_formats* is empty.
+    """
+    if not date_formats:
+        return
+    entries = [
+        {"column_name": col, "date_format": str(fmt)}
+        for col, fmt in date_formats.items()
+        if fmt
+    ]
+    if not entries:
+        return
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.date_format][0]
+             AS fmt
+        WHERE fmt IS NOT NULL
+        SET col.date_format = fmt
         """,
         {"table_id": table_id, "entries": entries},
     )
