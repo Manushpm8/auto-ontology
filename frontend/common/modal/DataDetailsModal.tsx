@@ -120,7 +120,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 
 	const title = type === 'columns' ? 'Columns' : type === 'queries' ? 'SQL Queries' : 'Terms';
 
-	const columnTableColumns: TableColumn<Column>[] = [
+	const tableColumns: TableColumn<Column>[] = [
 		{
 			key: 'column',
 			header: 'Name',
@@ -178,7 +178,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 		if (type === 'columns') {
 			return (
 				<Table
-					columns={columnTableColumns}
+					columns={tableColumns}
 					rows={columns}
 					rowKey={(row) => row.id}
 					pagination={columnsPage.pagination}
@@ -220,7 +220,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 	const renderSkeleton = () => {
 		if (type === 'queries') return <SkeletonSqlBlocks />;
 		return type === 'columns' ? (
-			<SkeletonTable columns={columnTableColumns.length} rows={columnsPage.pageRowCount} />
+			<SkeletonTable columns={tableColumns.length} rows={columnsPage.pageRowCount} />
 		) : (
 			<SkeletonTable columns={termTableColumns.length} rows={termsPage.pageRowCount} />
 		);
