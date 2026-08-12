@@ -67,6 +67,16 @@ _CAND_RERANK = os.environ.get("BIRD_CAND_RERANK", "1").strip().lower() not in {
     "no",
     "off",
 }
+# Databases whose custom analyses skip the LLM intent filter. The rerank cap has
+# already cut the pool to _CAND_KEEP_CUSTOM by embedding distance; the filter then
+# cuts that to one on many questions, which splits knowledge that has to arrive
+# together — a share of translated sets needs both the percentage analysis and the
+# one saying a set's translation lives in set_translations.
+_INTENT_FILTER_SKIP_DBS = {
+    db.strip().lower()
+    for db in os.environ.get("BIRD_CUSTOM_FILTER_SKIP_DBS", "").split(",")
+    if db.strip()
+}
 # SqlAttribute candidates reach the generator two ways: their expression and SQL
 # go into the prompt, and the tables their SQL names are added to the candidate
 # schema. Both are unwanted where the semantic layer is meant to carry the
@@ -505,9 +515,11 @@ class CandidateRetrievalAgent(BaseAgent):
 
 
         # LLM intent filter on the (already-shrunk) custom/sql pools.
-        deduped_custom, deduped_sql_attr = _llm_filter_both(
-            llm, search_question, deduped_custom, deduped_sql_attr
-        )
+        _skip_filter = str(target_db or "").lower() in _INTENT_FILTER_SKIP_DBS
+        if not _skip_filter:
+            deduped_custom, deduped_sql_attr = _llm_filter_both(
+                llm, search_question, deduped_custom, deduped_sql_attr
+            )
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom

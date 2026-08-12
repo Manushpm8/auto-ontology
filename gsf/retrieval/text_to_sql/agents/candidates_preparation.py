@@ -291,6 +291,17 @@ _FK_CLOSURE_MAX = _env_int("BIRD_FK_CLOSURE_MAX", 4)
 _PHYSICAL_FK_JOINS = _env_flag("BIRD_PHYSICAL_FK_JOINS", "0")
 # Never describe an anchor attribute whose table is absent from the schema block.
 _FORCE_ANCHOR_TABLE = _env_flag("BIRD_FORCE_ANCHOR_TABLE", "0")
+# Databases where the anchor's table is added but not pinned against the relevance
+# filter. Pinning states that retrieval's guess is not open to review, and the filter
+# then reads the remaining candidates as redundant: on formula_1 it cost five
+# questions their gold table, the anchor landing on results or constructorResults
+# while the answer lived in the standings table the filter dropped. Elsewhere the pin
+# is what has been measured, so it stays until a database is checked without it.
+_ANCHOR_PIN_SKIP_DBS = {
+    db.strip().lower()
+    for db in os.environ.get("BIRD_ANCHOR_PIN_SKIP_DBS", "").split(",")
+    if db.strip()
+}
 
 
 def _qualified_name(t: dict) -> str:
@@ -683,7 +694,15 @@ class CandidatePreparationAgent(BaseAgent):
             # only protect hints that resolved to a real in-DB table above
             if any((t.get("name") or "").lower() == h.lower() for t in relevant_tables)
         }
-        if _FORCE_ANCHOR_TABLE and anchor_table:
+        # Step 4d already added the anchor's table so the generator can act on the
+        # hint; pinning it as well is what _ANCHOR_PIN_SKIP_DBS opts a database out
+        # of. Evidence-named tables stay pinned either way, being the ones the
+        # question states outright rather than the ones retrieval guessed.
+        if (
+            _FORCE_ANCHOR_TABLE
+            and anchor_table
+            and str(target_db or "").lower() not in _ANCHOR_PIN_SKIP_DBS
+        ):
             force_keep.add(anchor_table.split(".")[-1].lower())
 
         relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(

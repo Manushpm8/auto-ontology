@@ -64,7 +64,6 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         )
 
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
-    domain_rules = fetch_custom_analyses() + list(acronyms or [])
 
     initial_path_state = dict(payload.get("path_state") or {})
 
@@ -75,6 +74,13 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         connector_db = getattr(connectors[0], "database_name", None)
         if connector_db:
             initial_path_state["target_db"] = connector_db
+
+    # Rules are quoted verbatim into the table relevance prompt, so on a graph
+    # holding several databases the ones belonging elsewhere name tables the
+    # question's schema does not have.
+    domain_rules = fetch_custom_analyses(initial_path_state.get("target_db")) + list(
+        acronyms or []
+    )
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),

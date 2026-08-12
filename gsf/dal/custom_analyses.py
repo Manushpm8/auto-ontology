@@ -148,17 +148,32 @@ def detach_existing_sql_edges(analysis_id: str) -> None:
     )
 
 
-def fetch_custom_analyses() -> list[dict[str, str]]:
-    """Fetch all CustomAnalysis nodes from Neo4j and return as domain rules.
+def fetch_custom_analyses(database_name: str | None = None) -> list[dict[str, str]]:
+    """Fetch CustomAnalysis nodes from Neo4j and return as domain rules.
 
     Each analysis becomes ``{"name": <name>, "description": <sql>}``.
+
+    Scoped to *database_name* when given, through the tables the analysis' SQL
+    reads. Rules belonging to another database name tables absent from the
+    question's schema, and they are quoted verbatim into prompts, so on a
+    multi-database graph they crowd out the text the prompt is meant to weigh.
     """
+    scope = (
+        f"-[:{Edges.HAS_SQL}]->(:{Labels.SQL})-[:SQL]->(:{Labels.TABLE})"
+        f"<-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA} {{database_name: $database_name}})"
+        if database_name
+        else ""
+    )
     query = (
         f"MATCH (n:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL}) "
-        "RETURN n.name AS name, n.description AS description, sql.sql_full_query AS sql_code"
+        + (f"WHERE (n){scope} " if database_name else "")
+        + "RETURN DISTINCT n.name AS name, n.description AS description, "
+        "sql.sql_full_query AS sql_code"
     )
     try:
-        results = get_neo4j_conn().query_read(query=query, parameters={})
+        results = get_neo4j_conn().query_read(
+            query=query, parameters={"database_name": database_name}
+        )
     except Exception as e:
         logger.warning("Failed to fetch custom analyses from Neo4j: %s", e)
         return []
