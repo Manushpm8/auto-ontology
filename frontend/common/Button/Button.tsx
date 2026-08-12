@@ -49,19 +49,11 @@ const iconOnlySizeClasses: Record<Size, string> = {
 	[Size.LARGE]: 'w-10',
 };
 
-export type IconPosition = 'left' | 'right' | 'left-and-right';
+export type IconPosition = 'left' | 'right';
 
-const setPaddingClasses = (size: Size, iconPosition?: IconPosition, noPadding = false): string => {
+const setPaddingClasses = (size: Size, noPadding: boolean): string => {
 	if (noPadding) return 'p-0';
-
-	const isSmall = size === Size.SMALL;
-
-	// Icons on both sides already fill the edges, so they get a tighter inset.
-	// Every other combination keeps left and right insets equal: a single
-	// leading/trailing icon sits inside the same box the label does.
-	if (iconPosition === 'left-and-right') return isSmall ? 'px-1' : 'px-2';
-
-	return isSmall ? 'px-2' : 'px-4';
+	return size === Size.SMALL ? 'px-2' : 'px-4';
 };
 
 export type ButtonProps = {
@@ -109,9 +101,7 @@ export const Button = forwardRef<
 				themeClasses[theme],
 				sizeClasses[size],
 				rounded ? 'rounded-full' : radiusClasses[size],
-				iconOnly
-					? iconOnlySizeClasses[size]
-					: setPaddingClasses(size, iconPosition, noPadding),
+				iconOnly ? iconOnlySizeClasses[size] : setPaddingClasses(size, noPadding),
 				iconOnly && 'p-0',
 				iconPosition && 'gap-1.5',
 				full && 'w-full',
