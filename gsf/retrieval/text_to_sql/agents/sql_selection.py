@@ -42,7 +42,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
-from gsf.retrieval.text_to_sql import empty_repair, verify_revise
+from gsf.retrieval.text_to_sql import empty_repair, projection_order, verify_revise
 from gsf.retrieval.text_to_sql.agents.sql_execution import QueryResponse, _run_sql
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
@@ -783,6 +783,24 @@ class SQLSelectionAgent(BaseAgent):
                 continue
             clusters.setdefault(sig, []).append(idx)
 
+        # Candidates that differ only in projected column order are the same
+        # answer, but their signatures differ, so the vote splits and the lowest
+        # index wins arbitrarily. Fold them together first, then let the order
+        # named in the evidence decide which spelling ships.
+        projection_columns_by_index: dict[int, Optional[tuple[str, ...]]] = {}
+        projection_order_on = projection_order.enabled_for(path_state.get("target_db"))
+        if projection_order_on and clusters:
+            projection_columns_by_index = {
+                idx: projection_order.projection_columns(
+                    getattr(candidates[idx], "sql_code", "") or ""
+                )
+                for idxs in clusters.values()
+                for idx in idxs
+            }
+            clusters = projection_order.merge_permuted(
+                clusters, projection_columns_by_index
+            )
+
         selection_method = "majority"
         judge_reason = ""
         majority_idx = 0
@@ -800,6 +818,26 @@ class SQLSelectionAgent(BaseAgent):
         else:
             slot_weights = _slot_vote_weights()
             majority_idx = _majority_winner(clusters, weights=slot_weights)
+            if projection_order_on:
+                _question = get_original_question(state) or get_question_for_processing(
+                    state
+                )
+                _members = next(
+                    (idxs for idxs in clusters.values() if majority_idx in idxs), []
+                )
+                _preferred = projection_order.preferred_index(
+                    _members,
+                    projection_columns_by_index,
+                    str(path_state.get("evidence") or extract_evidence(_question) or ""),
+                    str(_question or ""),
+                )
+                if _preferred is not None and _preferred != majority_idx:
+                    self.logger.info(
+                        "projection_order: majority slot %d -> %d on projection order",
+                        majority_idx,
+                        _preferred,
+                    )
+                    majority_idx = _preferred
             winner_idx = majority_idx
             if slot_weights is not None:
                 # Weighted vote *is* the measured policy (CV +0.7–0.85pp). Do not
