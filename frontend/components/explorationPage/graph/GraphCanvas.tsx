@@ -8,12 +8,15 @@ import { useEffect, useRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { UndirectedGraph } from 'graphology';
 import Sigma from 'sigma';
-import type { EdgeDisplayData, MouseCoords, NodeDisplayData } from 'sigma/types';
+import type { CameraState, EdgeDisplayData, MouseCoords, NodeDisplayData } from 'sigma/types';
 import { forceSimulation, forceManyBody, forceLink, forceCollide, forceX, forceY } from 'd3-force';
 import type { SimulationNodeDatum, SimulationLinkDatum } from 'd3-force';
 import { createNodeImageProgram } from '@sigma/node-image';
-import { drawDiscNodeLabel } from 'sigma/rendering';
-import type { NodeHoverDrawingFunction, NodeProgramType } from 'sigma/rendering';
+import type {
+	NodeHoverDrawingFunction,
+	NodeLabelDrawingFunction,
+	NodeProgramType,
+} from 'sigma/rendering';
 
 import SnowflakeSvg from '@/common/icons/svg/snowflake.svg';
 import TermsSvg from '@/common/icons/svg/terms.svg';
@@ -46,6 +49,40 @@ const NODE_ICON_PADDING = 0.58;
 // when toggling between the semantic and data layers) would otherwise
 // re-register and re-rasterize the same icons each time.
 const NodeIconProgram = createNodeImageProgram({ padding: NODE_ICON_PADDING });
+
+// Sigma always redraws whichever node is currently under the mouse a
+// second time, on its own WebGL layer stacked *above* the one captions are
+// drawn on — purely so a hovered node visually sits in front of any
+// overlapping siblings. For a plain circle program that second draw is
+// invisible (same shape, same spot), but our image program's copy is a
+// fully opaque disc + icon that ends up blotting out whatever caption
+// `drawNodeLabel` drew underneath it, in the exact place users look right
+// when they mouse over a node. Bringing hovered/active nodes to the front
+// is already handled by the `zIndex` reducer output below (sorted within
+// the *normal* node layer), so this second draw is redundant for us —
+// swapping in a program that renders nothing keeps the caption visible
+// under the cursor instead of losing it.
+class NoopNodeProgram {
+	drawLabel: NodeLabelDrawingFunction | undefined;
+
+	drawHover: NodeHoverDrawingFunction | undefined;
+
+	kill(): void {
+		// Nothing was ever allocated for this no-op program.
+	}
+
+	reallocate(): void {
+		// Nothing to allocate — see the class comment above.
+	}
+
+	process(): void {
+		// Nothing to process — see the class comment above.
+	}
+
+	render(): void {
+		// Nothing to render — see the class comment above.
+	}
+}
 
 // The canvas is plain WebGL/Canvas2D, not DOM, so it can't pick up Tailwind's
 // `dark:` variants — node/label colors have to be swapped by hand based on
@@ -217,6 +254,26 @@ const getEdgeColors = (isDark: boolean) => {
 	};
 };
 
+// Captions stay hidden until the user has zoomed in a bit past the initial
+// "whole graph" view, mirroring Neo4j Browser's "no clutter when zoomed
+// out, read node names once you zoom in" behavior. This is a *fraction* of
+// the camera ratio Sigma settles on right after fitting the whole graph
+// (see `labelRevealRatio` below) rather than a fixed absolute ratio, so it
+// adapts to graphs of any size/spread instead of only working for whichever
+// graph happened to fit near ratio 1. Nodes here render at a fixed
+// on-screen size regardless of zoom (`itemSizesReference: 'screen'` below),
+// so — unlike Neo4j — the node itself doesn't visually grow; only gating
+// the caption on zoom is needed to get the same "declutter, then reveal"
+// effect.
+const NODE_LABEL_REVEAL_ZOOM_FRACTION = 0.75;
+
+// Shared with the `minCameraRatio` Sigma setting below: on a small/tight
+// graph, "75% of the whole-graph ratio" can land below the closest the
+// camera is ever allowed to zoom in, which would make captions
+// unreachable; clamping the reveal threshold to the same floor keeps them
+// reachable no matter how small the graph is.
+const MIN_CAMERA_RATIO = 0.3;
+
 // Node radii (half of the previous Cytoscape diameters, since Sigma sizes are radii).
 const getNodeRadius = (relationshipCount: number) => {
 	if (relationshipCount >= 8) return 70;
@@ -335,6 +392,13 @@ export const GraphCanvas = ({
 
 		let isDark = prefersDarkMode();
 		let edgeColors = getEdgeColors(isDark);
+		// Updated live from the camera's `updated` event below; read by
+		// `drawNodeLabel` to decide whether captions are visible yet.
+		let cameraRatio = 1;
+		// Computed once the initial layout settles (see `centerTimeout`
+		// below) as a fraction of the "whole graph" ratio; captions stay
+		// hidden (`cameraRatio` starts far above this) until then.
+		let labelRevealRatio = 0;
 		const containerRect = containerRef.current.getBoundingClientRect();
 		const containerAspectRatio =
 			containerRect.height > 0 ? containerRect.width / containerRect.height : 1;
@@ -347,50 +411,74 @@ export const GraphCanvas = ({
 		const hoveredNodeIdRef = { current: null as string | null };
 		const hoveredEdgeIdRef = { current: null as string | null };
 
-		// Reimplementation of Sigma's own `drawDiscNodeHover`, swapping its
-		// hardcoded white label-background pill for a theme-aware one — it
-		// reads `isDark` live, so flipping the OS theme (see
-		// `handleColorSchemeChange` below) updates it without re-registering.
+		// Sigma's own `drawDiscNodeHover` (and our previous reimplementation
+		// of it) drew the node's name a second time, in a side pill — right
+		// next to the exact same caption `drawNodeLabel` below already draws
+		// centered inside the node once zoomed in, and redundant with the
+		// separate `HoverNodeCard`/active-node panel shown in the DOM for
+		// hovered/selected nodes. A soft shadow ring is enough to mark a
+		// node as hovered/active without duplicating its name on screen.
 		const drawNodeHover: NodeHoverDrawingFunction<GraphNodeAttributes, GraphEdgeAttributes> = (
 			context,
 			data,
-			settings,
 		) => {
-			const { labelSize: size, labelFont: font, labelWeight: weight } = settings;
-			context.font = `${weight} ${size}px ${font}`;
-
-			context.fillStyle = isDark ? HOVER_LABEL_BACKGROUND_DARK : HOVER_LABEL_BACKGROUND_LIGHT;
 			context.shadowOffsetX = 0;
 			context.shadowOffsetY = 0;
 			context.shadowBlur = 8;
 			context.shadowColor = '#000';
-			const PADDING = 2;
-			if (typeof data.label === 'string') {
-				const textWidth = context.measureText(data.label).width;
-				const boxWidth = Math.round(textWidth + 5);
-				const boxHeight = Math.round(size + 2 * PADDING);
-				const radius = Math.max(data.size, size / 2) + PADDING;
-				const angleRadian = Math.asin(boxHeight / 2 / radius);
-				const xDeltaCoord = Math.sqrt(Math.abs(radius ** 2 - (boxHeight / 2) ** 2));
-				context.beginPath();
-				context.moveTo(data.x + xDeltaCoord, data.y + boxHeight / 2);
-				context.lineTo(data.x + radius + boxWidth, data.y + boxHeight / 2);
-				context.lineTo(data.x + radius + boxWidth, data.y - boxHeight / 2);
-				context.lineTo(data.x + xDeltaCoord, data.y - boxHeight / 2);
-				context.arc(data.x, data.y, radius, angleRadian, -angleRadian);
-				context.closePath();
-				context.fill();
-			} else {
-				context.beginPath();
-				context.arc(data.x, data.y, data.size + PADDING, 0, Math.PI * 2);
-				context.closePath();
-				context.fill();
-			}
+			context.strokeStyle = isDark
+				? HOVER_LABEL_BACKGROUND_DARK
+				: HOVER_LABEL_BACKGROUND_LIGHT;
+			context.lineWidth = 2;
+			context.beginPath();
+			context.arc(data.x, data.y, data.size, 0, Math.PI * 2);
+			context.stroke();
 			context.shadowOffsetX = 0;
 			context.shadowOffsetY = 0;
 			context.shadowBlur = 0;
+		};
 
-			drawDiscNodeLabel(context, data, settings);
+		// The persistent (non-hover) caption: hidden while zoomed out past
+		// `labelRevealRatio`, then drawn centered *inside* the node's own
+		// circle (à la Neo4j Browser) rather than Sigma's default placement
+		// to the right of it — which is what actually caused the clutter
+		// this is fixing. A stroked halo behind the fill keeps the caption
+		// legible over the node's own color and icon artwork underneath,
+		// the same trick used for text labels on maps.
+		const drawNodeLabel: NodeLabelDrawingFunction<GraphNodeAttributes, GraphEdgeAttributes> = (
+			context,
+			data,
+			settings,
+		) => {
+			if (!data.label || cameraRatio > labelRevealRatio) return;
+
+			const { labelFont: font, labelWeight: weight } = settings;
+			// Scaled to the node's own on-screen radius so captions on the
+			// smallest nodes don't dwarf their circle, while bigger hub nodes
+			// get a caption that's actually easy to read.
+			const fontSize = Math.max(9, Math.min(13, Math.round(data.size * 0.4)));
+			context.font = `${weight} ${fontSize}px ${font}`;
+			context.textAlign = 'center';
+			context.textBaseline = 'middle';
+
+			// Truncated with an ellipsis instead of letting long names spill
+			// past the node's own circle, mirroring how Neo4j clips captions
+			// that don't fit inside their node.
+			const maxWidth = data.size * 1.6;
+			let { label } = data;
+			if (context.measureText(label).width > maxWidth) {
+				while (label.length > 1 && context.measureText(`${label}…`).width > maxWidth) {
+					label = label.slice(0, -1);
+				}
+				label = `${label}…`;
+			}
+
+			context.lineJoin = 'round';
+			context.lineWidth = 3;
+			context.strokeStyle = isDark ? '#000000' : '#ffffff';
+			context.strokeText(label, data.x, data.y);
+			context.fillStyle = isDark ? LABEL_COLOR_DARK : LABEL_COLOR_LIGHT;
+			context.fillText(label, data.x, data.y);
 		};
 
 		// Re-evaluated every frame by the continuously running physics layout
@@ -455,7 +543,7 @@ export const GraphCanvas = ({
 				// forever — nodes would balloon or shrink to invisible dots as
 				// the simulation's bounding box changes, independently of zoom.
 				itemSizesReference: 'screen',
-				minCameraRatio: 0.3,
+				minCameraRatio: MIN_CAMERA_RATIO,
 				maxCameraRatio: 5,
 				// The container can briefly report a zero size during layer
 				// switches/route transitions before the surrounding flex layout
@@ -466,11 +554,20 @@ export const GraphCanvas = ({
 				zIndex: true,
 				labelColor: { color: isDark ? LABEL_COLOR_DARK : LABEL_COLOR_LIGHT },
 				defaultDrawNodeHover: drawNodeHover,
+				defaultDrawNodeLabel: drawNodeLabel,
 				// @sigma/node-image's program class is typed generically over the
 				// default `Attributes` type; our stricter node attributes are a
 				// compatible subtype at runtime, so this cast is safe.
 				nodeProgramClasses: {
 					image: NodeIconProgram as unknown as NodeProgramType<
+						GraphNodeAttributes,
+						GraphEdgeAttributes
+					>,
+				},
+				// See `NoopNodeProgram`'s own comment above for why hovered nodes
+				// get a do-nothing program here instead of redrawing the icon.
+				nodeHoverProgramClasses: {
+					image: NoopNodeProgram as unknown as NodeProgramType<
 						GraphNodeAttributes,
 						GraphEdgeAttributes
 					>,
@@ -608,7 +705,10 @@ export const GraphCanvas = ({
 		const handleLeaveEdge = () => {
 			hoveredEdgeIdRef.current = null;
 		};
-		const handleCameraUpdated = () => onHoverNode(null);
+		const handleCameraUpdated = (cameraState: CameraState) => {
+			cameraRatio = cameraState.ratio;
+			onHoverNode(null);
+		};
 
 		renderer.on('downNode', handleDownNode);
 		renderer.on('clickStage', handleClickStage);
@@ -640,7 +740,19 @@ export const GraphCanvas = ({
 		// fit/center the view once, mirroring the previous "layout stop" reset.
 		const centerTimeout = window.setTimeout(() => {
 			renderer.refresh();
-			void renderer.getCamera().animatedReset();
+			void renderer
+				.getCamera()
+				.animatedReset()
+				.then(() => {
+					// Baseline is whatever ratio Sigma just settled on to fit the
+					// *whole* graph; captions unlock once the user zooms in past a
+					// fraction of that, however far "the whole graph" ends up being
+					// for this particular graph's size/spread.
+					labelRevealRatio = Math.max(
+						MIN_CAMERA_RATIO,
+						renderer.getCamera().ratio * NODE_LABEL_REVEAL_ZOOM_FRACTION,
+					);
+				});
 			if (containerRef.current) {
 				containerRef.current.style.transition = 'opacity 300ms ease-out';
 				containerRef.current.style.opacity = '1';
