@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import type { Core } from 'cytoscape';
+import dynamic from 'next/dynamic';
 
 import { explorationApi } from '@/api/exploration';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
@@ -29,7 +29,7 @@ import {
 import { TableType } from '@/enums/datasources';
 import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationGraph } from '@/types/exploration';
-import { GraphCanvas, type HoveredNode } from './graph/GraphCanvas';
+import type { GraphController, HoveredNode } from './graph/GraphCanvas';
 import { ViewToggle } from './graph/ViewToggle';
 import { ZoomControls } from './graph/ZoomControls';
 import { HoverNodeCard } from './HoverNodeCard';
@@ -38,6 +38,14 @@ import { ExplorationLoader } from './ExplorationLoader';
 import { ActiveTermCard, buildSemanticGraph } from './ExplorationSemantic';
 
 const EMPTY_GRAPH: ExplorationGraph = { nodes: [], links: [] };
+
+// Sigma.js touches WebGL globals at module scope, so it can only be
+// evaluated in the browser; loading it via `next/dynamic` with `ssr: false`
+// keeps Next.js from crashing while server-rendering this client component.
+const GraphCanvas = dynamic(
+	() => import('./graph/GraphCanvas').then((graphCanvasModule) => graphCanvasModule.GraphCanvas),
+	{ ssr: false },
+);
 
 export const ExplorationView = () => {
 	const router = useRouter();
@@ -65,7 +73,7 @@ export const ExplorationView = () => {
 	const [dataDetailsType, setDataDetailsType] = useState<DataDetailsType | null>(null);
 	const [columnAttributesNodeId, setColumnAttributesNodeId] = useState<string | null>(null);
 	const [sqlAttributesNodeId, setSqlAttributesNodeId] = useState<string | null>(null);
-	const [controller, setController] = useState<Core | null>(null);
+	const [controller, setController] = useState<GraphController | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -178,7 +186,7 @@ export const ExplorationView = () => {
 		);
 	}, [layer, router]);
 
-	const handleControllerChange = useCallback((nextController: Core | null) => {
+	const handleControllerChange = useCallback((nextController: GraphController | null) => {
 		setController(nextController);
 	}, []);
 	const handleHoverNode = useCallback((hoveredNode: HoveredNode | null) => {
