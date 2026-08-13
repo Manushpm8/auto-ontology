@@ -113,8 +113,12 @@ def route_intent_validation(state: AgentState) -> str:
     decision = state.get("decision", "")
 
     if decision == "intent_invalid":
-        attempts = state["path_state"].get("sql_attempts", 0)
-        logger.info(f"Intent validation failed at attempt: {attempts}")
+        # Count the reconstruction this route triggers. route_sql_validation caps
+        # the loop on this counter, so without the increment the intent retry is
+        # bounded only by the graph's global recursion limit.
+        reconstructions = state["path_state"].get("reconstruction_count", 0)
+        state["path_state"]["reconstruction_count"] = reconstructions + 1
+        logger.info(f"Intent validation failed at attempt: {reconstructions}")
         # Route back to reconstruction to fix intent issues
         return "invalid_sql"
     else:
