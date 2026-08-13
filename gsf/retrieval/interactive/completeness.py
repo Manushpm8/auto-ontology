@@ -23,6 +23,9 @@ A: {last_a}
 Relevant external knowledge (may contain partial or ambiguous definitions):
 {relevant_kg}
 
+Schema columns already resolved by VDB (close a gap only if the description directly resolves it):
+{resolved_schema_terms}
+
 Your task — produce a FRESH updated list:
 1. DROP any prior gap that is now fully resolved by the user's answer above \
    (exact operators, constants, and column names given for every part of it).
@@ -118,6 +121,7 @@ def detect_incomplete_formulas(
     current_gaps: list[tuple[str, str]],
     llm,
     vdb_only_entities: list[str] | None = None,
+    resolved_schema_terms: str = "",
 ) -> list[tuple[str, str]]:
     """Return an updated (term, what_is_missing) gap list.
 
@@ -125,6 +129,8 @@ def detect_incomplete_formulas(
     missing formulas — no user answer to evaluate.
     When last_turn is provided: evaluates the answer against prior gaps and KB,
     dropping resolved terms, keeping unresolved ones, adding new gaps.
+    resolved_schema_terms: pre-formatted VDB hit descriptions (entity → description)
+    used to close gaps whose column semantics are already known from the schema.
     """
     if last_turn is None:
         vdb_section = (
@@ -144,6 +150,7 @@ def detect_incomplete_formulas(
             last_q=last_turn["q"],
             last_a=last_turn["a"],
             relevant_kg=relevant_kg or "None",
+            resolved_schema_terms=resolved_schema_terms or "None",
         )
 
     response = safe_invoke_text(llm, prompt).strip()

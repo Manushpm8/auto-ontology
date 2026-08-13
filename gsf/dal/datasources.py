@@ -260,7 +260,8 @@ MATCH (tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: col.description}}) AS cols
+                         description: col.description,
+                         sample_values: col.sample_values}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
        sch.name AS schema_name, cols
 """
@@ -399,6 +400,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
         if not tid:
             continue
         cols = [c for c in (row.get("cols") or []) if c.get("name")]
+        for col in cols:
+            col["sample_values"] = parse_sample_values(col.get("sample_values"))
         tables.append(
             {
                 "id": tid,

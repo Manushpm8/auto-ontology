@@ -605,14 +605,17 @@ are actually needed to answer the question.
 
 Rules:
 - Only remove tables you are confident are NOT needed in the SQL query.
-- If table A must be joined through table B to reach table C, do NOT
-  remove any table in the join chain (A, B, or C).
+- If table A must be joined through tables B and C to reach table D, do NOT
+  remove any table in the join chain (A, B, C, or D). The join paths below
+  show real table connections. Keep the full bridges between tables that
+  you deem relevant.
+  whether a table you're about to remove is actually a needed bridge.
 - If a selected custom analysis references a table in its SQL, do NOT
   remove that table.
 - When in doubt, do NOT remove — it is safer to include an extra table
   than to remove a necessary one.
 
-{domain_rules}{custom_analyses}User's question:
+{domain_rules}{custom_analyses}{join_paths}User's question:
 {question}
 
 Candidate tables:

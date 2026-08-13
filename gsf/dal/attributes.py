@@ -10,6 +10,7 @@ CONTAINS edges to resolve multi-hop join routes at retrieval time.
 
 from __future__ import annotations
 
+import itertools
 import logging
 from typing import Any
 
@@ -131,6 +132,13 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
 def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     """Fetch Column + Table + Schema context for ColumnAttribute IDs.
 
+    Prefers the attribute's own defining column (HAS_ATTRIBUTE) over a
+    referencing FK column (SEMANTIC_FK) when both exist for the same
+    attribute — picking the wrong one here (as the previous unordered
+    OPTIONAL MATCH could) resolves the attribute to the anchor's own FK
+    column instead of the real hub table it points at, producing a spurious
+    "1 hop" join path that's actually just an intra-table hop.
+
     Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
     col_name, table_id, table_name, schema_name}.
     """
@@ -139,7 +147,11 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     query = """
     UNWIND $attr_ids AS attr_id
     MATCH (attr:ColumnAttribute {id: attr_id})
-    OPTIONAL MATCH (col:Column)-[:SEMANTIC_FK|HAS_ATTRIBUTE]->(attr)
+    OPTIONAL MATCH (definingCol:Column)-[:HAS_ATTRIBUTE]->(attr)
+    WITH attr, collect(definingCol)[0] AS definingCol
+    OPTIONAL MATCH (refCol:Column)-[:SEMANTIC_FK]->(attr)
+    WITH attr, definingCol, collect(refCol)[0] AS refCol
+    WITH attr, coalesce(definingCol, refCol) AS col
     OPTIONAL MATCH (col)<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
     RETURN attr.id AS attr_id, attr.name AS attr_name,
            attr.description AS attr_description,
@@ -314,6 +326,53 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _extract_fk_hops(
+    path_nodes: list[dict], rel_types: list[str]
+) -> list[tuple[dict, dict]]:
+    """Reconstruct real FK-mediated crossings from a raw expandConfig path.
+
+    A traversal path can interleave CONTAINS edges (Table<->Column, purely
+    structural containment — one table has many columns) with the actual
+    semantic crossings (SEMANTIC_FK / HAS_ATTRIBUTE, Column<->ColumnAttribute).
+    Filtering the path down to Column-labeled nodes and pairing them by
+    position (0&1, 2&3, ...) silently discards what actually connects each
+    pair — so two columns that merely share a table (Column <-CONTAINS-
+    Table -CONTAINS-> Column, no FK between them at all) get asserted as a
+    join. Confirmed live: therapy_details/medchg share a table with zero FK
+    relationship, and the old pairing logic reported them as a "1 hop" join.
+
+    This walks the path in order and only emits a hop where a Column reaches
+    a ColumnAttribute via HAS_ATTRIBUTE/SEMANTIC_FK, and that same attribute
+    is reached by another Column the same way — i.e. an actual FK crossing,
+    not co-location. CONTAINS is still needed and still used, just never as
+    the crossing itself: it's how the path steps from a crossing's landing
+    column, through its table, to a *different* column that continues the
+    next crossing (e.g. bridging two hops through a shared pivot table).
+
+    Returns a list of (source_column_node, target_column_node) pairs, in
+    path order — the actual columns real crossings.
+    """
+    hops: list[tuple[dict, dict]] = []
+    pending_src: dict | None = None
+    for i in range(len(rel_types)):
+        cur, rel, nxt = path_nodes[i], rel_types[i], path_nodes[i + 1]
+        if (
+            cur.get("label") == "Column"
+            and rel in ("HAS_ATTRIBUTE", "SEMANTIC_FK")
+            and nxt.get("label") == "ColumnAttribute"
+        ):
+            pending_src = cur
+        elif (
+            pending_src is not None
+            and cur.get("label") == "ColumnAttribute"
+            and rel in ("HAS_ATTRIBUTE", "SEMANTIC_FK")
+            and nxt.get("label") == "Column"
+        ):
+            hops.append((pending_src, nxt))
+            pending_src = None
+    return hops
+
+
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     """Find the shortest semantic join path between two Column nodes.
 
@@ -354,7 +413,8 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         id: n.id,
         name: n.name,
         label: labels(n)[0]
-    }] AS path_nodes
+    }] AS path_nodes,
+    [r IN relationships(path) | type(r)] AS rel_types
     """
     try:
         rows = get_neo4j_conn().query_read(
@@ -374,17 +434,37 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         return []
 
     path_nodes: list[dict] = rows[0].get("path_nodes") or []
-    col_nodes = [n for n in path_nodes if n.get("label") == "Column"]
-    if len(col_nodes) < 2:
+    rel_types: list[str] = rows[0].get("rel_types") or []
+    if len(path_nodes) > 2:
+        # A path was found (more than the two endpoint columns) but
+        # _extract_fk_hops below may still discard it as pure co-location —
+        # log so that case is distinguishable from "no path exists at all"
+        # in the "N hop(s)" summary the caller logs.
+        table_names = [n.get("name") for n in path_nodes if n.get("label") == "Table"]
+        logger.debug(
+            "find_join_path: raw path %s -> %s spans table(s) %s, "
+            "validating for real FK crossings",
+            anchor_col_id,
+            dest_col_id,
+            table_names,
+        )
+    crossings = _extract_fk_hops(path_nodes, rel_types)
+    if not crossings:
+        if len(path_nodes) > 2:
+            logger.info(
+                "find_join_path: discarding path %s -> %s — nodes were "
+                "reachable but only via co-location (no real FK crossing), "
+                "reporting no join path instead of a fabricated one",
+                anchor_col_id,
+                dest_col_id,
+            )
         return []
 
-    col_ids = [n["id"] for n in col_nodes if n.get("id")]
+    col_ids = [c["id"] for pair in crossings for c in pair if c.get("id")]
     col_ctx = fetch_col_table_contexts(col_ids)
 
     hops: list[dict] = []
-    for i in range(0, len(col_nodes) - 1, 2):
-        src = col_nodes[i]
-        tgt = col_nodes[i + 1]
+    for src, tgt in crossings:
         src_ctx = col_ctx.get(src.get("id") or "", {})
         tgt_ctx = col_ctx.get(tgt.get("id") or "", {})
         hops.append(
@@ -398,3 +478,314 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
             }
         )
     return hops
+
+
+def find_anchor_hub_siblings(
+    anchor_table_id: str, max_siblings: int = 5
+) -> tuple[list[dict], int]:
+    """Find tables that share a hub table with *anchor_table_id* via FK.
+
+    Looser than :func:`find_join_path` on purpose: it takes ONE step backward
+    through a hub table's real, DB-declared primary key (verified against
+    ``Table.pk``, not just any ColumnAttribute) — starting only from the
+    anchor table's own outgoing SEMANTIC_FK edges, never from every
+    candidate table's PK. This finds sibling tables (e.g. two tables that
+    both reference the same parent) that :func:`find_join_path`'s
+    forward-only traversal structurally cannot reach, without risking the
+    false-positive fan-out find_join_path guards against.
+
+    Includes the hub table itself (not just its siblings) — a question can
+    need the hub as its own base/pivot table (e.g. to count every row even
+    when a sibling has no matching data), and the hub is cheap and safe to
+    add: exactly one verified, single-hop forward FK per distinct hub, not
+    proportional to how many siblings reference it.
+
+    Sibling count is capped at *max_siblings* per hub — measured against the
+    live graph, most hubs have few siblings (median 2), but some are genuine
+    mega-hubs (up to 20), and an uncapped expansion would dump a large,
+    low-precision batch of tables into the candidate set for those.
+
+    This is a discovery/relevance signal, not a verified join path — it
+    does NOT claim the anchor and sibling should be joined directly (they
+    usually should each join the shared hub instead). Callers must not feed
+    this into SQL-generation join instructions; it exists only to stop the
+    relevance filter from dropping a structurally-connected table it has no
+    other way to recognize.
+
+    Returns ``(results, truncated_count)``. Each result dict has
+    ``{source_table, target_table, id, hub_table, is_hub}`` — the first two
+    keys match :func:`find_join_path`'s hop shape for prompt rendering: for
+    hub entries ``target_table`` is the hub name, for sibling entries it's
+    the sibling name. ``truncated_count`` is how many sibling tables were
+    dropped by the cap (0 if none were).
+    """
+    query = """
+    MATCH (anchorTable:Table {id: $anchor_table_id})-[:CONTAINS]->(fkCol:Column)
+          -[:SEMANTIC_FK]->(hubAttr:ColumnAttribute)
+    MATCH (hubCol:Column)-[:HAS_ATTRIBUTE]->(hubAttr)
+    MATCH (hubTable:Table)-[:CONTAINS]->(hubCol)
+    WHERE hubCol.name IN coalesce(hubTable.pk, [])
+    MATCH (siblingCol:Column)-[:SEMANTIC_FK]->(hubAttr)
+    MATCH (siblingTable:Table)-[:CONTAINS]->(siblingCol)
+    WHERE siblingTable.id <> anchorTable.id
+    RETURN DISTINCT siblingTable.id AS sibling_id, siblingTable.name AS sibling_table,
+           hubTable.id AS hub_id, hubTable.name AS hub_table,
+           anchorTable.name AS anchor_table
+    """
+    try:
+        rows = get_neo4j_conn().query_read(
+            query, {"anchor_table_id": anchor_table_id}
+        )
+    except Exception:
+        logger.warning(
+            "find_anchor_hub_siblings: Neo4j query failed for table %s",
+            anchor_table_id,
+            exc_info=True,
+        )
+        return [], 0
+
+    anchor_name = ""
+    hubs: dict[str, str] = {}  # hub_id -> hub_name
+    siblings_by_hub: dict[str, list[dict]] = {}
+    for row in rows:
+        anchor_name = row.get("anchor_table") or anchor_name
+        hub_id, hub_name = row.get("hub_id"), row.get("hub_table")
+        if not hub_id:
+            continue
+        hubs[hub_id] = hub_name or ""
+        sib_id, sib_name = row.get("sibling_id"), row.get("sibling_table")
+        if sib_id:
+            siblings_by_hub.setdefault(hub_id, []).append(
+                {"id": sib_id, "name": sib_name or ""}
+            )
+
+    results: list[dict] = []
+    truncated = 0
+    for hub_id, hub_name in hubs.items():
+        results.append(
+            {
+                "source_table": anchor_name,
+                "target_table": hub_name,
+                "id": hub_id,
+                "hub_table": hub_name,
+                "is_hub": True,
+            }
+        )
+        sibs = siblings_by_hub.get(hub_id, [])
+        if len(sibs) > max_siblings:
+            truncated += len(sibs) - max_siblings
+            sibs = sibs[:max_siblings]
+        for s in sibs:
+            results.append(
+                {
+                    "source_table": anchor_name,
+                    "target_table": s["name"],
+                    "id": s["id"],
+                    "hub_table": hub_name,
+                    "is_hub": False,
+                }
+            )
+    return results, truncated
+
+
+def find_table_bridge(
+    table_a_id: str,
+    table_b_id: str,
+    allowed_table_ids: set[str] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Find bridge tables AND their join hops (if any) needed to connect two tables.
+
+    Runs the same forward-only traversal as :func:`find_join_path`, but
+    starts from table_a as a whole rather than a single representative
+    column — a table's own primary key is usually a pure identity column
+    with no outgoing FK of its own (the real FK, e.g. ``member_fan_pivot``,
+    is a *different* column on the same table), so anchoring on the PK
+    alone would miss the real connection or find an unrelated coincidental
+    one. Starting from the Table node and letting CONTAINS (undirected, same
+    as find_join_path) walk into every one of its own columns finds the real
+    path regardless of which specific column carries the FK. Tried in both
+    directions since SEMANTIC_FK is forward-only.
+
+    IMPORTANT: an unrestricted traversal can find a real but coincidental
+    forward path through a table that was never presented to (or judged by)
+    the relevance filter at all — e.g. two tables that both happen to FK
+    into an unrelated "preferences" table for reasons having nothing to do
+    with the actual question. That's not "the filter missed a bridge it
+    should have kept", it's introducing information the filter never had a
+    chance to accept or reject. So when *allowed_table_ids* is given, a
+    found path is only returned if every intermediate table on it is a
+    member of that set (typically: the tables that were candidates *before*
+    the relevance filter ran) — this keeps the function to "restore a
+    bridge the filter had and dropped", never "discover a new one".
+
+    Returns ``(bridge_tables, hops)``:
+      - ``bridge_tables``: ``{id, name}`` dicts for every distinct table
+        strictly between table_a and table_b on the shortest path found —
+        excludes the two endpoint tables themselves.
+      - ``hops``: join hop dicts in the same shape :func:`find_join_path`
+        produces (``{source_schema, source_table, source_column,
+        target_schema, target_table, target_column}``), describing the
+        actual FK columns connecting table_a -> ... -> table_b. Without
+        this, callers only learn a bridge table's *name*, not how to join
+        it — earlier versions of this function returned table names alone
+        and downstream SQL-gen had to guess the join, which produced a
+        fabricated join between two unrelated PK columns.
+
+    Both empty if no path exists in either direction, or the only path
+    found steps outside *allowed_table_ids*.
+    """
+    query = """
+    MATCH (start:Table {id: $start_id})
+    MATCH (end:Table {id: $end_id})
+    CALL apoc.path.expandConfig(start, {
+        relationshipFilter: 'SEMANTIC_FK>|HAS_ATTRIBUTE|CONTAINS',
+        labelFilter: '-Schema',
+        terminatorNodes: [end],
+        bfs: true, uniqueness: 'NODE_GLOBAL', minLevel: 1, maxLevel: 30, limit: 1
+    }) YIELD path
+    RETURN [n IN nodes(path) | {id: n.id, name: n.name, label: labels(n)[0]}] AS path_nodes,
+    [r IN relationships(path) | type(r)] AS rel_types
+    """
+    for src, dst in ((table_a_id, table_b_id), (table_b_id, table_a_id)):
+        try:
+            rows = get_neo4j_conn().query_read(
+                query, {"start_id": src, "end_id": dst}
+            )
+        except Exception:
+            logger.warning(
+                "find_table_bridge: Neo4j query failed for %s -> %s",
+                src,
+                dst,
+                exc_info=True,
+            )
+            continue
+        if not rows:
+            continue
+        path_nodes: list[dict] = rows[0].get("path_nodes") or []
+        rel_types: list[str] = rows[0].get("rel_types") or []
+        tables = [n for n in path_nodes if n.get("label") == "Table"]
+        bridge = {
+            t["id"]: t
+            for t in tables
+            if t.get("id") not in (table_a_id, table_b_id)
+        }
+        if not bridge:
+            continue
+        if allowed_table_ids is not None and not set(bridge).issubset(
+            allowed_table_ids
+        ):
+            logger.info(
+                "find_table_bridge: discarding path %s -> %s — bridge table(s) "
+                "%s were never a candidate, not just restoring a dropped one",
+                src,
+                dst,
+                [t["name"] for t in bridge.values() if t["id"] not in allowed_table_ids],
+            )
+            continue
+
+        # Rebuild the actual join hops: only real SEMANTIC_FK/HAS_ATTRIBUTE
+        # crossings count, never a pair of columns that merely share a table
+        # (see _extract_fk_hops). A bridge table with no real crossing is a
+        # structural coincidence, not a joinable path — reject it rather
+        # than hand back a table we can't actually explain how to join.
+        crossings = _extract_fk_hops(path_nodes, rel_types)
+        if not crossings:
+            logger.warning(
+                "find_table_bridge: path %s -> %s found bridge table(s) %s "
+                "but no real FK crossing — discarding (co-location, not a "
+                "join)",
+                src,
+                dst,
+                [t["name"] for t in bridge.values()],
+            )
+            continue
+
+        col_ids = [c["id"] for pair in crossings for c in pair if c.get("id")]
+        col_ctx = fetch_col_table_contexts(col_ids)
+        hops: list[dict] = []
+        for c_src, c_tgt in crossings:
+            src_ctx = col_ctx.get(c_src.get("id") or "", {})
+            tgt_ctx = col_ctx.get(c_tgt.get("id") or "", {})
+            hops.append(
+                {
+                    "source_schema": src_ctx.get("schema_name", ""),
+                    "source_table": src_ctx.get("table_name", ""),
+                    "source_column": c_src.get("name", ""),
+                    "target_schema": tgt_ctx.get("schema_name", ""),
+                    "target_table": tgt_ctx.get("table_name", ""),
+                    "target_column": c_tgt.get("name", ""),
+                }
+            )
+        return list(bridge.values()), hops
+    return [], []
+
+
+def find_kept_table_bridges(
+    table_ids: list[str],
+    allowed_table_ids: set[str] | None = None,
+    max_bridge_tables: int = 5,
+) -> tuple[list[dict], list[list[dict]], int]:
+    """Find bridge tables AND their join hops needed to connect pairs of
+    already-kept tables.
+
+    Runs *after* the relevance filter has already narrowed candidates down
+    — kept sets are consistently small in practice (2-4 tables), so
+    checking every pair is cheap by construction. Stops early once
+    *max_bridge_tables* distinct bridge tables have been found regardless,
+    as a hard safety cap for the rare case a kept set is larger than usual.
+
+    *allowed_table_ids*, if given, is passed through to
+    :func:`find_table_bridge` to restrict results to tables that were
+    already candidates before the relevance filter ran — see its docstring
+    for why this matters.
+
+    If the LLM already kept a genuine bridge table C alongside A and B, the
+    A-C and C-B pairs would otherwise "rediscover" C as if it were new,
+    burning cap budget on a table that was never missing — so any table
+    already present in *table_ids* is excluded from counting as a found
+    bridge (it needs no restoring; it's already there). Join hops for such
+    a pair are still collected — even an already-kept table needs its join
+    condition surfaced, or SQL-gen has the table but not the join, same
+    failure this whole function exists to prevent.
+
+    Returns ``(bridge_tables, bridge_paths, skipped_pairs)``:
+      - ``bridge_tables``: ``{id, name}`` dicts (deduped across all pairs,
+        excluding tables already in *table_ids*).
+      - ``bridge_paths``: one hop-list per pair that found a bridge (each
+        hop shaped like :func:`find_join_path`'s output) — meant to be
+        appended to ``attribute_join_paths`` as ``{"path": hops}`` entries
+        so SQL-gen actually learns how to join the bridge table in, not
+        just that it exists.
+      - ``skipped_pairs``: how many remaining pairs were never checked
+        because the cap was already hit.
+    """
+    if len(table_ids) < 2:
+        return [], [], 0
+
+    already_kept = set(table_ids)
+    pairs = list(itertools.combinations(table_ids, 2))
+    found: dict[str, dict] = {}
+    bridge_paths: list[list[dict]] = []
+    checked = 0
+    for a_id, b_id in pairs:
+        if len(found) >= max_bridge_tables:
+            break
+        checked += 1
+        bridge_tables, hops = find_table_bridge(a_id, b_id, allowed_table_ids)
+        for t in bridge_tables:
+            if t["id"] in already_kept:
+                continue
+            found.setdefault(t["id"], t)
+        if bridge_tables and hops:
+            bridge_paths.append(hops)
+
+    skipped = len(pairs) - checked
+    if skipped:
+        logger.info(
+            "find_kept_table_bridges: cap of %d bridge table(s) hit — "
+            "skipped %d/%d remaining pair(s)",
+            max_bridge_tables,
+            skipped,
+            len(pairs),
+        )
+    return list(found.values()), bridge_paths, skipped

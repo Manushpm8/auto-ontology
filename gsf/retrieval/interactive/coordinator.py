@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 # import time (which requires NVIDIA_API_KEY to be set).
 from concurrent.futures import ThreadPoolExecutor
 
-from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, expand_kg_with_children, _STUCK_PHRASES, should_inject_default_sort, _DEFAULT_SORT_HINT
+from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, expand_kg_with_children, _STUCK_PHRASES, should_inject_default_sort, _DEFAULT_SORT_HINT, _format_resolved_schema_terms
+from .output_type import output_type_enabled, should_skip_output_type_question, OUTPUT_TYPE_QUESTION, SCALAR_HINT
+from .conditional_output import conditional_output_enabled, get_conditional_output_hint
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from .completeness import detect_incomplete_formulas
@@ -406,6 +408,14 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     if should_inject_default_sort(session.working_question):
         evidence = "\n".join(filter(None, [evidence, _DEFAULT_SORT_HINT]))
         logger.info("[%s] SQL gen — injected default DESC sort hint", session.task_id)
+    if session.scalar_hint:
+        evidence = "\n".join(filter(None, [evidence, SCALAR_HINT]))
+        logger.info("[%s] SQL gen — injected scalar aggregate hint", session.task_id)
+    if conditional_output_enabled():
+        _cond_hint = get_conditional_output_hint(session.working_question)
+        if _cond_hint:
+            evidence = "\n".join(filter(None, [evidence, _cond_hint]))
+            logger.info("[%s] SQL gen — injected conditional output hint", session.task_id)
     if evidence:
         question = f"{question}\n\nEvidence: {evidence}"
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence)
@@ -504,6 +514,29 @@ def step(
                     extracted,
                 )
 
+                # ── Output-type check (runs once, before clarify sees anything) ──
+                # Pure regex — no LLM call. Fires only on the very first step
+                # (clarify_history is empty). If the type is ambiguous, we ask the
+                # user before any other clarification question. If it's obvious,
+                # we set scalar_hint (or skip silently for table/ddl) and continue.
+                if output_type_enabled():
+                    skip = should_skip_output_type_question(extracted)
+                    logger.info(
+                        "[%s] OutputType check → %s",
+                        session.task_id,
+                        skip if skip is not None else "None (will ask)",
+                    )
+                    if skip is None:
+                        session._pending_question = OUTPUT_TYPE_QUESTION
+                        return AskUserAction(question=OUTPUT_TYPE_QUESTION)
+                    elif skip == "scalar":
+                        session.scalar_hint = True
+                        logger.info(
+                            "[%s] OutputType: scalar hint set at session start",
+                            session.task_id,
+                        )
+                    # "table" and "ddl" → skip silently, no hint needed
+
     elif turn_type == TurnType.FOLLOW_UP:
         if session.phase not in (
             InteractivePhase.PHASE2_CLARIFY,
@@ -517,6 +550,20 @@ def step(
         _apply_debug_seed(session, orchestrator_message)
 
     under_budget = len(session.clarify_history) < session.max_clarify_turns
+
+    # ── Per-turn output-type re-check (pure regex, no LLM) ───────────────────
+    # Re-runs on the enriched working_question each turn so that intent revealed
+    # naturally in dialogue (without an explicit output-type question) still sets
+    # the hint. One-way only: False → True; never unsets once set.
+    if output_type_enabled() and not session.scalar_hint:
+        if should_skip_output_type_question(session.working_question) == "scalar":
+            session.scalar_hint = True
+            logger.info(
+                "[%s] OutputType: scalar hint set from enriched question (turn %d)",
+                session.task_id,
+                len(session.clarify_history),
+            )
+
     if turn_type != TurnType.DEBUG and under_budget:
         should_ask, question = should_clarify(session, _get_llm())
         if should_ask:
@@ -557,6 +604,8 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
                 relevant_kg,
                 list(session.incomplete_formula_terms),
                 _get_llm(),
+                None,
+                _format_resolved_schema_terms(session._cached_resolved_hits or []),
             )
             prune_future = pool.submit(
                 prune_resolved_terms,

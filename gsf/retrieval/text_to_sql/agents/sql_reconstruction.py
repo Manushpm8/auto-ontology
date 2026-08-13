@@ -52,6 +52,75 @@ from gsf.retrieval.text_to_sql.state import (
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
+# Known-column grounding (from the semantic resolution done up front)
+# ------------------------------------------------------------------
+
+
+def _format_known_columns(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict] | None,
+) -> str:
+    """Render a short, repair-focused reminder of already-resolved column
+    names, so reconstruction doesn't have to re-guess casing/existence from
+    the error message alone (e.g. "exch_spot" vs "EXCH_SPOT" when the real
+    column is "quote_depth_snapshot"). Terse by design — this is a repair
+    prompt, not the first-pass generation prompt.
+    """
+    entries = list(attribute_join_paths or [])
+    if primary_attribute:
+        entries = [primary_attribute] + entries
+
+    column_lines = []
+    seen_columns = set()
+    hop_lines = []
+    seen_hops = set()
+    for entry in entries:
+        col_name = entry.get("col_name")
+        table_name = entry.get("table_name")
+        if col_name and table_name:
+            key = (table_name, col_name)
+            if key not in seen_columns:
+                seen_columns.add(key)
+                label = entry.get("attr_name") or col_name
+                column_lines.append(f"  {label}: {table_name}.{col_name}")
+
+        # Multi-hop entries also carry the exact join key on each side of
+        # every hop (e.g. treatmentbasics.encref = encounters.enckey) — this
+        # is what actually fixes wrong-FK-column guesses like "enc_ref" vs
+        # "encref", which the flat column mapping above can't cover since
+        # the FK column isn't itself a resolved business attribute.
+        for hop in entry.get("path") or []:
+            src_table = hop.get("source_table")
+            src_col = hop.get("source_column")
+            tgt_table = hop.get("target_table")
+            tgt_col = hop.get("target_column")
+            if not (src_table and src_col and tgt_table and tgt_col):
+                continue
+            hop_key = (src_table, src_col, tgt_table, tgt_col)
+            if hop_key in seen_hops:
+                continue
+            seen_hops.add(hop_key)
+            hop_lines.append(f"  {src_table}.{src_col} = {tgt_table}.{tgt_col}")
+
+    if not column_lines and not hop_lines:
+        return ""
+
+    sections = []
+    if column_lines:
+        sections.append(
+            "\nKNOWN COLUMN MAPPINGS (already resolved — use these exact "
+            "names/casing, do not guess):\n" + "\n".join(column_lines)
+        )
+    if hop_lines:
+        sections.append(
+            "\nKNOWN JOIN KEYS (already resolved — use these exact join "
+            "conditions, do not guess FK column names):\n" + "\n".join(hop_lines)
+        )
+
+    return "\n".join(sections) + "\n\n"
+
+
+# ------------------------------------------------------------------
 # Error classification models
 # ------------------------------------------------------------------
 
@@ -344,6 +413,18 @@ class SQLReconstructionAgent(BaseAgent):
                 + "\n\n"
             )
 
+        known_columns_section = _format_known_columns(
+            path_state.get("primary_attribute"),
+            path_state.get("attribute_join_paths"),
+        )
+        # TEMP DEBUG — remove once we've confirmed whether this section is
+        # populated and what it contains during reconstruction retries.
+        self.logger.info(
+            "known_columns_section (%d chars): %r",
+            len(known_columns_section),
+            known_columns_section,
+        )
+
         evidence_section = ""
         if extract_evidence(original_question):
             evidence_hints = build_evidence_hints_block(original_question)
@@ -382,6 +463,7 @@ class SQLReconstructionAgent(BaseAgent):
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"
+            f"{known_columns_section}"
             f"{evidence_section}"
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"

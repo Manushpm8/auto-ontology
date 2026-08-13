@@ -64,9 +64,9 @@ Formulas or conditions whose exact specification is still missing, ranked most-c
 {turns_hint}
 
 STRICT RULES — follow every one of these exactly:
-1. NEVER ask where data is stored. Do not ask about 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
+1. NEVER ask where data is stored. Do not ask about or mention the words 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, or history: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
-3. If the question is vague about what to output (e.g., "show relevant metrics"), prioritize asking the user which specific metrics or fields they want in the output.
+3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize the results"), prioritize asking the user which specific metrics or fields they want in the output.
 4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If turns remain AND no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time. Suggested format: "As a metric, what does [TERM] measure and what is its exact formula?"
 6. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
@@ -924,7 +924,17 @@ def should_clarify(
         session._grounded_kg or has_calc_vdb
     ):
         from .completeness import detect_incomplete_formulas
-        vdb_only = sorted(session._cached_vdb_only_norms) if has_calc_vdb else []
+        if has_calc_vdb:
+            hits_map = {e: t for e, t, _ in resolved_hits}
+            vdb_only = []
+            for e in sorted(session._cached_vdb_only_norms):
+                if e in hits_map:
+                    desc = re.sub(r"^ColumnAttribute:[^.]+\.\s*", "", hits_map[e]).rstrip()
+                    vdb_only.append(f"{e}: {desc}" if desc else e)
+                else:
+                    vdb_only.append(e)
+        else:
+            vdb_only = []
         gaps = detect_incomplete_formulas(
             session.working_question,
             last_turn=None,

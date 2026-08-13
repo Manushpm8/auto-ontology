@@ -28,7 +28,12 @@ from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from gsf.dal.attributes import fetch_attr_column_contexts, find_join_path
+from gsf.dal.attributes import (
+    fetch_attr_column_contexts,
+    find_anchor_hub_siblings,
+    find_join_path,
+    find_kept_table_bridges,
+)
 from gsf.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
@@ -181,6 +186,10 @@ class CandidatePreparationAgent(BaseAgent):
         attribute_join_paths: list[dict] = []
         attr_contexts: dict[str, dict] = {}
         term_synonyms: dict[str, list[str]] = {}
+        # Table ids to force back into relevant_tables after the relevance
+        # filter runs (§5b), regardless of what it decides — see rationale
+        # at the hub-sibling and pairwise-bridge computations below.
+        forced_table_ids: set[str] = set()
 
         if column_attributes:
             attr_ids = [
@@ -241,6 +250,36 @@ class CandidatePreparationAgent(BaseAgent):
                             dest_id,
                             len(join_path),
                         )
+
+                # Looser, discovery-only signal: find_join_path above cannot
+                # reach a sibling table that shares a hub with the anchor
+                # (forward-only, by design — see its docstring). Surface
+                # those siblings (and the hub itself) separately so the
+                # relevance filter doesn't drop a structurally-connected
+                # table it has no other way to recognize. Scoped to the
+                # anchor's own outgoing FKs only. These also get forced back
+                # into relevant_tables below (§5b) — the relevance filter has
+                # repeatedly proven unreliable at acting on this info even
+                # when it's shown it, so we no longer just advise it.
+                anchor_table_id = anchor_ctx.get("table_id")
+                if anchor_table_id:
+                    hub_sibling_hops, hub_sibling_truncated = find_anchor_hub_siblings(
+                        anchor_table_id
+                    )
+                    if hub_sibling_hops:
+                        attribute_join_paths.append({"path": hub_sibling_hops})
+                        forced_table_ids.update(
+                            h["id"] for h in hub_sibling_hops if h.get("id")
+                        )
+                        self.logger.info(
+                            "Found %d hub-sibling table(s) via anchor's own FK "
+                            "(hub included): %s%s",
+                            len(hub_sibling_hops),
+                            [h["target_table"] for h in hub_sibling_hops],
+                            f" ({hub_sibling_truncated} sibling(s) truncated by cap)"
+                            if hub_sibling_truncated
+                            else "",
+                        )
             else:
                 self.logger.warning(
                     "No valid anchor attribute found — skipping join path computation"
@@ -270,7 +309,8 @@ class CandidatePreparationAgent(BaseAgent):
 
         additional_tables = []
         search_queries = [question] + path_state.get("entities", [])
-        k_per_query = max(1, 5 // len(search_queries))
+        # k_per_query = max(1, 5 // len(search_queries))  # old fixed budget, commented 2026-08-13 — revert if raised budget causes noise
+        k_per_query = max(1, 10 // len(search_queries))
 
         def _fetch_tables_for_query(query: str) -> list[dict]:
             return get_relevant_tables(
@@ -292,7 +332,8 @@ class CandidatePreparationAgent(BaseAgent):
                     self.logger.warning(
                         "Table retrieval failed for query: %s", query, exc_info=True
                     )
-        additional_tables = dedupe_merge_relevant_tables(additional_tables)[:10]
+        # additional_tables = dedupe_merge_relevant_tables(additional_tables)[:10]  # old cap, commented 2026-08-13
+        additional_tables = dedupe_merge_relevant_tables(additional_tables)[:20]
         seen_qnames: set[str] = set()
         deduped_tables: list[dict] = []
         for t in relevant_tables + additional_tables:
@@ -303,6 +344,8 @@ class CandidatePreparationAgent(BaseAgent):
             deduped_tables.append(t)
         relevant_tables = deduped_tables
 
+        # NOTE: log message says "capped at 20" but there is no actual [:20] slice
+        # anywhere in this path — flagged 2026-08-13, revisit if this matters later.
         self.logger.info(
             "Found %d relevant tables (after dedupe, capped at 20): %s",
             len(relevant_tables),
@@ -397,15 +440,86 @@ class CandidatePreparationAgent(BaseAgent):
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
 
+        # Snapshot the candidate pool BEFORE the relevance filter runs. §5b's
+        # bridge reconciliation must only ever restore a table that was
+        # already a candidate here (and that the filter had a chance to see)
+        # — never surface a table the filter was never shown, which would be
+        # discovering new information rather than enforcing the filter's own
+        # "don't remove a needed bridge" rule.
+        pre_filter_candidate_ids = {
+            t["id"] for t in relevant_tables if t.get("id")
+        }
+
         # --- 5. Filter tables by relevance ---
         relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(
             state,
             question,
             relevant_tables,
             custom_analyses,
+            attribute_join_paths,
         )
         self.logger.info(
             "Kept %d relevant tables (after relevance filter): %s",
+            len(relevant_tables),
+            [_qualified_name(t) for t in relevant_tables],
+        )
+
+        # --- 5b. Deterministic bridge-table reconciliation ---
+        # The relevance filter has repeatedly proven unreliable at preserving
+        # join-chain bridge tables even when its prompt shows it the exact
+        # connection (logged join_paths_section vs. removed-tables mismatch
+        # observed across multiple runs) — so force these back in by code
+        # rather than continue relying on it noticing. Two sources:
+        #   (a) the anchor's hub + capped siblings, already computed above
+        #       and collected into forced_table_ids;
+        #   (b) any bridge table needed to connect pairs of tables the
+        #       filter itself decided to KEEP — this only ever restores
+        #       connectivity between tables the filter already judged
+        #       relevant, it never second-guesses which tables matter, and
+        #       (via pre_filter_candidate_ids) never introduces a table the
+        #       filter was never shown in the first place.
+        kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
+        bridge_tables, bridge_paths, skipped_pairs = find_kept_table_bridges(
+            kept_ids, pre_filter_candidate_ids
+        )
+        if bridge_tables:
+            forced_table_ids.update(t["id"] for t in bridge_tables)
+            self.logger.info(
+                "Pairwise bridge reconciliation added %d table(s) between "
+                "kept tables: %s%s",
+                len(bridge_tables),
+                [t["name"] for t in bridge_tables],
+                f" ({skipped_pairs} pair(s) skipped after cap)"
+                if skipped_pairs
+                else "",
+            )
+        # A bridge table with no join hops reaching SQL-gen is a table the
+        # model can see but not connect — it previously had to guess the
+        # join condition itself (which produced a fabricated join between
+        # two unrelated PK columns on virtual_idol_13). Surface the real
+        # FK chain the same way attribute_join_paths already does for
+        # verified semantic joins.
+        if bridge_paths:
+            attribute_join_paths.extend({"path": hops} for hops in bridge_paths)
+            self.logger.info(
+                "Pairwise bridge reconciliation added %d join path(s) for "
+                "bridge table(s)",
+                len(bridge_paths),
+            )
+
+        forced_table_ids -= {t.get("id") for t in relevant_tables}
+        if forced_table_ids:
+            forced_tables = fetch_tables_by_ids(list(forced_table_ids))
+            relevant_tables = _merge_tables(relevant_tables, forced_tables)
+            self.logger.info(
+                "Force-included %d table(s) after relevance filter (deterministic "
+                "reconciliation, not the LLM's choice): %s",
+                len(forced_tables),
+                [t["name"] for t in forced_tables],
+            )
+
+        self.logger.info(
+            "Final %d table(s) reaching SQL generation: %s",
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
@@ -518,6 +632,7 @@ class CandidatePreparationAgent(BaseAgent):
         question: str,
         tables: list[dict],
         custom_analyses: list[dict] | None = None,
+        attribute_join_paths: list[dict] | None = None,
     ) -> tuple[list[dict], str]:
         """Use the LLM to decide which candidate tables are actually needed."""
         if len(tables) <= 2:
@@ -560,11 +675,32 @@ class CandidatePreparationAgent(BaseAgent):
                 + "\n\n"
             )
 
+        join_paths_section = ""
+        chains: set[str] = set()
+        if attribute_join_paths:
+            for entry in attribute_join_paths:
+                for hop in entry.get("path") or []:
+                    src = hop.get("source_table")
+                    tgt = hop.get("target_table")
+                    if src and tgt and src != tgt:
+                        chains.add(f"{src} <-> {tgt}")
+            if chains:
+                join_paths_section = (
+                    "Known join paths between candidate tables:\n"
+                    + "\n".join(sorted(chains))
+                    + "\n\n"
+                )
+            self.logger.info(
+                "Relevance filter join_paths_section: %s",
+                sorted(chains) if chains else "(no cross-table chains found)",
+            )
+
         prompt_text = TABLE_RELEVANCE_FILTER_PROMPT.format(
             question=question,
             tables_summary=tables_summary,
             domain_rules=domain_rules_section,
             custom_analyses=ca_section,
+            join_paths=join_paths_section,
         )
 
         messages = [
@@ -614,6 +750,26 @@ class CandidatePreparationAgent(BaseAgent):
         )
         if removed:
             self.logger.info("Relevance filter removed tables: %s", removed)
+
+        # Cross-reference the join-chain facts we showed the LLM (computed in
+        # full before the call, above) against what it actually kept — lets
+        # us measure whether the prompt wording is doing anything, rather
+        # than assume it from a handful of manually-inspected runs.
+        if chains:
+            kept_names = {(t.get("name") or "").lower() for t in filtered}
+            preserved, broken = [], []
+            for chain in sorted(chains):
+                a, b = (part.strip().lower() for part in chain.split("<->"))
+                (preserved if a in kept_names and b in kept_names else broken).append(
+                    chain
+                )
+            self.logger.info(
+                "Relevance filter join-chain outcome — preserved: %s | broken "
+                "(a table on this chain was removed, before §5b reconciliation "
+                "restores it): %s",
+                preserved if preserved else "(none)",
+                broken if broken else "(none)",
+            )
 
         if not filtered:
             self.logger.warning("Relevance filter removed ALL tables — keeping all")

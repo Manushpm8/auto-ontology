@@ -121,8 +121,14 @@ def _format_semantic_context(
             col_name = entry.get("col_name", "")
             schema = entry.get("schema_name", "")
             table = entry.get("table_name", "")
-            full_table = f"{schema}.{table}" if schema else table
-            lines.append(f"  {attr_name}: {full_table}.{col_name}")
+            # Structural entries (hub-sibling / bridge-table reconciliation)
+            # carry only "path" — no named attribute they resolve to. Render
+            # a generic label instead of a blank "  : ." header line.
+            if attr_name or col_name or table:
+                full_table = f"{schema}.{table}" if schema else table
+                lines.append(f"  {attr_name}: {full_table}.{col_name}")
+            else:
+                lines.append("  (structural bridge — connects tables kept above)")
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
@@ -212,7 +218,14 @@ def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -
                     if col_desc:
                         col_line += f" - {col_desc}"
                     if sample_values:
-                        col_line += f" | sample values: {sample_values}"
+                        if "json" in (col_type or "").lower():
+                            col_line += (
+                                f" | available JSONB keys"
+                                f" (dot = nesting level, use as"
+                                f" ->>'key' or ->'container'->>'leaf'): {sample_values}"
+                            )
+                        else:
+                            col_line += f" | sample values: {sample_values}"
                     table_parts.append(col_line)
                 elif isinstance(col, str):
                     # If column is a string, use it directly

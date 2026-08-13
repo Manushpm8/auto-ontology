@@ -8,7 +8,7 @@ import os
 
 # Maximum number of entity noun phrases to extract per question.
 # Raise via ENTITY_EXTRACTION_MAX_ENTITIES env var for complex multi-metric queries.
-_MAX_ENTITIES: int = int(os.environ.get("ENTITY_EXTRACTION_MAX_ENTITIES", "5"))
+_MAX_ENTITIES: int = int(os.environ.get("ENTITY_EXTRACTION_MAX_ENTITIES", "10"))
 
 
 def create_question_extraction_prompt(question: str) -> str:
