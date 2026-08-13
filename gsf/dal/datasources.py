@@ -893,31 +893,50 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _decode_sample_values(raw: Any) -> list[Any]:
+    """Return ``Column.sample_values`` as a list.
+
+    Neo4j stores it as a JSON string, while ``TabularFetchEmbeddingsOp`` slices
+    it and joins the elements. Handed the string it slices and joins characters
+    instead, embedding ``sample_values: [, ", -, ", ,`` in place of the values.
+    """
+    if isinstance(raw, list):
+        return raw
+    if not raw:
+        return []
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return decoded if isinstance(decoded, list) else []
+
+
 def fetch_tables_and_columns_by_node_ids(
     node_ids: list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, str]:
     """Load Table/Column rows from Neo4j as dataframes for TabularFetchEmbeddingsOp."""
     conn = get_neo4j_conn()
-    columns_df = pd.DataFrame(
-        conn.query_read(
-            f"""
-            UNWIND $ids AS id
-            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-            WHERE t.id = id OR c.id = id
-            RETURN DISTINCT
-                   c.id AS id,
-                   t.name AS table_name,
-                   s.name AS table_schema,
-                   c.name AS column_name,
-                   c.data_type AS data_type,
-                   {column_description_expr("c")} AS description,
-                   c.sample_values AS sample_values,
-                   db.name AS database_name
-            """,
-            {"ids": node_ids},
-        ),
+    column_records = conn.query_read(
+        f"""
+        UNWIND $ids AS id
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+              -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+        WHERE t.id = id OR c.id = id
+        RETURN DISTINCT
+               c.id AS id,
+               t.name AS table_name,
+               s.name AS table_schema,
+               c.name AS column_name,
+               c.data_type AS data_type,
+               {column_description_expr("c")} AS description,
+               c.sample_values AS sample_values,
+               db.name AS database_name
+        """,
+        {"ids": node_ids},
     )
+    for record in column_records:
+        record["sample_values"] = _decode_sample_values(record.get("sample_values"))
+    columns_df = pd.DataFrame(column_records)
     tables_df = pd.DataFrame(
         conn.query_read(
             f"""
