@@ -243,6 +243,33 @@ The web UI manages the UUID automatically. An API-created conversation can be
 opened in the UI at `/chat?focus=<conversation_id>` when it belongs to the
 signed-in user.
 
+## MCP server
+
+GSF ships an [MCP](https://modelcontextprotocol.io) server, so agent harnesses
+such as Cursor and Claude Desktop can query your data directly. It gives an
+agent one tool that answers questions in natural language, plus read-only tools
+for browsing the glossary and catalog behind those answers.
+
+It is an HTTP client of the public API described above — it authenticates with
+an API token and therefore acts as that token's owner, with exactly their
+permissions.
+
+```sh
+export GSF_API_URL=https://gsf.example.com
+export GSF_API_TOKEN=gsf_...
+
+uvx --from "git+https://github.com/NVIDIA/GSF.git#subdirectory=gsf-mcp" gsf-mcp
+```
+
+`gsf-mcp` is a separate, lightweight distribution (source in
+[`gsf-mcp/`](./gsf-mcp/)): it needs no database drivers or model tooling and
+nothing from `gsf-server`, so users do not have to clone this repo or run the
+backend to use it. The install shortens to `uvx gsf-mcp` once it is published to
+PyPI.
+
+See [`docs/mcp.md`](./docs/mcp.md) for client configuration, the full tool list,
+and deployment notes.
+
 ## License
 
 GSF is licensed under the [Apache License, Version 2.0](./LICENSE).
