@@ -47,13 +47,23 @@ _SUPERLATIVE = (
 
 # Explicit multi-row ask — leave these alone even if a superlative word appears.
 _EXPLICIT_MULTI = re.compile(
+    # "top 5", "first three"
     r"\b(?:top|bottom|first|last)\s+(?:\d+|one|two|three|four|five|six|seven|"
     r"eight|nine|ten|eleven|twelve)\b"
+    # "5 highest", "three longest"
     r"|\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)"
-    r"\s+(?:highest|lowest|best|worst|most|least|largest|smallest|biggest|"
-    r"shortest|longest|top|bottom)\b"
-    r"|\b(?:highest|lowest|best|worst|most|least|largest|smallest)\s+and\s+"
-    r"(?:highest|lowest|best|worst|most|least|largest|smallest)\b",
+    rf"\s+{_SUPERLATIVE}\b"
+    # Both ends of a ranking: "the shortest and longest streaks".
+    rf"|\b{_SUPERLATIVE}\s+and\s+(?:the\s+)?{_SUPERLATIVE}\b"
+    rf"|\bboth\s+(?:the\s+)?{_SUPERLATIVE}\b"
+    # Plural subject: "which countries in June 2022 have the longest streak".
+    r"|\b(?:which|what)\s+[a-z]{3,}s\b[^?.]{0,60}?"
+    r"\b(?:have|had|are|were|share|tie)\b"
+    # One row per group: "for each month", "each month", "per ticker".
+    r"|\b(?:for\s+each|each|per)\s+[a-z]+\b"
+    # "include all of them", "list all tied rows"
+    r"|\b(?:include|list|return|show|display)\s+(?:them\s+)?all\b"
+    r"|\ball\s+of\s+them\b",
     re.IGNORECASE,
 )
 

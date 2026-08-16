@@ -27,8 +27,6 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
-    LABEL_SQL_ATTRIBUTE,
-    LABEL_TERM,
 )
 
 from gsf.dal.attributes import (
@@ -509,19 +507,20 @@ class CandidateRetrievalAgent(BaseAgent):
                     for entity in clean_entities
                 ],
             ]
-            if subject:
-                search_tasks.append(
-                    (
-                        "subject_term",
-                        (
-                            semantic_retriever,
-                            subject,
-                            LABEL_TERM,
-                            1,
-                            target_db,
-                        ),
-                    )
-                )
+            # [subject-extraction] Subject Term VDB search disabled for evaluation.
+            # if subject:
+            #     search_tasks.append(
+            #         (
+            #             "subject_term",
+            #             (
+            #                 semantic_retriever,
+            #                 subject,
+            #                 LABEL_TERM,
+            #                 1,
+            #                 target_db,
+            #             ),
+            #         )
+            #     )
 
             with ThreadPoolExecutor(max_workers=len(search_tasks) or 1) as pool:
                 futures = {
@@ -569,7 +568,9 @@ class CandidateRetrievalAgent(BaseAgent):
             deduped_ids = [
                 str(h.get("id") or "") for h in deduped_col_attr if h.get("id")
             ]
-            col_attr_contexts = fetch_attr_column_contexts(deduped_ids)
+            col_attr_contexts = fetch_attr_column_contexts(
+                deduped_ids, database_name=target_db
+            )
             deduped_col_attr = _llm_evaluate_col_attr_candidates(
                 llm, question, deduped_col_attr, col_attr_contexts
             )
@@ -584,7 +585,8 @@ class CandidateRetrievalAgent(BaseAgent):
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = deduped_sql_attr
         path_state["col_attr_contexts"] = col_attr_contexts
-        path_state["retrieved_subject_term"] = subject_term
+        # [subject-extraction] disabled: path_state["retrieved_subject_term"] = subject_term
+        path_state["retrieved_subject_term"] = None
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "

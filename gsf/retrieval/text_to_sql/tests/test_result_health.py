@@ -120,6 +120,24 @@ def test_singular_superlative_question_detection() -> None:
     assert not is_singular_superlative_question(
         "Can you identify the hubs that saw more than a 20% increase?"
     )
+    assert not is_singular_superlative_question(
+        "Identify both the shortest and longest streaks of consecutive dates."
+    )
+    # The detector sees the sanitized question, which reworders the multi-row cue.
+    assert not is_singular_superlative_question(
+        "Which countries in June 2022 have the longest streak of consecutive "
+        "inserted city dates? List their 2-letter country codes."
+    )
+    assert not is_singular_superlative_question(
+        "For each month, report the ticker with the highest closing price."
+    )
+    assert not is_singular_superlative_question(
+        "By month and interest, select the interest with the highest average "
+        "composition each month."
+    )
+    assert not is_singular_superlative_question(
+        "Which session had the lowest count? If several tie, include all of them."
+    )
 
 
 def test_superlative_cardinality_flags_multi_row_singular_answer() -> None:
