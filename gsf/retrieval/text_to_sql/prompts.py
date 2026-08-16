@@ -609,7 +609,6 @@ Rules:
   remove any table in the join chain (A, B, C, or D). The join paths below
   show real table connections. Keep the full bridges between tables that
   you deem relevant.
-  whether a table you're about to remove is actually a needed bridge.
 - If a selected custom analysis references a table in its SQL, do NOT
   remove that table.
 - When in doubt, do NOT remove — it is safer to include an extra table

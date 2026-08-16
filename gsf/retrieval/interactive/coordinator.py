@@ -91,7 +91,12 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
     session.path_state["sql_attempts"] = 0
     session.path_state["reconstruction_count"] = 0
     session.path_state["error_analysis_done"] = False
-    for key in ("repair_attempted", "value_repair_done"):
+    # "failed_attempts" backs route_sql_validation's skip_intent_validation
+    # check (len(failed_attempts) > 5) — it must reset here too, or a debug
+    # turn inherits the attempt count from the PRIOR turn and can skip
+    # intent validation almost immediately, cutting off the fresh repair
+    # budget this turn is supposed to get.
+    for key in ("repair_attempted", "value_repair_done", "failed_attempts"):
         session.path_state.pop(key, None)
 
 
@@ -242,13 +247,18 @@ Working question: {question}
 
 Relevant external knowledge (one entry per term):
 {grounded_kg}
-
+{resolved_terms_section}
 Extract the formulas, calculation rules, and threshold/filter conditions that are \
 directly needed to answer the working question above. For each such entry, output one \
 line in SQL-friendly notation:
   TermName = <formula, threshold, or filter condition using column names and values>
 Only include conditions expressible with specific column names and values — skip \
 natural-language qualifiers with no clear SQL translation. \
+Never invent a column-like name (Title_Case/snake_case) for a term with no confirmed \
+mapping. If no term in a formula has a confirmed mapping, omit the line entirely. If \
+only some terms are confirmed, keep the formula structure and substitute \
+[UNRESOLVED: <term>] — using the term's exact original wording from the question — \
+for each unconfirmed operand, never a name that could pass as a real column. \
 Skip any entry not required by the working question. \
 Entries may include a "# matched from: <terms>" annotation line listing the original \
 natural-language phrases from the question that correspond to this KB entry — use these \
@@ -313,11 +323,68 @@ def _detect_and_resolve_named_columns(session: InteractiveSessionState, answer: 
         already = session._named_column_evidence
 
 
-def _generate_evidence(question: str, grounded_kg: str) -> str:
+def _build_grounded_terms_hint(session: InteractiveSessionState) -> str:
+    """Surface already-resolved schema mappings for terms VDB-matched to the
+    current question, and flag when two different terms resolved to the same
+    column, so the evidence LLM grounds formula terms in real columns instead
+    of guessing table/column names — and can correctly skip a term instead of
+    inventing one when nothing is confirmed.
+    """
+    hits = session._cached_resolved_hits or []
+    if not hits:
+        return ""
+
+    # Keep the best (lowest-distance) hit per term.
+    best: dict[str, tuple[str, float, str]] = {}
+    for norm, hit_text, score, hit_id in hits:
+        if norm not in best or score < best[norm][1]:
+            best[norm] = (hit_text, score, hit_id)
+    if not best:
+        return ""
+
+    # Collision check: two distinct terms resolving to the same underlying
+    # attribute node is a sign the match is unreliable (e.g. two near-synonym
+    # terms colliding on one column) — flag it instead of presenting both as
+    # confident hits. Keyed on hit_id (the attribute node's identity), not
+    # hit_text (a display label that isn't guaranteed unique or consistently
+    # formatted across hits) — falls back to hit_text only when hit_id is
+    # missing.
+    target_to_terms: dict[str, list[str]] = {}
+    for norm, (hit_text, _score, hit_id) in best.items():
+        key = hit_id or hit_text
+        target_to_terms.setdefault(key, []).append(norm)
+
+    lines = []
+    for norm, (hit_text, _score, hit_id) in best.items():
+        key = hit_id or hit_text
+        others = [t for t in target_to_terms[key] if t != norm]
+        if others:
+            logger.info(
+                "Evidence — term collision: %r and %s share target %r",
+                norm, others, hit_text,
+            )
+        suffix = (
+            f'  [TERM COLLISION: also matched by "{", ".join(others)}" — '
+            f"unreliable, do not assume this mapping is correct]"
+            if others
+            else ""
+        )
+        lines.append(f'  "{norm}" → {hit_text}{suffix}')
+    return (
+        "\nConfirmed schema mappings for terms VDB-matched to the question "
+        "(terms not listed here have no confirmed mapping; a term marked TERM "
+        "COLLISION matched the same column as another term and should not be "
+        "trusted without other confirmation):\n" + "\n".join(lines) + "\n"
+    )
+
+
+def _generate_evidence(question: str, grounded_kg: str, resolved_terms_section: str = "") -> str:
     """Convert grounded KB text into a short Evidence string for the SQL generator."""
     if not grounded_kg:
         return ""
-    prompt = _EVIDENCE_PROMPT.format(question=question, grounded_kg=grounded_kg)
+    prompt = _EVIDENCE_PROMPT.format(
+        question=question, grounded_kg=grounded_kg, resolved_terms_section=resolved_terms_section
+    )
     response = safe_invoke_text_nr(prompt).strip()
     logger.debug("SQL gen — Evidence raw response: %s", response)
     if not response or response.upper() == "NONE":
@@ -402,7 +469,8 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             f"thresholds, and formulas from this SQL where applicable]\n{p1_sql}"
         )
 
-    evidence = _generate_evidence(evidence_question, combined_kg)
+    resolved_terms_section = _build_grounded_terms_hint(session)
+    evidence = _generate_evidence(evidence_question, combined_kg, resolved_terms_section)
     if session._named_column_evidence:
         evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
     if should_inject_default_sort(session.working_question):

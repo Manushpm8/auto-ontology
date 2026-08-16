@@ -460,10 +460,12 @@ def _format_resolved_hit(entity: str, hit_text: str) -> str:
     return f"- {entity}\n  Definition: {body}" if body else f"- {entity}\n  Definition: {hit_text}"
 
 
-def _format_resolved_schema_terms(resolved_hits: list[tuple[str, str, float]]) -> str:
+def _format_resolved_schema_terms(
+    resolved_hits: list[tuple[str, str, float, str]],
+) -> str:
     """Format resolved VDB hits as concise one-liners for the decide-LLM prompt."""
     lines = []
-    for entity, hit_text, _ in resolved_hits:
+    for entity, hit_text, *_ in resolved_hits:
         body = re.sub(r"^ColumnAttribute:[^.]+\.\s*", "", hit_text or "").rstrip()
         lines.append(f'- "{entity}" → {body}' if body else f'- "{entity}" → {hit_text}')
     return "\n".join(lines)
@@ -471,11 +473,11 @@ def _format_resolved_schema_terms(resolved_hits: list[tuple[str, str, float]]) -
 
 def _update_vdb_resolved_hits(
     session: "InteractiveSessionState",
-    resolved_hits: list[tuple[str, str, float]],
+    resolved_hits: list[tuple[str, str, float, str]],
 ) -> None:
     """Persist resolved hits to session. Confident hits (score<=0.63) go to evidence."""
     session._cached_resolved_hits = resolved_hits
-    confident = [(e, t) for e, t, s in resolved_hits if s <= 0.63]
+    confident = [(e, t) for e, t, s, *_ in resolved_hits if s <= 0.63]
     if not confident:
         return
     for entity, hit_text in confident:
@@ -602,7 +604,13 @@ def _find_unresolvable_entities(
     db_name: str | None,
     formatted_kg: str = "",
     children_map: dict[str, list[str]] | None = None,
-) -> tuple[list[tuple[str, str | None]], list[tuple[str, str, float]], str, set[str], dict[str, list[str]]]:
+) -> tuple[
+    list[tuple[str, str | None]],
+    list[tuple[str, str, float, str]],
+    str,
+    set[str],
+    dict[str, list[str]],
+]:
     """Return (unresolvable_entities, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms).
 
     Flow:
@@ -614,9 +622,12 @@ def _find_unresolvable_entities(
          relevant_kg_text for the prompt and identifies KB-covered entities.
       4. Final unresolvable = (VDB-uncovered ∪ ambiguous) − KB-covered.
 
-    resolved_hits contains (entity, hit_text, score) for entities cleanly resolved
+    resolved_hits contains (entity, hit_text, score, hit_id) for entities cleanly resolved
     by VDB (score <= CLARIFY_MAX_DISTANCE, unambiguous); the caller uses score <= 0.63
-    for evidence generation. entry_to_original_terms maps each confirmed KB entry name
+    for evidence generation. hit_id is the underlying attribute node's ID — a stable
+    identity check for "do two terms resolve to the same column", since hit_text is only
+    a display label and isn't guaranteed unique or consistently formatted across hits.
+    entry_to_original_terms maps each confirmed KB entry name
     to the original natural-language terms that matched it (for cumulative_grounded_kg).
     """
     if semantic_retriever is None:
@@ -670,7 +681,7 @@ def _find_unresolvable_entities(
     # Build resolved_hits from entities cleanly covered at VDB (unambiguous, within threshold).
     # Use the pipeline's enriched candidates (Neo4j-resolved attribute+term names) rather than
     # raw VDB text blobs. Fall back to raw text when no enriched candidate is available.
-    resolved_hits: list[tuple[str, str, float]] = []
+    resolved_hits: list[tuple[str, str, float, str]] = []
     col_hits: list[dict] = ec_path_state.get("retrieved_column_attributes") or []
     candidates_by_id: dict[str, dict] = {
         c["id"]: c
@@ -694,7 +705,9 @@ def _find_unresolvable_entities(
                 hit_text = f'{candidate["attribute"]} ({term})' if term else candidate["attribute"]
             else:
                 hit_text = hit.get("text") or ""
-            resolved_hits.append((norm, hit_text, float(hit.get("score", 1.0))))
+            resolved_hits.append(
+                (norm, hit_text, float(hit.get("score", 1.0)), str(hit.get("id") or ""))
+            )
 
     # --- Step 3: KB check on ALL extracted entities ---
     # Run on all search_norms (not just uncovered) so relevant_kg_text is complete
@@ -718,14 +731,17 @@ def _find_unresolvable_entities(
 
     # VDB-only: resolved by VDB but not covered by external KB.
     # Returned so the caller can check for missing calculation formulas.
-    vdb_only_norms: set[str] = {norm for norm, _, _ in resolved_hits} - kb_covered_norms
+    vdb_only_norms: set[str] = {norm for norm, *_ in resolved_hits} - kb_covered_norms
 
     unresolvable: list[tuple[str, str | None]] = [
         (norm, None) for norm in final_unresolvable_norms
     ]
 
     logger.info("Clarify — unresolvable after VDB+KB: %s", [e for e, _ in unresolvable] or "none")
-    logger.info("Clarify — resolved by VDB: %s", [(e, f"{s:.3f}") for e, _, s in resolved_hits] or "none")
+    logger.info(
+        "Clarify — resolved by VDB: %s",
+        [(e, f"{s:.3f}") for e, _, s, *_ in resolved_hits] or "none",
+    )
     return unresolvable, resolved_hits, relevant_kg_text, all_norms, entry_to_original_terms, vdb_only_norms
 
 
@@ -832,7 +848,7 @@ def should_clarify(
         # formula and the direct schema column rather than blindly applying both.
         _KB_VDB_DISAMBIG_THRESHOLD = 0.62
         kb_covered_hits = [
-            (norm, col_text, score) for norm, col_text, score in resolved_hits
+            (norm, col_text, score) for norm, col_text, score, *_ in resolved_hits
             if norm not in vdb_only_norms and score < _KB_VDB_DISAMBIG_THRESHOLD
         ]
         if kb_covered_hits:
@@ -890,8 +906,8 @@ def should_clarify(
     else:
         logger.info("Clarify — reusing cached unresolvable entities (question unchanged)")
         resolved_hits = []
-        for entity, hit_text, score in (session._cached_resolved_hits or []):
-            resolved_hits.append((entity, hit_text, score))
+        for entity, hit_text, score, hit_id in (session._cached_resolved_hits or []):
+            resolved_hits.append((entity, hit_text, score, hit_id))
     unresolvable = session._cached_unresolvable or []
 
     # Merge current unresolvable with any persistently-tracked terms that dropped
@@ -925,7 +941,7 @@ def should_clarify(
     ):
         from .completeness import detect_incomplete_formulas
         if has_calc_vdb:
-            hits_map = {e: t for e, t, _ in resolved_hits}
+            hits_map = {e: t for e, t, *_ in resolved_hits}
             vdb_only = []
             for e in sorted(session._cached_vdb_only_norms):
                 if e in hits_map:

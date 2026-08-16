@@ -20,7 +20,9 @@ main subject.
 ## Part 1 — sanitized_question
 
 Rules:
-- Remove personal background, narrative fluff, and filler.
+- Remove personal background, narrative fluff, filler, politeness, and generic request
+  framing such as "please", "can you", "show me", "find", or
+  "get semantic objects related to". Keep only the underlying domain intent.
 - Preserve every factual constraint: numbers, product names, brands, categories, and \
 qualifiers such as "similar", "natural ingredients", or "expensive is okay".
 - Do NOT invent constraints that are not in the original text.

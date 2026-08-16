@@ -403,9 +403,16 @@ class SQLReconstructionAgent(BaseAgent):
         if len(failed_attempts) > 1:
             history_lines = []
             for i, attempt in enumerate(failed_attempts[:-1], 1):
+                if len(attempt["sql"]) > 600 or len(attempt["error"]) > 600:
+                    self.logger.info(
+                        "History attempt %d truncated for prompt (sql=%d chars, error=%d chars)",
+                        i,
+                        len(attempt["sql"]),
+                        len(attempt["error"]),
+                    )
                 history_lines.append(
-                    f"  Attempt {i}: {attempt['sql'][:200]}\n"
-                    f"  Error: {attempt['error'][:200]}"
+                    f"  Attempt {i}: {attempt['sql'][:600]}\n"
+                    f"  Error: {attempt['error'][:600]}"
                 )
             history_section = (
                 "\nPREVIOUS FAILED ATTEMPTS (do NOT repeat any of these):\n"

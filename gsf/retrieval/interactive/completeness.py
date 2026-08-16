@@ -23,7 +23,7 @@ A: {last_a}
 Relevant external knowledge (may contain partial or ambiguous definitions):
 {relevant_kg}
 
-Schema columns already resolved by VDB (close a gap only if the description directly resolves it):
+Schema columns already resolved by VDB (drop a gap only if the description directly resolves it):
 {resolved_schema_terms}
 
 Your task — produce a FRESH updated list:
@@ -35,8 +35,8 @@ Your task — produce a FRESH updated list:
    - A formula whose exact operators, constants, or column combinations are still unknown
    - A threshold or classification condition expressed vaguely or in natural language \
      with no mapping to a specific column value
-   - A KB condition using hedged language (e.g. "typically", "often") or referencing \
-     an undefined sub-condition
+   - A KB condition or user answer using hedged language (e.g. "typically", "often",\
+    "approximately", "things like") or referencing an undefined sub-condition
    - A composite formula whose aggregation semantics are unspecified — i.e. the formula \
      combines multiple columns non-linearly and it is unclear at which level it should \
      be evaluated before grouping
@@ -44,7 +44,7 @@ Your task — produce a FRESH updated list:
      e.g. "adjusted by X", "modified with Y", "compensated for Z" where different \
      placements of the adjustment (inside a fraction vs. outside, numerator vs. denominator) \
      produce different values; include the user's exact phrase in the description
-
+ 
 Do NOT flag:
 - Business context or motivation that does not affect SQL structure
 - Terms fully defined by an explicit formula in the answer or KB
@@ -74,7 +74,7 @@ Schema entities found in the database but with NO formula in the external knowle
 
 Identify gaps in either of the following categories:
 1. Terms in the external knowledge that are ambiguously defined:
-   - Expressed with hedged language ("typically", "often", "approximately")
+   - Expressed with hedged language ("typically", "often", "approximately", "things like")
    - Reference sub-conditions not mapped to specific column values
    - Use natural language that does not map to a unique equation
 2. Schema entities (listed above) that the working question asks to CALCULATE using a \
