@@ -90,6 +90,28 @@ def get_term_for_table(table_id: str) -> str | None:
     return rows[0]["name"] if rows else None
 
 
+def get_term_record_for_table(table_id: str) -> dict[str, str] | None:
+    """Return ``{id, name, description}`` for the Term that REPRESENTS *table_id*.
+
+    Returns ``None`` when the table has no REPRESENTS Term. Unlike
+    ``get_term_for_table``, which returns only the name, this also carries
+    ``id``/``description`` — needed to rerank candidate owner Terms (e.g.
+    for bridge-table SqlAttribute synthesis).
+    """
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
+              (term:{LABEL_TERM} {{source: $source}})
+        RETURN term.id AS id,
+               term.name AS name,
+               coalesce(term.description, '') AS description
+        LIMIT 1
+        """,
+        {"table_id": table_id, "source": SEMANTIC_SOURCE},
+    )
+    return dict(rows[0]) if rows else None
+
+
 def get_slim_term_by_id(term_id: str) -> dict[str, str] | None:
     """Return ``{id, name}`` of a Term, or None."""
     rows = get_neo4j_conn().query_read(
