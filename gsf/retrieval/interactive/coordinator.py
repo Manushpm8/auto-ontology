@@ -213,6 +213,9 @@ If it only borrows part of it, incorporate only that part.
 in the previous SQL, do NOT assign it to a table or column — leave it unresolved so \
 the SQL generator can discover it from the schema. Only carry forward table/column \
 assignments for concepts explicitly present in the previous SQL.
+- if the question indicates only a minor change to the question (e.g a short sentence \
+starting with "also"), closely preserve the previous question structure.
+
 - Output only the rewritten question, no preamble or explanation."""
 
 

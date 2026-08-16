@@ -23,6 +23,7 @@ Run with:
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -33,11 +34,17 @@ from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
+# These point into the separate BIRD-Interact benchmark checkout (not part of
+# this repo); override via env vars if that checkout lives elsewhere,
+# otherwise the values below (this machine's layout) are used as the default.
 
-_FULL_DATASET = Path(
-    "/Users/ariellegeva/Desktop/BIRD-Interact/bird-interact-full/bird_interact_data_with_gt.jsonl"
-)
-_FULL_DB_ROOT = Path("/Users/ariellegeva/Desktop/BIRD-Interact/bird-interact-full")
+_FULL_DATASET = Path(os.environ.get(
+    "BIRD_INTERACT_FULL_DATA",
+    "/Users/ariellegeva/Desktop/BIRD-Interact/bird-interact-full/bird_interact_data_with_gt.jsonl",
+))
+_FULL_DB_ROOT = Path(os.environ.get(
+    "BIRD_INTERACT_FULL_DB_ROOT", "/Users/ariellegeva/Desktop/BIRD-Interact/bird-interact-full"
+))
 
 
 def _load_instances() -> dict[str, dict]:

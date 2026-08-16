@@ -17,7 +17,8 @@ use it to avoid coining pseudo-column names):
 {relevant_kg}
 
 Rewrite the current question to incorporate the new clarification. Rules:
-- Preserve every formula, definition, constraint, and column name already in the current question.
+- Preserve every formula, definition, constraint, and column name already in the current question, \
+  unless explicitly contradicted by the new answer, in which case you may replace misleading information.
 - If the new clarification defines or renames a metric, use that name consistently everywhere \
   in the rewritten question — including in aggregations (average, median, count) that reference it.
 - If the answer provides an EXPLICIT formula (exact operator, exact column names, exact constants), \

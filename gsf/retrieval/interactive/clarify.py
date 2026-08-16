@@ -833,6 +833,15 @@ def should_clarify(
         if relevant_kg:
             existing = _parse_kg_entries(session.cumulative_grounded_kg)
             for name, text in _parse_kg_entries(relevant_kg).items():
+                # entry_to_original_terms only contains entries the coverage LLM
+                # actually matched (parents) — children/grandchildren/great-grandchildren
+                # injected alongside them (see _filter_covered_by_external_knowledge)
+                # aren't in this dict. Keep those descendants in relevant_kg / session._grounded_kg
+                # for decide-LLM context (they occasionally clarify what the parent means),
+                # but don't carry them into cumulative_grounded_kg → SQL-gen custom_prompts,
+                # where they only ever showed up as unused noise in generated SQL.
+                if name not in entry_to_original_terms:
+                    continue
                 if name not in existing:
                     matched_from = entry_to_original_terms.get(name, [])
                     if matched_from:
@@ -1054,6 +1063,10 @@ def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
     if relevant_kg:
         existing = _parse_kg_entries(session.cumulative_grounded_kg)
         for name, text in _parse_kg_entries(relevant_kg).items():
+            # Skip descendants injected alongside a matched parent — see the matching
+            # comment in should_clarify() above for why these are excluded here.
+            if name not in entry_to_original_terms:
+                continue
             if name not in existing:
                 matched_from = entry_to_original_terms.get(name, [])
                 if matched_from:

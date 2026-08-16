@@ -24,7 +24,7 @@ Design Decisions:
 
 import logging
 from typing import Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
@@ -65,6 +65,14 @@ class IntentValidationModel(BaseModel):
             "do NOT add explanatory text like 'no aggregation issues'."
         ),
     )
+
+    @field_validator("join_issues", "aggregation_issues", mode="before")
+    @classmethod
+    def _empty_string_means_no_issues(cls, v: Any) -> Any:
+        """The model sometimes reports "no issues" as "" instead of [] — treat it as empty."""
+        if v == "":
+            return []
+        return v
 
 
 class IntentValidationAgent(BaseAgent):

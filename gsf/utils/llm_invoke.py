@@ -14,11 +14,33 @@ from typing import Type, TypeVar
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from gsf.utils.model_config import resolve
 
 logger = logging.getLogger(__name__)
+
+
+class StrictLLMOutputModel(BaseModel):
+    """Base for LLM structured-output schemas.
+
+    Forbids genuine hallucinated fields (``extra="forbid"``) but first strips any
+    key starting with ``$`` — some models leak tool-calling metadata (e.g. a stray
+    ``$FUNCTION_NAME`` field echoing the tool name) into the arguments payload,
+    which would otherwise fail validation and burn all retry attempts even though
+    the real data is fine. Opt a schema into this by inheriting from it instead of
+    ``BaseModel``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_provider_artifact_keys(cls, data):
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if not k.startswith("$")}
+        return data
+
 
 RETRY_MAX_ATTEMPTS = 3
 LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
