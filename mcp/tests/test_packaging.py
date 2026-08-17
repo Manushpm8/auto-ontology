@@ -13,10 +13,12 @@ import pytest
 
 import gsf_mcp
 from gsf_mcp.config import DEFAULT_SPEC_PATH
+from gsf_mcp.server import ICON_PATH
 
 _PACKAGE_DIR = Path(gsf_mcp.__file__).resolve().parent
 _PROJECT_DIR = _PACKAGE_DIR.parent
 _CANONICAL_SPEC = _PROJECT_DIR.parent / "docs" / "openapi" / "gsf-api.json"
+_CANONICAL_MARK = _PROJECT_DIR.parent / "frontend" / "public" / "favicon.svg"
 
 
 def _pyproject() -> dict:
@@ -39,6 +41,31 @@ def test_packaged_spec_matches_the_canonical_one() -> None:
         "The packaged spec drifted from docs/openapi/gsf-api.json. "
         "Run `pnpm openapi` and commit both files."
     )
+
+
+def test_icon_ships_inside_the_package() -> None:
+    assert ICON_PATH.is_file()
+    assert ICON_PATH.parent == _PACKAGE_DIR
+
+
+def test_icon_matches_the_frontend_favicon() -> None:
+    # Same mark the product shows, so the two cannot drift into different logos.
+    if not _CANONICAL_MARK.is_file():
+        pytest.skip("installed outside the repo; nothing to compare against")
+
+    assert ICON_PATH.read_bytes() == _CANONICAL_MARK.read_bytes(), (
+        "The packaged icon drifted from frontend/public/favicon.svg."
+    )
+
+
+def test_both_assets_are_forced_into_the_wheel() -> None:
+    # Neither is a .py file, so hatchling only carries them if named here. The
+    # failure is nasty: the wheel builds and installs, then reads from disk at
+    # startup and finds nothing.
+    forced = _pyproject()["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+
+    assert "gsf_mcp/gsf-api.json" in forced
+    assert "gsf_mcp/nvidia-mark.svg" in forced
 
 
 def test_console_script_is_declared() -> None:

@@ -38,6 +38,7 @@ packages = ["gsf_mcp"]
 # `pnpm openapi`, which writes both copies, and enforced by CI.
 [tool.hatch.build.targets.wheel.force-include]
 "gsf_mcp/gsf-api.json" = "gsf_mcp/gsf-api.json"
+"gsf_mcp/nvidia-mark.svg" = "gsf_mcp/nvidia-mark.svg"
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"

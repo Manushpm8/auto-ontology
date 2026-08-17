@@ -107,11 +107,14 @@ jobs:
               try:
                   async with Client(mcp) as session:
                       names = {t.name for t in await session.list_tools()}
+                      icons = session.initialize_result.serverInfo.icons or []
               finally:
                   await client.aclose()
               assert "ask_data" in names, names
               assert len(names) == 14, sorted(names)
-              print(f"ok: {len(names)} tools from an installed wheel")
+              # The icon is read from disk too, so it fails the same way.
+              assert icons, "the wheel did not carry the icon"
+              print(f"ok: {len(names)} tools and an icon from an installed wheel")
 
           asyncio.run(main())
           PY

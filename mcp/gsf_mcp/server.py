@@ -6,14 +6,17 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 import httpx
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_headers
+from mcp.types import Icon
 
 from gsf_mcp import chat
 from gsf_mcp.config import ConfigError, Settings
@@ -28,6 +31,12 @@ from gsf_mcp import get_version
 logger = logging.getLogger(__name__)
 
 SERVER_NAME = "gsf"
+
+# Shipped in the package and inlined as a data URI rather than linked, so it
+# needs no network and no reachable GSF to display — a client may well draw its
+# server list before anything is connected.
+ICON_PATH = Path(__file__).resolve().parent / "nvidia-mark.svg"
+ICON_MIME_TYPE = "image/svg+xml"
 
 # Advertised to the host at initialize. Tool descriptions say what each tool
 # does; this says how they fit together, which is the part a model otherwise
@@ -84,6 +93,28 @@ def load_spec(settings: Settings) -> dict[str, Any]:
             + ". Regenerate the spec, or update gsf_mcp/tools.py to match."
         )
     return spec
+
+
+def load_icons() -> list[Icon]:
+    """The NVIDIA mark, for clients that show an icon beside each server.
+
+    Purely cosmetic, so a missing or unreadable file degrades to no icon rather
+    than stopping a working server from starting.
+
+    ``sizes`` is left unset deliberately: it is optional, an SVG has no natural
+    pixel size, and clients have historically disagreed about whether the field
+    is a string or a list.
+    """
+    try:
+        svg = ICON_PATH.read_bytes()
+    except OSError as exc:
+        logger.warning("No icon at %s (%s); serving without one.", ICON_PATH, exc)
+        return []
+
+    encoded = base64.b64encode(svg).decode("ascii")
+    return [
+        Icon(src=f"data:{ICON_MIME_TYPE};base64,{encoded}", mimeType=ICON_MIME_TYPE)
+    ]
 
 
 API_KEY_HEADER = "x-api-key"
@@ -195,6 +226,7 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
         # anyone looking at the client's server list.
         instructions=INSTRUCTIONS,
         version=get_version(),
+        icons=load_icons(),
     )
 
     chat.register(mcp, settings, client)
@@ -222,10 +254,12 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
 __all__ = [
     "API_KEY_HEADER",
     "BEARER_HEADER",
+    "ICON_PATH",
     "INSTRUCTIONS",
     "SERVER_NAME",
     "CallerAuth",
     "build_client",
     "build_server",
+    "load_icons",
     "load_spec",
 ]

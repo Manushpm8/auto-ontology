@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from pathlib import Path
 from typing import Any
@@ -18,12 +19,15 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.http import set_http_request
 from starlette.requests import Request
 
+from gsf_mcp import server
 from gsf_mcp.config import DEFAULT_SPEC_PATH, ConfigError, Settings
 from gsf_mcp.server import (
+    ICON_PATH,
     INSTRUCTIONS,
     CallerAuth,
     build_client,
     build_server,
+    load_icons,
     load_spec,
 )
 from gsf_mcp.tools import CURATED
@@ -103,6 +107,39 @@ def test_handshake_advertises_the_gsf_version() -> None:
 
     assert info.name == "gsf"
     assert info.version == get_version()
+
+
+def test_handshake_advertises_the_icon() -> None:
+    mcp, client = build_server(_settings())
+
+    async def run() -> Any:
+        try:
+            async with Client(mcp) as session:
+                return session.initialize_result.serverInfo
+        finally:
+            await client.aclose()
+
+    icons = asyncio.run(run()).icons or []
+
+    assert len(icons) == 1
+    assert icons[0].mimeType == "image/svg+xml"
+    # Inline, so a client can draw it without reaching the network or GSF.
+    assert icons[0].src.startswith("data:image/svg+xml;base64,")
+
+
+def test_the_icon_decodes_back_to_the_svg() -> None:
+    src = load_icons()[0].src
+    payload = base64.b64decode(src.removeprefix("data:image/svg+xml;base64,"))
+
+    assert payload == ICON_PATH.read_bytes()
+    assert payload.startswith(b"<svg")
+
+
+def test_a_missing_icon_does_not_stop_the_server(monkeypatch: Any) -> None:
+    # Cosmetic, so it must never be the reason a working server fails to start.
+    monkeypatch.setattr(server, "ICON_PATH", Path("/nonexistent/nvidia-mark.svg"))
+
+    assert load_icons() == []
 
 
 def test_instructions_point_at_the_primary_tool() -> None:
