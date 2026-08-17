@@ -86,9 +86,31 @@ def _qualify_from_clauses(sql: str, table_names: dict[str, str] | None) -> str:
 
 _PQL_FENCE = re.compile(r"```pql\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _GENERIC_FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
-_PREDICT_START = re.compile(r"\bPREDICT\b", re.IGNORECASE)
+
+_IDENT = r"(?:`[^`\r\n]+`|[A-Za-z_]\w*)"
+
+
+def unquote_name(name: str) -> str:
+    """Strips the backticks a quoted PQL name carries."""
+    if len(name) >= 2 and name.startswith("`") and name.endswith("`"):
+        return name[1:-1]
+    return name
+
+
+def quote_name(name: str) -> str:
+    """Quotes a name only when PQL's bare identifier cannot spell it."""
+    if name == "*" or re.fullmatch(r"[A-Za-z_]\w*", name):
+        return name
+    return f"`{name}`"
+
+
+_PREDICT_LINE_START = re.compile(r"(?im)^[ \t]*PREDICT\b")
+_QUALIFIED_IDENTIFIER = re.compile(rf"(?P<table>{_IDENT})\.(?P<column>{_IDENT})")
+_GRAPH_TABLE_LINE = re.compile(
+    rf"(?m)^(?P<table>{_IDENT}|[^(\r\n]+?)\((?P<columns>[^()]*)\)(?:\s+--.*)?$"
+)
 _FOR_ENTITY = re.compile(
-    r"\bFOR\s+(?P<each>EACH\s+)?(?P<table>[A-Za-z_][\w]*)\.(?P<pk>[A-Za-z_][\w]*)",
+    rf"\bFOR\s+(?P<each>EACH\s+)?(?P<table>{_IDENT})\.(?P<pk>{_IDENT})",
     re.IGNORECASE,
 )
 _LIST_DISTINCT = re.compile(r"\bLIST_DISTINCT\b", re.IGNORECASE)
@@ -101,7 +123,7 @@ _CHANGE_COL_MARKER = re.compile(
     r"(?:^|_)(?:change|delta|qoq|mom|yoy)(?:_|$)", re.IGNORECASE
 )
 _WINDOWED_AGG_TARGET = re.compile(
-    r"\b(SUM|AVG|MIN|MAX)\s*\(\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)"
+    rf"\b(SUM|AVG|MIN|MAX)\s*\(\s*({_IDENT})\s*\.\s*({_IDENT})"
     r"\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*([A-Za-z]+)\s*\)",
     re.IGNORECASE,
 )
@@ -121,12 +143,10 @@ _PQL_BANNED_TIME_FUNCS = re.compile(
 _RANK_TOP = re.compile(r"\bRANK\s+TOP\b", re.IGNORECASE)
 _FOR_EACH_KW = re.compile(r"\bFOR\s+EACH\b", re.IGNORECASE)
 _AGG_OPEN = re.compile(r"\b(COUNT|SUM|AVG|MIN|MAX|LIST_DISTINCT)\s*\(", re.IGNORECASE)
-_TABLE_COL = re.compile(r"\b([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*|\*)")
+_TABLE_COL = re.compile(rf"({_IDENT})\s*\.\s*({_IDENT}|\*)")
 # The trailing ``, <start>, <end>, <unit>`` window args inside an aggregation (e.g. ``, 0, 90, days``).
 _WINDOW_TAIL = re.compile(r",\s*-?\d+\s*,\s*-?\d+\s*,\s*[A-Za-z]+\s*$")
-_REL_COMPARISON = re.compile(
-    r"\b([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*(>=|<=|>|<(?!>))"
-)
+_REL_COMPARISON = re.compile(rf"({_IDENT})\s*\.\s*({_IDENT})\s*(>=|<=|>|<(?!>))")
 _NON_ORDINAL_STYPES = frozenset({"categorical", "multicategorical", "ID", "text"})
 
 
@@ -152,6 +172,9 @@ def _aggregation_clauses(pql: str) -> list[tuple[str, str | None]]:
 
     The inner WHERE is the part of the aggregation body after ``WHERE`` and before the trailing window args;
     the FOR-EACH entity filter lives outside the parens and is intentionally not returned here.
+
+    The table name comes back unquoted, matching what ``parse_entity`` and the graph edges carry: a name
+    PQL has to backtick (one containing a space) would otherwise never compare equal to either.
     """
     clauses: list[tuple[str, str | None]] = []
     for match in _AGG_OPEN.finditer(pql):
@@ -162,7 +185,7 @@ def _aggregation_clauses(pql: str) -> list[tuple[str, str | None]]:
         if not table_match:
             continue
         where_clause = parts[1] if len(parts) > 1 else None
-        clauses.append((table_match.group(1), where_clause))
+        clauses.append((unquote_name(table_match.group(1)), where_clause))
     return clauses
 
 
@@ -222,7 +245,7 @@ def validate_pql_static(
         if not where_clause:
             continue
         for tbl, _col in _TABLE_COL.findall(where_clause):
-            if tbl.lower() != agg_table.lower():
+            if unquote_name(tbl).lower() != agg_table.lower():
                 raise PqlStaticError(
                     f"The WHERE inside the {agg_table} aggregation can only filter columns of '{agg_table}' "
                     f"(the aggregated event table); it references '{tbl}', which PQL cannot express as a "
@@ -261,7 +284,9 @@ def validate_pql_static(
 
     if col_stypes:
         for tbl, col, op in _REL_COMPARISON.findall(text):
-            stype = col_stypes.get(tbl.lower(), {}).get(col.lower())
+            stype = col_stypes.get(unquote_name(tbl).lower(), {}).get(
+                unquote_name(col).lower()
+            )
             if stype in _NON_ORDINAL_STYPES:
                 raise PqlStaticError(
                     f"'{tbl}.{col}' is a {stype} column and cannot be compared with '{op}'. Compare a "
@@ -312,7 +337,9 @@ def _is_forecast(pql: str) -> bool:
     return re.search(r"\bFORECAST\b", pql, re.IGNORECASE) is not None
 
 
-_EXISTENCE_COUNT = re.compile(r"PREDICT\s+COUNT\s*\(\s*\w+\s*\.\s*\*", re.IGNORECASE)
+_EXISTENCE_COUNT = re.compile(
+    rf"PREDICT\s+COUNT\s*\(\s*{_IDENT}\s*\.\s*\*", re.IGNORECASE
+)
 
 
 def _is_existence_count_pql(pql: str) -> bool:
@@ -499,11 +526,20 @@ _TRANSIENT_EXEC_MARKERS = (
 # DETERMINISTIC (same query -> same oversize context), so it steps straight down to a smaller neighbourhood
 # rather than re-hitting the same wall 3 times (see _retry_at_full_neighbourhood). Shrinking the
 # neighbourhood is the last resort to salvage *a* prediction when full settings cannot complete.
+#
+# The SDK's per-table row cap ("... contains 32,000 rows, exceeding the 10,000-row limit",
+# kumorfm.rfm.payload.MAX_TABLE_ROWS) is the same kind of DETERMINISTIC rejection: it is raised
+# client-side while serializing the request, before anything is sent, and the row count is a direct
+# product of the neighbourhood (FAST samples 1,000 context anchors x 32 first-hop neighbours = 32,000
+# rows in one related table), so only a smaller neighbourhood clears it. Without this marker the
+# rejection escapes _predict_resilient into the regenerate loop, which burns the whole PQL repair
+# budget rewriting a query that was never the problem.
 _CONTEXT_CAPACITY_MARKERS = (
     "cuda",
     "illegal memory access",
     "out of memory",
     "context size exceeds",
+    "-row limit",
 )
 
 # A parse error at PREDICT time is spurious: the query already passed validate_pql (the cheap parse) moments
@@ -532,10 +568,12 @@ def _is_context_capacity_error(message: str) -> bool:
 
 
 def _is_context_size_limit_error(message: str) -> bool:
-    """True for the DETERMINISTIC 'context size exceeds the limit' rejection. The SDK builds the context,
-    measures it, and rejects it for being over the ceiling, so the identical query yields the identical
-    oversize context every time — retrying the same neighbourhood cannot help, only a smaller one can."""
-    return "context size exceeds" in message.lower()
+    """True for the DETERMINISTIC context-too-big rejections: the total 'context size exceeds the limit'
+    and the SDK's per-table '...-row limit'. In both the SDK builds the context, measures it, and rejects it
+    for being over a ceiling, so the identical query yields the identical oversize context every time —
+    retrying the same neighbourhood cannot help, only a smaller one can."""
+    lowered = message.lower()
+    return "context size exceeds" in lowered or "-row limit" in lowered
 
 
 # Markers for a TERMINAL backend failure: the generated *shape* is not serveable for this dataset, so neither
@@ -566,6 +604,16 @@ def _friendly_empty_context_message() -> str:
         "KumoRFM found no entity matching the prediction's filter, so it could not gather any context "
         "examples. The WHERE clause likely references an id that does not exist (or a placeholder). Pass a "
         "real entity id taken from a prediction ranking or an rfm__sql_query result, not a placeholder."
+    )
+
+
+def _friendly_backend_unavailable_message() -> str:
+    """User-facing explanation for a KumoRFM backend failure on a query that is itself valid."""
+    return (
+        "The KumoRFM prediction service returned an internal error, so the prediction could "
+        "not be computed. The query itself was accepted and validated — this is a backend "
+        "fault, not a problem with the question. Please retry; if it persists, the KumoRFM "
+        "deployment (KUMO_RFM_API_URL) needs attention."
     )
 
 
@@ -713,10 +761,35 @@ _CONTEXT_BACKOFF_NEIGHBORS: tuple[list[int] | None, ...] = (
 )
 
 
+class _NeighbourhoodMemo:
+    """Remembers ladder rungs already proven too big for the graph in THIS run.
+
+    The SDK's size rejections (total context size and the per-table row cap) are
+    DETERMINISTIC given the graph and the neighbourhood, and the row count is driven by
+    anchors x neighbours rather than by the query text — so a rung that overflowed on one
+    PQL attempt overflows on the next one too. Without this memo every regenerate attempt
+    re-walks the ladder from full and re-pays the identical rejected serializations
+    (observed: 3 wasted rejections per attempt across 5 attempts on a 3.7M-row table).
+
+    Only the deterministic size errors raise the floor. Intermittent CUDA/OOM faults must
+    NOT — the same full-neighbourhood request often succeeds on retry, and the design is
+    accuracy-first, so those keep starting from the top.
+    """
+
+    __slots__ = ("floor",)
+
+    def __init__(self) -> None:
+        self.floor = 0
+
+    def note_too_big(self, index: int) -> None:
+        self.floor = max(self.floor, index + 1)
+
+
 def _predict_resilient(
     predict_fn: Callable[[list[int] | None], Any],
     *,
     device_assert_terminal: bool = True,
+    memo: "_NeighbourhoodMemo | None" = None,
 ) -> Any:
     """Run ``predict_fn(num_neighbors)`` accuracy-first.
 
@@ -737,8 +810,21 @@ def _predict_resilient(
         return _retry_at_full_neighbourhood(message)
 
     last_exc: Exception | None = None
-    for num_neighbors in _CONTEXT_BACKOFF_NEIGHBORS:
-        retries = _FULL_NEIGHBORHOOD_RETRIES if num_neighbors is None else 0
+    # Skip rungs a previous attempt in this run already proved too big (see _NeighbourhoodMemo).
+    # Never skip the whole ladder: the last rung is always tried, so a wrong memo costs accuracy
+    # rather than the result.
+    start = min(memo.floor, len(_CONTEXT_BACKOFF_NEIGHBORS) - 1) if memo else 0
+    if start:
+        logger.info(
+            "Starting at neighbourhood %s — larger ones already overflowed this run.",
+            _CONTEXT_BACKOFF_NEIGHBORS[start],
+        )
+    for index in range(start, len(_CONTEXT_BACKOFF_NEIGHBORS)):
+        num_neighbors = _CONTEXT_BACKOFF_NEIGHBORS[index]
+        # Retry hard at the FIRST rung actually used, not merely at the full one: when the memo
+        # starts the ladder lower, that rung is now the accuracy-preserving choice and deserves
+        # the same protection against a single transient hiccup.
+        retries = _FULL_NEIGHBORHOOD_RETRIES if index == start else 0
         try:
             return _predict_with_retry(
                 lambda nn=num_neighbors: predict_fn(nn),
@@ -752,6 +838,8 @@ def _predict_resilient(
                 raise
             if not (assert_err or _is_context_capacity_error(str(exc))):
                 raise
+            if memo is not None and _is_context_size_limit_error(str(exc)):
+                memo.note_too_big(index)
             if num_neighbors is None:
                 logger.warning(
                     "Full neighbourhood hit a KumoRFM capacity/assert error; falling back to a smaller "
@@ -778,6 +866,7 @@ def _predict_in_batches(
     predict_call: Callable[[list[Any] | None, list[int] | None], Any],
     *,
     device_assert_terminal: bool = True,
+    memo: "_NeighbourhoodMemo | None" = None,
 ) -> Any:
     """Run the resilient predict over ``indices`` in ordered chunks of at most ``_PREDICT_BATCH_SIZE``.
 
@@ -792,6 +881,7 @@ def _predict_in_batches(
         return _predict_resilient(
             lambda nn: predict_call(indices, nn),
             device_assert_terminal=device_assert_terminal,
+            memo=memo,
         )
     import pandas as pd
 
@@ -802,6 +892,7 @@ def _predict_in_batches(
             _predict_resilient(
                 lambda nn, c=chunk: predict_call(c, nn),
                 device_assert_terminal=device_assert_terminal,
+                memo=memo,
             )
         )
     return pd.concat(frames, ignore_index=True)
@@ -847,16 +938,62 @@ def _explain_resilient(explain_fn: Callable[[list[int] | None], Any]) -> Any:
 
 
 def extract_pql(text: str) -> str:
-    """Pull the PQL out of a model response (```pql fence, [PQL] tag, or first PREDICT...)."""
+    """Pull a PQL statement from a model response.
+
+    An unfenced response must put ``PREDICT`` at the start of a line. This
+    avoids treating prose such as "we need to predict ..." as executable PQL.
+    PQL is a single statement, so only that line is accepted when no explicit
+    fence/tag bounds it.
+    """
     match = _PQL_FENCE.search(text)
     if match and match.group(1).strip():
         candidate = match.group(1)
+        bounded = True
     else:
         tag = re.search(r"\[PQL\](.*?)\[/PQL\]", text, re.DOTALL | re.IGNORECASE)
         candidate = tag.group(1) if tag else text
-    start = _PREDICT_START.search(candidate)
-    pql = candidate[start.start() :] if start else candidate
+        bounded = tag is not None
+    start = _PREDICT_LINE_START.search(candidate)
+    if start is None:
+        return ""
+    pql = candidate[start.start() :]
+    if not bounded:
+        pql = pql.splitlines()[0]
     return pql.strip().rstrip(";").strip()
+
+
+def canonicalize_pql_identifiers(pql: str, graph_ddl: str) -> str:
+    """Match qualified PQL identifiers to the graph's exact casing.
+
+    Snowflake commonly reports uppercase identifiers while PostgreSQL and
+    Databricks commonly report lowercase identifiers. KumoRFM's parser is
+    case-sensitive, so generated identifiers are rewritten using graph metadata
+    instead of connector-specific assumptions.
+    """
+    tables: dict[str, tuple[str, dict[str, str]]] = {}
+    for match in _GRAPH_TABLE_LINE.finditer(graph_ddl):
+        table = unquote_name(match.group("table"))
+        columns: dict[str, str] = {}
+        for definition in match.group("columns").split(","):
+            parts = definition.strip().rsplit(maxsplit=1)
+            if parts:
+                # The DDL quotes a name PQL cannot spell bare, and the lookup is by
+                # the name itself: keyed with the backticks still on, a quoted column
+                # would never match and would keep whatever casing the model guessed.
+                column = unquote_name(parts[0])
+                columns[column.casefold()] = column
+        tables[table.casefold()] = (table, columns)
+
+    def replace(match: re.Match[str]) -> str:
+        entry = tables.get(unquote_name(match.group("table")).casefold())
+        if entry is None:
+            return match.group(0)
+        table, columns = entry
+        raw_column = unquote_name(match.group("column"))
+        column = columns.get(raw_column.casefold(), raw_column)
+        return f"{quote_name(table)}.{quote_name(column)}"
+
+    return _QUALIFIED_IDENTIFIER.sub(replace, pql)
 
 
 def extract_entity_sql(text: str) -> str | None:
@@ -875,7 +1012,9 @@ def extract_entity_sql(text: str) -> str | None:
 def parse_entity(pql: str) -> tuple[str, str] | None:
     """Parse the entity from population and single-entity PQL ``FOR`` clauses."""
     match = _FOR_ENTITY.search(pql)
-    return (match.group("table"), match.group("pk")) if match else None
+    if match is None:
+        return None
+    return (unquote_name(match.group("table")), unquote_name(match.group("pk")))
 
 
 def _metric_stem(column: str) -> str:
@@ -963,11 +1102,14 @@ def prefer_explicit_change_targets(
     def repl(match: re.Match[str]) -> str:
         agg, table, column, start, end, unit = match.groups()
         replacement = _explicit_change_candidate(
-            table, column, col_stypes=col_stypes, schema_text=schema_text
+            unquote_name(table),
+            unquote_name(column),
+            col_stypes=col_stypes,
+            schema_text=schema_text,
         )
         if not replacement:
             return match.group(0)
-        return f"{agg}({table}.{replacement}, {start}, {end}, {unit})"
+        return f"{agg}({table}.{quote_name(replacement)}, {start}, {end}, {unit})"
 
     return _WINDOWED_AGG_TARGET.sub(repl, pql)
 
@@ -978,17 +1120,30 @@ def _resolve_indices(
     connector: SQLDatabase,
     max_entities: int,
     table_names: dict[str, str] | None = None,
+    available_entity_ids: dict[str, list[Any]] | None = None,
 ) -> list[Any]:
-    """Resolve the entity-id list to score: from ``entity_sql`` if given, else all PKs of the entity table.
+    """Resolve entity IDs, constrained to rows loaded into the Kumo graph.
 
-    Both paths go through the connector's ``execute`` seam, capped at ``max_entities``.
-    Bare graph table names are schema-qualified via ``table_names`` so the SQL
-    resolves against the live database.
+    An explicit entity-selection query is still executed against the source,
+    then intersected with graph IDs. Without a filter, graph IDs are used
+    directly instead of issuing a second nondeterministic ``LIMIT`` query whose
+    rows may differ from the graph sample.
     """
+    entity = parse_entity(pql)
+    available = (
+        available_entity_ids.get(entity[0].casefold())
+        if available_entity_ids and entity
+        else None
+    )
     if entity_sql:
         df = connector.execute(_qualify_from_clauses(entity_sql, table_names))
+        ids = df.iloc[:, 0].dropna().tolist() if not df.empty else []
+        if available is not None:
+            allowed = set(available)
+            ids = [value for value in ids if value in allowed]
+    elif available is not None:
+        ids = available
     else:
-        entity = parse_entity(pql)
         if entity is None:
             return []
         table, pk = entity
@@ -996,9 +1151,7 @@ def _resolve_indices(
             f"SELECT DISTINCT {quote_ident(pk)} FROM {_sql_table(table, table_names)} "
             f"WHERE {quote_ident(pk)} IS NOT NULL LIMIT {int(max_entities)}"
         )
-    if df.empty:
-        return []
-    ids = df.iloc[:, 0].dropna().tolist()
+        ids = df.iloc[:, 0].dropna().tolist() if not df.empty else []
     if len(ids) > max_entities:
         logger.info("Capping entities from %d to %d.", len(ids), max_entities)
         ids = ids[:max_entities]
@@ -1039,7 +1192,7 @@ def _persist_full_prediction(
 
 
 _ANCHOR_TABLE_RE = re.compile(
-    r"(?:SUM|COUNT|AVG|MIN|MAX|FIRST|LAST|LIST_DISTINCT)\s*\(\s*([A-Za-z_]\w*)\.",
+    rf"(?:SUM|COUNT|AVG|MIN|MAX|FIRST|LAST|LIST_DISTINCT)\s*\(\s*({_IDENT})\.",
     re.IGNORECASE,
 )
 _ANCHOR_WINDOW_RE = re.compile(
@@ -1081,7 +1234,8 @@ def _forecast_anchor(
     wm = _ANCHOR_WINDOW_RE.search(pql or "")
     if not tm or not wm:
         return None
-    time_col = time_columns.get(tm.group(1))
+    anchor_table = unquote_name(tm.group(1))
+    time_col = time_columns.get(anchor_table)
     if not time_col:
         return None
     horizon_days = int(wm.group(1)) * _ANCHOR_UNIT_DAYS[wm.group(2).lower()]
@@ -1090,7 +1244,7 @@ def _forecast_anchor(
 
         df = connector.execute(
             f"SELECT MAX({quote_ident(time_col)}) AS m "
-            f"FROM {_sql_table(tm.group(1), table_names)}"
+            f"FROM {_sql_table(anchor_table, table_names)}"
         )
         data_max = (
             pd.Timestamp(df.iloc[0, 0])
@@ -1115,6 +1269,7 @@ def _resolve_single_index(
     entity: str | None,
     connector: SQLDatabase,
     table_names: dict[str, str] | None = None,
+    available_entity_ids: dict[str, list[Any]] | None = None,
 ) -> list[Any]:
     """Resolve one entity-id (the PK value to explain) to its correctly-typed value via the read-only guard.
 
@@ -1124,6 +1279,11 @@ def _resolve_single_index(
     if parsed is None or entity is None:
         return []
     table, pk = parsed
+    if available_entity_ids:
+        for value in available_entity_ids.get(table.casefold(), []):
+            if str(value) == str(entity):
+                return [value]
+        return []
     safe = str(entity).replace("'", "''")
     string_type = "VARCHAR"
     df = connector.execute(
@@ -1166,8 +1326,8 @@ def _scope_explain_entity(pql: str, entity: str) -> str:
 
 
 _GENERIC_ENTITY_FILTER_RE = re.compile(
-    r"(?P<head>\bFOR\s+EACH\s+(?P<table>[A-Za-z_]\w*)\.(?P<pk>[A-Za-z_]\w*))"
-    r"\s+WHERE\s+(?P=table)\.(?P<column>[A-Za-z_]\w*)\s*=\s*'(?P<value>[^']+)'"
+    rf"(?P<head>\bFOR\s+EACH\s+(?P<table>{_IDENT})\.(?P<pk>{_IDENT}))"
+    rf"\s+WHERE\s+(?P=table)\.(?P<column>{_IDENT})\s*=\s*'(?P<value>[^']+)'"
     r"(?P<tail>\s*(?:ASSUMING\b.*)?$)",
     re.IGNORECASE,
 )
@@ -1234,104 +1394,6 @@ def predict_all(
     return _rank_prediction(raw)
 
 
-def generate_pql_only(
-    question: str,
-    *,
-    llm: BaseChatModel,
-    kumo_model: PqlValidatorModel,
-    connector: SQLDatabase,
-    graph_ddl: str,
-    graph_edges: list[tuple[str, str, str]] | None = None,
-    graph_col_stypes: dict[str, dict[str, str]] | None = None,
-    column_reference: str = "",
-    examples: list[dict[str, str]] | None = None,
-    max_tries: int = 3,
-    escalation_llm: BaseChatModel | None = None,
-) -> PqlGenerationResult:
-    """Generate and validate a PQL for ``question`` WITHOUT predicting.
-
-    The generation half of :func:`generate_pql`: the LLM writes the PQL (and optional
-    entity-selection SQL), it is normalized (change-target rewrite, generic-filter strip)
-    and validated cheaply (``validate_pql_static`` + ``kumo_model.validate_pql``). A
-    validation error is fed back as the repair signal for the next attempt, up to
-    ``max_tries``. KumoRFM inference (``predict``) is never called, so no entity scoping
-    or graph upload happens — this is for callers that only want the PQL text for a
-    question. Returns a :class:`PqlGenerationResult` whose ``pql``/``entity_sql`` are set
-    and ``success`` is True once a query passes validation (``error`` holds the last
-    validation failure otherwise).
-    """
-    examples = examples or []
-    docs: list[str] = []
-
-    result = PqlGenerationResult(question=question)
-    prev_pql: str | None = None
-    prev_error: str | None = None
-
-    try:
-        dialect = getattr(connector, "dialect", None)
-    except Exception:  # noqa: BLE001 - dialect is a property; never fail generation over it
-        dialect = None
-
-    for attempt in range(1, max_tries + 1):
-        active_llm = (
-            escalation_llm
-            if (escalation_llm is not None and attempt == max_tries)
-            else llm
-        )
-        prompt = build_pql_prompt(
-            graph_ddl=graph_ddl,
-            columns=column_reference,
-            docs=docs,
-            examples=examples,
-            question=question,
-            explain_entity=None,
-            prev_pql=prev_pql,
-            prev_error=prev_error,
-            dialect=dialect,
-        )
-        result.attempts = attempt
-        try:
-            raw = invoke_text(active_llm, prompt)
-        except Exception as exc:  # noqa: BLE001 - LLM/gateway failure: record and retry
-            prev_error = str(exc)
-            result.error = prev_error
-            logger.info(
-                "PQL-only attempt %d/%d: LLM generation failed: %s",
-                attempt,
-                max_tries,
-                prev_error[:160],
-            )
-            continue
-        pql = extract_pql(raw)
-        pql = prefer_explicit_change_targets(
-            pql,
-            question,
-            col_stypes=graph_col_stypes,
-            schema_text="\n".join([graph_ddl, column_reference, *docs]),
-        )
-        pql = _strip_unasked_generic_entity_filter(pql, question)
-        result.pql = pql
-        result.entity_sql = extract_entity_sql(raw)
-        try:
-            validate_pql_static(pql, edges=graph_edges, col_stypes=graph_col_stypes)
-            kumo_model.validate_pql(pql)
-        except Exception as exc:  # noqa: BLE001 - error feeds the repair loop
-            prev_pql, prev_error = pql, str(exc)
-            result.error = prev_error
-            logger.info(
-                "PQL-only attempt %d/%d failed validation: %s",
-                attempt,
-                max_tries,
-                prev_error[:160],
-            )
-            continue
-        result.success = True
-        result.error = None
-        return result
-
-    return result
-
-
 def generate_pql(
     question: str,
     *,
@@ -1358,6 +1420,7 @@ def generate_pql(
     persist_lock: Any = None,
     time_columns: dict[str, str | None] | None = None,
     table_names: dict[str, str] | None = None,
+    available_entity_ids: dict[str, list[Any]] | None = None,
     examples: list[dict[str, str]] | None = None,
 ) -> PqlGenerationResult:
     """Generate a PQL, validate it cheaply against the graph, scope entities, and predict (with repair).
@@ -1374,6 +1437,9 @@ def generate_pql(
     result = PqlGenerationResult(question=question)
     prev_pql: str | None = None
     prev_error: str | None = None
+    # Shared across every attempt of this run so the backoff ladder is not re-walked from
+    # the full neighbourhood each time (see _NeighbourhoodMemo).
+    neighbourhood_memo = _NeighbourhoodMemo()
 
     # Snowflake stores unquoted identifiers uppercase (so the graph tables are
     # uppercase); tell the LLM to match that case in the PQL.
@@ -1413,6 +1479,20 @@ def generate_pql(
             )
             continue
         pql = extract_pql(raw)
+        if not pql:
+            prev_error = (
+                "The response did not contain a PQL statement beginning with "
+                "PREDICT on its own line."
+            )
+            result.error = prev_error
+            logger.info(
+                "PQL attempt %d/%d failed: %s",
+                attempt,
+                max_tries,
+                prev_error,
+            )
+            continue
+        pql = canonicalize_pql_identifiers(pql, graph_ddl)
         pql = prefer_explicit_change_targets(
             pql,
             question,
@@ -1435,7 +1515,11 @@ def generate_pql(
             kumo_model.validate_pql(pql)
             if explain:
                 indices = _resolve_single_index(
-                    pql, explain_entity, connector, table_names
+                    pql,
+                    explain_entity,
+                    connector,
+                    table_names,
+                    available_entity_ids,
                 )
                 if not indices:
                     raise ValueError(
@@ -1497,7 +1581,12 @@ def generate_pql(
                         )
                     result.entity_sql = None
                 indices = _resolve_indices(
-                    pql, scope_sql, connector, entity_cap, table_names
+                    pql,
+                    scope_sql,
+                    connector,
+                    entity_cap,
+                    table_names,
+                    available_entity_ids,
                 )
                 if forecast:
                     if len(indices) > 1:
@@ -1534,6 +1623,7 @@ def generate_pql(
                     indices,
                     _predict_call,
                     device_assert_terminal=_is_existence_count_pql(pql),
+                    memo=neighbourhood_memo,
                 )
                 if group_by:
                     if forecast or _LIST_DISTINCT.search(pql):
@@ -1619,6 +1709,18 @@ def generate_pql(
                 result.error = _friendly_empty_context_message()
                 logger.info(
                     "Empty entity set (no context examples) on a valid query; not regenerating."
+                )
+                break
+            # The query passed both validators and the backend still failed (e.g. the NIM
+            # answering /v1/predictions with a bare HTTP 500). That is infrastructure, not the
+            # query: the predict path already retried it, and the LLM would only regenerate the
+            # same statement, so stop instead of burning every remaining attempt on a fault no
+            # rewrite can address.
+            if _is_transient_exec_error(prev_error):
+                result.error = _friendly_backend_unavailable_message()
+                logger.warning(
+                    "KumoRFM backend error on a valid query; not regenerating. Error: %s",
+                    prev_error[:200],
                 )
                 break
 

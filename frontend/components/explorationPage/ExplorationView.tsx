@@ -10,8 +10,13 @@ import type { Core } from 'cytoscape';
 
 import { explorationApi } from '@/api/exploration';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
-import { Icon, IconName } from '@/components/icons';
-import { SearchInput } from '@/components/SearchInput';
+import { SelectButton } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { SelectButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
+import { Icon, IconName } from '@/common/icons';
+import { SearchInput } from '@/common/SearchInput';
+import { Text } from '@/common/Text';
 import {
 	ColumnAttributesModal,
 	DataDetailsModal,
@@ -19,8 +24,8 @@ import {
 	RelationshipsModal,
 	SemanticRelationshipModal,
 	SqlAttributesModal,
-	type DataDetailsKind,
-} from '@/components/modal';
+	type DataDetailsType,
+} from '@/common/modal';
 import { TableType } from '@/enums/datasources';
 import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationGraph } from '@/types/exploration';
@@ -29,6 +34,7 @@ import { ViewToggle } from './graph/ViewToggle';
 import { ZoomControls } from './graph/ZoomControls';
 import { HoverNodeCard } from './HoverNodeCard';
 import { ActiveDataCard, buildDataGraph } from './ExplorationData';
+import { ExplorationLoader } from './ExplorationLoader';
 import { ActiveTermCard, buildSemanticGraph } from './ExplorationSemantic';
 
 const EMPTY_GRAPH: ExplorationGraph = { nodes: [], links: [] };
@@ -50,15 +56,13 @@ export const ExplorationView = () => {
 	const [semanticError, setSemanticError] = useState<string | null>(null);
 	const [dataError, setDataError] = useState<string | null>(null);
 	const [dataLoaded, setDataLoaded] = useState(false);
-	const [semanticNoZoneAccess, setSemanticNoZoneAccess] = useState(false);
-	const [dataNoZoneAccess, setDataNoZoneAccess] = useState(false);
 	const [search, setSearch] = useState('');
 	const [activeNodeId, setActiveNodeId] = useState<string | null>(activeNodeIdFromUrl);
 	const [hoveredNodePosition, setHoveredNodePosition] = useState<HoveredNode | null>(null);
 	const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
 	const [selectedSemanticEdgeId, setSelectedSemanticEdgeId] = useState<string | null>(null);
 	const [relationshipsNodeId, setRelationshipsNodeId] = useState<string | null>(null);
-	const [dataDetailsKind, setDataDetailsKind] = useState<DataDetailsKind | null>(null);
+	const [dataDetailsType, setDataDetailsType] = useState<DataDetailsType | null>(null);
 	const [columnAttributesNodeId, setColumnAttributesNodeId] = useState<string | null>(null);
 	const [sqlAttributesNodeId, setSqlAttributesNodeId] = useState<string | null>(null);
 	const [controller, setController] = useState<Core | null>(null);
@@ -80,7 +84,6 @@ export const ExplorationView = () => {
 			const nextGraph = buildSemanticGraph(response.data ?? { nodes: [], links: [] });
 			if (cancelled) return;
 			setSemanticGraph(nextGraph);
-			setSemanticNoZoneAccess(response.meta?.noZoneAccess ?? false);
 			setSemanticError(null);
 			setSemanticLoading(false);
 		};
@@ -106,7 +109,6 @@ export const ExplorationView = () => {
 				const nextGraph = buildDataGraph(response.data ?? { nodes: [], links: [] });
 				if (cancelled) return;
 				setDataGraph(nextGraph);
-				setDataNoZoneAccess(response.meta?.noZoneAccess ?? false);
 				setDataError(null);
 				setDataLoaded(true);
 			} catch (loadError) {
@@ -135,7 +137,7 @@ export const ExplorationView = () => {
 			setSelectedLinkId(null);
 			setSelectedSemanticEdgeId(null);
 			setRelationshipsNodeId(null);
-			setDataDetailsKind(null);
+			setDataDetailsType(null);
 			setColumnAttributesNodeId(null);
 			setSqlAttributesNodeId(null);
 			setActiveNodeId(nodeId);
@@ -167,7 +169,7 @@ export const ExplorationView = () => {
 		setSelectedLinkId(null);
 		setSelectedSemanticEdgeId(null);
 		setRelationshipsNodeId(null);
-		setDataDetailsKind(null);
+		setDataDetailsType(null);
 		setColumnAttributesNodeId(null);
 		setSqlAttributesNodeId(null);
 		router.replace(
@@ -186,8 +188,6 @@ export const ExplorationView = () => {
 	const graph = layer === ExplorationLayer.Semantic ? semanticGraph : dataGraph;
 	const loading = layer === ExplorationLayer.Semantic ? semanticLoading : dataLoading;
 	const error = layer === ExplorationLayer.Semantic ? semanticError : dataError;
-	const noZoneAccess =
-		layer === ExplorationLayer.Semantic ? semanticNoZoneAccess : dataNoZoneAccess;
 
 	const filteredNodes = useMemo(() => {
 		const query = search.trim().toLowerCase();
@@ -203,15 +203,7 @@ export const ExplorationView = () => {
 		() => graph.nodes.find((node) => node.id === relationshipsNodeId) ?? null,
 		[graph.nodes, relationshipsNodeId],
 	);
-	const relatedNodes = useMemo(() => {
-		if (relationshipsNodeId == null) return [];
-		const relatedIds = new Set<string>();
-		graph.links.forEach((link) => {
-			if (link.source === relationshipsNodeId) relatedIds.add(link.target);
-			if (link.target === relationshipsNodeId) relatedIds.add(link.source);
-		});
-		return graph.nodes.filter((node) => relatedIds.has(node.id));
-	}, [graph.links, graph.nodes, relationshipsNodeId]);
+	const graphNodeIds = useMemo(() => new Set(graph.nodes.map((node) => node.id)), [graph.nodes]);
 	const columnAttributesNode = useMemo(() => {
 		const found = graph.nodes.find((node) => node.id === columnAttributesNodeId) ?? null;
 		return found?.layer === ExplorationLayer.Semantic ? found : null;
@@ -279,13 +271,12 @@ export const ExplorationView = () => {
 							<ul className="absolute top-12 max-h-[calc(100dvh-8.5rem)] w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
 								{filteredNodes.map((node) => (
 									<li key={node.id}>
-										<button
-											type="button"
+										<SelectButton
+											theme={SelectButtonTheme.ListItem}
 											onClick={() => {
 												setSearch('');
 												handleSelectNode(node.id);
 											}}
-											className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
 										>
 											<Icon
 												name={
@@ -299,8 +290,8 @@ export const ExplorationView = () => {
 														: 'text-[#3b82b6]'
 												}`}
 											/>
-											<span className="truncate">{node.name}</span>
-										</button>
+											<Text text={node.name} />
+										</SelectButton>
 									</li>
 								))}
 							</ul>
@@ -311,15 +302,7 @@ export const ExplorationView = () => {
 				<ZoomControls controller={controller} />
 			</div>
 
-			{loading && (
-				<div className="flex h-full items-center justify-center">
-					<div
-						className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-						role="status"
-						aria-label="Loading exploration"
-					/>
-				</div>
-			)}
+			{loading && <ExplorationLoader overlay />}
 
 			{!loading && error != null && (
 				<div className="flex h-full items-center justify-center px-6 text-center">
@@ -330,13 +313,15 @@ export const ExplorationView = () => {
 			)}
 
 			{!loading && error == null && graph.nodes.length === 0 && (
-				<div className="flex h-full items-center justify-center text-sm text-zinc-500">
-					{noZoneAccess
-						? 'You do not have access to any data. Contact an administrator to request access.'
-						: layer === ExplorationLayer.Semantic
+				<EmptyState
+					variant={EmptyStateVariant.Borderless}
+					icon={IconName.Exploration}
+					title={
+						layer === ExplorationLayer.Semantic
 							? 'No Terms Created Yet'
-							: 'No Data Objects Found'}
-				</div>
+							: 'No Data Objects Found'
+					}
+				/>
 			)}
 
 			{!loading && error == null && graph.nodes.length > 0 && (
@@ -383,9 +368,9 @@ export const ExplorationView = () => {
 						)
 					}
 					onShowRelationships={() => setRelationshipsNodeId(activeNode.id)}
-					onShowColumns={() => setDataDetailsKind('columns')}
-					onShowQueries={() => setDataDetailsKind('queries')}
-					onShowTerms={() => setDataDetailsKind('terms')}
+					onShowColumns={() => setDataDetailsType('columns')}
+					onShowQueries={() => setDataDetailsType('queries')}
+					onShowTerms={() => setDataDetailsType('terms')}
 				/>
 			)}
 
@@ -440,14 +425,14 @@ export const ExplorationView = () => {
 			/>
 			<RelationshipsModal
 				node={relationshipsNode}
-				rows={relatedNodes}
 				onClose={() => setRelationshipsNodeId(null)}
 				onFocus={handleSelectNode}
+				focusableNodeIds={graphNodeIds}
 			/>
 			<DataDetailsModal
 				target={activeNode?.layer === ExplorationLayer.Data ? activeNode : null}
-				kind={dataDetailsKind}
-				onClose={() => setDataDetailsKind(null)}
+				type={dataDetailsType}
+				onClose={() => setDataDetailsType(null)}
 			/>
 			<ColumnAttributesModal
 				term={columnAttributesNode}

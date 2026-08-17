@@ -38,13 +38,13 @@ from gsf.dal.sql_attributes import (
     fetch_sql_attributes_with_sql,
     fetch_tables_from_sql_attributes,
 )
-from gsf.dal.terms import fetch_term_synonyms
+from gsf.dal.terms import fetch_term_synonyms, fetch_term_table_pairs
 from gsf.retrieval.data_access.relevant_tables import (
     dedupe_merge_relevant_tables,
     get_relevant_tables,
     get_relevant_tables_from_candidates,
 )
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
@@ -63,13 +63,20 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 
 
 def _qualified_name(t: dict) -> str:
-    """Build schema-qualified table name (e.g. 'public.users') for dedup/filtering."""
+    """Build a database/schema-qualified table name for deduplication."""
+    database = t.get("database_name", "")
     schema = t.get("schema_name", "")
     name = t.get("name", "")
-    return f"{schema}.{name}" if schema else name
+    return ".".join(part for part in (database, schema, name) if part)
 
 
 logger = logging.getLogger(__name__)
+
+# Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
+# (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
+# so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
+# right step event and ``NODE_LABELS`` entry.
+_GRAPH_NODE_NAME = "prepare_candidates"
 
 
 class CandidatePreparationAgent(BaseAgent):
@@ -164,7 +171,10 @@ class CandidatePreparationAgent(BaseAgent):
             ]
             attr_ids = list(dict.fromkeys(attr_ids))
 
-            attr_contexts = fetch_attr_column_contexts(attr_ids)
+            attr_contexts = fetch_attr_column_contexts(
+                attr_ids,
+                database_name=target_db,
+            )
             self.logger.info(
                 "Fetched Neo4j context for %d/%d column attributes",
                 len(attr_contexts),
@@ -173,8 +183,12 @@ class CandidatePreparationAgent(BaseAgent):
             term_synonyms = fetch_term_synonyms(attr_ids)
             self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
-            anchor_id = self._identify_anchor(state, question, attr_contexts)
+            anchor_id, anchor_reasoning = self._identify_anchor(
+                state, question, attr_contexts
+            )
             self.logger.info("Anchor attribute id: %s", anchor_id)
+            if anchor_reasoning:
+                record_thought(path_state, _GRAPH_NODE_NAME, anchor_reasoning)
 
             if anchor_id and anchor_id in attr_contexts:
                 anchor_ctx = attr_contexts[anchor_id]
@@ -184,6 +198,7 @@ class CandidatePreparationAgent(BaseAgent):
                     "col_name": anchor_ctx["col_name"],
                     "table_name": anchor_ctx["table_name"],
                     "schema_name": anchor_ctx["schema_name"],
+                    "database_name": anchor_ctx["database_name"],
                 }
 
                 dest_items = [
@@ -208,6 +223,7 @@ class CandidatePreparationAgent(BaseAgent):
                                 "col_name": dest_ctx["col_name"],
                                 "table_name": dest_ctx["table_name"],
                                 "schema_name": dest_ctx["schema_name"],
+                                "database_name": dest_ctx["database_name"],
                                 "path": join_path,
                             }
                         )
@@ -330,7 +346,39 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in sa_linked_tables],
             )
 
+        # --- 4d. Add tables linked to the subject Term ---
+        subject_term = path_state.get("retrieved_subject_term")
+        subject_term_id = (
+            str(subject_term.get("id") or "") if isinstance(subject_term, dict) else ""
+        )
+        if subject_term_id:
+            pairs = fetch_term_table_pairs(term_ids=[subject_term_id])
+            subject_table_ids = list(
+                dict.fromkeys(str(p["table_id"]) for p in pairs if p.get("table_id"))
+            )
+            subject_tables = fetch_tables_by_ids(subject_table_ids)
+            existing_ids = {t.get("id") for t in relevant_tables}
+            added = 0
+            for tbl in subject_tables:
+                if tbl.get("id") not in existing_ids:
+                    relevant_tables.append(tbl)
+                    existing_ids.add(tbl.get("id"))
+                    added += 1
+            self.logger.info(
+                "Added %d table(s) from subject Term %r: %s",
+                added,
+                subject_term.get("name") or subject_term_id,
+                [t["name"] for t in subject_tables],
+            )
+
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
+
+        if target_db:
+            relevant_tables = [
+                table
+                for table in relevant_tables
+                if table.get("database_name") == target_db
+            ]
 
         # --- 5. Filter tables by relevance ---
         relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(
@@ -344,6 +392,8 @@ class CandidatePreparationAgent(BaseAgent):
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
+        if table_relevance_reasoning:
+            record_thought(path_state, _GRAPH_NODE_NAME, table_relevance_reasoning)
 
         return {
             "path_state": {
@@ -561,13 +611,17 @@ class CandidatePreparationAgent(BaseAgent):
         state: "AgentState",
         question: str,
         contexts: dict[str, dict],
-    ) -> str | None:
-        """Use the LLM to pick the primary (anchor) ColumnAttribute for the question."""
+    ) -> tuple[str | None, str]:
+        """Use the LLM to pick the primary (anchor) ColumnAttribute for the question.
+
+        Returns ``(anchor_id, reasoning)`` — reasoning is empty when no LLM
+        call was needed (0 or 1 candidates) or the call failed.
+        """
         ids = list(contexts.keys())
         if not ids:
-            return None
+            return None, ""
         if len(ids) == 1:
-            return ids[0]
+            return ids[0], ""
 
         try:
             llm = state["llm"]
@@ -575,7 +629,7 @@ class CandidatePreparationAgent(BaseAgent):
             self.logger.warning(
                 "_identify_anchor: no LLM in state — using first attribute"
             )
-            return ids[0]
+            return ids[0], ""
 
         attrs_block = "\n".join(
             f"- id: {aid} | {ctx['attr_name']} "
@@ -609,18 +663,18 @@ class CandidatePreparationAgent(BaseAgent):
                 "_identify_anchor: LLM call failed — using first attribute",
                 exc_info=True,
             )
-            return ids[0]
+            return ids[0], ""
 
         if result and result.anchor_id and result.anchor_id in contexts:
             self.logger.info(
                 "Anchor column identified: %s (%s)", result.anchor_id, result.reasoning
             )
-            return result.anchor_id
+            return result.anchor_id, (result.reasoning or "").strip()
 
         self.logger.warning(
             "_identify_anchor: LLM returned invalid id — using first attribute"
         )
-        return ids[0]
+        return ids[0], ""
 
     def _build_custom_analyses_str(self, relevant_queries: list[dict]) -> list[str]:
         """Build string representation of custom analyses for prompts."""

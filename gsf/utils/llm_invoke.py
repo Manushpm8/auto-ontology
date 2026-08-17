@@ -16,6 +16,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
+from gsf.utils.model_config import resolve
+
 logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
@@ -51,36 +53,41 @@ class _TimeoutSession(_requests.Session):
 
 T = TypeVar("T", bound=BaseModel)
 
-_BASE_URL = os.environ.get("BASE_URL", "https://integrate.api.nvidia.com/v1")
-_MODEL_NAME = os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b")
-_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+# Main (reasoning) model triplet. Each field falls back to DEFAULT_MODELS_<field>
+# (and the API key additionally to the legacy NVIDIA_API_KEY) when unset.
+_BASE_URL = resolve("REASONING", "ENDPOINT")
+_MODEL_NAME = resolve("REASONING", "MODEL")
+_API_KEY = resolve("REASONING", "API_KEY")
+
+# Non-reasoning model. Kept fully separate (key/endpoint/model) so it can point at
+# a different endpoint than the main model (e.g. inference vs integrate API). Each
+# field falls back to DEFAULT_MODELS_<field> when unset.
+_NON_REASONING_BASE_URL = resolve("NON_REASONING", "ENDPOINT")
+_NON_REASONING_MODEL_NAME = resolve("NON_REASONING", "MODEL")
+_NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 
 
-def get_llm_client(
+def _build_client(
     *,
-    model: str | None = None,
-    temperature: float = 0.0,
-    max_tokens: int = 8192,
+    model: str,
+    api_key: str,
+    base_url: str,
+    temperature: float,
+    max_tokens: int,
 ) -> BaseChatModel:
-    """Create an LLM client.
+    """Build a chat client for the given model/endpoint.
 
-    Parameters
-    ----------
-    model : str | None
-        Override the default ``MODEL_NAME`` env var for this client.
+    OpenAI-family models (``openai/``, ``azure/``, ``aws/`` prefixes) go through
+    ``ChatOpenAI``, which supports structured output. Everything else uses
+    ``ChatNVIDIA``.
     """
-    if not _API_KEY:
-        raise EnvironmentError("NVIDIA_API_KEY is not set")
-
-    resolved_model = model or _MODEL_NAME
-
-    if resolved_model.startswith(("openai/", "azure/", "aws/")):
+    if model.startswith(("openai/", "azure/", "aws/")):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=resolved_model,
-            api_key=_API_KEY,
-            base_url=_BASE_URL,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
             # temperature omitted: gpt-5.x/o-series reject any explicit value and
             # only allow the server default (1). Unset => langchain sends no
             # temperature field, so the provider default applies.
@@ -93,14 +100,68 @@ def get_llm_client(
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
     client = ChatNVIDIA(
-        model=resolved_model,
-        api_key=_API_KEY,
-        base_url=_BASE_URL,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
         temperature=temperature,
         max_tokens=max_tokens,
     )
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
     return client
+
+
+def get_llm_client(
+    *,
+    model: str | None = None,
+    temperature: float = 0.0,
+    max_tokens: int = 8192,
+) -> BaseChatModel:
+    """Create an LLM client for the main reasoning model.
+
+    Parameters
+    ----------
+    model : str | None
+        Override the default ``REASONING_MODEL`` env var for this client.
+    """
+    if not _API_KEY:
+        raise EnvironmentError("REASONING_API_KEY is not set")
+
+    return _build_client(
+        model=model or _MODEL_NAME,
+        api_key=_API_KEY,
+        base_url=_BASE_URL,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+
+def get_non_reasoning_llm_client(
+    *,
+    model: str | None = None,
+    temperature: float = 0.0,
+    max_tokens: int = 8192,
+) -> BaseChatModel:
+    """Create an LLM client for the non-reasoning model.
+
+    Uses ``NON_REASONING_API_KEY`` / ``NON_REASONING_ENDPOINT`` /
+    ``NON_REASONING_MODEL`` so it can target a different endpoint than the
+    main agent model.
+
+    Parameters
+    ----------
+    model : str | None
+        Override the default ``NON_REASONING_MODEL`` env var for this client.
+    """
+    if not _NON_REASONING_API_KEY:
+        raise EnvironmentError("NON_REASONING_API_KEY is not set")
+
+    return _build_client(
+        model=model or _NON_REASONING_MODEL_NAME,
+        api_key=_NON_REASONING_API_KEY,
+        base_url=_NON_REASONING_BASE_URL,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
 
 
 def _ensure_non_system_message(messages: list[BaseMessage]) -> list[BaseMessage]:
@@ -129,11 +190,24 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     permitted"), but they support tool calling — so force ``function_calling``
     for them. Everything else keeps langchain's default (json_schema for
     OpenAI), which is preferred where supported.
+
+    ``tool_choice=None`` suppresses the tool-choice langchain would otherwise set.
+    Bedrock behind LiteLLM rejects the request when one is present, because the gateway
+    both maps it into ``toolConfig.toolChoice`` and forwards the original
+    ``tool_choice.type``::
+
+        The additional field tool_choice/type conflicts with the existing field
+        toolConfig.toolChoice.tool. Remove tool_choice/type and try again.
+
+    Measured against the live endpoint: every explicit value ("auto", "any",
+    "required", and langchain's default of naming the tool) hits that conflict, and only
+    omitting it succeeds. The model still calls the tool without being forced to, and
+    the caller retries if it ever answers without one.
     """
     model = str(getattr(llm, "model_name", "") or getattr(llm, "model", "") or "")
     lowered = model.lower()
     if "anthropic" in lowered or "claude" in lowered:
-        return {"method": "function_calling"}
+        return {"method": "function_calling", "tool_choice": None}
     return {}
 
 

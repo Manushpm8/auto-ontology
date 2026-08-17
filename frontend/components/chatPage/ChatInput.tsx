@@ -5,10 +5,13 @@
 'use client';
 
 import { useCallback, useRef, useState, type KeyboardEvent, type FormEvent } from 'react';
-import { Icon, IconName } from '@/components/icons';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
+import { Icon, IconName } from '@/common/icons';
 
 type ChatInputProps = {
-	onSend: (text: string) => void;
+	/** Resolves false when the question was refused, so the text can be restored. */
+	onSend: (text: string) => Promise<boolean>;
 	onStop: () => void;
 	isLoading: boolean;
 };
@@ -34,16 +37,28 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 	}, []);
 
 	const handleSubmit = useCallback(
-		(e?: FormEvent) => {
+		async (e?: FormEvent) => {
 			e?.preventDefault();
 			const el = textareaRef.current;
 			if (!el) return;
 			const text = el.value.trim();
 			if (!text || isLoading) return;
-			onSend(text);
+
+			// Clear straight away so sending feels immediate, then put the text
+			// back if the backend refused it — a rejected question is never added
+			// to the transcript, so discarding it would lose it entirely.
 			el.value = '';
 			el.style.height = 'auto';
 			setHasText(false);
+
+			const accepted = await onSend(text);
+			if (accepted) return;
+
+			const target = textareaRef.current;
+			if (!target || target.value.trim()) return;
+			target.value = text;
+			resetHeight();
+			setHasText(true);
 		},
 		[onSend, isLoading],
 	);
@@ -74,23 +89,27 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 				/>
 
 				{isLoading ? (
-					<button
+					<Button
+						theme={ButtonTheme.Danger}
+						size={Size.LARGE}
+						iconOnly
 						type="button"
 						onClick={onStop}
-						className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-500 text-white transition-colors hover:bg-red-600"
 						aria-label="Stop generation"
 					>
 						<Icon name={IconName.Stop} className="h-4 w-4" />
-					</button>
+					</Button>
 				) : (
-					<button
+					<Button
+						theme={ButtonTheme.Primary}
+						size={Size.LARGE}
+						iconOnly
 						type="submit"
 						disabled={!hasText}
-						className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#76b900] text-white transition-colors hover:bg-[#5e9400] disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 disabled:hover:bg-zinc-300 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 dark:disabled:hover:bg-zinc-700"
 						aria-label="Send message"
 					>
 						<Icon name={IconName.Send} className="h-4 w-4" />
-					</button>
+					</Button>
 				)}
 			</div>
 		</form>

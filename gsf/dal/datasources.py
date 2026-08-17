@@ -4,7 +4,7 @@
 
 """Neo4j data access for catalog nodes: Database, Schema, Table, Column.
 
-Contains only functions that call ``get_neo4j_conn()`` directly.
+Contains only functions that call ``graph()`` directly.
 
 All read functions use the ``fetch_*`` prefix.
 Write functions use ``patch_*``, ``store_*``, or ``apply_*``.
@@ -21,21 +21,27 @@ import logging
 from typing import Any
 
 import pandas as pd
-
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.cypher_fragments import column_description_expr
+from gsf.dal.cypher_fragments import (
+    column_description_expr,
+    paging_clause,
+    table_description_expr,
+)
+from gsf.dal.neo4j_tx import graph
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
-
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
+    LABEL_SQL_ATTRIBUTE,
     LABEL_TERM,
     REL_HAS_ATTRIBUTE,
     REL_PROPERTY_OF,
     REL_REPRESENTS,
     REL_SEMANTIC_FK,
+    SQL_ATTR_SOURCE_BRIDGE,
 )
+from gsf.utils.join_columns import parse_join_columns
+from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +70,7 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
         where_clause = ""
         params = {}
 
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
         {where_clause}
@@ -119,7 +125,7 @@ def fetch_schemas_for_database(
         where_clause = ""
         params = {"db_id": db_id}
 
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (db:{Labels.DB} {{id: $db_id}})-[:{Edges.CONTAINS}]->
               (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
@@ -147,7 +153,7 @@ def fetch_all_schema_ids() -> list[str]:
     """Return all Schema node IDs."""
     return [
         r["schema_id"]
-        for r in get_neo4j_conn().query_read(
+        for r in graph().query_read(
             f"MATCH (s:{Labels.SCHEMA}) RETURN s.id AS schema_id",
         )
     ]
@@ -162,7 +168,7 @@ def fetch_schema_ids_for_database(database_name: str) -> list[str]:
     """
     return [
         r["schema_id"]
-        for r in get_neo4j_conn().query_read(
+        for r in graph().query_read(
             f"""
             MATCH (db:{Labels.DB} {{name: $database_name}})
                   -[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
@@ -178,7 +184,7 @@ def fetch_schemas_by_ids(
 ) -> list[dict[str, str]]:
     """Return column-level rows for the given schema IDs (all schemas when empty)."""
     schema_ids = relevant_schemas_ids or []
-    result = get_neo4j_conn().query_read(
+    result = graph().query_read(
         f"""
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(schema:{Labels.SCHEMA})
               -[:{Edges.CONTAINS}]->(table:{Labels.TABLE})
@@ -256,13 +262,13 @@ RETURN t1.name AS source_table,
 
 _FETCH_TABLES_BY_IDS = f"""
 UNWIND $table_ids AS tid
-MATCH (tbl:{Labels.TABLE} {{id: tid}})
-MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
+      -[:{Edges.CONTAINS}]->(tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
+WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: {column_description_expr("col")}}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       sch.name AS schema_name, cols
+       db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -333,7 +339,7 @@ def fetch_tables_for_schema(
         zone_ids, "t.id", extra_params={"schema_id": schema_id}
     )
 
-    return get_neo4j_conn().query_read(
+    return graph().query_read(
         f"""
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
               (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{Edges.CONTAINS}]->
@@ -344,7 +350,9 @@ def fetch_tables_for_schema(
                t.name AS name,
                t.table_type AS table_type,
                db.name AS database_name,
-               s.name AS schema_name, t.description AS description,
+               s.name AS schema_name,
+               {table_description_expr("t")} AS description,
+               coalesce(t.description_certified, false) AS description_certified,
                columns_count,
                sql_count,
                size(unique_term_ids) AS terms_count
@@ -356,7 +364,7 @@ def fetch_tables_for_schema(
 
 def fetch_sorted_tables() -> list[dict[str, Any]]:
     """Return all tables ordered by query_count descending."""
-    rows = get_neo4j_conn().query_read(_FETCH_TABLES_QUERY)
+    rows = graph().query_read(_FETCH_TABLES_QUERY)
     return [
         {
             "id": r["id"],
@@ -372,13 +380,13 @@ def fetch_sorted_tables() -> list[dict[str, Any]]:
 
 def fetch_table_by_id(table_id: str) -> dict[str, Any] | None:
     """Return a single Table row by id, or None if not found."""
-    rows = get_neo4j_conn().query_read(_FETCH_TABLE_BY_ID, {"table_id": table_id})
+    rows = graph().query_read(_FETCH_TABLE_BY_ID, {"table_id": table_id})
     return rows[0] if rows else None
 
 
 def fetch_table_by_name(name: str) -> dict[str, Any] | None:
     """Return the first Table row matching *name*, or None if not found."""
-    rows = get_neo4j_conn().query_read(_FETCH_TABLE_BY_NAME, {"name": name})
+    rows = graph().query_read(_FETCH_TABLE_BY_NAME, {"name": name})
     return rows[0] if rows else None
 
 
@@ -387,9 +395,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     if not table_ids:
         return []
     try:
-        rows = get_neo4j_conn().query_read(
-            _FETCH_TABLES_BY_IDS, {"table_ids": table_ids}
-        )
+        rows = graph().query_read(_FETCH_TABLES_BY_IDS, {"table_ids": table_ids})
     except Exception:
         logger.warning("fetch_tables_by_ids: Neo4j query failed", exc_info=True)
         return []
@@ -404,8 +410,13 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "id": tid,
                 "name": row.get("name") or "",
                 "description": row.get("description") or "",
+                "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
+                # The prediction graph keys its entities on this: a table that
+                # arrives without it reaches KumoRFM with no identity, which
+                # costs it every edge and makes it unusable in `FOR EACH`.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )
@@ -426,7 +437,7 @@ def fetch_all_tables_without_term(
     from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges
 
     if database_name is not None:
-        return get_neo4j_conn().query_read(
+        return graph().query_read(
             f"""
             MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
                   (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
@@ -438,7 +449,7 @@ def fetch_all_tables_without_term(
             {"database_name": database_name},
         )
 
-    return get_neo4j_conn().query_read(
+    return graph().query_read(
         f"""
         MATCH (t:{Labels.TABLE})
         WHERE NOT (t)-[:{REL_REPRESENTS}]->()
@@ -452,12 +463,19 @@ def fetch_all_tables_without_term(
 
 def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
     """Return JOIN-adjacent tables (undirected), one row per neighbour."""
-    return get_neo4j_conn().query_read(_FETCH_JOIN_NEIGHBORS, {"table_id": table_id})
+    return graph().query_read(_FETCH_JOIN_NEIGHBORS, {"table_id": table_id})
 
 
 def fetch_join_edges() -> list[dict[str, Any]]:
-    """Return all JOIN edges between tables."""
-    return get_neo4j_conn().query_read(_FETCH_JOINS_QUERY)
+    """Return all JOIN edges between tables.
+
+    ``join_columns`` is stored as a JSON string (see
+    ``gsf.utils.join_columns``), so it is parsed back to a list here.
+    """
+    rows = graph().query_read(_FETCH_JOINS_QUERY)
+    for row in rows:
+        row["join_columns"] = parse_join_columns(row.get("join_columns"))
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -491,42 +509,89 @@ _FETCH_COL_TABLE_CONTEXTS = f"""
 UNWIND $col_ids AS col_id
 MATCH (col:{Labels.COLUMN} {{id: col_id}})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
       <-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name
+      <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
+RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name,
+       db.name AS database_name
 """
 
 
-def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
-    """Return a table dict with nested columns, or None if the table is missing."""
-    rows = get_neo4j_conn().query_read(
+def fetch_columns_for_table(
+    table_id: str,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
+) -> dict[str, Any] | None:
+    """Return a table dict with nested columns, or None if the table is missing.
+
+    Columns are ordered by ordinal position, so *skip* and *limit* read one
+    page of that order; pair them with ``count_columns_for_table`` for the
+    table's full column count, which no paged read can report. Omit *limit*
+    for every column of the table, which is what the catalog tree and the
+    text-to-SQL context need.
+
+    Paging happens inside a subquery scoped to the table, so the table's own
+    fields (``table_name``, ``schema_name``, ``database_name``) come back the
+    same way whether the page holds rows or not — ``None`` means the table
+    itself (or its Schema/Database path) is missing, never that *skip* landed
+    past the last column.
+    """
+    params: dict[str, Any] = {"table_id": table_id}
+    paging = paging_clause(skip, limit, params)
+    rows = graph().query_read(
         f"""
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-        WITH t, c, s, db ORDER BY c.ordinal_position
-        WITH t, s, db, collect({{
-                 id: c.id,
-                 ordinal_position: c.ordinal_position,
-                 column_name: c.name,
-                 data_type: c.data_type,
-                 description: {column_description_expr("c")},
-                 sample_values: c.sample_values
-             }}) AS columns
+              (t:{Labels.TABLE} {{id: $table_id}})
+        CALL (t) {{
+            MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+            WITH c ORDER BY c.ordinal_position
+            {paging}
+            RETURN collect({{
+                       id: c.id,
+                       ordinal_position: c.ordinal_position,
+                       column_name: c.name,
+                       data_type: c.data_type,
+                       description: {column_description_expr("c")},
+                       description_certified: coalesce(c.description_certified, false),
+                       sample_values: c.sample_values
+                   }}) AS columns
+        }}
         RETURN t.name AS table_name,
                t.table_type AS table_type,
                s.name AS schema_name,
                db.name AS database_name,
-               size(columns) AS columns_count,
                columns
+        LIMIT 1
         """,
-        {"table_id": table_id},
+        params,
     )
     if not rows:
         return None
-    return rows[0]
+    table = rows[0]
+    for column in table.get("columns") or []:
+        column["sample_values"] = parse_sample_values(column.get("sample_values"))
+    return table
+
+
+def count_columns_for_table(table_id: str) -> int:
+    """Return how many Columns a table has.
+
+    Companion to ``fetch_columns_for_table`` when it is called with a *limit*:
+    Neo4j won't report the unpaged size of a ``LIMIT``-ed result, so the
+    caller's pager needs this second query.
+    """
+    rows = graph().query_read(
+        f"""
+        MATCH (:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+        RETURN count(c) AS total
+        """,
+        {"table_id": table_id},
+    )
+    return rows[0]["total"] if rows else 0
 
 
 def fetch_parent_table_id_for_column(column_id: str) -> str | None:
     """Return the id of the Table that contains this Column, or None."""
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{id: $column_id}})
         RETURN t.id AS table_id
@@ -539,7 +604,7 @@ def fetch_parent_table_id_for_column(column_id: str) -> str | None:
 
 def fetch_table_context(table_id: str) -> dict[str, Any]:
     """Return columns and FK edges for one table."""
-    conn = get_neo4j_conn()
+    conn = graph()
     rows = conn.query_read(_FETCH_COLUMNS_QUERY, {"table_id": table_id})
     columns = [
         {
@@ -558,13 +623,11 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
 
 
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Batch lookup: Column id → {table_name, schema_name}."""
+    """Batch lookup: Column id → database/schema/table identity."""
     if not col_ids:
         return {}
     try:
-        rows = get_neo4j_conn().query_read(
-            _FETCH_COL_TABLE_CONTEXTS, {"col_ids": col_ids}
-        )
+        rows = graph().query_read(_FETCH_COL_TABLE_CONTEXTS, {"col_ids": col_ids})
     except Exception:
         logger.warning("fetch_col_table_contexts: Neo4j query failed", exc_info=True)
         return {}
@@ -572,6 +635,7 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
         r["col_id"]: {
             "table_name": r.get("table_name") or "",
             "schema_name": r.get("schema_name") or "",
+            "database_name": r.get("database_name") or "",
         }
         for r in rows
         if r.get("col_id")
@@ -589,7 +653,7 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
         {"column_name": col, "sample_values": json.dumps(vals)}
         for col, vals in samples.items()
     ]
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
         WHERE col.name IN [e IN $entries | e.column_name]
@@ -614,7 +678,7 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
         {"column_name": col, "is_unique": bool(is_unique)}
         for col, is_unique in uniqueness.items()
     ]
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
         WHERE col.name IN [e IN $entries | e.column_name]
@@ -637,7 +701,7 @@ def fetch_tables_and_columns_by_node_ids(
     node_ids: list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, str]:
     """Load Table/Column rows from Neo4j as dataframes for TabularFetchEmbeddingsOp."""
-    conn = get_neo4j_conn()
+    conn = graph()
     columns_df = pd.DataFrame(
         conn.query_read(
             f"""
@@ -693,7 +757,7 @@ def apply_metadata_batch(
     *column_rows* — list of ``{table_name, column_name, description, sample_values}``.
     Skips silently when either list is empty.
     """
-    conn = get_neo4j_conn()
+    conn = graph()
     if table_rows:
         conn.query_write(
             _APPLY_TABLE_METADATA,
@@ -721,7 +785,7 @@ def patch_catalog_node(
     This is the pure Cypher write; callers are responsible for triggering
     any downstream VDB re-embedding.
     """
-    rows = get_neo4j_conn().query_write(
+    rows = graph().query_write(
         f"""
         MATCH (n:{Labels.DB}|{Labels.SCHEMA}|{Labels.TABLE}|{Labels.COLUMN}
               {{id: $node_id}})
@@ -752,7 +816,7 @@ def fetch_node_properties_by_id(id: str, label: str | list[str]) -> dict | None:
             )
             return None
     label_filter = "|".join(labels_list)
-    props = get_neo4j_conn().query_read(
+    props = graph().query_read(
         f"""
         MATCH (n:{label_filter} {{id: $id}})
         RETURN apoc.map.setKey(properties(n), "label", labels(n)[0]) AS props
@@ -768,3 +832,66 @@ def fetch_item_by_id(item_id: str, label: str | list[str]) -> dict | None:
     if result is None:
         logger.error("Required item with id %r not found in graph.", item_id)
     return result
+
+
+def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
+    """Return pure-FK junction tables eligible for bridge SqlAttribute creation.
+
+    A table qualifies when it has at least two columns, no column has
+    HAS_ATTRIBUTE, every column is linked via FOREIGN_KEY or SEMANTIC_FK,
+    every column resolves to an FK pair, and no SqlAttribute with source
+    ``bridgeTable`` already references the table through HAS_SQL -> Sql -> SQL.
+
+    Self-referential bridges are allowed (multiple FK columns targeting the
+    same table), e.g. ``also_buy(product_id, also_buy_product_id)``.
+    """
+    rows = graph().query_read(
+        f"""
+        MATCH (db:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
+        MATCH (t)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WITH sch, t, collect(col) AS cols
+        WHERE size(cols) >= 2
+          AND NONE(c IN cols WHERE (c)-[:{REL_HAS_ATTRIBUTE}]->())
+          AND ALL(
+            c IN cols
+            WHERE (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})
+               OR (c)-[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
+          )
+          AND NOT EXISTS {{
+            (attr:{LABEL_SQL_ATTRIBUTE} {{source: $bridge_source}})
+                  -[:{Edges.HAS_SQL}]->(:{Labels.SQL})-[:{Edges.SQL}]->(t)
+          }}
+        WITH sch, t, cols
+        UNWIND cols AS col
+        OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(fk_tgt:{Labels.COLUMN})
+              <-[:{Edges.CONTAINS}]-(fk_tbl:{Labels.TABLE})
+              <-[:{Edges.CONTAINS}]-(fk_sch:{Labels.SCHEMA})
+        OPTIONAL MATCH (col)-[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              <-[:{REL_HAS_ATTRIBUTE}]-(sem_tgt:{Labels.COLUMN})
+              <-[:{Edges.CONTAINS}]-(sem_tbl:{Labels.TABLE})
+              <-[:{Edges.CONTAINS}]-(sem_sch:{Labels.SCHEMA})
+        WITH sch, t, cols, col,
+             coalesce(fk_tbl, sem_tbl) AS tgt_tbl,
+             coalesce(fk_sch, sem_sch) AS tgt_sch,
+             coalesce(fk_tgt, sem_tgt) AS tgt_col
+        WHERE tgt_tbl IS NOT NULL AND tgt_col IS NOT NULL
+        WITH sch, t, cols,
+             collect(DISTINCT {{
+               source_column: col.name,
+               target_table: tgt_tbl.name,
+               target_schema: tgt_sch.name,
+               target_column: tgt_col.name,
+               target_table_id: tgt_tbl.id
+             }}) AS fk_pairs
+        WHERE size(fk_pairs) >= 2 AND size(fk_pairs) = size(cols)
+        RETURN t.id AS table_id,
+               t.name AS table_name,
+               sch.name AS schema_name,
+               t.description AS description,
+               fk_pairs
+        ORDER BY t.name
+        """,
+        {"database_name": database_name, "bridge_source": SQL_ATTR_SOURCE_BRIDGE},
+    )
+    return [dict(row) for row in rows]

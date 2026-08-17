@@ -19,10 +19,12 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "snowflake-connector-python>=4.6.0",
     "uvicorn[standard]>=0.32.0",
-    "kumoai>=2.22.0",
+    "nvidia-sdfm[kumorfm]>=0.1.0",
     "databricks-sql-connector>=4.3.0",
     "adbc-driver-vastdb>=0.0.30",
     "vastdb>=2.0.7",
+    "pyyaml>=6.0.3",
+    "apache-ossie-gsf",
 ]
 
 [build-system]
@@ -40,6 +42,15 @@ packages = ["gsf"]
 
 [tool.uv]
 package = true
+
+[[tool.uv.index]]
+name = "vendored-sdfm"
+url = "vendor/wheels"
+format = "flat"
+
+[tool.uv.sources]
+apache-ossie-gsf = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/gsf" }
+# apache-ossie-gsf = { path = "../ossie/converters/gsf", editable = true }
 
 [dependency-groups]
 dev = [

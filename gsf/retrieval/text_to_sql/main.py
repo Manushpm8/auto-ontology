@@ -3,14 +3,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-import os
 import time
 from datetime import datetime
 from typing import Generator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from gsf.retrieval.text_to_sql.text_to_sql_graph import create_graph
+from gsf.retrieval.text_to_sql.text_to_sql_graph import (
+    _prediction_enabled,
+    create_graph,
+)
+from gsf.retrieval.text_to_sql.connector_routing import (
+    resolve_target_database_name,
+)
+from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
 from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
@@ -18,22 +24,11 @@ from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
 
-_ENTITY_MODEL = os.environ.get("ENTITY_EXTRACTION_MODEL")
-
 try:
     llm_client = get_llm_client()
 except ValueError as e:
     logger.error("Failed to initialize LLM client: %s", e)
     llm_client = None
-
-entity_llm_client = None
-if _ENTITY_MODEL:
-    try:
-        entity_llm_client = get_llm_client(model=_ENTITY_MODEL, max_tokens=2048)
-        logger.info("Entity extraction will use model: %s", _ENTITY_MODEL)
-    except ValueError as e:
-        logger.warning("Failed to init entity LLM (%s): %s", _ENTITY_MODEL, e)
-
 
 graph = create_graph()
 app = graph.compile()
@@ -65,15 +60,32 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
     domain_rules = fetch_custom_analyses() + list(acronyms or [])
 
+    # ``prediction=True`` only means something when the KumoRFM branch was built
+    # into the graph at startup; without KUMO_RFM_API_KEY the classify node does
+    # not exist, so honouring the override is impossible. Fail loudly rather than
+    # silently answering with SQL.
+    prediction_override = payload.get("prediction")
+    if prediction_override is True and not _prediction_enabled():
+        raise ValueError(
+            "prediction=true was requested but the prediction flow is not "
+            "configured on this deployment (KUMO_RFM_API_KEY is unset)."
+        )
+
     initial_path_state = dict(payload.get("path_state") or {})
 
     target_db = payload.get("target_db")
     if target_db:
-        initial_path_state["target_db"] = target_db
+        initial_path_state["target_db"] = resolve_target_database_name(
+            target_db, connectors
+        )
     elif len(connectors) == 1:
         connector_db = getattr(connectors[0], "database_name", None)
         if connector_db:
             initial_path_state["target_db"] = connector_db
+
+    processing_question = (
+        payload.get("processing_question") or payload["question"]
+    ).strip()
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
@@ -81,12 +93,12 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     )
     messages = [
         SystemMessage(content=main_system_prompt),
-        HumanMessage(content=payload["question"]),
+        HumanMessage(content=processing_question),
     ]
 
     state: dict = {
         "llm": llm_client,
-        "initial_question": payload["question"],
+        "initial_question": processing_question,
         "connectors": connectors,
         "messages": messages,
         "path_state": initial_path_state,
@@ -94,9 +106,9 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "semantic_retriever": semantic_retriever,
         "decision": "",
         "domain_rules": domain_rules,
+        "glossary": list(acronyms or []),
+        "prediction_override": prediction_override,
     }
-    if entity_llm_client is not None:
-        state["entity_llm"] = entity_llm_client
     return state
 
 
@@ -116,12 +128,29 @@ def _extract_answer(final_state: dict) -> dict:
     return {"response": str(final_response)}
 
 
+def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
+    """Concatenate the run's per-node thought entries into one summary string.
+
+    Deterministic (no extra LLM call): one bullet per entry, labelled with the
+    same human-readable name the live step events use, in the order the nodes
+    actually ran (a node visited more than once — e.g. during reconstruction
+    retries — contributes one bullet per visit).
+    """
+    lines = [
+        f"- {NODE_LABELS.get(entry['node'], entry['node'])}: {entry['text']}"
+        for entry in thoughts_log
+        if entry.get("text")
+    ]
+    return "\n".join(lines)
+
+
 def stream_agent_response(
     payload: TextToSQLPayload,
 ) -> Generator[dict, None, None]:
-    """Yield ``{"type": "step", "node": ...}`` for each graph node,
-    then ``{"type": "result", "answer": ...}`` with the final answer.
-    On error yields ``{"type": "error", "message": ...}``."""
+    """Yield ``{"type": "step", "node": ..., "thought": ...}`` for each graph
+    node, then ``{"type": "result", "answer": ...}`` with the final answer
+    (its ``thoughts`` key summarizes every ``thought`` collected along the
+    way). On error yields ``{"type": "error", "message": ...}``."""
     t0 = time.perf_counter()
 
     logger.info("Text-to-SQL agent started for question: %s", payload["question"])
@@ -134,7 +163,19 @@ def stream_agent_response(
             logger.info("--- AGENT STEP ---")
             for node_name, node_output in step.items():
                 logger.info("Node: %s", node_name)
-                yield {"type": "step", "node": node_name}
+
+                # A node records its own thought (if any) at the tail of
+                # path_state["thoughts_log"] — see BaseAgent.record_thought.
+                # Only surface it here when this node is the one that just
+                # added it, so a step event never shows a stale entry left
+                # over from an earlier node.
+                thought = None
+                node_path_state = (node_output or {}).get("path_state") or {}
+                thoughts_log = node_path_state.get("thoughts_log") or []
+                if thoughts_log and thoughts_log[-1].get("node") == node_name:
+                    thought = thoughts_log[-1].get("text")
+
+                yield {"type": "step", "node": node_name, "thought": thought}
 
                 if node_output:
                     if "path_state" in node_output:
@@ -146,6 +187,10 @@ def stream_agent_response(
                             final_state[key] = value
 
         answer = _extract_answer(final_state)
+        thoughts_log = final_state.get("path_state", {}).get("thoughts_log") or []
+        thoughts_summary = _build_thoughts_summary(thoughts_log)
+        if isinstance(answer, dict) and thoughts_summary:
+            answer["thoughts"] = thoughts_summary
         elapsed = time.perf_counter() - t0
         logger.info("Final answer (%.2fs):\n%s", elapsed, answer)
         yield {"type": "result", "answer": answer}
@@ -165,39 +210,9 @@ def get_agent_response(payload: TextToSQLPayload) -> dict:
     return {"response": "SQL can't be constructed.", "sql_code": "", "result": None}
 
 
-def run_until_node(payload: TextToSQLPayload, stop_after: str) -> dict:
-    """Run the graph and return the accumulated state once ``stop_after`` produces output.
-
-    Streams the compiled graph exactly like :func:`stream_agent_response` — building
-    the state with :func:`_build_state` and merging each node's ``path_state`` — but
-    stops as soon as the ``stop_after`` node has run, before the next node executes.
-    This lets callers reuse the front of the pipeline (e.g. up to ``prepare_candidates``,
-    to read ``relevant_tables``/``attribute_join_paths``) without paying for the rest of
-    the flow. The returned dict is the full ``AgentState`` (top-level keys such as
-    ``llm``/``connectors``/``semantic_retriever`` plus the merged ``path_state``).
-    """
-    state = _build_state(payload)
-    final_state = dict(state)
-
-    for step in app.stream(state, config={"recursion_limit": 45}):
-        for node_name, node_output in step.items():
-            if node_output:
-                if "path_state" in node_output:
-                    final_state.setdefault("path_state", {})
-                    final_state["path_state"].update(node_output["path_state"])
-                for key, value in node_output.items():
-                    if key != "path_state":
-                        final_state[key] = value
-            if node_name == stop_after:
-                return final_state
-
-    return final_state
-
-
 __all__ = [
     "get_agent_response",
     "stream_agent_response",
-    "run_until_node",
     "app",
     "graph",
     "llm_client",

@@ -6,11 +6,16 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { connectionsApi } from '@/api/connections';
-import { ModalWithSteps, type StepperFooterAction } from '@/components/modal';
+import { ModalWithSteps, type StepperFooterAction } from '@/common/modal';
 import { ConnectionConnectStep } from '@/components/connectionsPage/steps/ConnectionConnectStep';
 import { ConnectionSelectDataStep } from '@/components/connectionsPage/steps/ConnectionSelectDataStep';
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';
-import { CONNECTION_FIELDS, ConnectionType, type ConnectionFieldKey } from '@/enums/connection';
+import {
+	CONNECTION_EITHER_FIELDS,
+	CONNECTION_FIELDS,
+	ConnectionType,
+	type ConnectionFieldKey,
+} from '@/enums/connection';
 import type { ConnectionInput } from '@/types/connection';
 
 const BASE_STEPS = ['Select Connector', 'Connect'] as const;
@@ -44,28 +49,60 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		connectionType === ConnectionType.SNOWFLAKE ||
 		connectionType === ConnectionType.VAST;
 
+	// Naming a schema on the form replaces picking one from a list: the test has
+	// already confirmed it exists, so there is nothing left to choose.
+	const explicitSchema = (values.schema ?? '').trim();
+
 	const steps = useMemo(
-		() => (supportsSchemaSelection ? [...BASE_STEPS, SCHEMA_STEP] : [...BASE_STEPS]),
-		[supportsSchemaSelection],
-	);
-
-	const buildConnection = useCallback((): ConnectionInput => {
-		const fields = CONNECTION_FIELDS[connectionType];
-		const entries = fields.map((field) => [field.key, (values[field.key] ?? '').trim()]);
-		const base = { type: connectionType, ...Object.fromEntries(entries) };
-		if (supportsSchemaSelection && selectedSchemas.length > 0) {
-			return { ...base, schemas: selectedSchemas } as ConnectionInput;
-		}
-		return base as ConnectionInput;
-	}, [connectionType, values, supportsSchemaSelection, selectedSchemas]);
-
-	const fieldsComplete = useMemo(
 		() =>
-			CONNECTION_FIELDS[connectionType].every(
-				(field) => field.optional || (values[field.key] ?? '').trim().length > 0,
-			),
-		[connectionType, values],
+			supportsSchemaSelection && !explicitSchema
+				? [...BASE_STEPS, SCHEMA_STEP]
+				: [...BASE_STEPS],
+		[supportsSchemaSelection, explicitSchema],
 	);
+
+	// `testOnly` fields (the Databricks schema filter) shape the connection test
+	// but must not end up on the stored connection, so they are dropped unless
+	// the payload is headed for the test endpoint.
+	const buildConnection = useCallback(
+		({ forTest = false }: { forTest?: boolean } = {}): ConnectionInput => {
+			const fields = CONNECTION_FIELDS[connectionType].filter(
+				(field) => forTest || !field.testOnly,
+			);
+			const entries = fields.map((field) => [
+				field.key,
+				// Checkbox fields go over the wire as real booleans; the form
+				// stores them as 'true'/'' like every other value.
+				field.boolean ? values[field.key] === 'true' : (values[field.key] ?? '').trim(),
+			]);
+			const base = { type: connectionType, ...Object.fromEntries(entries) };
+			if (supportsSchemaSelection) {
+				// A named schema is the allowlist; otherwise use whatever was picked.
+				if (explicitSchema) {
+					return { ...base, schemas: [explicitSchema] } as ConnectionInput;
+				}
+				if (selectedSchemas.length > 0) {
+					return { ...base, schemas: selectedSchemas } as ConnectionInput;
+				}
+			}
+			return base as ConnectionInput;
+		},
+		[connectionType, values, supportsSchemaSelection, selectedSchemas, explicitSchema],
+	);
+
+	const fieldsComplete = useMemo(() => {
+		const allRequiredPresent = CONNECTION_FIELDS[connectionType].every(
+			(field) => field.optional || (values[field.key] ?? '').trim().length > 0,
+		);
+		// Alternative credentials are each optional on their own, so the "every
+		// required field" check above cannot see that one of them is still needed.
+		const alternatives = CONNECTION_EITHER_FIELDS[connectionType];
+		const alternativeSatisfied =
+			alternatives == null ||
+			alternatives.some((key) => (values[key] ?? '').trim().length > 0);
+
+		return allRequiredPresent && alternativeSatisfied;
+	}, [connectionType, values]);
 
 	const canContinue = activeStep === 0 ? false : fieldsComplete;
 
@@ -108,7 +145,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		setAlert(null);
 		setTestSuccessMessage(null);
 
-		const res = await connectionsApi.test(buildConnection());
+		const res = await connectionsApi.test(buildConnection({ forTest: true }));
 		setTestingConnection(false);
 
 		if ('error' in res && res.error) {

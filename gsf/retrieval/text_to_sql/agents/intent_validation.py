@@ -28,10 +28,14 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
+from gsf.retrieval.text_to_sql.formatters_util import (
+    format_semantic_context,
+)
 from gsf.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
     create_intent_validation_prompt,
+    format_custom_analyses_section,
 )
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
@@ -42,10 +46,20 @@ from gsf.retrieval.text_to_sql.state import (
 
 logger = logging.getLogger(__name__)
 
+# Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
+# (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
+# so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
+# right step event and ``NODE_LABELS`` entry.
+_GRAPH_NODE_NAME = "validate_intent"
+
 
 class IntentValidationModel(BaseModel):
     """Model for intent validation response."""
 
+    reasoning: str = Field(
+        default="",
+        description="Brief reasoning (1-2 sentences max) on whether the SQL addresses the question's intent.",
+    )
     is_valid: bool = Field(
         description="Whether the SQL query has any CRITICAL issues. Should be True unless there are serious problems."
     )
@@ -148,8 +162,41 @@ class IntentValidationAgent(BaseAgent):
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
 
+        # Prefer Neo4j-enriched snippets (name/description/sql) from preparation.
+        # Fall back to the VDB custom_analyses list when enrichment is absent.
+        ca_str_list = path_state.get("custom_analyses_str") or []
+        if ca_str_list:
+            ca_section = (
+                "DOMAIN-SPECIFIC CUSTOM ANALYSES (use their SQL patterns as guidance):\n"
+                + "\n".join(f"- {entry}" for entry in ca_str_list)
+                + "\n\n"
+            )
+        else:
+            ca_section = format_custom_analyses_section(
+                path_state.get("custom_analyses") or []
+            )
+
+        join_paths_section = ""
+        primary_attribute = path_state.get("primary_attribute") or {}
+        attribute_join_paths = path_state.get("attribute_join_paths") or []
+        if primary_attribute and attribute_join_paths:
+            join_paths_section = (
+                "AUTHORITATIVE JOIN PATHS (keep joins that follow these verified paths):\n"
+                + format_semantic_context(
+                    primary_attribute,
+                    attribute_join_paths,
+                    target_db=path_state.get("target_db"),
+                )
+                + "\n\n"
+            )
+
         validation_prompt = create_intent_validation_prompt(
-            original_question, sanitized_question, "", sql_code
+            original_question,
+            sanitized_question,
+            "",
+            sql_code,
+            custom_analyses=ca_section,
+            join_paths=join_paths_section,
         )
 
         messages = [
@@ -169,6 +216,11 @@ class IntentValidationAgent(BaseAgent):
                 "decision": "intent_valid",
                 "path_state": path_state,
             }
+
+        if (validation_result.reasoning or "").strip():
+            record_thought(
+                path_state, _GRAPH_NODE_NAME, validation_result.reasoning.strip()
+            )
 
         if validation_result.is_valid:
             self.logger.info("SQL validation passed (no critical issues)")

@@ -6,10 +6,14 @@
 
 import { useState } from 'react';
 
-import { Icon, IconName } from '@/components/icons';
-import { DetailLinkButton } from '@/components/DetailLinkButton';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
+import { Icon, IconName } from '@/common/icons';
+import { DetailLinkButton } from '@/common/DetailLinkButton';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import { ExplorationLayer } from '@/enums/exploration';
-import { Label } from '@/components/Label';
+import { Label } from '@/common/Label';
 import type {
 	ExplorationGraph,
 	ExplorationTermNode,
@@ -64,22 +68,26 @@ export const ActiveTermCard = ({
 					Showing info on this Semantic Object
 				</p>
 				<div className="flex items-center gap-1">
-					<button
+					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={() => setMinimized((value) => !value)}
-						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 						aria-label={minimized ? 'Expand term details' : 'Minimize term details'}
 					>
 						{minimized ? '+' : '−'}
-					</button>
-					<button
+					</Button>
+					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={onClose}
-						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
 						aria-label="Close term details"
 					>
-						×
-					</button>
+						<Icon name={IconName.Close} className="h-4 w-4" />
+					</Button>
 				</div>
 			</header>
 			{!minimized && (
@@ -89,26 +97,30 @@ export const ActiveTermCard = ({
 							name={IconName.Terms}
 							className="mt-0.5 h-5 w-5 shrink-0 text-[#76b900]"
 						/>
-						<div className="min-w-0 flex-1">
-							<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-								{node.name}
-							</h2>
+						<div className="min-w-0 flex-1 space-y-1">
+							<Text as="h2" text={node.name} variant={TextVariant.Heading} />
 							{node.synonyms.length > 0 && (
-								<p className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
+								<Text as="p" variant={TextVariant.Caption}>
 									Synonyms: {node.synonyms.join(', ')}
-								</p>
+								</Text>
 							)}
-							<p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-								{node.description || 'No Description'}
-							</p>
+							<Text
+								as="p"
+								text={node.description || 'No Description'}
+								lines={2}
+								variant={TextVariant.Detail}
+							/>
 						</div>
-						<button
-							type="button"
-							onClick={onView}
-							className="shrink-0 cursor-pointer rounded-lg bg-[#76b900] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#5e9400]"
-						>
-							View Term
-						</button>
+						<div className="shrink-0">
+							<Button
+								theme={ButtonTheme.Primary}
+								size={Size.SMALL}
+								type="button"
+								onClick={onView}
+							>
+								View Term
+							</Button>
+						</div>
 					</div>
 					<div className="flex flex-wrap items-center gap-2">
 						<span className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">

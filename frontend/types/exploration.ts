@@ -6,7 +6,12 @@ import type { TableType } from '@/enums/datasources';
 import type { ExplorationLayer } from '@/enums/exploration';
 import type { Term, TermZone } from '@/types/terms';
 
-export type ExplorationTermNode = Term & {
+// The exploration graph does not surface certification, so those Term fields
+// are intentionally omitted from the graph node shape.
+export type ExplorationTermNode = Omit<
+	Term,
+	'name_certified' | 'description_certified' | 'certification'
+> & {
 	layer: ExplorationLayer.Semantic;
 	nodeType: 'term';
 	relationshipCount: number;
@@ -84,7 +89,22 @@ export type DataGraphNodeDto = {
 	columns_count: number;
 	sql_count: number;
 	terms_count: number;
+	relationship_count: number;
 	zones: TermZone[];
+};
+
+export type RelatedExplorationNodeDto = {
+	id: string;
+	name: string;
+	relationship_count: number;
+	table_type?: string;
+	database_id?: string;
+	schema_id?: string;
+};
+
+export type ExplorationRelationshipsPageDto = {
+	nodes: RelatedExplorationNodeDto[];
+	total: number;
 };
 
 export type SemanticExplorationGraph = {
@@ -124,4 +144,6 @@ export type TableExplorationDetails = {
 		name: string;
 		description: string | null;
 	}>;
+
+	terms_total: number;
 };

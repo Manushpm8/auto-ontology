@@ -9,11 +9,13 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { DataModels } from '@/enums/datasources';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import { datasources } from '@/api/datasources';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { splitId } from '@/lib/data/catalog-ids';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import {
 	catalogStructureFingerprint,
 	mergeColumnsIntoTable,
@@ -143,7 +145,7 @@ function Row({
 		</span>
 	);
 
-	const nameEl = <span className="min-w-0 flex-1 truncate font-medium">{name}</span>;
+	const nameEl = <Text text={name} variant={TextVariant.Strong} fill />;
 
 	const inner = (
 		<>

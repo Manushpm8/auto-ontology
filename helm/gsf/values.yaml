@@ -35,18 +35,27 @@ neo4jPassword: ""
 # pgAdmin
 pgadminEmail: admin@example.com
 pgadminPassword: admin
-# NVIDIA NIM
+# NVIDIA NIM — default triplet; every model triplet falls back to these per field.
+# Leave endpoint/model empty to auto-derive them from the API key prefix
+# (sk- -> inference-api, nvapi- -> integrate/build.nvidia.com).
+defaultModelsApiKey: ""
+defaultModelsEndpoint: ""
+defaultModelsModel: ""
+# Legacy value names (pre-triplet). Still honored so existing
+# --set nvidiaApiKey / baseUrl / modelName configs keep working.
 nvidiaApiKey: ""
-baseUrl: "https://integrate.api.nvidia.com/v1"
-modelName: "nvidia/nemotron-3-nano-30b-a3b"
-# Optional dedicated model for entity extraction in the text-to-SQL pipeline.
-# When empty, entity extraction falls back to modelName.
-entityExtractionModel: "meta/llama-3.1-8b-instruct"
-# KumoRFM (predictions). Leave the key empty to disable the prediction tool.
+baseUrl: ""
+modelName: ""
+# KumoRFM (predictions). Set the URL to a Universal TFM NIM serving the
+# 'kumo-rfm' model; leave it empty to disable the prediction tool. NIMs are
+# unauthenticated by contract, so the key is only needed when a deployment
+# fronts the NIM with an authenticating gateway.
 kumoRfmApiKey: ""
-kumoRfmApiUrl: "https://kumorfm.ai/api"
-embedEndpoint: "https://integrate.api.nvidia.com/v1"
-embedModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
+kumoRfmApiUrl: ""
+# Embedding endpoint/model. Leave empty to inherit from the default triplet /
+# auto-derive from the API key prefix; set to override just the embedder.
+embedEndpoint: ""
+embedModel: ""
 # VAST in-table vector search: the embedding model that produced the stored
 # vector columns (fixed_size_list<float>[N]). Leave empty to disable the feature.
 vastEmbedEndpoint: ""
