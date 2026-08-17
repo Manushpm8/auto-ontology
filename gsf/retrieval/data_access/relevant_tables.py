@@ -100,6 +100,8 @@ def _normalize_table_to_relevant_shape(table: dict) -> dict:
         entry["schema_name"] = table["schema_name"]
     if table.get("columns") and not entry.get("columns"):
         entry["columns"] = table["columns"]
+    if table.get("n_rows") is not None:
+        entry["n_rows"] = table["n_rows"]
     if table.get("pk") is not None:
         entry["primary_key"] = table["pk"]
     if not isinstance(entry.get("columns"), list):

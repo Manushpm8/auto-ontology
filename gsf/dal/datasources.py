@@ -244,6 +244,17 @@ RETURN t.id AS id,
 LIMIT 1
 """
 
+_FETCH_TABLE_BY_NAME_IN_DB = f"""
+MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+      (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{name: $name}})
+RETURN t.id AS id,
+       t.name AS name,
+       s.name AS schema_name,
+       t.description AS description,
+       t.pk as pk
+LIMIT 1
+"""
+
 _FETCH_JOIN_NEIGHBORS = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.JOIN}]-(other:{Labels.TABLE})
 RETURN DISTINCT other.id AS id,
@@ -266,9 +277,14 @@ MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
       -[:{Edges.CONTAINS}]->(tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: {column_description_expr("col")}}}) AS cols
+                            description: {column_description_expr("col")},
+                            sample_values: col.sample_values,
+                            is_unique: col.is_unique,
+                            exhaustive: col.exhaustive,
+                            n_distinct: col.n_distinct,
+                            date_format: col.date_format}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       db.name AS database_name, sch.name AS schema_name, cols
+       sch.name AS schema_name, tbl.n_rows AS n_rows, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -320,6 +336,28 @@ WITH db, s, t, columns_count, sql_count,
              ELSE unique_ids + term_id
          END
      ) AS unique_term_ids
+"""
+
+_FETCH_FK_NEIGHBOUR_TABLES = f"""
+MATCH (db:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(src:{Labels.TABLE})
+WHERE toLower(src.name) IN $table_names
+MATCH (src)-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+      -[:{Edges.FOREIGN_KEY}]-(:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
+WHERE NOT toLower(tbl.name) IN $table_names
+MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+WITH tbl, sch, col ORDER BY col.ordinal_position
+WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
+                         description: {column_description_expr("col")},
+                         sample_values: col.sample_values,
+                         is_unique: col.is_unique,
+                         exhaustive: col.exhaustive,
+                         n_distinct: col.n_distinct,
+                         date_format: col.date_format}}) AS cols
+RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
+       sch.name AS schema_name, tbl.n_rows AS n_rows, cols
+ORDER BY name
 """
 
 
@@ -384,9 +422,17 @@ def fetch_table_by_id(table_id: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
-def fetch_table_by_name(name: str) -> dict[str, Any] | None:
-    """Return the first Table row matching *name*, or None if not found."""
-    rows = graph().query_read(_FETCH_TABLE_BY_NAME, {"name": name})
+def fetch_table_by_name(
+    name: str, database_name: str | None = None
+) -> dict[str, Any] | None:
+    """Return the first Table row matching *name*, optionally scoped to a DB."""
+    if database_name:
+        rows = graph().query_read(
+            _FETCH_TABLE_BY_NAME_IN_DB,
+            {"name": name, "database_name": database_name},
+        )
+    else:
+        rows = graph().query_read(_FETCH_TABLE_BY_NAME, {"name": name})
     return rows[0] if rows else None
 
 
@@ -413,6 +459,61 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
+                "n_rows": row.get("n_rows"),
+                "columns": cols,
+            }
+        )
+    return tables
+
+
+def fetch_fk_neighbour_tables(
+    database_name: str, table_names: list[str]
+) -> list[dict[str, Any]]:
+    """Tables one foreign key away from *table_names*, in ``relevant_tables`` shape.
+    Retrieval ranks tables by how well their name and description match the
+    question, which systematically misses tables the question never names but
+    the query still has to join through. Following FK edges out of the tables we
+    did find recovers those without resorting to the whole schema.
+    *table_names* is matched case-insensitively; the inputs themselves are
+    excluded from the result.
+    """
+    if not database_name or not table_names:
+        return []
+    try:
+        rows = graph().query_read(
+            _FETCH_FK_NEIGHBOUR_TABLES,
+            {
+                "database_name": database_name,
+                "table_names": [t.lower() for t in table_names],
+            },
+        )
+    except Exception:
+        logger.warning("fetch_fk_neighbour_tables: Neo4j query failed", exc_info=True)
+        return []
+    tables = []
+    for row in rows:
+        if not row.get("id"):
+            continue
+        cols = []
+        for col in row.get("cols") or []:
+            if not col.get("name"):
+                continue
+            # Most descriptions already end in "— samples: ..." (or "— one of:
+            # ..." for a closed enumeration); keeping sample_values as well would
+            # print the same values twice and adds ~30% to the rendered schema
+            # block.
+            description = col.get("description") or ""
+            if "samples:" in description or "one of:" in description:
+                col.pop("sample_values", None)
+            cols.append(col)
+        tables.append(
+            {
+                "id": row["id"],
+                "name": row.get("name") or "",
+                "description": row.get("description") or "",
+                "schema_name": row.get("schema_name") or "",
+                "label": "Table",
+                "n_rows": row.get("n_rows"),
                 "columns": cols,
             }
         )
@@ -487,6 +588,9 @@ RETURN c.id AS id,
        {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
+       c.is_unique AS is_unique,
+       c.exhaustive AS exhaustive,
+       c.n_distinct AS n_distinct,
        EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key
 ORDER BY c.ordinal_position
 """
@@ -610,6 +714,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r.get("description"),
             "ordinal_position": r.get("ordinal_position"),
             "sample_values": r.get("sample_values"),
+            "n_distinct": r.get("n_distinct"),
         }
         for r in rows
         if r.get("id") is not None
@@ -688,38 +793,193 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
     )
 
 
+def store_column_descriptions(table_id: str, descriptions: dict[str, str]) -> None:
+    """Copy generated descriptions down onto the Column nodes of a table.
+    The semantic layer writes its descriptions to ColumnAttribute nodes, and the
+    only other writer of ``Column.description`` is the ingest-time metadata apply.
+    A column the source metadata left blank therefore has a description on its
+    attribute but none on itself — and columns with no attribute at all (foreign
+    keys, which are linked by SEMANTIC_FK to the attribute they reference) end up
+    with a description nowhere, reaching the prompt as a bare name and type.
+    Existing descriptions are never overwritten: a description that came from the
+    source metadata is authoritative, and this only fills the gaps.
+    """
+    if not descriptions:
+        return
+    entries = [
+        {"column_name": col, "description": desc}
+        for col, desc in descriptions.items()
+        if desc and desc.strip()
+    ]
+    if not entries:
+        return
+    graph().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.description][0]
+             AS d
+        WHERE d IS NOT NULL AND (col.description IS NULL OR trim(col.description) = "")
+        SET col.description = d
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_column_exhaustiveness(table_id: str, exhaustiveness: dict[str, bool]) -> None:
+    """Write exhaustive flags onto Column nodes for a given table.
+    ``exhaustive`` records whether ``sample_values`` is the column's complete
+    distinct set rather than its most common few, which is what lets a
+    description say "one of: Active, Closed" instead of "samples: Active,
+    Closed" — a constraint rather than a hint. Persisting it lets the semantic
+    layer read the profile back instead of recomputing it with a second table
+    scan and a DISTINCT probe per categorical column.
+    Skips silently when *exhaustiveness* is empty.
+    """
+    if not exhaustiveness:
+        return
+    entries = [
+        {"column_name": col, "exhaustive": bool(flag)}
+        for col, flag in exhaustiveness.items()
+    ]
+    graph().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.exhaustive][0]
+             AS ex
+        WHERE ex IS NOT NULL
+        SET col.exhaustive = ex
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_table_row_count(table_id: str, n_rows: int) -> None:
+    """Write a table's total row count onto its Table node.
+    Row counts turn table sizes into evidence the model can reason from: two
+    tables with the same count are probably 1:1, so a join between them cannot
+    fan out, while a 4,500-row table joined to a 1,056,320-row one multiplies
+    rows by ~235 and makes a plain ``COUNT(*)`` count the wrong entity.
+    """
+    if n_rows is None:
+        return
+    graph().query_write(
+        f"MATCH (t:{Labels.TABLE} {{id: $table_id}}) SET t.n_rows = $n_rows",
+        {"table_id": table_id, "n_rows": int(n_rows)},
+    )
+
+
+def store_column_cardinality(table_id: str, cardinality: dict[str, int]) -> None:
+    """Write exact distinct-value counts onto Column nodes for a given table.
+    Distinct from ``store_column_uniqueness``, whose flag is derived from a row
+    sample and so can be wrong: these counts come from a ``COUNT(DISTINCT)`` over
+    the whole column, which is what makes them safe to state in a description.
+    Skips silently when *cardinality* is empty.
+    """
+    if not cardinality:
+        return
+    entries = [
+        {"column_name": col, "n_distinct": int(n)} for col, n in cardinality.items()
+    ]
+    graph().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.n_distinct][0]
+             AS nd
+        WHERE nd IS NOT NULL
+        SET col.n_distinct = nd
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:
+    """Write inferred storage notations onto date Column nodes for a table.
+    Date columns carry no sample values, so without this a temporal column
+    reaches the generation prompt as a name and a sentence, and the model has to
+    guess whether to compare against ``'1995-03-24'``, ``'950324'`` or
+    ``'24/03/1995'``. The notation is inferred, not declared, so it is stored
+    only where a single reading fits every sampled value.
+    Skips silently when *date_formats* is empty.
+    """
+    if not date_formats:
+        return
+    entries = [
+        {"column_name": col, "date_format": str(fmt)}
+        for col, fmt in date_formats.items()
+        if fmt
+    ]
+    if not entries:
+        return
+    graph().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.date_format][0]
+             AS fmt
+        WHERE fmt IS NOT NULL
+        SET col.date_format = fmt
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cross-entity (Table + Column batch operations)
 # ---------------------------------------------------------------------------
+
+
+def _decode_sample_values(raw: Any) -> list[Any]:
+    """Return ``Column.sample_values`` as a list.
+    Neo4j stores it as a JSON string, while ``TabularFetchEmbeddingsOp`` slices
+    it and joins the elements. Handed the string it slices and joins characters
+    instead, embedding ``sample_values: [, ", -, ", ,`` in place of the values.
+    """
+    if isinstance(raw, list):
+        return raw
+    if not raw:
+        return []
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return decoded if isinstance(decoded, list) else []
 
 
 def fetch_tables_and_columns_by_node_ids(
     node_ids: list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, str]:
     """Load Table/Column rows from Neo4j as dataframes for TabularFetchEmbeddingsOp."""
-    conn = graph()
-    columns_df = pd.DataFrame(
-        conn.query_read(
-            f"""
-            UNWIND $ids AS id
-            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-            WHERE t.id = id OR c.id = id
-            RETURN DISTINCT
-                   c.id AS id,
-                   t.name AS table_name,
-                   s.name AS table_schema,
-                   c.name AS column_name,
-                   c.data_type AS data_type,
-                   {column_description_expr("c")} AS description,
-                   c.sample_values AS sample_values,
-                   db.name AS database_name
-            """,
-            {"ids": node_ids},
-        ),
+
+    column_records = graph().query_read(
+        f"""
+        UNWIND $ids AS id
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+              -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+        WHERE t.id = id OR c.id = id
+        RETURN DISTINCT
+               c.id AS id,
+               t.name AS table_name,
+               s.name AS table_schema,
+               c.name AS column_name,
+               c.data_type AS data_type,
+               {column_description_expr("c")} AS description,
+               c.sample_values AS sample_values,
+               db.name AS database_name
+        """,
+        {"ids": node_ids},
     )
+    for record in column_records:
+        record["sample_values"] = _decode_sample_values(record.get("sample_values"))
+    columns_df = pd.DataFrame(column_records)
     tables_df = pd.DataFrame(
-        conn.query_read(
+        graph().query_read(
             f"""
             UNWIND $ids AS id
             MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})

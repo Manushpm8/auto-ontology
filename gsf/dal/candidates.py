@@ -81,8 +81,12 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                                     description: {column_description_expr("c")},
                                                     sample_values: CASE
                                                         WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
-                                                        THEN c.sample_values ELSE null END
-                                                  }}]
+                                                        THEN c.sample_values ELSE null END,
+                                                    is_unique: c.is_unique,
+                                                    exhaustive: c.exhaustive,
+                                                    n_distinct: c.n_distinct,
+                                                    date_format: c.date_format
+                                                }}]
                                              }}
                                          )
                                      ELSE null END
@@ -110,8 +114,12 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                             description: {column_description_expr("c")},
                                             sample_values: CASE
                                                 WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
-                                                THEN c.sample_values ELSE null END
-                                          }}]
+                                                THEN c.sample_values ELSE null END,
+                                            is_unique: c.is_unique,
+                                            exhaustive: c.exhaustive,
+                                            n_distinct: c.n_distinct,
+                                            date_format: c.date_format
+                                            }}]
                                      }}
                                  )) AS tables
                             RETURN apoc.map.merge(
@@ -129,8 +137,12 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                     data_type: toString(coalesce(c.data_type, "")),
                                     description: {column_description_expr("c")},
                                     sample_values: CASE WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
-                                                        THEN c.sample_values ELSE null END
-                                  }}] AS column_list
+                                                        THEN c.sample_values ELSE null END,
+                                    is_unique: c.is_unique,
+                                    exhaustive: c.exhaustive,
+                                    n_distinct: c.n_distinct,
+                                    date_format: c.date_format
+                                    }}] AS column_list
                             WITH n, parent, schema, db, column_list,
                                  apoc.map.merge(
                                      properties(parent),

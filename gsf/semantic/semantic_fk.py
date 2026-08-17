@@ -24,6 +24,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.graph.retriever import Retriever
 
+from gsf.semantic.constants import MAX_SAMPLE_VALUE_LEN
 from gsf.dal.attributes import (
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
@@ -194,7 +195,11 @@ def _format_sample_values(raw: str | None) -> str:
         import json
 
         values = json.loads(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
+        non_null = [
+            str(v)
+            for v in values
+            if v is not None and len(str(v)) <= MAX_SAMPLE_VALUE_LEN
+        ]
         if not non_null:
             return ""
         return "sample_values: " + ", ".join(non_null)

@@ -12,6 +12,7 @@ from nemo_retriever.common.params.models import EmbedParams
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
+from gsf.semantic.constants import MAX_SAMPLE_VALUE_LEN
 from gsf.utils.model_config import resolve
 from gsf.vdb import get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
@@ -225,7 +226,11 @@ def _format_sample_values(raw: str | list[Any] | None) -> str:
         import json
 
         values = json.loads(raw) if isinstance(raw, str) else list(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
+        non_null = [
+            str(v)
+            for v in values
+            if v is not None and len(str(v)) <= MAX_SAMPLE_VALUE_LEN
+        ]
         if not non_null:
             return ""
         return " Sample values: " + ", ".join(non_null) + "."

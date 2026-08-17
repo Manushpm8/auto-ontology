@@ -4,6 +4,14 @@ from __future__ import annotations
 
 SEMANTIC_SOURCE = "semantic"
 
+# Longest sample value that is worth carrying. Profiling stores nothing longer,
+# and the prompt/embedding renderers drop anything longer on the way out. Raised
+# from 30 because real categorical values exceed it — BIRD district names such as
+# "Los Angeles Unified School District" are 35 characters — and a dropped value
+# is worse than a long one now that a complete value list is presented to the
+# model as a closed set ("one of: ...") rather than as examples.
+MAX_SAMPLE_VALUE_LEN = 60
+
 # Source values stored on SqlAttribute nodes.
 SQL_ATTR_SOURCE_MANUAL = "manual"
 SQL_ATTR_SOURCE_SQL = "sql"
@@ -16,6 +24,11 @@ LABEL_COLUMN_ATTRIBUTE = "ColumnAttribute"
 LABEL_SQL_ATTRIBUTE = "SqlAttribute"
 LABEL_TEXT_ATTRIBUTE = "TextAttribute"
 LABEL_ANALYSIS = "Analysis"
+
+# Cross-database Train few-shot Q→SQL demos for text-to-SQL ICL.
+# Stored in the dedicated ``train_qa`` pgvector collection (not semantic_layer).
+LABEL_FEW_SHOT_QA = "FewShotQA"
+FEW_SHOT_DATABASE_NAME = "train_qa"
 
 # PQL (predictive) custom analyses — the KumoRFM-prediction twin of CustomAnalysis.
 # Stored under their own label so they never mix into the SQL text-to-SQL retrieval;
