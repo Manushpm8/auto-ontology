@@ -7,12 +7,24 @@
 The server talks to the **public** GSF API, not to the Python services behind
 it: those are ClusterIP-only and reachable solely through the Next.js proxy,
 which is where authentication and permission checks live. So all it needs is a
-base URL and an API token —
-the same credential a script or notebook would use, carrying exactly the
-permissions of the user who minted it.
+base URL and a credential — the same one a script or notebook would use,
+carrying exactly the permissions of the user who minted it.
 
-That also makes the deployed and local cases identical: pointing at a
-self-hosted GSF or at a hosted one differs only in ``GSF_API_URL``.
+Where that credential comes from depends on who the server serves:
+
+* **stdio** — one process per user, started by their own client, so
+  ``GSF_API_TOKEN`` *is* that user's identity and is required.
+* **http** — potentially many users on one process, so each request carries its
+  own credential and the server holds none. ``GSF_API_TOKEN`` is not required,
+  and supplying one anyway needs ``GSF_MCP_ALLOW_SHARED_TOKEN`` because it makes
+  every caller act as that token's owner.
+
+That last case is the reason the opt-in exists rather than a warning: a shared
+token silently collapses a team into one identity, with one set of permissions
+and one conversation history, and nothing in the protocol would reveal it.
+
+Pointing at a self-hosted GSF or a hosted one still differs only in
+``GSF_API_URL``.
 """
 
 from __future__ import annotations
@@ -54,6 +66,8 @@ class Settings:
     """Everything the server needs to start."""
 
     api_url: str
+    # Empty under `http` unless a shared identity was opted into: there, the
+    # credential arrives per request instead. Always set under `stdio`.
     api_token: str
     spec_path: Path
     transport: str
@@ -61,6 +75,7 @@ class Settings:
     port: int
     timeout_s: float
     chat_timeout_s: float
+    allow_shared_token: bool = False
 
 
 def _positive_float(name: str, default: float) -> float:
@@ -74,6 +89,11 @@ def _positive_float(name: str, default: float) -> float:
     if value <= 0:
         raise ConfigError(f"{name} must be greater than zero, got {value}")
     return value
+
+
+def _flag(name: str) -> bool:
+    """Read a boolean opt-in. Anything unset or unrecognised reads as false."""
+    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _port(name: str, default: int) -> int:
@@ -98,18 +118,35 @@ def load_settings() -> Settings:
     never configured.
     """
 
-    token = (os.environ.get("GSF_API_TOKEN") or "").strip()
-    if not token:
-        raise ConfigError(
-            "GSF_API_TOKEN is required. Mint one in the GSF UI under "
-            "user menu → API Tokens, then export it."
-        )
-
     transport = (os.environ.get("GSF_MCP_TRANSPORT") or "stdio").strip().lower()
     if transport not in TRANSPORTS:
         raise ConfigError(
             f"GSF_MCP_TRANSPORT must be one of {', '.join(TRANSPORTS)}, "
             f"got {transport!r}"
+        )
+
+    token = (os.environ.get("GSF_API_TOKEN") or "").strip()
+    allow_shared_token = _flag("GSF_MCP_ALLOW_SHARED_TOKEN")
+
+    if transport == "stdio" and not token:
+        raise ConfigError(
+            "GSF_API_TOKEN is required. Mint one in the GSF UI under "
+            "user menu → API Tokens, then export it."
+        )
+
+    if transport == "http" and token and not allow_shared_token:
+        # Refusing here is the point. Serving many users from one token is a
+        # legitimate choice for a single-user deployment or an automation
+        # account, but it is never one to make by accident, and a running
+        # server gives no sign that it happened.
+        raise ConfigError(
+            "GSF_API_TOKEN is set with GSF_MCP_TRANSPORT=http, which would "
+            "authenticate every caller as that token's owner — their "
+            "permissions and their conversation history.\n"
+            "Unset GSF_API_TOKEN to have each caller send its own credential "
+            "(x-api-key, or Authorization: Bearer), which is what a "
+            "multi-user deployment wants. If a single shared identity is "
+            "intended, set GSF_MCP_ALLOW_SHARED_TOKEN=1 to confirm it."
         )
 
     spec_path = Path(
@@ -137,6 +174,7 @@ def load_settings() -> Settings:
         chat_timeout_s=_positive_float(
             "GSF_MCP_CHAT_TIMEOUT_S", DEFAULT_CHAT_TIMEOUT_S
         ),
+        allow_shared_token=allow_shared_token,
     )
 
 

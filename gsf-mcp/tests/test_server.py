@@ -11,11 +11,21 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
+from fastmcp.server.http import set_http_request
+from starlette.requests import Request
 
 from gsf_mcp.config import DEFAULT_SPEC_PATH, ConfigError, Settings
-from gsf_mcp.server import INSTRUCTIONS, build_client, build_server, load_spec
+from gsf_mcp.server import (
+    INSTRUCTIONS,
+    CallerAuth,
+    build_client,
+    build_server,
+    load_spec,
+)
 from gsf_mcp.tools import CURATED
 from gsf_mcp import get_version
 
@@ -102,12 +112,105 @@ def test_instructions_point_at_the_primary_tool() -> None:
     assert "check_answerable" in INSTRUCTIONS
 
 
-def test_client_authenticates_with_the_api_token() -> None:
+def _sent_headers(
+    auth: CallerAuth, incoming: dict[str, str] | None = None
+) -> httpx.Headers:
+    """Run one request through *auth* and return the headers it went out with.
+
+    The incoming request is faked with FastMCP's own HTTP request context, so
+    this exercises the same lookup a live HTTP transport would.
+    """
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={})
+
+    async def run() -> None:
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            auth=auth,
+            base_url="http://gsf.test",
+        )
+        try:
+            await client.get("/api/terms")
+        finally:
+            await client.aclose()
+
+    if incoming is None:
+        asyncio.run(run())
+    else:
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/mcp",
+            "headers": [(k.lower().encode(), v.encode()) for k, v in incoming.items()],
+        }
+        with set_http_request(Request(scope)):
+            asyncio.run(run())
+
+    return captured[0].headers
+
+
+def test_no_credential_is_attached_to_the_client_itself() -> None:
+    """A shared client must not carry one caller's identity for all callers."""
     client = build_client(_settings())
     try:
-        assert client.headers["x-api-key"] == "gsf_token"
+        assert "x-api-key" not in client.headers
     finally:
         asyncio.run(client.aclose())
+
+
+def test_falls_back_to_the_configured_token_without_a_request() -> None:
+    """This is the stdio case: the process token *is* the user's identity."""
+    headers = _sent_headers(CallerAuth("gsf_token"))
+
+    assert headers["x-api-key"] == "gsf_token"
+
+
+def test_forwards_the_callers_api_key_header() -> None:
+    headers = _sent_headers(CallerAuth("gsf_server"), {"x-api-key": "gsf_caller"})
+
+    assert headers["x-api-key"] == "gsf_caller"
+
+
+def test_a_gsf_token_in_the_bearer_slot_is_sent_as_an_api_key() -> None:
+    """GSF resolves API tokens from x-api-key first, and the prefix is proof."""
+    headers = _sent_headers(CallerAuth(), {"authorization": "Bearer gsf_caller"})
+
+    assert headers["x-api-key"] == "gsf_caller"
+    assert "authorization" not in headers
+
+
+def test_a_non_gsf_bearer_token_stays_a_bearer_token() -> None:
+    """An SSO id token only resolves from the bearer slot, so leave it there."""
+    headers = _sent_headers(CallerAuth(), {"authorization": "Bearer eyJhbGciOi"})
+
+    assert headers["authorization"] == "Bearer eyJhbGciOi"
+    assert "x-api-key" not in headers
+
+
+def test_the_caller_outranks_the_configured_token() -> None:
+    """Opting into a shared token must not override a caller who identified."""
+    headers = _sent_headers(CallerAuth("gsf_shared"), {"x-api-key": "gsf_caller"})
+
+    assert headers["x-api-key"] == "gsf_caller"
+
+
+def test_two_identities_are_never_sent_together() -> None:
+    headers = _sent_headers(
+        CallerAuth(),
+        {"x-api-key": "gsf_caller", "authorization": "Bearer eyJhbGciOi"},
+    )
+
+    assert headers["x-api-key"] == "gsf_caller"
+    assert "authorization" not in headers
+
+
+def test_missing_credential_is_an_actionable_error() -> None:
+    """With no server token and no caller token there is nobody to act as."""
+    with pytest.raises(ToolError, match="No GSF credential"):
+        _sent_headers(CallerAuth(), {"accept": "application/json"})
 
 
 def test_rejects_a_spec_that_is_not_json(tmp_path: Path) -> None:

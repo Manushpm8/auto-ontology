@@ -22,6 +22,11 @@ export GSF_API_URL=https://gsf.example.com
 export GSF_API_TOKEN=gsf_...
 ```
 
+That token is for the default `stdio` transport, where your client starts the
+process and it serves only you. If you are deploying one server for several
+people, do not set it: on `GSF_MCP_TRANSPORT=http` each caller sends its own
+credential per request and acts as itself. See [Notes](#notes).
+
 No clone needed — `uvx` fetches, builds, and runs it from the repository:
 
 ```sh
@@ -79,8 +84,10 @@ This server is a plain HTTP client of the GSF API, so it needs no database
 credentials and can run anywhere that can reach your deployment. It authenticates
 with your API token and therefore **acts as you**, with exactly your permissions.
 
-One important limit: with `GSF_MCP_TRANSPORT=http` it serves every caller as the
-single identity in its environment, so don't share one instance across a team.
+With `GSF_MCP_TRANSPORT=http` it holds no token at all: each caller sends its own
+in an `x-api-key` or `Authorization` header, and so acts as itself. Setting
+`GSF_API_TOKEN` there would make every caller share one identity, so the server
+refuses to start unless `GSF_MCP_ALLOW_SHARED_TOKEN=1` says that is intended.
 
 Full documentation, including all configuration variables and how to extend the
 tool surface, is in [`docs/mcp.md`](../docs/mcp.md).

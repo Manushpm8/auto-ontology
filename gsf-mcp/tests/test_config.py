@@ -27,6 +27,7 @@ _VARS = (
     "GSF_MCP_PORT",
     "GSF_MCP_TIMEOUT_S",
     "GSF_MCP_CHAT_TIMEOUT_S",
+    "GSF_MCP_ALLOW_SHARED_TOKEN",
 )
 
 
@@ -73,10 +74,69 @@ def test_rejects_unknown_transport(monkeypatch: MonkeyPatch) -> None:
 
 
 def test_accepts_http_transport(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setenv("GSF_API_TOKEN", "gsf_abc")
     monkeypatch.setenv("GSF_MCP_TRANSPORT", "HTTP")
 
-    assert load_settings().transport == "http"
+    settings = load_settings()
+
+    assert settings.transport == "http"
+    # No token: callers authenticate per request, which is the whole point of
+    # the HTTP transport not requiring one.
+    assert settings.api_token == ""
+
+
+def test_stdio_still_requires_a_token(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "stdio")
+
+    with pytest.raises(ConfigError, match="GSF_API_TOKEN is required"):
+        load_settings()
+
+
+def test_refuses_a_shared_token_on_http_without_opt_in(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The dangerous configuration must be chosen, never merely inherited."""
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("GSF_API_TOKEN", "gsf_abc")
+
+    with pytest.raises(ConfigError, match="GSF_MCP_ALLOW_SHARED_TOKEN") as exc:
+        load_settings()
+
+    # The message has to say what it would do, not just that it refused.
+    assert "every caller" in str(exc.value)
+
+
+def test_allows_a_shared_token_on_http_when_opted_in(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("GSF_API_TOKEN", "gsf_abc")
+    monkeypatch.setenv("GSF_MCP_ALLOW_SHARED_TOKEN", "1")
+
+    settings = load_settings()
+
+    assert settings.api_token == "gsf_abc"
+    assert settings.allow_shared_token is True
+
+
+@pytest.mark.parametrize("value", ["true", "TRUE", "yes", "on", "1"])
+def test_opt_in_accepts_the_usual_spellings(
+    monkeypatch: MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("GSF_API_TOKEN", "gsf_abc")
+    monkeypatch.setenv("GSF_MCP_ALLOW_SHARED_TOKEN", value)
+
+    assert load_settings().allow_shared_token is True
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "maybe"])
+def test_anything_else_is_not_an_opt_in(monkeypatch: MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("GSF_API_TOKEN", "gsf_abc")
+    monkeypatch.setenv("GSF_MCP_ALLOW_SHARED_TOKEN", value)
+
+    with pytest.raises(ConfigError, match="GSF_MCP_ALLOW_SHARED_TOKEN"):
+        load_settings()
 
 
 def test_rejects_missing_spec(monkeypatch: MonkeyPatch, tmp_path) -> None:

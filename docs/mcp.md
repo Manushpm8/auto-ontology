@@ -35,6 +35,12 @@ at a production instance differs only in `GSF_API_URL`.
 It follows that **an MCP session can do exactly what its token's owner can do**,
 no more. A viewer's token yields a viewer's answers.
 
+Which token that is depends on who the server serves. On `stdio` each user's
+client starts its own process, so `GSF_API_TOKEN` is that user's identity. On
+`http` one process may serve many people, so the credential travels with each
+request and the server keeps none — see [Running it
+remotely](#running-it-remotely).
+
 It also means users install almost nothing. `gsf-mcp` is its own distribution
 (source in [`gsf-mcp/`](../gsf-mcp/)) depending only on `fastmcp`, `httpx`,
 `pydantic`, and `python-dotenv` — around 140 packages installed in seconds,
@@ -51,6 +57,10 @@ shown once. See [API tokens](../README.md#api-tokens-scripting) for the details.
 export GSF_API_URL=https://gsf.example.com   # default: http://localhost:3000
 export GSF_API_TOKEN=gsf_...
 ```
+
+This is the `stdio` setup, where the process is yours alone. For a shared server
+the token goes in the caller's request instead — see [Running it
+remotely](#running-it-remotely).
 
 Then install and run it. No clone needed — `uvx` fetches the package straight
 from the repository, builds it, and runs it:
@@ -167,13 +177,14 @@ was withheld.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `GSF_API_TOKEN` | *required* | API token. Acts as its owner. |
+| `GSF_API_TOKEN` | *required on `stdio`* | API token. Acts as its owner. Not used on `http`, where callers authenticate themselves. |
 | `GSF_API_URL` | `http://localhost:3000` | Base URL of the GSF web app. |
 | `GSF_MCP_TRANSPORT` | `stdio` | `stdio` or `http`. |
 | `GSF_MCP_HOST` | `0.0.0.0` | Bind address, `http` transport only. |
 | `GSF_MCP_PORT` | `3003` | Bind port, `http` transport only. |
 | `GSF_MCP_TIMEOUT_S` | `30` | Timeout for catalog and glossary calls. |
 | `GSF_MCP_CHAT_TIMEOUT_S` | `900` | Timeout for one `ask_data` run. |
+| `GSF_MCP_ALLOW_SHARED_TOKEN` | unset | Permit one `GSF_API_TOKEN` to serve every `http` caller. See below. |
 | `GSF_OPENAPI_SPEC` | bundled with the package | Override the spec tools are generated from. |
 
 ## Running it remotely
@@ -182,17 +193,35 @@ was withheld.
 GSF_MCP_TRANSPORT=http GSF_MCP_PORT=3003 gsf-mcp
 ```
 
+Note the absence of a token. **On the HTTP transport each caller authenticates as
+itself and the server holds no credential of its own.** Callers send their own GSF
+API token per request, in either header:
+
+```
+x-api-key: gsf_...
+Authorization: Bearer gsf_...
+```
+
+An `Authorization` header that is not a GSF API token is forwarded as a bearer
+token, so an SSO id token works too. A request carrying no credential is refused
+with an error saying so, rather than quietly acting as somebody else.
+
+This is what makes a shared deployment sound: a session can do exactly what its
+caller's token allows, and conversation history belongs to that caller.
+
 > [!IMPORTANT]
-> **The HTTP transport currently serves every caller as a single identity.** The
-> server authenticates to GSF with the one token in its environment, so a shared
-> remote instance collapses all its users into that token's owner — their
-> permissions, and their conversation history.
+> Setting `GSF_API_TOKEN` on the HTTP transport makes **every** caller act as that
+> token's owner — their permissions and their conversation history. Because
+> nothing in the protocol would reveal that, the server refuses to start in that
+> configuration unless you also set `GSF_MCP_ALLOW_SHARED_TOKEN=1`.
 >
-> This is fine for a single-user deployment or a trusted automation account. It
-> is **not** suitable for exposing one instance to a team. Until the server
-> accepts per-caller credentials (OAuth 2.1, which the MCP authorization spec
-> defines for exactly this), give each user their own stdio process with their
-> own token.
+> That combination is legitimate for a single-user deployment or an automation
+> account. It is never what you want for a team.
+
+Per-caller tokens still have to be configured by hand in each client. The MCP
+authorization spec defines OAuth 2.1 for this, which would let clients run the
+login flow themselves and remove the copied tokens; that is the next step, not
+something this implements.
 
 ## Extending the tool surface
 
@@ -226,6 +255,14 @@ not include it. GUI clients do not inherit your shell.
 
 **"GSF rejected the API token"** — expired, revoked, or its owner lacks chat
 permission. Check with `curl -H "x-api-key: $GSF_API_TOKEN" $GSF_API_URL/api/terms`.
+
+**"No GSF credential on this request"** — an `http` caller sent neither
+`x-api-key` nor `Authorization`. Add the token to that client's headers; the
+server has none to fall back on by design.
+
+**"GSF_API_TOKEN is set with GSF_MCP_TRANSPORT=http"** — the shared-identity
+guard. Unset the token so callers authenticate themselves, or set
+`GSF_MCP_ALLOW_SHARED_TOKEN=1` if one identity for everyone is genuinely intended.
 
 **"GSF cannot answer right now"** — usually the semantic layer was never
 compiled. Confirm with `get_semantic_layer_status`. It also appears when a
