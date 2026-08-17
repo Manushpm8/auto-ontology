@@ -20,15 +20,18 @@ runtime from (1) the generated SQL itself and (2) live read-only probes:
 """
 
 from __future__ import annotations
-
 import difflib
 import logging
 from typing import Any, Optional
-
 import sqlglot
 from sqlglot import exp
 
-from gsf.retrieval.text_to_sql.db_probe.config import DB_PROBE_LOW_CARD_THRESHOLD
+
+from gsf.retrieval.text_to_sql.db_probe.config import (
+    DB_PROBE_HIGH_CARD_SUGGESTIONS,
+    DB_PROBE_LOW_CARD_THRESHOLD,
+    is_db_probe_high_card,
+)
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 
 logger = logging.getLogger(__name__)
@@ -159,6 +162,53 @@ def _fetch_distinct(
     return [str(v) for v in values if v is not None]
 
 
+def _quote_literal(value: str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _high_card_suggestions(
+    executor: ProbeExecutor,
+    table_node: exp.Table,
+    col: exp.Column,
+    dialect: Optional[str],
+    used: str,
+) -> Optional[list[str]]:
+    """Suggestions for *used* on a column too large to enumerate.
+    Returns ``None`` when the literal already exists (nothing to repair) or the
+    probes fail; an empty list when the literal is absent with no close real
+    value. Uses only bounded lookups, never a full ``DISTINCT`` scan.
+    """
+    d = _sqlglot_dialect(dialect)
+    col_ref = exp.column(col.this).sql(dialect=d)
+    table_ref = table_node.sql(dialect=d)
+    quoted = _quote_literal(used)
+
+    exists = executor.run(
+        f"SELECT 1 AS hit FROM {table_ref} WHERE {col_ref} = {quoted} LIMIT 1",
+        purpose="value_check_exists",
+    )
+    if not exists["ok"]:
+        return None
+    if exists["rows"]:
+        return None  # literal is real
+
+    limit = DB_PROBE_HIGH_CARD_SUGGESTIONS
+    lookups = (
+        f"SELECT DISTINCT {col_ref} AS value FROM {table_ref} "
+        f"WHERE lower({col_ref}) = lower({quoted}) LIMIT {limit}",
+        f"SELECT DISTINCT {col_ref} AS value FROM {table_ref} "
+        f"WHERE {col_ref} LIKE {_quote_literal('%' + used + '%')} LIMIT {limit}",
+    )
+    for sql in lookups:
+        if not executor.budget_left:
+            break
+        res = executor.run(sql, purpose="value_check_high_card")
+        if res["ok"] and res["rows"]:
+            values = [_first_value(r) for r in res["rows"]]
+            return [str(v) for v in values if v is not None]
+    return []
+
+
 def find_literal_mismatches(
     executor: ProbeExecutor,
     dialect: Optional[str],
@@ -184,7 +234,8 @@ def find_literal_mismatches(
 
     mismatches: list[dict[str, Any]] = []
     distinct_cache: dict[tuple[str, str], Optional[list[str]]] = {}
-
+    high_card = is_db_probe_high_card()
+    skipped_high_card: list[str] = []
     for col, values in _string_predicates(tree):
         candidates = _candidate_tables(col, all_nodes, by_key)
         actual: Optional[list[str]] = None
@@ -199,7 +250,31 @@ def find_literal_mismatches(
                 actual = distinct_cache[key]
                 owning_table = node.name
                 break
-        if not actual:  # column not resolvable, high-cardinality, or probe failed
+        if not actual:
+            # Column not resolvable, probe failed, or too many distinct values to
+            # enumerate. Name/place/title columns land here, so without the
+            # high-card path their literals are never validated at all.
+            if not high_card:
+                skipped_high_card.extend(values)
+                continue
+            for node in candidates:
+                if not executor.budget_left:
+                    break
+                for used in values:
+                    suggested = _high_card_suggestions(
+                        executor, node, col, dialect, used
+                    )
+                    if not suggested:
+                        continue
+                    mismatches.append(
+                        {
+                            "table": node.name,
+                            "column": col.name,
+                            "used": used,
+                            "suggested": suggested,
+                            "actual": suggested,
+                        }
+                    )
             continue
 
         actual_by_norm = {_norm(v): v for v in actual}

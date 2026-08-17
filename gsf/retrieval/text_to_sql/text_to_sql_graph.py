@@ -40,6 +40,7 @@ from gsf.retrieval.text_to_sql.agents.response import ResponseAgent
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import SQLFromCandidatesAgent
 from gsf.retrieval.text_to_sql.agents.sql_from_tables import SQLFromTablesAgent
+from gsf.retrieval.text_to_sql.agents.sql_selection import SQLSelectionAgent
 from gsf.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructionAgent
 from gsf.retrieval.text_to_sql.agents.sql_unconstructable import SQLUnconstructableAgent
 from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationAgent
@@ -111,8 +112,9 @@ def route_intent_validation(state: AgentState) -> str:
     decision = state.get("decision", "")
 
     if decision == "intent_invalid":
-        attempts = state["path_state"].get("sql_attempts", 0)
-        logger.info(f"Intent validation failed at attempt: {attempts}")
+        reconstructions = state["path_state"].get("reconstruction_count", 0)
+        state["path_state"]["reconstruction_count"] = reconstructions + 1
+        logger.info(f"Intent validation failed at attempt: {reconstructions}")
         # Route back to reconstruction to fix intent issues
         return "invalid_sql"
     else:
@@ -230,6 +232,7 @@ def create_graph():
     candidate_preparation_agent = CandidatePreparationAgent()
     sql_from_tables_agent = SQLFromTablesAgent()
     sql_from_candidates_agent = SQLFromCandidatesAgent()
+    sql_selection_agent = SQLSelectionAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
     sql_validation_agent = SQLValidationAgent()
     intent_validation_agent = IntentValidationAgent()
@@ -274,7 +277,9 @@ def create_graph():
     reconstruct_sql_node = _make_node(
         "reconstruct_sql", agent_wrapper(sql_reconstruction_agent)
     )
-
+    select_sql_candidate_node = _make_node(
+        "select_sql_candidate", agent_wrapper(sql_selection_agent)
+    )
     validate_sql_query_node = _make_node(
         "validate_sql_query", agent_wrapper(sql_validation_agent)
     )
@@ -312,6 +317,7 @@ def create_graph():
         "construct_sql_not_from_snippets", construct_sql_not_from_snippets_node
     )
     graph.add_node("construct_sql_from_candidates", construct_sql_from_candidates_node)
+    graph.add_node("select_sql_candidate", select_sql_candidate_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
     graph.add_node("validate_sql_query", validate_sql_query_node)
     graph.add_node("validate_intent", validate_intent_node)
@@ -374,6 +380,14 @@ def create_graph():
 
     graph.add_conditional_edges(
         "construct_sql_from_candidates",
+        route_decision,
+        {
+            "validate_sql_query": "select_sql_candidate",
+            "unconstructable": "unconstructable_sql_response",
+        },
+    )
+    graph.add_conditional_edges(
+        "select_sql_candidate",
         route_decision,
         {
             "validate_sql_query": "validate_sql_query",

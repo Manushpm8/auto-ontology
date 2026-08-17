@@ -21,6 +21,7 @@ Design Decisions:
 """
 
 import logging
+import os
 from typing import Dict, Any
 
 import sqlglot
@@ -128,6 +129,101 @@ def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
     return ""
 
 
+def asc_null_guard_enabled() -> bool:
+    """Whether the ascending-sort NULL guard runs. Env ``BIRD_ASC_NULL_GUARD``.
+    Off by default: skipping NULLs is a benchmark convention, not a universal
+    intent, and a user asking for the earliest value may well want to see that
+    the field is empty.
+    """
+    return os.environ.get("BIRD_ASC_NULL_GUARD", "0").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+        "",
+    }
+
+
+def _null_guarded_columns(tree: exp.Expression) -> set[str]:
+    """Column names already protected by an ``IS NOT NULL`` predicate."""
+    out: set[str] = set()
+    for node in tree.find_all(exp.Not):
+        inner = node.this
+        if (
+            isinstance(inner, exp.Is)
+            and isinstance(inner.expression, exp.Null)
+            and isinstance(inner.this, exp.Column)
+        ):
+            out.add(inner.this.name.lower())
+    return out
+
+
+def apply_asc_null_guard(sql: str, dialect: str | None = None) -> str:
+    """AND ``IS NOT NULL`` onto the columns an ascending ``ORDER BY ... LIMIT`` sorts.
+    SQLite sorts NULLs first, so ``ORDER BY f LIMIT 1`` meant as "the smallest f"
+    returns a row where ``f`` is missing. Gold queries guard against it; generated
+    ones often do not.
+    Deliberately narrow, because each restriction was needed to keep the rewrite
+    from changing a query that was already right:
+    * requires a ``LIMIT`` — without one the sort order rarely decides the answer,
+      and removing NULL rows would change the result set;
+    * only the outermost SELECT's own ``ORDER BY``, since the guard lands in the
+      outermost WHERE and a subquery's sort column need not be in scope there;
+    * skips names that are projection aliases, which ``ORDER BY`` may reference
+      but ``WHERE`` may not.
+    Returns *sql* unchanged whenever it does not apply or cannot be rewritten
+    safely. Idempotent: a guard already present is detected and not re-added.
+    """
+    if not sql or not sql.strip():
+        return sql
+
+    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
+    try:
+        tree = sqlglot.parse_one(sql, read=read)
+    except Exception:
+        return sql
+    if tree is None:
+        return sql
+
+    select = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
+    if select is None:
+        return sql
+    order = select.args.get("order")
+    if order is None or not list(tree.find_all(exp.Limit)):
+        return sql
+
+    guarded = _null_guarded_columns(tree)
+    aliases = {
+        p.alias.lower()
+        for p in (select.expressions or [])
+        if isinstance(p, exp.Alias) and p.alias
+    }
+
+    targets: list[str] = []
+    for ordered in order.expressions:
+        if ordered.args.get("desc"):
+            continue
+        col = ordered.this
+        if not isinstance(col, exp.Column):
+            continue
+        name = col.name.lower()
+        if name in guarded or name in aliases:
+            continue
+        rendered = col.sql(dialect=read)
+        if rendered not in targets:
+            targets.append(rendered)
+    if not targets:
+        return sql
+
+    try:
+        patched = select
+        for column in targets:
+            patched = patched.where(f"{column} IS NOT NULL", dialect=read)
+        return patched.sql(dialect=read)
+    except Exception:
+        return sql
+
+
 class SQLValidationAgent(BaseAgent):
     """
     Agent that validates SQL queries before execution.
@@ -181,6 +277,27 @@ class SQLValidationAgent(BaseAgent):
         dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
         schemas_ids = fetch_all_schema_ids()
         schemas = get_schemas_by_ids(schemas_ids)
+
+        is_asc_null_guard_enabled = asc_null_guard_enabled()
+        if is_asc_null_guard_enabled:
+            original_sql = response.sql_code
+            guarded_sql = apply_asc_null_guard(
+                original_sql, dialects[0] if dialects else None
+            )
+            if guarded_sql != original_sql:
+                try:
+                    response = response.model_copy(update={"sql_code": guarded_sql})
+                    path_state["sql_generation_result"] = response
+                    self.logger.info(
+                        "Ascending-sort NULL guard applied before validation."
+                    )
+                except Exception:
+                    self.logger.warning(
+                        "Ascending-sort NULL guard could not be applied; "
+                        "keeping the original SQL.",
+                        exc_info=True,
+                    )
+                    response = path_state["sql_generation_result"]
 
         validation_result = self._sql_parse_validation(
             schemas, response.sql_code, dialects
