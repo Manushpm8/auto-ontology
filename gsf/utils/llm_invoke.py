@@ -20,8 +20,15 @@ from gsf.utils.model_config import resolve
 
 logger = logging.getLogger(__name__)
 
-RETRY_MAX_ATTEMPTS = 3
-LLM_INVOKE_TIMEOUT_S = 50
+RETRY_MAX_ATTEMPTS = int(os.environ.get("LLM_RETRY_MAX_ATTEMPTS", "5"))
+# Transient saturation on the shared endpoint arrives as 429/503 and clears on a
+# timescale of tens of seconds. Three attempts at 2**(n+1) spent ~7s total, which
+# abandoned candidates inside a single such event; capped exponential backoff over
+# five attempts spends ~60s instead. Honors Retry-After when the server sends one.
+RETRY_BACKOFF_CAP_S = float(os.environ.get("LLM_RETRY_BACKOFF_CAP_S", "30"))
+# gpt-5.x structured SQL generation routinely exceeds 50s under parallel load
+# (BIRD_NCAND>1 × multi-worker eval). Override with LLM_INVOKE_TIMEOUT_S.
+LLM_INVOKE_TIMEOUT_S = float(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
 
 # Bound total concurrent LLM requests across all worker threads so the pipeline's
 # nested parallelism (tables × terms) doesn't saturate the hosted endpoint's
@@ -36,7 +43,50 @@ _RETRYABLE_TOKENS = (
     "503",
     "ResourceExhausted",
     "Service Unavailable",
+    "ReadTimeout",
+    "timed out",
+    "Timeout",
 )
+
+
+def _is_read_timeout(exc: BaseException) -> bool:
+    """True for requests/httpx/openai client read timeouts.
+    ChatOpenAI uses httpx, so timeouts arrive as ``httpx.ReadTimeout`` (not
+    ``requests.exceptions.ReadTimeout``). Treating only the requests type as
+    retryable caused immediate failure + full traceback under parallel eval.
+    """
+    if isinstance(exc, _requests.exceptions.Timeout):
+        return True
+    name = type(exc).__name__
+    if name in {
+        "ReadTimeout",
+        "WriteTimeout",
+        "ConnectTimeout",
+        "PoolTimeout",
+        "TimeoutException",
+        "APITimeoutError",
+    }:
+        return True
+    msg = str(exc).lower()
+    return "read operation timed out" in msg or "request timed out" in msg
+
+
+def _retry_after(exc: BaseException) -> float | None:
+    """Seconds the server asked us to wait, if it said so."""
+    try:
+        headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+        raw = headers.get("retry-after") or headers.get("Retry-After")
+        return float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _backoff_s(attempt: int, exc: BaseException) -> float:
+    """Capped exponential backoff, deferring to the server's Retry-After."""
+    asked = _retry_after(exc)
+    if asked is not None:
+        return min(asked, RETRY_BACKOFF_CAP_S) + random.uniform(0, 1)
+    return min(2 ** (attempt + 1), RETRY_BACKOFF_CAP_S) + random.uniform(0, 1)
 
 
 class _TimeoutSession(_requests.Session):
@@ -84,18 +134,32 @@ def _build_client(
     if model.startswith(("openai/", "azure/", "aws/")):
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            # temperature omitted: gpt-5.x/o-series reject any explicit value and
-            # only allow the server default (1). Unset => langchain sends no
-            # temperature field, so the provider default applies.
-            # temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=LLM_INVOKE_TIMEOUT_S,
-            max_retries=0,
-        )
+        # gpt-5.x / o-series reject an explicit temperature and only allow the
+        # provider default. gpt-4o / gpt-4o-mini (and most other chat models)
+        # honor temperature, which is what makes BIRD_NCAND_TEMP actually
+        # diversify candidates 2..N.
+        model_leaf = model.rsplit("/", 1)[-1].lower()
+        omit_temperature = model_leaf.startswith(("gpt-5", "o1", "o3", "o4"))
+        kwargs: dict = {
+            "model": model,
+            "api_key": _API_KEY,
+            "base_url": _BASE_URL,
+            "max_tokens": max_tokens,
+            "timeout": LLM_INVOKE_TIMEOUT_S,
+            "max_retries": 0,
+        }
+        if not omit_temperature:
+            kwargs["temperature"] = temperature
+        # langchain sends parallel_tool_calls=False alongside a named tool_choice
+        # for method="function_calling". litellm's Bedrock adapter mistranslates
+        # that pair and the gateway rejects the request as
+        # "tool_choice/type conflicts with toolConfig.toolChoice.tool" — which
+        # names the wrong field, so it reads like a tool_choice problem. Dropping
+        # this one parameter makes the identical payload succeed; a single tool
+        # choice already implies no parallelism.
+        if model.startswith("aws/"):
+            kwargs["disabled_params"] = {"parallel_tool_calls": None}
+        return ChatOpenAI(**kwargs)
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
@@ -237,19 +301,6 @@ def safe_invoke_with_structured_output(
             model_llm = llm.with_structured_output(schema, **structured_kwargs)
             with _INFLIGHT:
                 result = model_llm.invoke(current_messages)
-        except _requests.exceptions.ReadTimeout:
-            logger.error(
-                "LLM invoke timed out after %ds on attempt %d/%d for %s",
-                LLM_INVOKE_TIMEOUT_S,
-                attempt + 1,
-                RETRY_MAX_ATTEMPTS,
-                schema_name,
-            )
-            if attempt < RETRY_MAX_ATTEMPTS - 1:
-                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
-                time.sleep(wait)
-                continue
-            raise
         except ValidationError as e:
             if attempt < RETRY_MAX_ATTEMPTS - 1:
                 current_messages.append(
@@ -269,9 +320,23 @@ def safe_invoke_with_structured_output(
                 )
                 raise
         except Exception as e:
+            if _is_read_timeout(e):
+                logger.error(
+                    "LLM invoke timed out after %ss on attempt %d/%d for %s (%s)",
+                    LLM_INVOKE_TIMEOUT_S,
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                    schema_name,
+                    type(e).__name__,
+                )
+                if attempt < RETRY_MAX_ATTEMPTS - 1:
+                    time.sleep(_backoff_s(attempt, e))
+                    continue
+                raise
+
             is_retryable = any(tok in str(e) for tok in _RETRYABLE_TOKENS)
             if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
-                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                wait = _backoff_s(attempt, e)
                 logger.warning(
                     "Retryable LLM error (endpoint saturated/rate-limited) on attempt "
                     "%d/%d for %s — retrying in %.1fs",
