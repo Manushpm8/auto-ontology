@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import json
 import time
 from datetime import datetime
 from typing import Generator
@@ -58,7 +59,6 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         )
 
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
-    domain_rules = fetch_custom_analyses() + list(acronyms or [])
 
     # ``prediction=True`` only means something when the KumoRFM branch was built
     # into the graph at startup; without KUMO_RFM_API_KEY the classify node does
@@ -87,6 +87,13 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         payload.get("processing_question") or payload["question"]
     ).strip()
 
+    # Rules are quoted verbatim into the table relevance prompt, so on a graph
+    # holding several databases the ones belonging elsewhere name tables the
+    # question's schema does not have.
+    domain_rules = fetch_custom_analyses(initial_path_state.get("target_db")) + list(
+        acronyms or []
+    )
+
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
         custom_prompts=custom_prompts_text,
@@ -112,6 +119,96 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     return state
 
 
+def _schema_debug_snapshot(path_state: dict) -> dict:
+    """Compact semantic-layer context for gold-coverage diagnostics."""
+
+    def _qname(t: dict) -> str:
+        schema = (t.get("schema_name") or "").strip()
+        name = (t.get("name") or "").strip()
+        return f"{schema}.{name}" if schema else name
+
+    tables = path_state.get("relevant_tables") or []
+    cols = path_state.get("retrieved_column_attributes") or []
+    joins = path_state.get("attribute_join_paths") or []
+    sql_attrs = path_state.get("sql_attributes") or []
+    primary = path_state.get("primary_attribute") or {}
+
+    col_summaries = []
+    for c in cols[:30]:
+        if not isinstance(c, dict):
+            continue
+        meta = c.get("metadata") or {}
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        col_summaries.append(
+            {
+                "id": str(c.get("id") or ""),
+                "name": str(c.get("name") or meta.get("name") or c.get("text") or "")[
+                    :80
+                ],
+                "source_column": str(
+                    c.get("source_column") or meta.get("source_column") or ""
+                )[:80],
+                "table_name": str(
+                    c.get("table_name")
+                    or meta.get("table_name")
+                    or meta.get("source_table")
+                    or ""
+                )[:80],
+            }
+        )
+
+    join_summaries = []
+    for jp in joins[:20]:
+        if not isinstance(jp, dict):
+            continue
+        hops = []
+        for hop in jp.get("path") or []:
+            if not isinstance(hop, dict):
+                continue
+            hops.append(
+                {
+                    "source_table": str(hop.get("source_table") or ""),
+                    "target_table": str(hop.get("target_table") or ""),
+                    "source_column": str(hop.get("source_column") or ""),
+                    "target_column": str(hop.get("target_column") or ""),
+                }
+            )
+        join_summaries.append(
+            {
+                "dest_attr": str(jp.get("attr_name") or "")[:80],
+                "dest_table": str(jp.get("table_name") or ""),
+                "n_hops": len(hops),
+                "path": hops[:8],
+            }
+        )
+
+    return {
+        "entities": list(path_state.get("entities") or [])[:20],
+        "table_names": [_qname(t) for t in tables if isinstance(t, dict)],
+        "col_attrs": col_summaries,
+        "primary_attribute": {
+            "attr_name": str(primary.get("attr_name") or ""),
+            "col_name": str(primary.get("col_name") or ""),
+            "table_name": str(primary.get("table_name") or ""),
+        }
+        if primary
+        else {},
+        "join_paths": join_summaries,
+        "sql_attr_names": [
+            str(x.get("name") or "")[:100]
+            for x in sql_attrs
+            if isinstance(x, dict) and x.get("name")
+        ],
+        "n_few_shot": len(path_state.get("similar_questions") or []),
+    }
+
+
 def _extract_answer(final_state: dict) -> dict:
     path_state = final_state.get("path_state", {})
     final_response = path_state.get("final_response")
@@ -123,9 +220,30 @@ def _extract_answer(final_state: dict) -> dict:
         else:
             final_response = ""
 
-    if isinstance(final_response, dict):
-        return final_response
-    return {"response": str(final_response)}
+    answer = (
+        final_response
+        if isinstance(final_response, dict)
+        else {"response": str(final_response)}
+    )
+
+    # Attach semantic-layer snapshot for eval gold-coverage analysis.
+    try:
+        answer["schema_debug"] = _schema_debug_snapshot(path_state)
+    except Exception:
+        answer["schema_debug"] = {}
+    # Expose the candidate pool so the eval CSV can carry it. Oracle (best-of-N)
+    # is derived from these, and until now they existed only in the generator's
+    # debug log — a file that gets cleared between runs. One such clear made a
+    # completed 1,534-question run's oracle permanently unrecoverable.
+    try:
+        answer["sql_candidates"] = [
+            sql
+            for cand in (path_state.get("sql_candidates") or [])
+            if (sql := getattr(cand, "sql_code", "") or "")
+        ]
+    except Exception:
+        answer["sql_candidates"] = []
+    return answer
 
 
 def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
@@ -189,10 +307,20 @@ def stream_agent_response(
         answer = _extract_answer(final_state)
         thoughts_log = final_state.get("path_state", {}).get("thoughts_log") or []
         thoughts_summary = _build_thoughts_summary(thoughts_log)
+
         if isinstance(answer, dict) and thoughts_summary:
             answer["thoughts"] = thoughts_summary
+
+        log_answer = answer
+        if isinstance(answer, dict) and answer.get("sql_response_from_db") is not None:
+            db = str(answer["sql_response_from_db"])
+            if len(db) > 1000:
+                log_answer = {
+                    **answer,
+                    "sql_response_from_db": db[:1000] + "…",
+                }
         elapsed = time.perf_counter() - t0
-        logger.info("Final answer (%.2fs):\n%s", elapsed, answer)
+        logger.info("Final answer (%.2fs):\n%s", elapsed, log_answer)
         yield {"type": "result", "answer": answer}
 
     except Exception as exc:
