@@ -148,17 +148,31 @@ def detach_existing_sql_edges(analysis_id: str) -> None:
     )
 
 
-def fetch_custom_analyses() -> list[dict[str, str]]:
-    """Fetch all CustomAnalysis nodes from Neo4j and return as domain rules.
+def fetch_custom_analyses(database_name: str | None = None) -> list[dict[str, str]]:
+    """Fetch CustomAnalysis nodes from Neo4j and return as domain rules.
 
     Each analysis becomes ``{"name": <name>, "description": <sql>}``.
+    Scoped to *database_name* when given, through the tables the analysis' SQL
+    reads. Rules belonging to another database name tables absent from the
+    question's schema, and they are quoted verbatim into prompts, so on a
+    multi-database graph they crowd out the text the prompt is meant to weigh.
     """
+    scope = (
+        f"-[:{Edges.HAS_SQL}]->(:{Labels.SQL})-[:SQL]->(:{Labels.TABLE})"
+        f"<-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA} {{database_name: $database_name}})"
+        if database_name
+        else ""
+    )
     query = (
         f"MATCH (n:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL}) "
-        "RETURN n.name AS name, n.description AS description, sql.sql_full_query AS sql_code"
+        + (f"WHERE (n){scope} " if database_name else "")
+        + "RETURN DISTINCT n.name AS name, n.description AS description, "
+        "sql.sql_full_query AS sql_code"
     )
     try:
-        results = graph().query_read(query=query, parameters={})
+        results = graph().query_read(
+            query=query, parameters={"database_name": database_name}
+        )
     except Exception as e:
         logger.warning("Failed to fetch custom analyses from Neo4j: %s", e)
         return []
@@ -197,9 +211,22 @@ def embed_custom_analyses(
     from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
     from nemo_retriever.operators.vdb import IngestVdbOperator
 
+    # An analysis belongs to the database owning the tables its SQL touches, so
+    # scoping by *database_name* means walking out to the Schema. Without this the
+    # query returns every analysis in the graph and the caller appends them all
+    # under whichever database it happens to be ingesting, which both duplicates
+    # rows and files analyses under databases they do not belong to.
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        WHERE $analysis_id IS NULL OR ca.id = $analysis_id
+        WHERE ($analysis_id IS NULL OR ca.id = $analysis_id)
+          AND (
+            $database_name IS NULL
+            OR EXISTS {{
+                MATCH (sql)-[:{Edges.SQL}]->(:{Labels.TABLE})
+                      <-[:{Edges.CONTAINS}]-(sc:{Labels.SCHEMA})
+                WHERE sc.database_name = $database_name
+            }}
+          )
         WITH DISTINCT ca, sql,
              CASE
                  WHEN ca.description IS NOT NULL AND trim(toString(ca.description)) <> ''
@@ -222,13 +249,15 @@ def embed_custom_analyses(
     """
     result = graph().query_read(
         query,
-        parameters={"analysis_id": analysis_id},
+        parameters={"analysis_id": analysis_id, "database_name": database_name},
     )
     docs = result[0].get("docs") if result else None
     if not docs:
         logger.info(
-            "No CustomAnalysis rows found for analysis_id=%r; skipping VDB upsert.",
+            "No CustomAnalysis rows found for analysis_id=%r database_name=%r; "
+            "skipping VDB upsert.",
             analysis_id,
+            database_name,
         )
         return
 
