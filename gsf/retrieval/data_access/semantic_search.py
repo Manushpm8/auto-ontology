@@ -229,7 +229,28 @@ def _hits_to_semantic_rows(
             "label": lab,
             "score": score,
         }
-        for _field in ("name", "schema_name", "database_name"):
+        content_meta = meta.get("content_metadata")
+        if isinstance(content_meta, dict):
+            for _field in (
+                "name",
+                "schema_name",
+                "database_name",
+                "question",
+                "sql",
+                "evidence",
+                "db_id",
+            ):
+                if _field not in meta and content_meta.get(_field) is not None:
+                    meta[_field] = content_meta[_field]
+        for _field in (
+            "name",
+            "schema_name",
+            "database_name",
+            "question",
+            "sql",
+            "evidence",
+            "db_id",
+        ):
             val = meta.get(_field)
             if val is not None:
                 row[_field] = val
