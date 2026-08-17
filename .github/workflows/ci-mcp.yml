@@ -14,7 +14,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'gsf-mcp/**'
+      - 'mcp/**'
       - '.github/workflows/ci-mcp.yml'
 
 jobs:
@@ -32,14 +32,14 @@ jobs:
         with:
           version: '0.15.9'
           args: check
-          src: './gsf-mcp'
+          src: './mcp'
 
       - name: Ruff format check
         uses: astral-sh/ruff-action@v3
         with:
           version: '0.15.9'
           args: format --check
-          src: './gsf-mcp'
+          src: './mcp'
 
   test:
     name: Tests
@@ -58,11 +58,11 @@ jobs:
       # Installs the package itself, so the tests exercise the same import
       # path and packaged spec that a user's `uvx gsf-mcp` would.
       - name: Sync dependencies
-        working-directory: gsf-mcp
+        working-directory: mcp
         run: uv sync
 
       - name: Pytest
-        working-directory: gsf-mcp
+        working-directory: mcp
         run: uv run pytest -q
 
   packaging:
@@ -84,13 +84,13 @@ jobs:
       # dies at startup. Building and running outside the source tree is the
       # only way to catch that.
       - name: Build wheel
-        working-directory: gsf-mcp
+        working-directory: mcp
         run: uv build --wheel --out-dir dist
 
       - name: Install the wheel into a clean environment
         run: |
           uv venv /tmp/probe
-          VIRTUAL_ENV=/tmp/probe uv pip install gsf-mcp/dist/*.whl
+          VIRTUAL_ENV=/tmp/probe uv pip install mcp/dist/*.whl
 
       - name: Server starts and lists its tools from outside the repo
         run: |

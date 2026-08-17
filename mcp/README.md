@@ -30,7 +30,7 @@ credential per request and acts as itself. See [Notes](#notes).
 No clone needed — `uvx` fetches, builds, and runs it from the repository:
 
 ```sh
-uvx --from "git+https://github.com/NVIDIA/GSF.git#subdirectory=gsf-mcp" gsf-mcp
+uvx --from "git+https://github.com/NVIDIA/GSF.git#subdirectory=mcp" gsf-mcp
 ```
 
 Or install into a virtualenv, which gives you a stable path for client config:
@@ -54,7 +54,7 @@ GUI clients don't inherit your shell's PATH, so give an absolute path:
 {
   "mcpServers": {
     "gsf": {
-      "command": "/absolute/path/to/gsf-mcp/.venv/bin/gsf-mcp",
+      "command": "/absolute/path/to/mcp/.venv/bin/gsf-mcp",
       "args": [],
       "env": {
         "GSF_API_URL": "https://gsf.example.com",

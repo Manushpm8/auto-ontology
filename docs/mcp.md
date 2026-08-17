@@ -42,7 +42,7 @@ request and the server keeps none — see [Running it
 remotely](#running-it-remotely).
 
 It also means users install almost nothing. `gsf-mcp` is its own distribution
-(source in [`gsf-mcp/`](../gsf-mcp/)) depending only on `fastmcp`, `httpx`,
+(source in [`mcp/`](../mcp/)) depending only on `fastmcp`, `httpx`,
 `pydantic`, and `python-dotenv` — around 140 packages installed in seconds,
 against the 450-plus and gigabyte-plus that `gsf-server` needs for its database
 drivers and model tooling. Nobody has to clone GSF or run its backend locally to
@@ -66,20 +66,20 @@ Then install and run it. No clone needed — `uvx` fetches the package straight
 from the repository, builds it, and runs it:
 
 ```sh
-uvx --from "git+https://github.com/NVIDIA/GSF.git#subdirectory=gsf-mcp" gsf-mcp
+uvx --from "git+https://github.com/NVIDIA/GSF.git#subdirectory=mcp" gsf-mcp
 ```
 
 Working from a checkout, point `--from` at the directory instead:
 
 ```sh
-uvx --from ./gsf-mcp gsf-mcp
+uvx --from ./mcp gsf-mcp
 ```
 
 Or install into a virtualenv, which gives you a stable path to point a client at
 and avoids a build on every start:
 
 ```sh
-cd gsf-mcp && uv venv && uv pip install -e .
+cd mcp && uv venv && uv pip install -e .
 ./.venv/bin/gsf-mcp
 ```
 
@@ -105,7 +105,7 @@ thing to point them at:
 {
   "mcpServers": {
     "gsf": {
-      "command": "/absolute/path/to/gsf-mcp/.venv/bin/gsf-mcp",
+      "command": "/absolute/path/to/mcp/.venv/bin/gsf-mcp",
       "args": [],
       "env": {
         "GSF_API_URL": "https://gsf.example.com",
@@ -121,7 +121,7 @@ cost of a build on each start — and needs no checkout at all:
 
 ```json
 "command": "uvx",
-"args": ["--from", "git+https://github.com/NVIDIA/GSF.git#subdirectory=gsf-mcp", "gsf-mcp"]
+"args": ["--from", "git+https://github.com/NVIDIA/GSF.git#subdirectory=mcp", "gsf-mcp"]
 ```
 
 Restart the client after editing its config — most read MCP configuration only at
@@ -226,7 +226,7 @@ something this implements.
 ## Extending the tool surface
 
 The tool set is an explicit allow-list in
-[`gsf-mcp/gsf_mcp/tools.py`](../gsf-mcp/gsf_mcp/tools.py). The spec publishes 82
+[`mcp/gsf_mcp/tools.py`](../mcp/gsf_mcp/tools.py). The spec publishes 82
 operations; exposing all of them would degrade tool selection badly and would
 hand agents things like SSO configuration and token management. Everything not
 named is excluded by a catch-all.
@@ -243,7 +243,7 @@ fails loudly if a curated entry no longer exists in the spec, so a rename
 upstream cannot silently drop a tool.
 
 The spec is committed twice: canonically at `docs/openapi/gsf-api.json`, and
-again inside the package at `gsf-mcp/gsf_mcp/gsf-api.json`, because the server
+again inside the package at `mcp/gsf_mcp/gsf-api.json`, because the server
 reads it at startup and must work from an ordinary install where no `docs/`
 directory exists. `pnpm openapi` writes both, and CI diffs both — so never edit
 the packaged copy by hand.
@@ -272,7 +272,7 @@ compiled. Confirm with `get_semantic_layer_status`. It also appears when a
 stderr, since stdout carries the protocol itself on stdio.
 
 **"no longer publishes these curated operations"** — the spec and the allow-list
-disagree. Run `pnpm openapi`, or update `gsf-mcp/gsf_mcp/tools.py`.
+disagree. Run `pnpm openapi`, or update `mcp/gsf_mcp/tools.py`.
 
 **"OpenAPI spec not found"** — `GSF_OPENAPI_SPEC` points somewhere wrong, or the
 install is incomplete. Unset it to fall back to the packaged copy.

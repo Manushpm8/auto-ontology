@@ -22,7 +22,7 @@ on:
       - 'dev_tools/generate_backend_openapi.py'
       - 'docs/openapi/**'
       # The spec is committed here as well, so a hand-edit must be caught.
-      - 'gsf-mcp/gsf_mcp/gsf-api.json'
+      - 'mcp/gsf_mcp/gsf-api.json'
 
 jobs:
   # The public spec is generated from the route handlers plus the *committed*
@@ -59,7 +59,7 @@ jobs:
       # startup and must work outside a checkout), so both paths are diffed.
       - name: Fail if the committed spec drifted
         run: |
-          git diff --exit-code -- docs/openapi/gsf-api.json gsf-mcp/gsf_mcp/gsf-api.json \
+          git diff --exit-code -- docs/openapi/gsf-api.json mcp/gsf_mcp/gsf-api.json \
             || { echo '::error::the committed OpenAPI spec is stale — run `pnpm openapi` and commit both files'; exit 1; }
 
   # Building the FastAPI apps needs the full backend environment, so this job

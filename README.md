@@ -258,11 +258,11 @@ permissions.
 export GSF_API_URL=https://gsf.example.com
 export GSF_API_TOKEN=gsf_...
 
-uvx --from "git+https://github.com/NVIDIA/GSF.git#subdirectory=gsf-mcp" gsf-mcp
+uvx --from "git+https://github.com/NVIDIA/GSF.git#subdirectory=mcp" gsf-mcp
 ```
 
 `gsf-mcp` is a separate, lightweight distribution (source in
-[`gsf-mcp/`](./gsf-mcp/)): it needs no database drivers or model tooling and
+[`mcp/`](./mcp/)): it needs no database drivers or model tooling and
 nothing from `gsf-server`, so users do not have to clone this repo or run the
 backend to use it. The install shortens to `uvx gsf-mcp` once it is published to
 PyPI.

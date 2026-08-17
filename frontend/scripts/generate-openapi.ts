@@ -53,7 +53,7 @@ const repoRoot = resolve(frontendDir, '..');
 const apiDir = resolve(frontendDir, 'app/api');
 const backendSpecPath = resolve(repoRoot, 'docs/openapi/backend.json');
 const outputPath = resolve(repoRoot, 'docs/openapi/gsf-api.json');
-const packagedSpecPath = resolve(repoRoot, 'gsf-mcp/gsf_mcp/gsf-api.json');
+const packagedSpecPath = resolve(repoRoot, 'mcp/gsf_mcp/gsf-api.json');
 
 /** `app/api/terms/[term_id]/route.ts` → `/api/terms/{term_id}`. */
 const routePath = (filePath: string): string => {
