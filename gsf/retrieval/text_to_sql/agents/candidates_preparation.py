@@ -23,17 +23,24 @@ Design Decisions:
 """
 
 import logging
+import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
-
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from gsf.dal.attributes import fetch_attr_column_contexts, find_join_path
 from gsf.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
 )
-from gsf.dal.datasources import fetch_tables_by_ids
+from gsf.dal.datasources import (
+    fetch_fk_neighbour_tables,
+    fetch_table_by_name,
+    fetch_tables_by_ids,
+)
+from gsf.dal.foreign_keys import get_relevant_fks
 from gsf.dal.sql_attributes import (
     fetch_sql_attributes_with_sql,
     fetch_tables_from_sql_attributes,
@@ -44,7 +51,14 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
     get_relevant_tables_from_candidates,
 )
+from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
+from gsf.retrieval.text_to_sql.evidence_hints import (
+    evidence_retrieval_phrases,
+    evidence_table_name_hints,
+    extract_evidence,
+)
+from gsf.retrieval.text_to_sql.few_shot import fetch_similar_questions
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
@@ -56,10 +70,215 @@ from gsf.retrieval.text_to_sql.prompts import (
 )
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
+    get_original_question,
     get_question_for_processing,
     rules_to_text,
 )
+from gsf.utils.env import read_env_bool, read_env_float, read_env_int
 from gsf.utils.llm_invoke import invoke_with_structured_output
+
+
+def _read_env_count(name: str, default: int) -> int:
+    """``read_env_int``, floored at 1 — these knobs are all search/closure widths."""
+    return max(1, read_env_int(name, default))
+
+
+_TABLE_SEARCH_K = _read_env_count("BIRD_TABLE_SEARCH_K", 12)
+# Floor on hits fetched per search query, so adding entity/evidence queries
+# cannot make each individual search shallower than this.
+_TABLE_SEARCH_MIN_K = _read_env_count("BIRD_TABLE_SEARCH_MIN_K", 5)
+_TABLE_SEARCH_CAP = _read_env_count("BIRD_TABLE_SEARCH_CAP", 20)
+_TABLE_FILTER_ENABLED = read_env_bool("BIRD_TABLE_FILTER", "1")
+# Search COLUMNS per entity and keep which entity matched which columns — the table
+# searches below filter to Labels.TABLE, so column-level matches never surface there.
+# Measured on california_schools: searching "charter" returns schools.Charter (1/0),
+# frpm.'Charter Funding Type', schools.FundingType and frpm.'Charter School (Y/N)' in
+# its top five — exactly the columns that get confused for each other.
+_ENTITY_COLUMNS = read_env_bool("BIRD_ENTITY_COLUMNS", "0")
+_ENTITY_COLUMNS_K = _read_env_count("BIRD_ENTITY_COLUMNS_K", 6)
+# Only entities where at least this many distinct columns compete are worth printing:
+# a noun with one match is not a choice, and rendering it is pure prompt bloat.
+_ENTITY_COLUMNS_MIN = _read_env_count("BIRD_ENTITY_COLUMNS_MIN", 2)
+_ENTITY_COLUMNS_MAX_ENTITIES = _read_env_count("BIRD_ENTITY_COLUMNS_MAX_ENTITIES", 8)
+
+
+# Keep only hits within this vector distance of the entity's best match, or every
+# entity prints its full k and "phone numbers" drags in schools.Ext as noise. Sized
+# off the charter case: genuine competitors span 0.717-0.808, the first irrelevant
+# hit is 0.832, and 0.10 keeps all five confusable columns while cutting the tail.
+_ENTITY_COLUMNS_MARGIN = read_env_float("BIRD_ENTITY_COLUMNS_MARGIN", 0.10)
+_EVIDENCE_FORCE_KEEP = read_env_bool("BIRD_EVIDENCE_FORCE_KEEP_TABLES", "1")
+_FK_CLOSURE = read_env_bool("BIRD_FK_CLOSURE", "1")
+# Cap on tables added by FK closure, so a hub table cannot pull in a whole DB.
+_FK_CLOSURE_MAX = _read_env_count("BIRD_FK_CLOSURE_MAX", 4)
+# Ship the physical FK edges among the final tables to the generator, so join
+# conditions come from the schema rather than from semantic path inference.
+_PHYSICAL_FK_JOINS = read_env_bool("BIRD_PHYSICAL_FK_JOINS", "0")
+_FORCE_ANCHOR_TABLE = read_env_bool("BIRD_FORCE_ANCHOR_TABLE", "0")
+# Databases where the anchor's table is added but not pinned against the relevance
+# filter: on formula_1, pinning cost five questions their gold table, the anchor
+# landing on results/constructorResults while the answer lived in standings. Elsewhere
+# the pin is what has been measured, so it stays until a database is checked without it.
+_ANCHOR_PIN_SKIP_DBS = {
+    db.strip().lower()
+    for db in os.environ.get("BIRD_ANCHOR_PIN_SKIP_DBS", "").split(",")
+    if db.strip()
+}
+
+
+def _parse_column_hit(text: str) -> dict:
+    """Pull the fields out of an embedded Column row.
+    Ingestion writes these rows in one fixed shape —
+    ``table_name: T, column_name: C, data_type: D, column_description: ..., sample_values: ...``
+    — and the structured values are not returned as separate keys by the vector search,
+    only inside ``text``.
+    """
+    out: dict[str, str] = {}
+    for key in ("table_name", "column_name", "data_type"):
+        m = re.search(
+            rf"{key}:\s*(.*?)(?:,\s*(?:table_name|column_name|data_type|column_description|sample_values):|$)",
+            text,
+            re.S,
+        )
+        if m:
+            out[key] = m.group(1).strip()
+    m = re.search(r"column_description:\s*(.*?)(?:,\s*sample_values:|$)", text, re.S)
+    if m:
+        out["description"] = " ".join(m.group(1).split())
+    m = re.search(r"sample_values:\s*(.*)$", text, re.S)
+    if m:
+        out["sample_values"] = " ".join(m.group(1).split())
+    return out
+
+
+def _qualify(table: str, column: str) -> str:
+    """``table.column``, quoting the column only when it needs it."""
+    if not table:
+        return column
+    if re.fullmatch(r"\w+", column or ""):
+        return f"{table}.{column}"
+    return f'{table}."{column}"'
+
+
+def _fk_partner_tables(verified_fks: list[dict] | None) -> dict[str, set[str]]:
+    """table -> tables it has a physical FK edge to, lowercased and unqualified.
+    ``get_relevant_fks`` returns ``table1``/``table2`` schema-qualified ("main.frpm"),
+    while column hits carry the bare table name, so the prefix has to go or nothing
+    ever matches and every column is labelled as having no FK.
+    """
+
+    def _bare(value: object) -> str:
+        return str(value or "").strip().lower().rpartition(".")[2]
+
+    out: dict[str, set[str]] = {}
+    for fk in verified_fks or []:
+        if not isinstance(fk, dict):
+            continue
+        left, right = _bare(fk.get("table1")), _bare(fk.get("table2"))
+        if not left or not right or left == right:
+            continue
+        out.setdefault(left, set()).add(right)
+        out.setdefault(right, set()).add(left)
+    return out
+
+
+def fetch_entity_columns(
+    retriever,
+    entities: list[str],
+    target_db: str | None,
+    k: int | None = None,
+    min_competing: int | None = None,
+    allowed_tables: set[str] | None = None,
+    verified_fks: list[dict] | None = None,
+) -> list[dict]:
+    """Per entity, the columns whose descriptions match it — provenance kept.
+    Returns only entities where ``min_competing`` or more distinct columns match, since
+    those are the ambiguous bindings. One search per entity, in parallel.
+    ``allowed_tables`` restricts hits to the final prompt table set. Without it the
+    block offered columns from tables that never reached the prompt, which is how q71
+    and q74 ended up answered from ``schools`` alone rather than joined to ``frpm``.
+    """
+    entities = [e.strip() for e in dict.fromkeys(entities or []) if (e or "").strip()]
+    if not entities:
+        return []
+    k = _ENTITY_COLUMNS_K if k is None else k
+    min_competing = _ENTITY_COLUMNS_MIN if min_competing is None else min_competing
+    fk_partners = _fk_partner_tables(verified_fks)
+
+    def _one(entity: str) -> tuple[str, list[dict]]:
+        rows = list(
+            search_semantic_index(
+                retriever,
+                entity,
+                label_filter=[Labels.COLUMN],
+                per_label_k=k,
+                database_name=target_db,
+            )
+        )
+        cols: list[dict] = []
+        seen: set[str] = set()
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            parsed = _parse_column_hit(str(r.get("text") or ""))
+            name = parsed.get("column_name") or str(r.get("name") or "")
+            table = parsed.get("table_name") or ""
+            if not name:
+                continue
+            if allowed_tables and table.strip().lower() not in allowed_tables:
+                continue
+            key = f"{table}.{name}".lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cols.append(
+                {
+                    "qualified": _qualify(table, name),
+                    "table": table,
+                    "column": name,
+                    "type": parsed.get("data_type") or "",
+                    "description": parsed.get("description") or "",
+                    "sample_values": parsed.get("sample_values") or "",
+                    "score": r.get("score"),
+                    "fk_partners": sorted(
+                        fk_partners.get(table.strip().lower(), set())
+                    ),
+                }
+            )
+        scored = [c for c in cols if c.get("score") is not None]
+        if scored and _ENTITY_COLUMNS_MARGIN > 0:
+            best = min(float(c["score"]) for c in scored)
+            cols = [
+                c
+                for c in cols
+                if c.get("score") is None
+                or float(c["score"]) <= best + _ENTITY_COLUMNS_MARGIN
+            ]
+        # Distance decides who is shown, never the order they are shown in. Vector
+        # rank is unreliable at the top — MailCity outranks City for "city", and
+        # NCESDist and District Type both outrank District Code for "district name" —
+        # so a distance-sorted list reads as a recommendation for the wrong column.
+        cols.sort(key=lambda c: (str(c["table"]).lower(), str(c["column"]).lower()))
+        return entity, cols
+
+    out: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(len(entities), 8)) as pool:
+        futures = {pool.submit(_one, e): e for e in entities}
+        for future in as_completed(futures):
+            entity = futures[future]
+            try:
+                entity, cols = future.result()
+            except Exception:
+                logger.warning(
+                    "entity column search failed for %r", entity, exc_info=True
+                )
+                continue
+            if len(cols) >= min_competing:
+                out.append({"entity": entity, "columns": cols})
+    out.sort(
+        key=lambda d: entities.index(d["entity"]) if d["entity"] in entities else 99
+    )
+    return out[:_ENTITY_COLUMNS_MAX_ENTITIES]
 
 
 def _qualified_name(t: dict) -> str:
@@ -138,6 +357,9 @@ class CandidatePreparationAgent(BaseAgent):
         """
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
+        original_question = get_original_question(state) or question
+        evidence_phrases = evidence_retrieval_phrases(original_question)
+        evidence_table_hints = evidence_table_name_hints(original_question)
         target_db = path_state.get("target_db")
         if not target_db:
             connectors = state.get("connectors") or []
@@ -183,8 +405,15 @@ class CandidatePreparationAgent(BaseAgent):
             term_synonyms = fetch_term_synonyms(attr_ids)
             self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
+            preferred_order = [
+                str(hit.get("id") or "") for hit in column_attributes if hit.get("id")
+            ]
             anchor_id, anchor_reasoning = self._identify_anchor(
-                state, question, attr_contexts
+                state,
+                question,
+                attr_contexts,
+                preferred_order=preferred_order,
+                evidence_phrases=evidence_phrases,
             )
             self.logger.info("Anchor attribute id: %s", anchor_id)
             if anchor_reasoning:
@@ -261,8 +490,26 @@ class CandidatePreparationAgent(BaseAgent):
         )
 
         additional_tables = []
-        search_queries = [question] + path_state.get("entities", [])
-        k_per_query = max(1, 5 // len(search_queries))
+        search_queries: list[str] = []
+        for q in [
+            original_question,
+            question,
+            *path_state.get("entities", []),
+            *evidence_phrases,
+            *evidence_table_hints,
+        ]:
+            q = (q or "").strip()
+            if q and q not in search_queries:
+                search_queries.append(q)
+        # Dividing the budget across search queries meant every extra entity or
+        # evidence phrase made each individual search shallower: with the usual
+        # 5-7 queries this floored at k=2 for 87% of questions, so a gold table
+        # ranked 3rd for every query was never retrieved. Search each query to a
+        # fixed depth instead and let the dedupe + relevance filter downstream
+        # do the narrowing.
+        k_per_query = max(
+            _TABLE_SEARCH_MIN_K, _TABLE_SEARCH_K // max(1, len(search_queries))
+        )
 
         def _fetch_tables_for_query(query: str) -> list[dict]:
             return get_relevant_tables(
@@ -284,7 +531,9 @@ class CandidatePreparationAgent(BaseAgent):
                     self.logger.warning(
                         "Table retrieval failed for query: %s", query, exc_info=True
                     )
-        additional_tables = dedupe_merge_relevant_tables(additional_tables)[:10]
+        additional_tables = dedupe_merge_relevant_tables(additional_tables)[
+            :_TABLE_SEARCH_CAP
+        ]
         seen_qnames: set[str] = set()
         deduped_tables: list[dict] = []
         for t in relevant_tables + additional_tables:
@@ -295,9 +544,63 @@ class CandidatePreparationAgent(BaseAgent):
             deduped_tables.append(t)
         relevant_tables = deduped_tables
 
+        # Force-inject evidence-named tables (exact Neo4j name lookup + vector).
+        force_kept: list[str] = []
+        if _EVIDENCE_FORCE_KEEP and evidence_table_hints:
+            existing_ids = {t.get("id") for t in relevant_tables}
+            existing_names = {(t.get("name") or "").lower() for t in relevant_tables}
+            for hint in evidence_table_hints:
+                if hint.lower() in existing_names:
+                    continue
+                row = fetch_table_by_name(hint, database_name=target_db)
+                added = False
+                if row and row.get("id") and row.get("id") not in existing_ids:
+                    relevant_tables.append(
+                        {
+                            "id": row.get("id"),
+                            "name": row.get("name") or hint,
+                            "description": row.get("description") or "",
+                            "schema_name": row.get("schema_name") or "",
+                            "label": "Table",
+                            "columns": row.get("columns") or [],
+                        }
+                    )
+                    existing_ids.add(row.get("id"))
+                    existing_names.add((row.get("name") or hint).lower())
+                    force_kept.append(_qualified_name(relevant_tables[-1]))
+                    added = True
+                if not added:
+                    try:
+                        hits = get_relevant_tables(
+                            state["data_retriever"],
+                            hint,
+                            k=3,
+                            database_name=target_db,
+                        )
+                    except Exception:
+                        hits = []
+                    for hit in hits:
+                        hname = (hit.get("name") or "").lower()
+                        if hname != hint.lower():
+                            continue
+                        if hit.get("id") in existing_ids:
+                            continue
+                        relevant_tables.append(hit)
+                        existing_ids.add(hit.get("id"))
+                        existing_names.add(hname)
+                        force_kept.append(_qualified_name(hit))
+                        break
+            if force_kept:
+                self.logger.info(
+                    "Evidence force-kept table(s): %s (hints=%s)",
+                    force_kept,
+                    evidence_table_hints,
+                )
+
         self.logger.info(
-            "Found %d relevant tables (after dedupe, capped at 20): %s",
+            "Found %d relevant tables (after dedupe, capped at %d): %s",
             len(relevant_tables),
+            _TABLE_SEARCH_CAP,
             [_qualified_name(t) for t in relevant_tables],
         )
 
@@ -335,11 +638,13 @@ class CandidatePreparationAgent(BaseAgent):
             sa_linked_tables = fetch_tables_from_sql_attributes(sa_ids)
             existing_ids = {t.get("id") for t in relevant_tables}
             added = 0
+            added_names: list[str] = []
             for tbl in sa_linked_tables:
                 if tbl.get("id") not in existing_ids:
                     relevant_tables.append(tbl)
                     existing_ids.add(tbl.get("id"))
                     added += 1
+                    added_names.append(_qualified_name(tbl))
             self.logger.info(
                 "Added %d table(s) from SqlAttribute SQL references: %s",
                 added,
@@ -371,6 +676,22 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in subject_tables],
             )
 
+        # --- 4e. Guarantee the anchor's own table is available ---
+        # The prompt names an anchor column; omitting its table leaves the
+        # generator with a hint it cannot act on.
+        anchor_table = str((primary_attribute or {}).get("table_name") or "")
+        if _FORCE_ANCHOR_TABLE and anchor_table:
+            have = {
+                (t.get("name") or "").split(".")[-1].lower() for t in relevant_tables
+            }
+            if anchor_table.split(".")[-1].lower() not in have:
+                found = fetch_table_by_name(anchor_table, target_db)
+                if found:
+                    relevant_tables.append(found)
+                    self.logger.info(
+                        "Added anchor table missing from retrieval: %s", anchor_table
+                    )
+
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
 
         if target_db:
@@ -381,11 +702,35 @@ class CandidatePreparationAgent(BaseAgent):
             ]
 
         # --- 5. Filter tables by relevance ---
+        force_keep = {
+            (t.get("name") or "").lower()
+            for t in relevant_tables
+            if (t.get("name") or "").lower()
+            in {h.lower() for h in evidence_table_hints}
+        } | {
+            h.lower()
+            for h in evidence_table_hints
+            # only protect hints that resolved to a real in-DB table above
+            if any((t.get("name") or "").lower() == h.lower() for t in relevant_tables)
+        }
+        # Step 4e already added the anchor's table so the generator can act on the
+        # hint; pinning it as well is what _ANCHOR_PIN_SKIP_DBS opts a database out
+        # of. Evidence-named tables stay pinned either way, being the ones the
+        # question states outright rather than the ones retrieval guessed.
+        if (
+            _FORCE_ANCHOR_TABLE
+            and anchor_table
+            and str(target_db or "").lower() not in _ANCHOR_PIN_SKIP_DBS
+        ):
+            force_keep.add(anchor_table.split(".")[-1].lower())
+
         relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(
             state,
             question,
             relevant_tables,
             custom_analyses,
+            original_question=original_question,
+            force_keep_names=force_keep,
         )
         self.logger.info(
             "Kept %d relevant tables (after relevance filter): %s",
@@ -395,6 +740,77 @@ class CandidatePreparationAgent(BaseAgent):
         if table_relevance_reasoning:
             record_thought(path_state, _GRAPH_NODE_NAME, table_relevance_reasoning)
 
+        # --- 5b. Pull in FK neighbours of the tables we kept ---
+        # 77.8% of gold tables missing from the prompt sat one foreign key away
+        # from a table that *was* retrieved, so closing over FK edges recovers
+        # most of them while adding far fewer tables than the whole schema.
+        if _FK_CLOSURE and target_db:
+            before_names = [_qualified_name(t) for t in relevant_tables]
+            relevant_tables = self._expand_by_fk(relevant_tables, target_db)
+            added = [
+                _qualified_name(t)
+                for t in relevant_tables
+                if _qualified_name(t) not in before_names
+            ]
+            if added:
+                self.logger.info("FK closure added table(s): %s", added)
+
+        # --- 5c. Physical FK edges among the final tables ---
+        # Join conditions the model can trust: these come from the schema, not
+        # from walking the semantic graph.
+        verified_fks: list[dict] = []
+        if _PHYSICAL_FK_JOINS:
+            table_ids = [t.get("id") for t in relevant_tables if t.get("id")]
+            if table_ids:
+                try:
+                    verified_fks = get_relevant_fks(table_ids)
+                except Exception:
+                    self.logger.warning("get_relevant_fks failed", exc_info=True)
+                    verified_fks = []
+            self.logger.info(
+                "Verified FK edges among prompt tables: %d", len(verified_fks)
+            )
+
+        # --- 5d. Per-entity candidate columns, scoped to the final table set ---
+        # Runs here and not beside the table search: v1 ran before the relevance
+        # filter, FK closure and evidence force-keep, so it offered columns from
+        # tables that were never in the prompt. Measured cost of that on 137
+        # questions — q71 answered from schools.DOC instead of frpm."District Code"
+        # and q74 from schools.GSserved instead of frpm."Low Grade", both dropping
+        # the join to frpm entirely, because a same-table lookalike was presented
+        # as a peer of the column gold needed.
+        entity_columns: list[dict] = []
+        if _ENTITY_COLUMNS:
+            entity_columns = fetch_entity_columns(
+                state["data_retriever"],
+                list(path_state.get("entities") or []) + evidence_phrases,
+                target_db,
+                allowed_tables={
+                    str(t.get("name") or "").strip().lower()
+                    for t in relevant_tables
+                    if t.get("name")
+                },
+                verified_fks=verified_fks,
+            )
+
+        # --- 6. Cross-database Train few-shot Q→SQL demos ---
+        retrieved_questions = fetch_similar_questions(question)
+        # Preserve examples supplied by callers / conversation retrieval, then
+        # append Train demos without introducing duplicate Q→SQL pairs.
+        similar_questions = []
+        seen_examples: set[tuple[str, str]] = set()
+        for example in [
+            *(path_state.get("similar_questions") or []),
+            *retrieved_questions,
+        ]:
+            if not isinstance(example, (list, tuple)) or len(example) < 2:
+                continue
+            pair = (str(example[0]).strip(), str(example[1]).strip())
+            if not pair[0] or not pair[1] or pair in seen_examples:
+                continue
+            seen_examples.add(pair)
+            similar_questions.append(pair)
+
         return {
             "path_state": {
                 **path_state,
@@ -402,16 +818,43 @@ class CandidatePreparationAgent(BaseAgent):
                 "relevant_queries": [
                     r["sql"] for r in relevant_queries if r.get("sql")
                 ],
+                "similar_questions": similar_questions,
                 "custom_analyses": custom_analyses,
                 "custom_analyses_str": custom_analyses_str,
+                "verified_fks": verified_fks,
                 "sql_attributes": sql_attributes,
                 "sql_attributes_str": sql_attributes_str,
                 "table_relevance_reasoning": table_relevance_reasoning,
                 "primary_attribute": primary_attribute,
                 "attribute_join_paths": attribute_join_paths,
                 "term_synonyms": term_synonyms,
+                "entity_columns": entity_columns,
             }
         }
+
+    def _expand_by_fk(self, tables: list[dict], target_db: str) -> list[dict]:
+        """Append tables one foreign key away from *tables*.
+        Runs after the relevance filter so the LLM's choices seed the expansion
+        rather than compete with it. Capped at ``_FK_CLOSURE_MAX`` additions to
+        keep a hub table from dragging in the whole database.
+        """
+        names = [(t.get("name") or "") for t in tables if t.get("name")]
+        if not names:
+            return tables
+        neighbours = fetch_fk_neighbour_tables(target_db, names)
+        if not neighbours:
+            return tables
+        existing = {t.get("id") for t in tables}
+        added = 0
+        for tbl in neighbours:
+            if added >= _FK_CLOSURE_MAX:
+                break
+            if tbl.get("id") in existing:
+                continue
+            tables.append(tbl)
+            existing.add(tbl.get("id"))
+            added += 1
+        return tables
 
     def _filter_custom_analyses_by_relevance(
         self,
@@ -503,11 +946,17 @@ class CandidatePreparationAgent(BaseAgent):
         question: str,
         tables: list[dict],
         custom_analyses: list[dict] | None = None,
+        *,
+        original_question: str | None = None,
+        force_keep_names: set[str] | None = None,
     ) -> tuple[list[dict], str]:
         """Use the LLM to decide which candidate tables are actually needed."""
+        if not _TABLE_FILTER_ENABLED:
+            return tables, "BIRD_TABLE_FILTER=0"
         if len(tables) <= 2:
             return tables, ""
 
+        force_keep_names = {n.lower() for n in (force_keep_names or set()) if n}
         try:
             llm = state["llm"]
         except KeyError:
@@ -525,6 +974,19 @@ class CandidatePreparationAgent(BaseAgent):
             domain_rules_section = (
                 "Domain-specific rules (use these to decide relevance):\n"
                 f"{domain_rules_text}\n"
+            )
+
+        evidence = extract_evidence(original_question or question)
+        if evidence:
+            domain_rules_section += (
+                "Evidence from the user question (MUST keep any table named here):\n"
+                f"{evidence[:800]}\n"
+            )
+        if force_keep_names:
+            domain_rules_section += (
+                "Force-keep table names (never remove these): "
+                + ", ".join(sorted(force_keep_names))
+                + "\n"
             )
 
         ca_section = ""
@@ -546,7 +1008,7 @@ class CandidatePreparationAgent(BaseAgent):
             )
 
         prompt_text = TABLE_RELEVANCE_FILTER_PROMPT.format(
-            question=question,
+            question=original_question or question,
             tables_summary=tables_summary,
             domain_rules=domain_rules_section,
             custom_analyses=ca_section,
@@ -584,6 +1046,14 @@ class CandidatePreparationAgent(BaseAgent):
 
         reasoning = (result.reasoning or "").strip()
         names_to_remove = {name.lower() for name in result.tables_to_remove}
+        protected = set()
+        for t in tables:
+            bare = (t.get("name") or "").lower()
+            qn = _qualified_name(t).lower()
+            if bare in force_keep_names or qn in force_keep_names:
+                protected.add(qn)
+                names_to_remove.discard(qn)
+                names_to_remove.discard(bare)
 
         filtered = [
             t for t in tables if _qualified_name(t).lower() not in names_to_remove
@@ -611,6 +1081,8 @@ class CandidatePreparationAgent(BaseAgent):
         state: "AgentState",
         question: str,
         contexts: dict[str, dict],
+        preferred_order: list[str] | None = None,
+        evidence_phrases: list[str] | None = None,
     ) -> tuple[str | None, str]:
         """Use the LLM to pick the primary (anchor) ColumnAttribute for the question.
 
@@ -623,20 +1095,61 @@ class CandidatePreparationAgent(BaseAgent):
         if len(ids) == 1:
             return ids[0], ""
 
+        # Prefer retrieval/rerank order over arbitrary dict insertion order.
+        ranked: list[str] = []
+        for aid in preferred_order or []:
+            if aid in contexts and aid not in ranked:
+                ranked.append(aid)
+        for aid in ids:
+            if aid not in ranked:
+                ranked.append(aid)
+
+        # Soft bias: if evidence names a column/table matching an attribute, prefer it.
+        evidence_boost: list[str] = []
+        phrases = [p.lower() for p in (evidence_phrases or []) if p]
+        if phrases:
+            for aid in ranked:
+                ctx = contexts[aid]
+                hay = " ".join(
+                    [
+                        str(ctx.get("attr_name") or ""),
+                        str(ctx.get("col_name") or ""),
+                        str(ctx.get("table_name") or ""),
+                    ]
+                ).lower()
+                if any(p in hay or hay.find(p) >= 0 for p in phrases):
+                    evidence_boost.append(aid)
+            if evidence_boost:
+                ranked = evidence_boost + [a for a in ranked if a not in evidence_boost]
+
+        fallback_id = ranked[0]
+
         try:
             llm = state["llm"]
         except KeyError:
             self.logger.warning(
-                "_identify_anchor: no LLM in state — using first attribute"
+                "_identify_anchor: no LLM in state — using retrieval-ranked attribute"
             )
-            return ids[0], ""
+            return fallback_id, ""
 
         attrs_block = "\n".join(
-            f"- id: {aid} | {ctx['attr_name']} "
-            f"(table: {ctx.get('table_name', '?')}, column: {ctx.get('col_name', '?')})"
-            + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
-            for aid, ctx in contexts.items()
+            f"- id: {aid} | {contexts[aid]['attr_name']} "
+            f"(table: {contexts[aid].get('table_name', '?')}, "
+            f"column: {contexts[aid].get('col_name', '?')})"
+            + (
+                f" — {contexts[aid]['attr_description']}"
+                if contexts[aid].get("attr_description")
+                else ""
+            )
+            for aid in ranked
         )
+        evidence_note = ""
+        if phrases:
+            evidence_note = (
+                "Evidence phrases (prefer attributes matching these): "
+                + ", ".join(phrases[:8])
+                + "\n\n"
+            )
         messages = [
             SystemMessage(
                 content=(
@@ -647,7 +1160,9 @@ class CandidatePreparationAgent(BaseAgent):
             HumanMessage(
                 content=(
                     f"Question: {question}\n\n"
-                    f"Available column attributes:\n{attrs_block}\n\n"
+                    f"{evidence_note}"
+                    f"Available column attributes (best retrieval matches first):\n"
+                    f"{attrs_block}\n\n"
                     "Return the id of the single column attribute that best represents "
                     "the primary subject of the question."
                 )
@@ -660,10 +1175,10 @@ class CandidatePreparationAgent(BaseAgent):
             )
         except Exception:
             self.logger.warning(
-                "_identify_anchor: LLM call failed — using first attribute",
+                "_identify_anchor: LLM call failed — using retrieval-ranked attribute",
                 exc_info=True,
             )
-            return ids[0], ""
+            return fallback_id, ""
 
         if result and result.anchor_id and result.anchor_id in contexts:
             self.logger.info(
@@ -672,9 +1187,9 @@ class CandidatePreparationAgent(BaseAgent):
             return result.anchor_id, (result.reasoning or "").strip()
 
         self.logger.warning(
-            "_identify_anchor: LLM returned invalid id — using first attribute"
+            "_identify_anchor: LLM returned invalid id — using retrieval-ranked attribute"
         )
-        return ids[0], ""
+        return fallback_id, ""
 
     def _build_custom_analyses_str(self, relevant_queries: list[dict]) -> list[str]:
         """Build string representation of custom analyses for prompts."""

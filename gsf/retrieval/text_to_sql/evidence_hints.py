@@ -37,6 +37,65 @@ _TRANSACTIONS_IN_Q = re.compile(r"\btransaction", re.IGNORECASE)
 _SPENT_OR_PAID = re.compile(r"\b(spent|paid|price)\b", re.IGNORECASE)
 _SLASH_DATE_IN_Q = re.compile(r"\b20\d{2}/\d{1,2}/\d{1,2}\b")
 
+_TABLE_WORD = re.compile(
+    r"\b([A-Za-z_][A-Za-z0-9_]{1,40})\s+table\b",
+    re.IGNORECASE,
+)
+_BACKTICK_OR_DOTTED = re.compile(
+    r"(?:`([A-Za-z_][A-Za-z0-9_]{1,40})`)|(?:\b([A-Za-z_][A-Za-z0-9_]{1,40})\.([A-Za-z_][A-Za-z0-9_]{1,40})\b)"
+)
+# Common BIRD evidence tokens that are tables, not English noise.
+_EVIDENCE_STOP = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "that",
+    "this",
+    "when",
+    "where",
+    "which",
+    "refers",
+    "refer",
+    "means",
+    "equal",
+    "equals",
+    "between",
+    "table",
+    "column",
+    "value",
+    "values",
+    "null",
+    "true",
+    "false",
+    "date",
+    "year",
+    "month",
+    "day",
+    "count",
+    "sum",
+    "avg",
+    "max",
+    "min",
+    "id",
+    "name",
+    "type",
+    "status",
+    "label",
+    "order",  # English + common false positive vs financial.order
+    "card",
+    "cards",
+    "format",
+    "female",
+    "male",
+    "owner",
+    "sulfur",
+    "hydrogen",
+    "tin",
+    "element",
+}
+
 
 def _normalize_time_for_like(literal: str) -> str | None:
     """Map question time `0:01:54` to BIRD LIKE prefix `1:54`."""
@@ -184,4 +243,82 @@ def build_evidence_hints_block(question: str) -> str:
     return "## Evidence-derived rules\n" + "\n".join(hints)
 
 
-__all__ = ["extract_evidence", "build_evidence_hints_block"]
+def evidence_retrieval_phrases(question: str) -> list[str]:
+    """Short phrases from Evidence useful as extra retrieval queries."""
+    evidence = extract_evidence(question)
+    if not evidence:
+        return []
+    phrases: list[str] = []
+    seen: set[str] = set()
+    for match in _REFERS_TO.finditer(evidence):
+        target = (match.group(1) or "").strip()
+        if not target:
+            continue
+        key = target.lower()
+        if key in seen or key in _EVIDENCE_STOP:
+            continue
+        seen.add(key)
+        phrases.append(target)
+        if "." in target:
+            left = target.split(".", 1)[0].strip()
+            if left and left.lower() not in seen and left.lower() not in _EVIDENCE_STOP:
+                seen.add(left.lower())
+                phrases.append(left)
+    for match in _TABLE_WORD.finditer(evidence):
+        name = (match.group(1) or "").strip()
+        key = name.lower()
+        if not name or key in seen or key in _EVIDENCE_STOP:
+            continue
+        seen.add(key)
+        phrases.append(name)
+    return phrases
+
+
+def evidence_table_name_hints(question: str) -> list[str]:
+    """Likely bare table names mentioned in Evidence (for force-keep).
+    Conservative: only ``X table``, backtick `` `name` ``, and ``table.column``
+    left-hand sides. Does not treat English "X refers to …" subjects as tables
+    (too many false positives like sulfur/order/cards).
+    """
+    evidence = extract_evidence(question)
+    if not evidence:
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def _add(name: str | None) -> None:
+        if not name:
+            return
+        key = name.strip().lower()
+        if (
+            not key
+            or key in seen
+            or key in _EVIDENCE_STOP
+            or len(key) < 2
+            or key.isdigit()
+        ):
+            return
+        seen.add(key)
+        names.append(name.strip())
+
+    for match in _TABLE_WORD.finditer(evidence):
+        _add(match.group(1))
+    for match in _BACKTICK_OR_DOTTED.finditer(evidence):
+        _add(match.group(1))
+        # only dotted left side when it looks like a table (no spaces / short)
+        _add(match.group(2))
+    for match in _REFERS_TO.finditer(evidence):
+        target = match.group(1) or ""
+        if "." in target:
+            _add(target.split(".", 1)[0])
+    if _YEARMONTH_TABLE.search(evidence):
+        _add("yearmonth")
+    return names
+
+
+__all__ = [
+    "extract_evidence",
+    "build_evidence_hints_block",
+    "evidence_retrieval_phrases",
+    "evidence_table_name_hints",
+]
