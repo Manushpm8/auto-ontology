@@ -12,7 +12,7 @@ Run with:
 import time
 import pytest
 
-from gsf.retrieval.interactive.clarify import (
+from gsf.retrieval.interactive.kg_coverage import (
     _slim_kg_for_coverage,
     _KG_COVERAGE_PROMPT,
 )

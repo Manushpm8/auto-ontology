@@ -51,8 +51,9 @@ Do NOT flag:
 - Minor stylistic ambiguities a SQL generator can resolve on its own (e.g. sign \
   handling, boundary operators)
 
-Output one line per remaining gap, ordered from most to least critical for SQL correctness \
-(e.g. a missing core formula blocks SQL entirely; a missing secondary threshold is lower priority):
+Output one line per remaining gap, ordered from most to least critical for SQL correctness, \
+by considering the working question (e.g. a missing core formula blocks SQL entirely; a missing \
+secondary threshold is lower priority):
   INCOMPLETE: <term> | <what is still missing>
 
 If no gaps remain, output:

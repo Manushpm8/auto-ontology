@@ -366,25 +366,40 @@ class SQLReconstructionAgent(BaseAgent):
         # --- Step 1: Classify the error (once per reconstruction chain) ---
         if not path_state.get("error_analysis_done"):
             path_state["error_analysis_done"] = True
-            response_text = getattr(incorrect_response, "response", "") or ""
-            error_context = (
-                f"SQL: {sql_code}\n"
-                f"Response: {response_text}\n"
-                f"Actual validation/execution error: {error}"
-            )
 
-            analysis = self._analyze_error(
-                state, question_block, error_context, relevant_tables
-            )
-            path_state["error_type"] = analysis.error_type.value
-            self.logger.info(
-                "Error analysis: %s — %s",
-                analysis.error_type.value,
-                analysis.explanation[:150],
-            )
+            # A db_probe check (literal_check / jsonb_path_check) already
+            # confirmed the correct value/key live in a table the query is
+            # already joining — that can never be a missing_data situation,
+            # so skip the LLM classification (and the table-discovery
+            # detour it could trigger) and go straight to fixable.
+            if path_state.pop("error_known_fixable", False):
+                self.logger.info(
+                    "Error pre-classified fixable (db_probe check) — skipping "
+                    "LLM error analysis and table discovery"
+                )
+                path_state["error_type"] = ErrorType.FIXABLE.value
+                analysis = None
+            else:
+                response_text = getattr(incorrect_response, "response", "") or ""
+                error_context = (
+                    f"SQL: {sql_code}\n"
+                    f"Response: {response_text}\n"
+                    f"Actual validation/execution error: {error}"
+                )
+
+                analysis = self._analyze_error(
+                    state, question_block, error_context, relevant_tables
+                )
+                path_state["error_type"] = analysis.error_type.value
+                self.logger.info(
+                    "Error analysis: %s — %s",
+                    analysis.error_type.value,
+                    analysis.explanation[:150],
+                )
 
             if (
-                analysis.error_type == ErrorType.MISSING_DATA
+                analysis is not None
+                and analysis.error_type == ErrorType.MISSING_DATA
                 and analysis.search_queries
             ):
                 new_tables = self._discover_tables(

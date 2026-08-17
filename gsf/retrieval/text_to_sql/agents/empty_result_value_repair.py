@@ -71,6 +71,12 @@ class EmptyResultValueRepairAgent(BaseAgent):
 
         path_state["value_repair_attempted"] = True
         path_state["error"] = build_value_repair_error(mismatches)
+        # This error was derived from a live probe against the query's own
+        # already-joined tables — the fix is always "use the real value we
+        # just found there," never "go search for a new table." Skip
+        # reconstruction's LLM error-classification for it (see
+        # sql_reconstruction.py) so it can't be misread as missing_data.
+        path_state["error_known_fixable"] = True
         self.logger.info(
             "Empty result — routing to reconstruction to fix %d literal(s): %s",
             len(mismatches),

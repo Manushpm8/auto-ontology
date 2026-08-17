@@ -26,6 +26,7 @@ class InteractiveSessionState:
     _cached_unresolvable: Optional[list] = None  # cached per working_question
     _cached_unresolvable_for: Optional[str] = None  # working_question at cache time
     _cached_resolved_hits: Optional[list] = None  # VDB resolved hits for current question
+    _json_shared_notes: list[str] = field(default_factory=list)  # collision groups resolved as "shared JSON column" — injected verbatim into Evidence
     _cached_vdb_only_norms: set = field(default_factory=set)  # VDB-resolved but KB-uncovered norms
     _grounded_kg: Optional[str] = None  # relevant KB text extracted during coverage check
     _grounded_kg_for: Optional[str] = None  # working_question when _grounded_kg was set

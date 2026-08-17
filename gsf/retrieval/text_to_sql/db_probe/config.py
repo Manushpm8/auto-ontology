@@ -41,6 +41,18 @@ def is_db_probe_proactive() -> bool:
     return os.environ.get("DB_PROBE_PROACTIVE", "").strip().lower() in _TRUTHY
 
 
+def is_db_probe_jsonb_path_check() -> bool:
+    """Whether the pre-execution JSONB key-path check is wired in.
+
+    Off by default, same trade-off as ``is_db_probe_proactive``: it runs a few
+    cheap ``jsonb_object_keys`` probes on every query that navigates JSONB via
+    ``->``/``->>``, to catch a hallucinated key/container that would otherwise
+    silently return NULL instead of erroring. Opt-in via
+    ``DB_PROBE_JSONB_PATH_CHECK``. Postgres-only regardless of this flag.
+    """
+    return os.environ.get("DB_PROBE_JSONB_PATH_CHECK", "").strip().lower() in _TRUTHY
+
+
 # Hard caps — keep Phase 1 cheap and always-on-safe.
 # Total read-only queries allowed per question.
 DB_PROBE_MAX_CALLS = _int_env("DB_PROBE_MAX_CALLS", 40)
@@ -58,6 +70,7 @@ DB_PROBE_LOW_CARD_THRESHOLD = _int_env("DB_PROBE_LOW_CARD_THRESHOLD", 20)
 
 __all__ = [
     "is_db_probe_proactive",
+    "is_db_probe_jsonb_path_check",
     "DB_PROBE_MAX_CALLS",
     "DB_PROBE_MAX_ROWS",
     "DB_PROBE_TIMEOUT_S",

@@ -24,6 +24,9 @@ from gsf.retrieval.text_to_sql.agents.empty_result_value_repair import (
 from gsf.retrieval.text_to_sql.agents.proactive_value_check import (
     ProactiveValueCheckAgent,
 )
+from gsf.retrieval.text_to_sql.agents.jsonb_path_check import (
+    JsonbPathCheckAgent,
+)
 from gsf.retrieval.entity_coverage.agents.question_extraction import (
     QuestionExtractionAgent,
 )
@@ -46,6 +49,7 @@ from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationA
 from gsf.retrieval.text_to_sql.base import agent_wrapper
 from gsf.retrieval.text_to_sql.db_probe.config import (
     is_db_probe_proactive,
+    is_db_probe_jsonb_path_check,
 )
 
 logger = logging.getLogger(__name__)
@@ -271,6 +275,15 @@ def create_graph():
         if proactive_enabled
         else None
     )
+    # Optional proactive (pre-execution) JSONB key-path check — opt-in via
+    # DB_PROBE_JSONB_PATH_CHECK.
+    jsonb_path_enabled = is_db_probe_jsonb_path_check()
+    logger.info("Text-to-SQL graph: db-probe jsonb path check %s", jsonb_path_enabled)
+    jsonb_path_node = (
+        _make_node("precheck_jsonb_path", agent_wrapper(JsonbPathCheckAgent()))
+        if jsonb_path_enabled
+        else None
+    )
     construct_sql_not_from_snippets_node = _make_node(
         "construct_sql_not_from_snippets", agent_wrapper(sql_from_tables_agent)
     )
@@ -324,6 +337,8 @@ def create_graph():
     graph.add_node("check_value_repair", value_repair_node)
     if proactive_value_node is not None:
         graph.add_node("precheck_value_repair", proactive_value_node)
+    if jsonb_path_node is not None:
+        graph.add_node("precheck_jsonb_path", jsonb_path_node)
     graph.add_node(
         "construct_sql_not_from_snippets", construct_sql_not_from_snippets_node
     )
@@ -397,12 +412,19 @@ def create_graph():
         },
     )
 
-    # When the proactive check is enabled, every route that would otherwise go
-    # straight to execution is funnelled through it first.
+    # When any pre-execution probe check is enabled, every route that would
+    # otherwise go straight to execution is funnelled through the enabled
+    # checks first, in order: literal check, then JSONB path check.
+    pre_execute_chain = [
+        name
+        for name, node in (
+            ("precheck_value_repair", proactive_value_node),
+            ("precheck_jsonb_path", jsonb_path_node),
+        )
+        if node is not None
+    ]
     pre_execute_target = (
-        "precheck_value_repair"
-        if proactive_value_node is not None
-        else "execute_sql_query"
+        pre_execute_chain[0] if pre_execute_chain else "execute_sql_query"
     )
 
     # SQL validation → route
@@ -428,12 +450,17 @@ def create_graph():
         },
     )
 
-    if proactive_value_node is not None:
+    for idx, name in enumerate(pre_execute_chain):
+        next_target = (
+            pre_execute_chain[idx + 1]
+            if idx + 1 < len(pre_execute_chain)
+            else "execute_sql_query"
+        )
         graph.add_conditional_edges(
-            "precheck_value_repair",
+            name,
             route_decision,
             {
-                "valid_sql": "execute_sql_query",
+                "valid_sql": next_target,
                 "invalid_sql": "reconstruct_sql",
             },
         )

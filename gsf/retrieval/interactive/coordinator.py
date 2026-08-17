@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 # import time (which requires NVIDIA_API_KEY to be set).
 from concurrent.futures import ThreadPoolExecutor
 
-from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, expand_kg_with_children, _STUCK_PHRASES, should_inject_default_sort, _DEFAULT_SORT_HINT, _format_resolved_schema_terms
+from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, _STUCK_PHRASES, should_inject_default_sort, _DEFAULT_SORT_HINT, _format_resolved_schema_terms
+from .kg_coverage import expand_kg_with_children
 from .output_type import output_type_enabled, should_skip_output_type_question, OUTPUT_TYPE_QUESTION, SCALAR_HINT
 from .conditional_output import conditional_output_enabled, get_conditional_output_hint
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
@@ -210,7 +211,7 @@ references or implicitly depends on. Carry forward exact numeric values, if they
 - If the follow-up reuses or extends the previous query's full structure, incorporate it. \
 If it only borrows part of it, incorporate only that part.
 - For any concept or metric in the follow-up that does not clearly map 1:1 to a term \
-in the previous SQL, do NOT assign it to a table or column — leave it unresolved so \
+in the previous SQL, do NOT assign it a table or column, or new name — leave it unresolved so \
 the SQL generator can discover it from the schema. Only carry forward table/column \
 assignments for concepts explicitly present in the previous SQL.
 - if the question indicates only a minor change to the question (e.g a short sentence \
@@ -254,7 +255,7 @@ Relevant external knowledge (one entry per term):
 Extract the formulas, calculation rules, and threshold/filter conditions that are \
 directly needed to answer the working question above. For each such entry, output one \
 line in SQL-friendly notation:
-  TermName = <formula, threshold, or filter condition using column names and values>
+  TermName = <formula, threshold, filter condition or definition using column names and values, if present>
 Only include conditions expressible with specific column names and values — skip \
 natural-language qualifiers with no clear SQL translation. \
 Never invent a column-like name (Title_Case/snake_case) for a term with no confirmed \
@@ -328,10 +329,16 @@ def _detect_and_resolve_named_columns(session: InteractiveSessionState, answer: 
 
 def _build_grounded_terms_hint(session: InteractiveSessionState) -> str:
     """Surface already-resolved schema mappings for terms VDB-matched to the
-    current question, and flag when two different terms resolved to the same
-    column, so the evidence LLM grounds formula terms in real columns instead
-    of guessing table/column names — and can correctly skip a term instead of
-    inventing one when nothing is confirmed.
+    current question, so the evidence LLM grounds formula terms in real
+    columns instead of guessing table/column names — and can correctly skip a
+    term instead of inventing one when nothing is confirmed.
+
+    Collisions (two terms landing on the same column) are resolved upstream,
+    during clarify's _resolve_collisions — by the time _cached_resolved_hits
+    reaches here every term is already mapped to a distinct column, or
+    confirmed as legitimately sharing one (in which case a note is injected
+    directly into evidence separately — see _run_sql_generation). So every
+    hit here can be presented as a plain confirmed mapping.
     """
     hits = session._cached_resolved_hits or []
     if not hits:
@@ -345,39 +352,11 @@ def _build_grounded_terms_hint(session: InteractiveSessionState) -> str:
     if not best:
         return ""
 
-    # Collision check: two distinct terms resolving to the same underlying
-    # attribute node is a sign the match is unreliable (e.g. two near-synonym
-    # terms colliding on one column) — flag it instead of presenting both as
-    # confident hits. Keyed on hit_id (the attribute node's identity), not
-    # hit_text (a display label that isn't guaranteed unique or consistently
-    # formatted across hits) — falls back to hit_text only when hit_id is
-    # missing.
-    target_to_terms: dict[str, list[str]] = {}
-    for norm, (hit_text, _score, hit_id) in best.items():
-        key = hit_id or hit_text
-        target_to_terms.setdefault(key, []).append(norm)
-
-    lines = []
-    for norm, (hit_text, _score, hit_id) in best.items():
-        key = hit_id or hit_text
-        others = [t for t in target_to_terms[key] if t != norm]
-        if others:
-            logger.info(
-                "Evidence — term collision: %r and %s share target %r",
-                norm, others, hit_text,
-            )
-        suffix = (
-            f'  [TERM COLLISION: also matched by "{", ".join(others)}" — '
-            f"unreliable, do not assume this mapping is correct]"
-            if others
-            else ""
-        )
-        lines.append(f'  "{norm}" → {hit_text}{suffix}')
+    lines = [f'  "{norm}" → {hit_text}' for norm, (hit_text, _score, _hit_id) in best.items()]
     return (
         "\nConfirmed schema mappings for terms VDB-matched to the question "
-        "(terms not listed here have no confirmed mapping; a term marked TERM "
-        "COLLISION matched the same column as another term and should not be "
-        "trusted without other confirmation):\n" + "\n".join(lines) + "\n"
+        "(terms not listed here have no confirmed mapping):\n"
+        + "\n".join(lines) + "\n"
     )
 
 
@@ -476,6 +455,11 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     evidence = _generate_evidence(evidence_question, combined_kg, resolved_terms_section)
     if session._named_column_evidence:
         evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
+    if session._json_shared_notes:
+        # Injected directly rather than left to evidence-gen's LLM to relay —
+        # that step isn't reliable about preserving instructions passed through it.
+        evidence = "\n".join(filter(None, [evidence, *session._json_shared_notes]))
+        logger.info("[%s] SQL gen — injected %d shared-JSON-column note(s)", session.task_id, len(session._json_shared_notes))
     if should_inject_default_sort(session.working_question):
         evidence = "\n".join(filter(None, [evidence, _DEFAULT_SORT_HINT]))
         logger.info("[%s] SQL gen — injected default DESC sort hint", session.task_id)
