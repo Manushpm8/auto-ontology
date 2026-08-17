@@ -2,6 +2,8 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
     "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
@@ -9,13 +11,25 @@ main_system_prompt_template = (
 )
 
 
-create_sql_user_prompt = (
+def _question_last_enabled() -> bool:
+    """Whether the question and evidence sit at the END of the user prompt.
+    Env ``BIRD_PROMPT_ORDER`` (default ``legacy``; ``question_last`` to move
+    them).
+    """
+    return (
+        os.environ.get("BIRD_PROMPT_ORDER", "legacy").strip().lower() == "question_last"
+    )
+
+
+_USER_TASK = (
     "## Task\n"
     "Construct a SQL query that answers the user's question.\n"
     "Dialect: {dialect}.\n\n"
-    "## Question\n"
-    "{main_question}\n"
-    "{observation_block}\n\n"
+)
+
+_USER_QUESTION = "## Question\n{main_question}\n{observation_block}\n\n"
+
+_USER_CONTEXT = (
     "## Available Schema\n"
     "Use ONLY the tables and columns listed below. "
     "Do NOT invent tables, schemas, or columns.\n\n"
@@ -25,6 +39,9 @@ create_sql_user_prompt = (
     "## Conversation History\n"
     "{qa_from_conversations}\n\n"
     "{custom_analyses}"
+)
+
+_USER_RULES = (
     "## Rules\n\n"
     "**Correctness**\n"
     "- Every alias used in SELECT / WHERE / GROUP BY / ORDER BY / HAVING "
@@ -43,6 +60,29 @@ create_sql_user_prompt = (
     "Use CASE WHEN inside aggregates instead: "
     "COUNT(CASE WHEN condition THEN 1 END) or SUM(CASE WHEN condition THEN 1 ELSE 0 END).\n"
     "- If business categories are specified, use CASE WHEN to classify.\n\n"
+    "**Literal Result Fidelity (STRICT)**\n"
+    "- Decide the counting grain inside aggregates deliberately, since it changes "
+    "the number returned: COUNT(DISTINCT x) when the question counts distinct "
+    "entities ('how many different/unique/separate X'), COUNT(x) when it counts "
+    "rows or occurrences.\n"
+    "- Return raw stored values unless the question explicitly requests a "
+    "human-readable translation. Do NOT convert code/label values (for example "
+    "'+', '-', status codes, element symbols) into explanatory CASE text.\n"
+    "- Do NOT add plausible filters that are absent from the question/evidence "
+    "(such as record-type/status filters), and do NOT broaden a directed "
+    "relationship into both directions unless requested.\n"
+    "- Match the requested projection exactly: same number and order of output "
+    "columns; do not add helper/ranking/aggregate columns or reorder requested columns.\n"
+    "- Distinguish a stored measure from a row count: if the question asks for a "
+    "number already stored in a measure column for one identified record, SELECT "
+    "that measure; do not SUM/COUNT it unless multiple records must be aggregated.\n"
+    "- For a percentage, multiply the requested numerator/denominator ratio by "
+    "100 unless authoritative evidence explicitly defines a different formula. "
+    "For 'X compared to all other types', the denominator is the non-X group, "
+    "not all rows.\n"
+    "- Prefer the simplest direct SQL that exactly implements the question. Do "
+    "not introduce CTEs, parsing logic, or extra joins when ordinary filters and "
+    "schema joins are sufficient.\n\n"
     "**Example Queries**\n"
     "- Review example queries for WHERE values that match the question's intent. "
     "If a value or filter condition is relevant to what is being asked, include it in your SQL.\n\n"
@@ -76,6 +116,32 @@ create_sql_user_prompt = (
     "- Do NOT include comments in the SQL.\n"
     "- Do NOT use ellipsis as placeholder — output the complete SQL.\n"
 )
+
+# Answer-shape conventions were tried here and removed. Stating DISTINCT and
+# COUNT-form defaults mined from train looked promising — gold omits SELECT
+# DISTINCT 88% of the time — but the model already omitted it 90.2% of the time,
+# so the rule pushed it away from gold rather than toward it. Nothing predicts
+# DISTINCT either: the best feature reaches 15.7% on 4,019 train queries while
+# firing on 42% of the questions already answered correctly. The ceiling is 9
+# dev questions (0.59pp), and they contradict each other on the same table and
+# query shape, so it is annotator noise. See scripts/distinct_predictors.py.
+create_sql_user_prompt = _USER_TASK + _USER_QUESTION + _USER_CONTEXT + _USER_RULES
+
+
+def get_sql_user_prompt() -> str:
+    """The user-prompt template, ordered per ``BIRD_PROMPT_ORDER``.
+    Legacy order states the question at char ~85 and then closes with the Rules
+    block, which is 4,096 of the template's 4,450 characters. Since the human
+    message is assembled last, the final thing the model reads before generating
+    is a wall of prohibitions, with the actual task ~14k characters back.
+    ``question_last`` moves the question and its evidence to the end instead, so
+    they are adjacent to generation. It also stops the variable part of the
+    prompt from preceding the stable schema, which is what any prefix cache
+    needs.
+    """
+    if _question_last_enabled():
+        return _USER_TASK + _USER_CONTEXT + _USER_RULES + "\n" + _USER_QUESTION
+    return _USER_TASK + _USER_QUESTION + _USER_CONTEXT + _USER_RULES
 
 
 # Functions the LLM reaches for (Postgres / Snowflake / BigQuery / PostGIS
@@ -153,11 +219,95 @@ def format_dialect_rules(dialect: str | None) -> str:
     return ""
 
 
+_CAPPED_THOUGHT_SPEC = (
+    "- thought: 1-2 sentence internal reasoning — your approach and key decisions."
+)
+_CAPPED_THOUGHT_EXAMPLE = """- thought: Join sales and customers, filter last full quarter, aggregate by country.
+    "Total sales" means gross SUM(sales_amount), with no refund adjustment
+    since the question didn't ask for one."""
+# The cap and the one-line example beneath it are the only place the prompt
+# demonstrates how much reasoning to do, and a demonstration outweighs an
+# instruction. Two sentences is not enough room to check the query against the
+# rule block above it, so the model commits to a shape before any rule applies.
+_OPEN_THOUGHT_SPEC = (
+    "- thought: work the question out here before writing any SQL. Name the "
+    "tables you need and why, the keys that join them, the exact filter "
+    "literals, the row grain, and the projection. Check the shape against the "
+    "rules above and say what you rejected. Take as much room as the question "
+    "needs."
+)
+_OPEN_THOUGHT_EXAMPLE = """The question asks for revenue per country for the last full quarter, so the
+output grain is one row per country and the projection is (country, revenue).
+Revenue lives in sales.sales_amount but country only exists on customers, so
+these must join on sales.customer_id = customers.customer_id. "Last full
+quarter" is a closed range on sales.order_date, not the current partial one.
+Revenue is a sum over many sales rows per country, so this aggregates rather
+than reading a stored measure. No DISTINCT: duplicate sales rows are real
+revenue, not noise. Country is not a single constant filter, so it stays in
+SELECT."""
+
+
+def _open_reasoning_enabled() -> bool:
+    """Whether the ``thought`` field is uncapped.
+    Env ``BIRD_OPEN_REASONING`` (default ``0`` = current 1-2 sentence cap).
+    """
+    return os.environ.get("BIRD_OPEN_REASONING", "0").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+        "",
+    }
+
+
+# Measured on the 354 pools where no candidate matched gold: 63 (17.8%) have all
+# seven candidates using a column gold does not while missing one gold needs, and
+# 252 (71.2%) agree on an identical column set. The wrong column is chosen
+# unanimously, which is why neither candidate diversity nor selection can reach
+# these. The disambiguating values are already rendered — "charter" in the
+# California schools DB matches schools.Charter (1, 0) and schools.FundingType
+# ('Directly funded', 'Locally funded', ...), both printed with sample values in
+# the same prompt — so this asks for no new information. It only forces the
+# binding to be written down as an explicit decision instead of glided past.
+_BINDING_SPEC = (
+    " Begin by binding the question's nouns to the schema: for each meaningful "
+    "noun or modifier, name the exact table.column you will use. Where more than "
+    "one column plausibly matches, list every candidate with its sample values "
+    "and state why you chose one — a boolean flag column and a text column "
+    "describing a category are different questions, and their values show which "
+    "is which. Only then write the SQL."
+)
+_BINDING_EXAMPLE = """Bindings: "revenue" -> sales.sales_amount (numeric measure);
+"country" -> customers.country_name (only country column in scope);
+"last full quarter" -> sales.order_date. No ambiguous nouns here; had both
+customers.country_name and customers.country_code matched, the sample values
+('Germany' vs 'DE') decide it, and the question asks for a name.
+"""
+
+
+def _entity_binding_enabled() -> bool:
+    """Whether ``thought`` must open with an entity-to-column binding list.
+    Env ``BIRD_BIND_ENTITIES`` (default ``0``). Only meaningful alongside
+    ``BIRD_OPEN_REASONING``: a binding list does not fit the 1-2 sentence cap, so
+    it is ignored while the capped spec is active rather than contradicting it.
+    """
+    if not _open_reasoning_enabled():
+        return False
+    return os.environ.get("BIRD_BIND_ENTITIES", "0").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+        "",
+    }
+
+
 def create_sql_from_candidates_prompt(
     *,
     dialect: str | None = None,
     target_db: str | None = None,
     has_evidence: bool = False,
+    include_sql_attributes: bool = True,
 ) -> str:
     """System prompt for SQL generation from semantic retrieval candidates.
 
@@ -167,6 +317,15 @@ def create_sql_from_candidates_prompt(
     query to one database (``target_db``) removes only the *database* prefix — the
     schema is still required to resolve the table, so it is never dropped here.
     """
+    open_reasoning = _open_reasoning_enabled()
+    thought_spec = _OPEN_THOUGHT_SPEC if open_reasoning else _CAPPED_THOUGHT_SPEC
+    thought_example = (
+        _OPEN_THOUGHT_EXAMPLE if open_reasoning else _CAPPED_THOUGHT_EXAMPLE
+    )
+    if _entity_binding_enabled():
+        thought_spec += _BINDING_SPEC
+        thought_example = _BINDING_EXAMPLE + thought_example
+
     bare_table_names = (dialect or "").lower() in _SCHEMALESS_DIALECTS
     if bare_table_names:
         table_name_rule = (
@@ -174,12 +333,14 @@ def create_sql_from_candidates_prompt(
             "(unqualified — do NOT add a schema or database prefix).\n"
         )
         join_template = "    JOIN target_table ON source_table.source_column = target_table.target_column"
-        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
-FROM sales AS s
-JOIN customers AS c ON s.customer_id = c.customer_id
-WHERE s.order_date BETWEEN '2024-01-01' AND '2024-03-31'
-GROUP BY c.country_name
-ORDER BY total_sales DESC;"""
+        example_sql = """
+        SELECT c.country_name, SUM(s.sales_amount) AS total_sales
+        FROM sales AS s
+        JOIN customers AS c ON s.customer_id = c.customer_id
+        WHERE s.order_date BETWEEN '2024-01-01' AND '2024-03-31'
+        GROUP BY c.country_name
+        ORDER BY total_sales DESC;
+        """
     else:
         table_name_rule = (
             "- Use table names exactly as shown in AVAILABLE TABLES, INCLUDING the "
@@ -190,14 +351,49 @@ ORDER BY total_sales DESC;"""
             "    JOIN target_schema.target_table ON source_schema.source_table.source_column\n"
             "         = target_schema.target_table.target_column"
         )
-        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
-FROM PUBLIC.SALES AS s
-JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
-WHERE s.order_date BETWEEN
-  DATE_TRUNC('quarter', ADD_MONTHS(CURRENT_DATE, -3))
-  AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
-GROUP BY c.country_name
-ORDER BY total_sales DESC;"""
+        example_sql = """
+        SELECT c.country_name, SUM(s.sales_amount) AS total_sales
+        FROM PUBLIC.SALES AS s
+        JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
+        WHERE s.order_date BETWEEN
+          DATE_TRUNC('quarter', ADD_MONTHS(CURRENT_DATE, -3))
+          AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
+        GROUP BY c.country_name
+        ORDER BY total_sales DESC;
+        """
+    sql_attributes_rule = (
+        "- SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.\n"
+        "  If one matches the question's intent, incorporate its expression or SQL pattern\n"
+        "  into your query. Treat them like reusable building blocks for calculations.\n"
+        if include_sql_attributes
+        else ""
+    )
+
+    # Six of the system rules restate — in different words — rules the user
+    # prompt already states more specifically. Saying one thing twice in two
+    # voices invites the model to read both as approximate rather than binding,
+    # so the deduped path keeps only the user copy. Every rule dropped here has
+    # a strictly more detailed counterpart in ``_USER_RULES``.
+    duplicated_in_user_rules = (
+        ""
+        if _question_last_enabled()
+        else """
+        - Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
+        RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
+        NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
+      - Preserve database row multiplicity. Do NOT add DISTINCT just to make output
+        look cleaner; use it only when uniqueness is explicitly requested or
+        mathematically required at the requested grain.
+      - Return raw stored values. Never translate code/label values into explanatory
+        CASE text unless the question explicitly asks for a human-readable label.
+      - Do not add unstated filters or broaden directed conditions. Match the exact
+        requested output columns and their order; never add helpful extra columns.
+      - If a requested number is already stored in a measure column for one identified
+        record, SELECT it directly instead of SUM/COUNT. For percentages, multiply the
+        requested ratio by 100 unless authoritative evidence defines another formula.
+      - Prefer simple direct SQL over speculative CTEs, string parsing, or extra joins.
+      """
+    )
 
     evidence_block = (
         "## Evidence Priority\n"
@@ -215,81 +411,75 @@ ORDER BY total_sales DESC;"""
         else ""
     )
 
-    return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
+    return f"""
+    You are an expert SQL query builder. You MUST always produce a SQL query.
 
-{evidence_block}Key rules:
-{table_name_rule}
-- When SQL snippets are provided as reference, do NOT copy their aliases.
-  Define your own aliases in FROM/JOIN and use only those.
-- File contents (if present) are inputs only — use them as literals, filters,
-  or CASE logic within the SQL.
-- SEMANTIC HINT (if present) shows a likely starting table and suggested join
-  paths derived from the semantic model. Treat it as a strong hint: prefer it
-  when it fits, but if AVAILABLE TABLES provide a simpler or more direct answer,
-  use them instead. Never force the semantic hint if it doesn't match the question.
-- SUGGESTED JOIN PATHS show column-level join conditions. Use only the hops you
-  actually need:
-{join_template}
-  Follow hops in order when the path spans more than one table.
-- DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
-  adapt its full SQL directly as your starting point — you may reuse it wholesale,
-  trimming only what does not apply. Do NOT copy its aliases.
-- SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.
-  If one matches the question's intent, incorporate its expression or SQL pattern
-  into your query. Treat them like reusable building blocks for calculations.
-- Prefer the fewest joins that still correctly answer the question. If all
-  required fields exist in a single table, use only that table. If a shorter
-  join path covers the question equally well, choose it over a longer chain.
-- When creating a JOIN, both sides of the ON condition must use columns with
-  the same data type. Never join a text column to a numeric column or a date
-  column to an integer column, or uuid column to a string column.
-- Never match a human name/label against an id or foreign-key column (`*_id`,
-  `link_to_*`). To filter by a name, join to the table holding the name columns
-  (first_name/last_name/*_name) and filter there. Join each foreign key to the
-  primary key it actually references (e.g. `expense.link_to_member` =
-  `member.member_id`, never `event.event_id`).
-- Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
-  RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
-  NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
-- If the question filters by a single constant value on a column,
-  do NOT include that column in SELECT — it adds no information since every row has the same value.
+    {evidence_block}Key rules:
+    {table_name_rule}
+    - When SQL snippets are provided as reference, do NOT copy their aliases.
+      Define your own aliases in FROM/JOIN and use only those.
+    - File contents (if present) are inputs only — use them as literals, filters,
+      or CASE logic within the SQL.
+    - SEMANTIC HINT (if present) shows a likely starting table and suggested join
+      paths derived from the semantic model. Treat it as a strong hint: prefer it
+      when it fits, but if AVAILABLE TABLES provide a simpler or more direct answer,
+      use them instead. Never force the semantic hint if it doesn't match the question.
+    - SUGGESTED JOIN PATHS show column-level join conditions. Use only the hops you
+      actually need:
+    {join_template}
+      Follow hops in order when the path spans more than one table.
+    - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
+      adapt its full SQL directly as your starting point — you may reuse it wholesale,
+      trimming only what does not apply. Do NOT copy its aliases.
+      {sql_attributes_rule}- Prefer the fewest joins that still correctly answer the question. If all
+      required fields exist in a single table, use only that table. If a shorter
+      join path covers the question equally well, choose it over a longer chain.
+    - When creating a JOIN, both sides of the ON condition must use columns with
+      the same data type. Never join a text column to a numeric column or a date
+      column to an integer column, or uuid column to a string column.
+    - Never match a human name/label against an id or foreign-key column (`*_id`,
+      `link_to_*`). To filter by a name, join to the table holding the name columns
+      (first_name/last_name/*_name) and filter there. Join each foreign key to the
+      primary key it actually references (e.g. `expense.link_to_member` =
+      `member.member_id`, never `event.event_id`).
+    - If the question filters by a single constant value on a column,
+      do NOT include that column in SELECT — it adds no information since every row has the same value.
+    {duplicated_in_user_rules}
+    Output (fill fields in this exact order):
+    - thought: briefly explain your approach and state every assumption the
+      request or schema doesn't uniquely determine. For each that applies,
+      state the choice AND the reason ("X, because Y"): time window (the
+      boundary for vague/relative phrases), zero/missing values (included,
+      excluded, or coerced to 0; how division guards a zero denominator), and
+      ties (what breaks a tie in a ranking/superlative query).
+    - sql_code: the complete SQL, no comments or delimiters.
+    - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
+      being calculated, WHICH tables and columns are used, any FILTERS or time
+      windows applied, and the GROUPING/ORDERING.
+      Do NOT include SQL and code fences, raw identifiers like ``schema.table``,
+      or meta-commentary about your reasoning. Refer to tables
+      and columns by their human-readable names.
+    - All fields are required.
 
-Output (fill fields in this exact order):
-- thought: briefly explain your approach and state every assumption the
-  request or schema doesn't uniquely determine. For each that applies,
-  state the choice AND the reason ("X, because Y"): time window (the
-  boundary for vague/relative phrases), zero/missing values (included,
-  excluded, or coerced to 0; how division guards a zero denominator), and
-  ties (what breaks a tie in a ranking/superlative query).
-- sql_code: the complete SQL, no comments or delimiters.
-- response: 2-4 sentences for the end user, in plain English. Describe WHAT is
-  being calculated, WHICH tables and columns are used, any FILTERS or time
-  windows applied, and the GROUPING/ORDERING.
-  Do NOT include SQL and code fences, raw identifiers like ``schema.table``,
-  or meta-commentary about your reasoning. Refer to tables
-  and columns by their human-readable names.
-- All fields are required.
+    Example:
 
-Example:
+    thought:
+    {thought_example}
 
-thought:
-Join sales and customers, filter last full quarter, aggregate by country.
-"Total sales" means gross SUM(sales_amount), with no refund adjustment
-since the question didn't ask for one.
+    sql_code:
+    {example_sql}
 
-sql_code:
-{example_sql}
-
-response:
-This calculates total sales revenue per country for the most recently completed
-calendar quarter. It combines the sales records with the customers list so each
-sale is attributed to a country, sums the sales amounts within that quarter,
-and then groups the results by country and orders them from highest to lowest
-total sales.
+    response:
+    This calculates total sales revenue per country for the most recently completed
+    calendar quarter. It combines the sales records with the customers list so each
+    sale is attributed to a country, sums the sales amounts within that quarter,
+    and then groups the results by country and orders them from highest to lowest
+    total sales.
 """
 
 
-create_sql_general_prompt = """You are an expert SQL query builder.
+create_sql_general_prompt = """
+You are an expert SQL query builder.
 You will receive a user question and a list of relevant tables.
 
 If no tables are relevant, explain politely and suggest rephrasing.

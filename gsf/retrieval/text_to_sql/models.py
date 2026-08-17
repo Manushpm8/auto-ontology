@@ -1,10 +1,48 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
+import os
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Annotated, Literal
 
+# Cap on same-schema demos per stage-1 call, enforced here (not just in the
+# prompt) since structured output validates against it.
+#
+# CHASE generates 75/question for +9.0pp; we generate 2-3. More is nearly free —
+# one call's output grows, not the call count — and every example executes
+# against the target DB before reaching the prompt, so a bigger batch only
+# costs output tokens, never an invalid table/column.
+SYNTHETIC_EXAMPLE_COUNT = max(2, int(os.environ.get("BIRD_SYNTHETIC_N", "3")))
+
+
+# The "thought" length cap was stated twice — in the prompt and in this schema
+# description sent alongside it — but BIRD_OPEN_REASONING only swapped the
+# prompt copy, leaving the model two conflicting instructions. Both now follow
+# the flag.
+_OPEN_REASONING = os.environ.get("BIRD_OPEN_REASONING", "0").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+    "",
+}
+_THOUGHT_DESCRIPTION = (
+    "Internal reasoning: work the question out here before writing any SQL, at "
+    "whatever length it needs. This is NOT shown to the user."
+    if _OPEN_REASONING
+    else (
+        "Briefly explain the SQL approach and explicitly state every assumption "
+        "made where the user's request or available schema does not uniquely "
+        "determine the query. Do not omit assumptions. For each of the following "
+        'that applies, state the choice AND the reason ("X, because Y"): '
+        "(1) time window — the concrete boundary for any vague/relative time "
+        "phrase (e.g. 'recently'); (2) zero/missing values — whether zero-count "
+        "or NULL groups are included, excluded, or coerced to 0, and how any "
+        "division guards against a zero denominator; (3) ties — what breaks a "
+        "tie in a ranking/superlative query. If none were needed, state that "
+        "explicitly. This is NOT shown to the user."
+    )
+)
 
 # ==================== TYPE ALIASES ====================
 
@@ -169,21 +207,7 @@ class SQLGenerationModel(StrictModel):
     comes first to drain reasoning before it writes the clean output fields.
     """
 
-    thought: str = Field(
-        ...,
-        description=(
-            "Briefly explain the SQL approach and explicitly state every assumption "
-            "made where the user's request or available schema does not uniquely "
-            "determine the query. Do not omit assumptions. For each of the following "
-            'that applies, state the choice AND the reason ("X, because Y"): '
-            "(1) time window — the concrete boundary for any vague/relative time "
-            "phrase (e.g. 'recently'); (2) zero/missing values — whether zero-count "
-            "or NULL groups are included, excluded, or coerced to 0, and how any "
-            "division guards against a zero denominator; (3) ties — what breaks a "
-            "tie in a ranking/superlative query. If none were needed, state that "
-            "explicitly."
-        ),
-    )
+    thought: str = Field(..., description=_THOUGHT_DESCRIPTION)
     sql_code: NonEmptyStr = Field(
         ...,
         description=(
@@ -205,14 +229,176 @@ class SQLGenerationModel(StrictModel):
 
     @field_validator("sql_code", "response")
     @classmethod
-    def reject_placeholder_strings(cls, v: str, info) -> str:
+    def reject_placeholder_strings(cls, value: str, info) -> str:
         """Block LLM stubs like literal '...' that satisfy min length but are not valid output."""
-        t = (v or "").strip()
-        if t in ("...", "…", "..", ".") or (
-            len(t) <= 3 and not t.isalnum() and set(t) <= {".", "…", " "}
+        stripped = (value or "").strip()
+        if stripped in ("...", "…", "..", ".") or (
+            len(stripped) <= 3
+            and not stripped.isalnum()
+            and set(stripped) <= {".", "…", " "}
         ):
             raise ValueError(
                 f"{info.field_name!r} must be real content, not an ellipsis placeholder. "
                 "sql_code must be the full executable statement; response must be a real explanation."
             )
-        return v
+        return value
+
+
+class SQLQueryPlanModel(StrictModel):
+    """Intermediate artifact for the first stage of Query Plan CoT."""
+
+    plan: NonEmptyStr = Field(
+        ...,
+        description=(
+            "A numbered execution plan in plain English, with no SQL: "
+            "(1) tables and why each is needed; (2) joins with both key columns; "
+            "(3) filters with exact literals; (4) target row grain and "
+            "aggregation; (5) exact output columns, ordering, and LIMIT."
+        ),
+    )
+
+
+class SQLDecompositionModel(StrictModel):
+    """Intermediate artifact for Divide-and-Conquer generation."""
+
+    sub_questions: list[NonEmptyStr] = Field(
+        ...,
+        min_length=2,
+        max_length=4,
+        description=(
+            "Two to four independently answerable sub-questions. Each names "
+            "the table, columns, and predicate/aggregate needed, but contains "
+            "no complete final SQL query."
+        ),
+    )
+    composition: NonEmptyStr = Field(
+        ...,
+        description=(
+            "How the sub-question answers compose into one SQL statement, "
+            "including the final row grain and projection."
+        ),
+    )
+
+
+class DecompositionNode(StrictModel):
+    """One node of a divide-and-conquer decomposition tree."""
+
+    label: NonEmptyStr = Field(
+        ...,
+        description=(
+            "Hierarchical position, e.g. '1', '2', or '1.1' for a sub-question "
+            "that must be solved before its parent."
+        ),
+    )
+    question: NonEmptyStr = Field(
+        ..., description="The sub-question this node answers, in plain English."
+    )
+    analysis: NonEmptyStr = Field(
+        ...,
+        description=(
+            "Which table holds the answer, which columns are read, which keys "
+            "join them, and the exact filter literals."
+        ),
+    )
+    pseudo_sql: NonEmptyStr = Field(
+        ...,
+        description=(
+            "SQL for this node with unresolved parts left as bracketed natural "
+            "language, e.g. "
+            "SELECT gender FROM client WHERE <youngest in lowest-salary branch>. "
+            "A child node's pseudo SQL replaces the placeholder in its parent."
+        ),
+    )
+
+
+class SQLDecompositionTreeModel(StrictModel):
+    """Recursive divide-and-conquer artifact with explicit assembly.
+    The flat variant (``SQLDecompositionModel``) produces a linear list of
+    table-access steps, which is the same object the query-plan generator
+    already builds. This keeps the nesting and the bottom-up substitution that
+    make the decomposition a structurally different derivation.
+    """
+
+    main_analysis: NonEmptyStr = Field(
+        ...,
+        description=(
+            "What the target question asks for: the output columns, the row "
+            "grain, and which part cannot be answered without a sub-question."
+        ),
+    )
+    main_pseudo_sql: NonEmptyStr = Field(
+        ...,
+        description=(
+            "Top-level SQL with each unresolved condition left as bracketed "
+            "natural language to be filled by the nodes below."
+        ),
+    )
+    nodes: list[DecompositionNode] = Field(
+        ...,
+        min_length=1,
+        max_length=6,
+        description=(
+            "Sub-questions in the order they must be solved. Nest with dotted "
+            "labels whenever a sub-question needs its own sub-question."
+        ),
+    )
+    assembly: NonEmptyStr = Field(
+        ...,
+        description=(
+            "Bottom-up substitution: which node's pseudo SQL replaces which "
+            "placeholder, ending in one complete query."
+        ),
+    )
+    simplification: NonEmptyStr = Field(
+        ...,
+        description=(
+            "How the assembled query collapses — nested subqueries folded into "
+            "joins, redundant CTEs removed, duplicate filters dropped — while "
+            "preserving the row grain."
+        ),
+    )
+
+
+class SyntheticSQLExample(StrictModel):
+    """One same-schema demonstration generated at inference time."""
+
+    question: NonEmptyStr = Field(
+        ...,
+        description=(
+            "A realistic but different question answerable from the available "
+            "schema. It must not paraphrase or answer the user's target question."
+        ),
+    )
+    reasoning: str = Field(
+        default="",
+        description=(
+            "The derivation that turns the question into the SQL: which tables "
+            "are needed and why, which keys join them, which filters apply with "
+            "their exact literals, the row grain, and the final projection. "
+            "A demonstration teaches the procedure it shows, so this must read "
+            "as the work, not as a restatement of the query."
+        ),
+    )
+    sql: NonEmptyStr = Field(
+        ...,
+        description=(
+            "Complete executable SQL for the synthetic question, using only "
+            "the available tables, columns, and documented join keys."
+        ),
+    )
+
+
+class SyntheticSQLExamplesModel(StrictModel):
+    """Batch of online demonstrations grounded in the target database schema."""
+
+    examples: list[SyntheticSQLExample] = Field(
+        ...,
+        min_length=2,
+        max_length=SYNTHETIC_EXAMPLE_COUNT,
+        description=(
+            f"Up to {SYNTHETIC_EXAMPLE_COUNT} diverse same-schema question-to-SQL "
+            "demonstrations. Together they should cover the range of joins, "
+            "filters, aggregations, and output grains this schema supports, "
+            "without solving the target question itself."
+        ),
+    )

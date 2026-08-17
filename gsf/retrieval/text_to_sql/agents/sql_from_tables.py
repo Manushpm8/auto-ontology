@@ -41,7 +41,7 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_general_prompt,
-    create_sql_user_prompt,
+    get_sql_user_prompt,
     format_dialect_rules,
     format_dual_question_block,
 )
@@ -108,8 +108,10 @@ class SQLFromTablesAgent(BaseAgent):
                 question,
                 database_name=path_state.get("target_db"),
             )
-        similar_questions = []
-
+        similar_questions = path_state.get("similar_questions", [])
+        similar_questions_txt = "\n".join(
+            f"question: {x[0]}\nanswer: {x[1]}" for x in similar_questions
+        )
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
         target_db = path_state.get("target_db")
@@ -129,7 +131,8 @@ class SQLFromTablesAgent(BaseAgent):
             observation_block = f"\n{evidence_hints}\n"
 
         # Build user prompt with formatted tables
-        user_prompt = create_sql_user_prompt.format(
+        sql_user_prompt = get_sql_user_prompt()
+        user_prompt = sql_user_prompt.format(
             dialect=dialect,
             dialect_rules=format_dialect_rules(dialect),
             main_question=main_question,
@@ -139,7 +142,7 @@ class SQLFromTablesAgent(BaseAgent):
                 relevant_tables, target_db=path_state.get("target_db")
             ),
             join_paths="",
-            qa_from_conversations=similar_questions,
+            qa_from_conversations=similar_questions_txt,
             custom_analyses="",
         )
 
