@@ -593,7 +593,10 @@ class CandidateRetrievalAgent(BaseAgent):
                             keep_k=_CAND_KEEP_COL,
                             label=f"column_attribute:{entity}",
                         )
-                        all_col_attr_hits.extend(kept)
+                        for hit in kept:
+                            tagged = dict(hit)
+                            tagged["query_entity"] = entity
+                            all_col_attr_hits.append(tagged)
 
             if target_db is None:
                 selected_database, database_stats = _select_candidate_database(
