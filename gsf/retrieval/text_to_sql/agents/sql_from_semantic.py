@@ -65,7 +65,7 @@ from gsf.retrieval.text_to_sql.models import (
     SQLQueryPlanModel,
     SYNTHETIC_EXAMPLE_COUNT,
     SyntheticSQLExamplesModel,
-    _DECOMPOSITION_TREE_DBS,
+    _OPEN_REASONING_DBS,
 )
 
 
@@ -380,10 +380,10 @@ def _slot_plan() -> tuple[str, ...] | None:
 def _decomposition_tree_enabled(db_id: str | None = None) -> bool:
     """Whether decomposition emits a recursive tree instead of a flat list.
 
-    Opt-in only: enabled for the databases named in
-    ``BIRD_DECOMPOSITION_TREE_DBS`` (comma-separated), flat everywhere else.
+    Shares its opt-in list with open reasoning (``BIRD_OPEN_REASONING_DBS``):
+    a database only gets the tree once it also gets uncapped reasoning.
     """
-    return (db_id or "").strip().lower() in _DECOMPOSITION_TREE_DBS
+    return (db_id or "").strip().lower() in _OPEN_REASONING_DBS
 
 
 def _format_decomposition_tree(artifact) -> str:
