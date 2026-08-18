@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-from gsf.retrieval.text_to_sql.models import _OPEN_REASONING_SKIP_DBS, _OPEN_REASONING
+from gsf.retrieval.text_to_sql.models import _OPEN_REASONING_DBS
 
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
@@ -249,17 +249,12 @@ SELECT."""
 
 
 def _open_reasoning_enabled(db_id: str | None = None) -> bool:
-    """Whether the ``thought`` field is uncapped.
-    Env ``BIRD_OPEN_REASONING`` (default ``0``).
-    ``BIRD_OPEN_REASONING_SKIP_DBS``: comma-separated databases that opt out
-    even when the global flag is on.
+    """Whether the ``thought`` field is uncapped for this database.
+
+    Opt-in only: uncapped for the databases named in
+    ``BIRD_OPEN_REASONING_DBS`` (comma-separated), capped everywhere else.
     """
-    if (
-        _OPEN_REASONING_SKIP_DBS
-        and (db_id or "").strip().lower() in _OPEN_REASONING_SKIP_DBS
-    ):
-        return False
-    return _OPEN_REASONING
+    return (db_id or "").strip().lower() in _OPEN_REASONING_DBS
 
 
 # Measured on the 354 pools where no candidate matched gold: 63 (17.8%) have all

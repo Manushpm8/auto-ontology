@@ -31,6 +31,19 @@ _OPEN_REASONING_SKIP_DBS = {
     for db in os.environ.get("BIRD_OPEN_REASONING_SKIP_DBS", "").split(",")
     if db.strip()
 }
+# Opt-in list: when non-empty, reasoning is ON only for DBs in this set,
+# superseding both the global flag and the skip list.
+_OPEN_REASONING_DBS = {
+    db.strip().lower()
+    for db in os.environ.get("BIRD_OPEN_REASONING_DBS", "").split(",")
+    if db.strip()
+}
+# Opt-in list: when non-empty, decomposition tree is ON only for DBs in this set.
+_DECOMPOSITION_TREE_DBS = {
+    db.strip().lower()
+    for db in os.environ.get("BIRD_DECOMPOSITION_TREE_DBS", "").split(",")
+    if db.strip()
+}
 _THOUGHT_DESCRIPTION = (
     "Internal reasoning: work the question out here before writing any SQL, at "
     "whatever length it needs. This is NOT shown to the user."
