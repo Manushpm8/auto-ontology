@@ -38,10 +38,7 @@ import { TextVariant } from '@/enums/text';
 export type ComposerEditValue = string | string[];
 
 export const LabelList = ({ values }: { values: string[] }) => {
-	// Guards against a Neo4j `sample_values`-style property that wasn't
-	// actually stored as a list (e.g. a bare string) — defensive here since
-	// that mismatch surfaces at the DB layer, past every caller's own
-	// static `string[]` typing.
+
 	const nonEmptyValues = (Array.isArray(values) ? values : []).filter((v) => v.trim() !== '');
 	if (nonEmptyValues.length === 0) return <span>—</span>;
 	return (

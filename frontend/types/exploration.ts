@@ -385,9 +385,9 @@ export type SqlExplorationDetails = {
  *
  * `connection` is not a graph node at all — it stands in for a clicked
  * term↔term Semantic-layer edge itself (see `activeSemanticConnectionEntity`
- * in `ExplorationView.tsx`), reusing this same card/type instead of the
- * separate `LinkPathCard` a Data-layer edge still uses. `relationshipTypes`/
- * `connectionHops` below are its only real payload.
+ * in `ExplorationView.tsx`) — a clicked table↔table Data-layer edge no
+ * longer shows anything at all. `relationshipTypes`/`connectionHops` below
+ * are its only real payload.
  */
 export type ExpansionEntityKind =
 	| 'schema'
@@ -488,10 +488,9 @@ export type ExpansionEntity = {
 	connectionTarget?: { id: string; name: string };
 	/**
 	 * A `connection` entity's own real hop chain, fetched from
-	 * `explorationApi.getSemanticLinkPath` the same way `LinkPathCard`'s old
-	 * `semantic` variant did — `null` while that request is still in
-	 * flight (distinct from `[]`, an edge whose two terms genuinely share
-	 * no path). `undefined` for every other kind.
+	 * `explorationApi.getSemanticLinkPath` — `null` while that request is
+	 * still in flight (distinct from `[]`, an edge whose two terms
+	 * genuinely share no path). `undefined` for every other kind.
 	 */
 	connectionHops?: ExplorationLinkPathHopDto[] | null;
 };

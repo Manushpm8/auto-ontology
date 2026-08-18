@@ -49,7 +49,6 @@ import { ViewToggle } from './graph/ViewToggle';
 import { ZoomControls } from './graph/ZoomControls';
 import { ActiveExpansionCard } from './ActiveExpansionCard';
 import { HoverNodeCard } from './HoverNodeCard';
-import { LinkPathCard } from './LinkPathCard';
 import { ActiveDataCard, buildDataGraph } from './ExplorationData';
 import { ExplorationLoader } from './ExplorationLoader';
 import { ActiveTermCard, buildSemanticGraph } from './ExplorationSemantic';
@@ -204,12 +203,12 @@ export const ExplorationView = () => {
 	const [search, setSearch] = useState('');
 	const [activeNodeId, setActiveNodeId] = useState<string | null>(activeNodeIdFromUrl);
 	const [hoveredNodePosition, setHoveredNodePosition] = useState<HoveredNode | null>(null);
-	const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
 	const [selectedSemanticEdgeId, setSelectedSemanticEdgeId] = useState<string | null>(null);
 	// The real hop chain behind `selectedSemanticEdgeId`, fetched from
 	// `explorationApi.getSemanticLinkPath` — `null` while that request is
 	// still in flight (distinct from `[]`, an edge whose two terms
-	// genuinely share no path), read by `LinkPathCard`'s `semantic` variant.
+	// genuinely share no path), read via `activeSemanticConnectionEntity`'s
+	// `connectionHops` below.
 	const [semanticLinkPathHops, setSemanticLinkPathHops] = useState<
 		ExplorationLinkPathHopDto[] | null
 	>(null);
@@ -1507,7 +1506,6 @@ export const ExplorationView = () => {
 	const handleSelectNode = useCallback(
 		(nodeId: string | null) => {
 			setHoveredNodePosition(null);
-			setSelectedLinkId(null);
 			setSelectedSemanticEdgeId(null);
 			// Skip tearing the link-path graft down when the node being
 			// selected is one of its own grafted nodes — see
@@ -1851,27 +1849,16 @@ export const ExplorationView = () => {
 		[],
 	);
 
+	// Only ever fires for a Semantic-layer (Term↔Term) edge — a Data-layer
+	// (Table↔Table) one is drawn with the click-inert `structural` kind
+	// instead (see `buildGraphologyGraph` in `GraphCanvas.tsx`), since that
+	// edge's own SQL query/foreign key details are no longer surfaced here.
 	const handleSelectEdge = useCallback(
 		(edgeId: string) => {
 			controllerRef.current?.removeExpansion(LINK_PATH_ORIGIN_ID);
 			setSemanticLinkPathHops(null);
 
-			if (layer === ExplorationLayer.Data) {
-				setSelectedLinkId(edgeId);
-				setSelectedSemanticEdgeId(null);
-				const link = dataGraph.links.find(
-					(candidate) => `${candidate.source}:${candidate.target}` === edgeId,
-				);
-				setHighlightedPath(
-					link != null
-						? { nodeIds: [link.source, link.target], edgeKeys: [edgeId] }
-						: null,
-				);
-				return;
-			}
-
 			setSelectedSemanticEdgeId(edgeId);
-			setSelectedLinkId(null);
 			const link = semanticGraph.links.find(
 				(candidate) => `${candidate.source}:${candidate.target}` === edgeId,
 			);
@@ -1886,14 +1873,13 @@ export const ExplorationView = () => {
 			setHighlightedPath({ nodeIds: [link.source, link.target], edgeKeys: [edgeId] });
 			void loadSemanticLinkPath(link.source, link.target, edgeId);
 		},
-		[layer, dataGraph.links, semanticGraph.links, loadSemanticLinkPath],
+		[semanticGraph.links, loadSemanticLinkPath],
 	);
 
 	const handleToggleLayer = useCallback(() => {
 		setSearch('');
 		setActiveNodeId(null);
 		setHoveredNodePosition(null);
-		setSelectedLinkId(null);
 		setSelectedSemanticEdgeId(null);
 		clearHighlightedPath();
 		setRelationshipsNodeId(null);
@@ -1999,16 +1985,6 @@ export const ExplorationView = () => {
 		() => graph.nodes.find((node) => node.id === hoveredNodePosition?.id) ?? null,
 		[graph.nodes, hoveredNodePosition?.id],
 	);
-	const selectedLink = useMemo(
-		() =>
-			graph.links.find((link) => `${link.source}:${link.target}` === selectedLinkId) ?? null,
-		[graph.links, selectedLinkId],
-	);
-	const selectedLinkSource =
-		graph.nodes.find((node) => node.id === selectedLink?.source)?.name ?? '';
-	const selectedLinkTarget =
-		graph.nodes.find((node) => node.id === selectedLink?.target)?.name ?? '';
-
 	const selectedSemanticEdge = useMemo(
 		() =>
 			graph.links.find(
@@ -2022,10 +1998,11 @@ export const ExplorationView = () => {
 		graph.nodes.find((node) => node.id === selectedSemanticEdge?.target)?.name ?? '';
 	// The `connection`-kind entity `ActiveExpansionCard` shows for a clicked
 	// Semantic-layer edge — reuses that same card/kind (see its own
-	// `ExpansionEntityKind` doc comment) instead of `LinkPathCard`'s
-	// now-removed `semantic` variant, for one consistent card shape across
-	// every Exploration side panel. `viewHref` is never read: the card
-	// skips its own "View" button entirely for this kind.
+	// `ExpansionEntityKind` doc comment) for one consistent card shape
+	// across every Exploration side panel. A Data-layer (Table↔Table) edge
+	// no longer shows anything on click at all (see `buildGraphologyGraph`
+	// in `GraphCanvas.tsx`). `viewHref` is never read: the card skips its
+	// own "View" button entirely for this kind.
 	const activeSemanticConnectionEntity: ExpansionEntity | null = useMemo(
 		() =>
 			selectedSemanticEdge == null
@@ -2254,14 +2231,18 @@ export const ExplorationView = () => {
 						</div>
 						{/* A Term's own expansion (see `expandTermNode`) grafts on Data
 						objects too — its Tables directly, and (via a Table/
-						ColumnAttribute in turn) their Columns and any Sql query behind a
-						SqlAttribute (which can, in turn, graft the CustomAnalysis
-						sharing that exact Sql node — see `expandSqlNode`) — so this
-						legend covers those same four Data-layer kinds here as well,
-						same as the Data-layer section below. */}
+						ColumnAttribute in turn) their Schema/Columns and any Sql query
+						behind a SqlAttribute (which can, in turn, graft the
+						CustomAnalysis sharing that exact Sql node — see
+						`expandSqlNode`) — so this legend covers those same five
+						Data-layer kinds here as well, same as the Data-layer section
+						below. */}
 						<div className="flex items-center gap-3">
 							<LegendItem kind="table" icon={IconName.Table} label="Table" />
+							<LegendItem kind="schema" icon={IconName.Schema} label="Schema" />
 							<LegendItem kind="column" icon={IconName.Column} label="Column" />
+						</div>
+						<div className="flex items-center gap-3">
 							<LegendItem kind="sql" icon={IconName.CodeBracket} label="SQL" />
 							<LegendItem
 								kind="customAnalysis"
@@ -2294,6 +2275,7 @@ export const ExplorationView = () => {
 							))}
 						</div>
 						<div className="flex items-center gap-3">
+							<LegendItem kind="schema" icon={IconName.Schema} label="Schema" />
 							<LegendItem kind="column" icon={IconName.Column} label="Column" />
 							<LegendItem kind="sql" icon={IconName.CodeBracket} label="SQL" />
 							<LegendItem
@@ -2302,22 +2284,28 @@ export const ExplorationView = () => {
 								label="Custom Analysis"
 							/>
 						</div>
+						{/* A Table's own expansion (see `expandTableNode`) grafts on
+						Semantic objects too — its linked Terms directly, and (via a
+						Term in turn) their Column/SQL Attributes — so this legend
+						covers those same three Semantic-layer kinds here as well,
+						same as the Semantic-layer section above. */}
+						<div className="flex items-center gap-3">
+							<LegendItem kind="term" icon={IconName.Terms} label="Term" />
+							<LegendItem
+								kind="columnAttribute"
+								icon={IconName.Key}
+								label="Column Attribute"
+							/>
+							<LegendItem
+								kind="sqlAttribute"
+								icon={IconName.ChartLine}
+								label="SQL Attribute"
+							/>
+						</div>
 					</div>
 				)}
 			</div>
 
-			{selectedLink != null && (
-				<LinkPathCard
-					key={selectedLinkId}
-					sourceName={selectedLinkSource}
-					targetName={selectedLinkTarget}
-					link={selectedLink}
-					onClose={() => {
-						setSelectedLinkId(null);
-						clearHighlightedPath();
-					}}
-				/>
-			)}
 			{activeSemanticConnectionEntity != null && (
 				<ActiveExpansionCard
 					key={selectedSemanticEdgeId}

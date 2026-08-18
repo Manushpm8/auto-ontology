@@ -124,29 +124,32 @@ class NoopNodeProgram {
 
 // The canvas is plain WebGL/Canvas2D, not DOM, so it can't pick up Tailwind's
 // `dark:` variants — node/label colors have to be swapped by hand based on
-// the OS-level color scheme instead. Light values match the previous
-// Cytoscape pastel backgrounds; dark values are muted tints of the same hues
-// (rather than that same near-white pastel) so nodes read as colored shapes
-// instead of glowing white blobs against a black canvas.
+// the OS-level color scheme instead. Light values are pale tints of each
+// type's own `NODE_TYPE_ACCENT_COLOR` hue (the same pastel-fill/vivid-accent
+// node styling Neo4j Browser uses, just with this file's own more evenly
+// spread hues — see that module's own doc comment); dark values are muted
+// tints of the same hues (rather than that same near-white pastel) so nodes
+// read as colored shapes instead of glowing white blobs against a black
+// canvas.
 const NODE_TYPE_COLOR_LIGHT: Record<NodeType, string> = {
-	term: '#bfe8ec',
-	table: '#fbd9bd',
-	schema: '#e6e1fb',
-	column: '#e6e9ee',
-	columnAttribute: '#f3e2b8',
-	sqlAttribute: '#f2d9e2',
-	sql: '#d7e3f7',
-	customAnalysis: '#f5ddc4',
+	term: '#daf5c7',
+	table: '#fae3c2',
+	schema: '#f7c5e6',
+	column: '#e1caf2',
+	columnAttribute: '#caf2d4',
+	sqlAttribute: '#c7cef5',
+	sql: '#f8c3c3',
+	customAnalysis: '#c5f3f7',
 };
 const NODE_TYPE_COLOR_DARK: Record<NodeType, string> = {
-	term: '#1f3336',
-	table: '#332821',
-	schema: '#2a2440',
-	column: '#262b33',
-	columnAttribute: '#362d18',
-	sqlAttribute: '#35202a',
-	sql: '#1e2a3d',
-	customAnalysis: '#3a2917',
+	term: '#293a1d',
+	table: '#3e2e19',
+	schema: '#3b1c31',
+	column: '#2d2037',
+	columnAttribute: '#203725',
+	sqlAttribute: '#1d223a',
+	sql: '#3c1a1a',
+	customAnalysis: '#1c383b',
 };
 const LABEL_COLOR_LIGHT = '#3f3f46';
 const LABEL_COLOR_DARK = '#e4e4e7';
@@ -684,10 +687,17 @@ const buildGraphologyGraph = (
 	graph.links.forEach((link) => {
 		if (!graphology.hasNode(link.source) || !graphology.hasNode(link.target)) return;
 		if (link.source === link.target || graphology.hasEdge(link.source, link.target)) return;
+		// A Data-layer (Table↔Table) edge used to open its own `LinkPathCard`
+		// with the SQL query/foreign key behind it — no longer wanted, so
+		// these are drawn as plain `structural` edges instead: click-inert,
+		// with no pointer cursor on hover (see `handleClickEdge`/
+		// `handleEnterEdge` below). A Semantic-layer (Term↔Term) edge still
+		// opens its own `connection` card, so it keeps the `relationship` kind.
+		const isDataLayerEdge = graphology.getNodeAttribute(link.source, 'kind') === 'table';
 		graphology.addEdgeWithKey(`${link.source}:${link.target}`, link.source, link.target, {
 			color: edgeColor,
 			size: 1.5,
-			kind: 'relationship',
+			kind: isDataLayerEdge ? 'structural' : 'relationship',
 		});
 	});
 
@@ -1092,7 +1102,106 @@ export const GraphCanvas = ({
 		const simLinkEndpointId = (endpoint: SimLink['source'] | SimLink['target']): string =>
 			typeof endpoint === 'string' ? endpoint : (endpoint as SimNode).id;
 
+		// Whether the `'end'` handler below (physics naturally settling) is
+		// allowed to re-freeze `customBBox`. Only ever armed right before a
+		// `simulation...restart()` call that grows/shrinks the *graph itself*
+		// (the initial layout, or `addExpansion`/`removeExpansion` below) —
+		// never by a drag's own `alphaTarget(0.3)` reheat (see
+		// `handleDownNode`, which explicitly disarms it). Repositioning one
+		// node still nudges its neighbours (and, transitively, faint amounts
+		// of the whole graph) toward a new equilibrium as it settles, which
+		// shifts this *live* extent by a few pixels even with nothing
+		// structurally new to fit — re-freezing to that slightly-different
+		// box on every single drag was what made the entire canvas visibly
+		// hop by a few pixels a moment after every drop, even though only
+		// one node had actually moved.
+		let bboxFreezeArmed = true;
+
+		// Computed by hand (rather than `renderer.getBBox()`, which is just
+		// Sigma's own live extent over *every* node) so that even when armed
+		// above, re-freezing deliberately excludes any currently-pinned
+		// (`fx`/`fy` set) node: one dropped far from the rest of the graph
+		// would otherwise balloon the box out to include it, on top of the
+		// disarming above.
+		const computeStableBBox = (): { x: [number, number]; y: [number, number] } | null => {
+			const unpinned = simNodes.filter((node) => node.fx == null && node.fy == null);
+			const source = unpinned.length > 0 ? unpinned : simNodes;
+			let minX = Infinity;
+			let maxX = -Infinity;
+			let minY = Infinity;
+			let maxY = -Infinity;
+			source.forEach((node) => {
+				if (node.x == null || node.y == null) return;
+				minX = Math.min(minX, node.x);
+				maxX = Math.max(maxX, node.x);
+				minY = Math.min(minY, node.y);
+				maxY = Math.max(maxY, node.y);
+			});
+			if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+			return { x: [minX, maxX], y: [minY, maxY] };
+		};
+
+		// `setCustomBBox` itself is a single synchronous jump — it swaps the
+		// graph-to-framed-space mapping that *every* node's rendered position
+		// derives from in one frame, so applying it directly on every re-arm
+		// (an `addExpansion`/`removeExpansion`, or clicking a semantic edge —
+		// which grafts the path via `addExpansion` under the hood) reads as
+		// the whole graph abruptly hopping, the same jarring "shake" freezing
+		// the box was meant to prevent in the first place. Tweening it over a
+		// short animation — mirroring `focusExpansionIfOffscreen`'s own
+		// camera animations below — turns that hop into a smooth zoom/pan
+		// instead, while still keeping the mapping perfectly static (hence
+		// jitter-free) the rest of the time, between animations.
+		const BBOX_FREEZE_ANIMATION_DURATION_MS = 350;
+		let bboxAnimationFrame: number | null = null;
+		const animateCustomBBoxTo = (target: { x: [number, number]; y: [number, number] }) => {
+			if (bboxAnimationFrame != null) cancelAnimationFrame(bboxAnimationFrame);
+			const start = renderer.getCustomBBox();
+			if (start == null) {
+				renderer.setCustomBBox(target);
+				return;
+			}
+			const startTime = performance.now();
+			const lerp = (from: number, to: number, t: number) => from + (to - from) * t;
+			const step = (now: number) => {
+				const t = Math.min(1, (now - startTime) / BBOX_FREEZE_ANIMATION_DURATION_MS);
+				// Quadratic ease-out, matching the "quadraticOut" easing Sigma's
+				// own camera animations (e.g. `focusExpansionIfOffscreen`) use.
+				const eased = 1 - (1 - t) * (1 - t);
+				renderer.setCustomBBox({
+					x: [lerp(start.x[0], target.x[0], eased), lerp(start.x[1], target.x[1], eased)],
+					y: [lerp(start.y[0], target.y[0], eased), lerp(start.y[1], target.y[1], eased)],
+				});
+				bboxAnimationFrame = t < 1 ? requestAnimationFrame(step) : null;
+			};
+			bboxAnimationFrame = requestAnimationFrame(step);
+		};
+
+		// d3-force's own default `alphaDecay` (`1 - alphaMin^(1/300)`, ≈0.0228)
+		// gives a reheat ~300 ticks (~4-5s) to fully cool — plenty of time for
+		// the charge/collision forces to finish re-relaxing a newly-grown or
+		// -shrunk graph after `addExpansion`/`removeExpansion` below, so that
+		// case deliberately keeps it. A drag's own reheat has nothing new to
+		// relax, though — just one manually-placed node's neighbours nudging
+		// back into equilibrium around it — so it's set to decay much faster
+		// (`handleDownNode` below) purely so that gentle post-drag settling
+		// actually finishes in a second or so instead of visibly lingering.
+		const DEFAULT_ALPHA_DECAY = 1 - 0.001 ** (1 / 300);
+		const DRAG_ALPHA_DECAY = 0.06;
+
 		const simulation = forceSimulation<SimNode>(simNodes)
+			// More damping than d3-force's own default (0.4) so a reheated
+			// simulation settles into place rather than visibly overshooting
+			// and bouncing back a few times first. Deliberately *not* paired
+			// with a faster `alphaDecay` here — that also speeds up how long
+			// an `addExpansion`/`removeExpansion` reheat (see `DRAG_ALPHA_DECAY`
+			// below for why only a *drag's* own reheat wants that) gets to
+			// actually run, cutting the charge/collision forces' work short
+			// before they'd naturally finish spreading the newly-grown graph
+			// back out — the layout would visibly end up more cramped/"zoomed
+			// in" than before the expansion, simply because it never got to
+			// fully re-relax.
+			.velocityDecay(0.55)
 			// Stronger repulsion (and a proportionally longer reach) plus a
 			// wider collision margin than the link `distance` above alone
 			// would give, so unconnected/loosely-connected nodes settle with
@@ -1100,10 +1209,7 @@ export const GraphCanvas = ({
 			// tight, even in dense clusters.
 			.force('charge', forceManyBody<SimNode>().strength(-700).distanceMax(1400))
 			.force('link', linkForce)
-			.force(
-				'collide',
-				forceCollide<SimNode>((node) => node.size + 24),
-			)
+			.force('collide', forceCollide<SimNode>((node) => node.size + 24).iterations(2))
 			// A very weak pull toward the origin — just enough to stop the
 			// whole graph drifting off-center over time, far too weak to
 			// override the clustering forces above (that imbalance, gravity
@@ -1130,15 +1236,18 @@ export const GraphCanvas = ({
 					{ attributes: ['x', 'y'] },
 				);
 			})
-			// Re-freezes the custom bounding box (see the `centerTimeout` comment
-			// above) every time the physics naturally comes to rest — after the
-			// initial layout, after an `addExpansion`/`removeExpansion` grows or
-			// shrinks the graph, and after a drag's reheated alpha decays back
-			// down. Doing it only here (never mid-tick) is what keeps the
+			// Re-freezes the custom bounding box (see the `bboxFreezeArmed`/
+			// `computeStableBBox` comments above) every time the physics
+			// naturally comes to rest with a structural change armed — the
+			// initial layout, or an `addExpansion`/`removeExpansion` grows or
+			// shrinks the graph — but never for a drag's own reheat decaying
+			// back down. Doing it only here (never mid-tick) is what keeps the
 			// canvas's scale/pan rock steady while nodes are actually moving,
 			// while still letting it grow to fit legitimately new content.
 			.on('end', () => {
-				renderer.setCustomBBox(renderer.getBBox());
+				if (!bboxFreezeArmed) return;
+				animateCustomBBoxTo(computeStableBBox() ?? renderer.getBBox());
+				bboxFreezeArmed = false;
 			});
 
 		let draggedNode: string | null = null;
@@ -1154,7 +1263,10 @@ export const GraphCanvas = ({
 			// dragged node's neighbours keep reacting live for as long as it's
 			// held, the same way Neo4j Browser's physics behaves, instead of
 			// staying frozen at whatever alpha the initial layout settled to.
-			simulation.alphaTarget(0.3).restart();
+			// Explicitly disarmed (see `bboxFreezeArmed`'s own comment) so
+			// *this* reheat's own eventual settle never re-freezes the bbox.
+			bboxFreezeArmed = false;
+			simulation.alphaDecay(DRAG_ALPHA_DECAY).alphaTarget(0.3).restart();
 		};
 		const stopDrag = () => {
 			// Deliberately leaves `fx`/`fy` set (rather than nulling them back
@@ -1336,7 +1448,8 @@ export const GraphCanvas = ({
 			// only the newly-pushed ones get initialized.
 			simulation.nodes(simNodes);
 			linkForce.links(simLinks);
-			simulation.alpha(0.5).restart();
+			bboxFreezeArmed = true;
+			simulation.alphaDecay(DEFAULT_ALPHA_DECAY).alpha(0.5).restart();
 			renderer.refresh();
 			// Also frames every *pre-existing* neighbour of the origin (e.g. another
 			// Table already linked to it by a direct SQL/FOREIGN_KEY edge on the base
@@ -1442,7 +1555,8 @@ export const GraphCanvas = ({
 
 			simulation.nodes(simNodes);
 			linkForce.links(simLinks);
-			simulation.alpha(0.4).restart();
+			bboxFreezeArmed = true;
+			simulation.alphaDecay(DEFAULT_ALPHA_DECAY).alpha(0.4).restart();
 			renderer.refresh();
 
 			return removedNodeIds;
@@ -1631,6 +1745,7 @@ export const GraphCanvas = ({
 
 		return () => {
 			window.clearTimeout(centerTimeout);
+			if (bboxAnimationFrame != null) cancelAnimationFrame(bboxAnimationFrame);
 			colorSchemeQuery.removeEventListener('change', handleColorSchemeChange);
 			resizeObserver.disconnect();
 			onControllerChange(null);

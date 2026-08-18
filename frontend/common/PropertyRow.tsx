@@ -13,13 +13,6 @@ export type PropertyRowProps = {
 	className?: string;
 };
 
-/**
- * Labeled value with a copy button, styled after `SqlBlock`'s header/body
- * split — a dark card with the label + copy control up top and the value
- * below it. Used for node-inspector-style panels (e.g. exploration's node
- * details panel) where every field is a single copyable value like a name,
- * description, or id.
- */
 export const PropertyRow = ({ label, value, monospace = false, className }: PropertyRowProps) => (
 	<div
 		className={`group relative overflow-hidden rounded-lg bg-zinc-900 dark:bg-zinc-950 ${className ?? ''}`}
