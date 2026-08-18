@@ -284,7 +284,8 @@ WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                             n_distinct: col.n_distinct,
                             date_format: col.date_format}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       sch.name AS schema_name, tbl.n_rows AS n_rows, cols
+       db.name AS database_name, sch.name AS schema_name,
+       tbl.n_rows AS n_rows, tbl.pk AS pk, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -460,6 +461,10 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
                 "n_rows": row.get("n_rows"),
+                # The prediction graph keys its entities on this: a table that
+                # arrives without it reaches KumoRFM with no identity, which
+                # costs it every edge and makes it unusable in `FOR EACH`.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )

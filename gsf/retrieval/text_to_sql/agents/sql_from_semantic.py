@@ -32,11 +32,7 @@ from typing import Any, Dict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from gsf.utils.llm_invoke import get_llm_client, safe_invoke_with_structured_output
-from gsf.semantic.deterministic import (
-    VALUE_SUFFIX_MARKERS,
-    enrich_column_description,
-    profile_from_column,
-)
+from gsf.semantic.deterministic import VALUE_SUFFIX_MARKERS
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.agents.sql_execution import _run_sql
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
@@ -45,6 +41,7 @@ from gsf.retrieval.data_access.custom_analyses import (
     get_custom_analyses_ids,
 )
 from gsf.retrieval.entity_coverage.prompts import format_glossary_section
+from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -846,95 +843,6 @@ def _format_semantic_context(
                     n_cross_shown += 1
 
     return "\n".join(lines)
-
-
-def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -> str:
-    """
-    Format tables with clear column information to prevent cross-table column confusion.
-
-    Args:
-        tables: Table dicts from ``path_state["relevant_tables"]`` — each must expose
-            ``columns`` as a list of dicts (from ``_normalize_table_to_relevant_shape`` / prep).
-        target_db: When set, only the *database* prefix is omitted (execution is
-            already scoped to this database). The schema qualifier is kept when
-            present, since schema dialects (Postgres/Snowflake) need it.
-
-    Returns:
-        Formatted string clearly showing which columns belong to each table
-    """
-    if not tables:
-        return "No tables available"
-
-    formatted_tables = []
-    for table in tables:
-        table_parts = []
-
-        # Table identifier
-        table_name = table.get("name", "UNKNOWN")
-        table_label = table.get("label", "")
-        table_description = table.get("description", "")
-
-        # Database and schema info
-        database_name = table.get("database_name", "")
-        schema_name = table.get("schema_name", "")
-
-        if database_name and schema_name:
-            full_name = f"{database_name}.{schema_name}.{table_name}"
-        elif schema_name:
-            full_name = f"{schema_name}.{table_name}"
-        else:
-            full_name = table_name
-
-        table_parts.append(f"TABLE: {full_name}")
-        if table_label and table_label != table_name:
-            table_parts.append(f"  Label: {table_label}")
-        if table_description:
-            table_parts.append(f"  Description: {table_description}")
-        # Table size, which decides things no description states: two tables with
-        # equal counts are probably 1:1 so a join between them cannot fan out,
-        # while joining across a large size gap multiplies rows and makes a plain
-        # COUNT(*) count the wrong entity.
-        n_rows = table.get("n_rows")
-        if isinstance(n_rows, int):
-            table_parts.append(f"  Rows: {n_rows:,}")
-
-        # Primary key
-        if "primary_key" in table:
-            table_parts.append(f"  Primary Key: {table['primary_key']}")
-
-        columns = table.get("columns")
-        if not isinstance(columns, list):
-            columns = []
-        if columns:
-            table_parts.append(
-                "  AVAILABLE COLUMNS (only use these columns for this table):"
-            )
-            for col in columns:
-                # Handle both dict and string column formats
-                if isinstance(col, dict):
-                    col_name = col.get("name", "UNKNOWN")
-                    col_type = col.get("data_type", "UNKNOWN")
-                    col_desc = col.get("description", "")
-                    col_desc = (
-                        enrich_column_description(col, profile_from_column(col))
-                        or col_desc
-                    )
-
-                    col_line = f"    - {col_name} ({col_type})"
-                    if col_desc:
-                        col_line += f" - {col_desc}"
-
-                    table_parts.append(col_line)
-                elif isinstance(col, str):
-                    # If column is a string, use it directly
-                    table_parts.append(f"    - {col}")
-                else:
-                    # Unknown format, convert to string
-                    table_parts.append(f"    - {str(col)}")
-
-        formatted_tables.append("\n".join(table_parts))
-
-    return "\n\n".join(formatted_tables)
 
 
 class SQLFromCandidatesAgent(BaseAgent):

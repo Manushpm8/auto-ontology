@@ -6,7 +6,7 @@
 
 The text-to-SQL prompts expect each table to be a flat dict with
 ``name``, ``label``, ``id``, ``table_info``, ``columns``, optional
-``primary_key`` / ``foreign_key`` etc. This module:
+``pk`` / ``foreign_key`` etc. This module:
 
 * parses the vector hit ``text`` into structured fields,
 * normalises a single table dict into the prompt shape, merges duplicates
@@ -102,8 +102,13 @@ def _normalize_table_to_relevant_shape(table: dict) -> dict:
         entry["columns"] = table["columns"]
     if table.get("n_rows") is not None:
         entry["n_rows"] = table["n_rows"]
+    # Keep the catalog's own spelling (``pk``) rather than renaming it: this
+    # function is applied twice on the candidate path (once in
+    # ``_get_candidates_information``, again in
+    # :func:`get_relevant_tables_from_candidates`), and a renamed key would be
+    # dropped by the second pass, which reads the input under the old name.
     if table.get("pk") is not None:
-        entry["primary_key"] = table["pk"]
+        entry["pk"] = table["pk"]
     if not isinstance(entry.get("columns"), list):
         entry["columns"] = []
     return entry
@@ -131,7 +136,7 @@ def _merge_two_relevant_table_dicts(a: dict, b: dict) -> dict:
             elif not sa and sb:
                 out[k] = v
             continue
-        if k in ("foreign_key", "primary_key"):
+        if k in ("foreign_key", "pk"):
             if not out.get(k) and v:
                 out[k] = v
             continue
@@ -173,7 +178,7 @@ def get_relevant_tables_from_candidates(
 
     Returns:
         List of normalized table dicts — same shape as :func:`get_relevant_tables`
-        (``name``, ``label``, ``id``, ``table_info``, parsed fields, optional ``primary_key``).
+        (``name``, ``label``, ``id``, ``table_info``, parsed fields, optional ``pk``).
     """
     table_by_id: dict[str, dict] = {}
 
