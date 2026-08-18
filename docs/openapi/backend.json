@@ -65,12 +65,14 @@
           "conversation_id": {
             "anyOf": [
               {
+                "format": "uuid",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
+            "description": "Stable thread UUID. When supplied through the authenticated gateway, prior completed turns are loaded and the new turn is persisted.",
             "title": "Conversation Id"
           },
           "prediction": {
@@ -98,6 +100,7 @@
                 "type": "null"
               }
             ],
+            "description": "Catalog database UUID or database name used to scope retrieval and SQL.",
             "title": "Target Db"
           }
         },
@@ -1333,6 +1336,10 @@
             },
             "title": "Databases",
             "type": "array"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ModelFormat",
+            "default": "gsf"
           }
         },
         "title": "ExportRequest",
@@ -1656,6 +1663,15 @@
         ],
         "title": "ListResponse[Zone]",
         "type": "object"
+      },
+      "ModelFormat": {
+        "description": "Serialisation dialect of an exchanged model document.",
+        "enum": [
+          "gsf",
+          "ossie"
+        ],
+        "title": "ModelFormat",
+        "type": "string"
       },
       "ModelImportResponse": {
         "additionalProperties": true,
@@ -3685,7 +3701,7 @@
   "paths": {
     "/api/chat/cancel": {
       "post": {
-        "description": "Abort the in-flight run for ``conversation_id``, if any.\n\nBacks the chat UI's Stop button. Without this, stopping only detached\nthe browser while the agent kept running and holding the slot, so the\nvery next question in the same conversation was rejected with 409.\n\nKilling the worker makes ``PrewarmedWorker.events()`` return rather\nthan raise, so ``_pump`` appends no error event: the run's buffer ends\nwith whatever steps completed and the stream closes with ``[DONE]``.\nConsumers therefore see a run that stopped without an answer, and the\ncompletions proxy persists no assistant turn for it.",
+        "description": "Abort the in-flight run for ``conversation_id``, if any.\n\nBacks the chat UI's Stop button. Without this, stopping only detached\nthe browser while the agent kept running and holding the slot, so the\nvery next question in the same conversation was rejected with 409.\n\nKilling the worker makes ``PrewarmedWorker.events()`` return rather\nthan raise, so ``_pump`` appends no error event: the run's buffer ends\nwith whatever steps completed and the stream closes with ``[DONE]``.\nConsumers therefore see a run that stopped without an answer, and the\nconversation keeps its user turn with no assistant reply.",
         "operationId": "chat_cancel_api_chat_cancel_post",
         "parameters": [
           {
@@ -3693,6 +3709,7 @@
             "name": "conversation_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Conversation Id",
               "type": "string"
             }
@@ -3728,6 +3745,7 @@
     },
     "/api/chat/completions": {
       "post": {
+        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nStep 1 of a chat turn: the SQL and the formatted answer. Charts are a\nseparate second call to ``POST /chat/visualize`` so the answer never waits on\nan extra LLM round trip.\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. Passing ``conversation_id``\npersists the turn and claims that conversation's single run slot \u2014 a second\nconcurrent request for the same conversation also gets 409. Omitting it runs\nthe question statelessly with a fresh key, so one-shot callers never collide.",
         "operationId": "chat_completions_api_chat_completions_post",
         "requestBody": {
           "content": {
@@ -3819,6 +3837,7 @@
             "name": "conversation_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Conversation Id",
               "type": "string"
             }
@@ -3931,6 +3950,7 @@
     },
     "/api/connections": {
       "get": {
+        "description": "List every configured database connection, credential-free.\n\n``password`` and ``password_env`` are stripped from each connection object,\nso the payload is safe to render in the UI. ``database_name`` doubles as the\nconnection's identity in the other routes here.",
         "operationId": "list_connections_api_connections_get",
         "responses": {
           "200": {
@@ -3950,6 +3970,7 @@
         ]
       },
       "post": {
+        "description": "Register a database connection and return it credential-free.\n\nThe connection is validated on the way in; anything the driver rejects comes\nback as 422 with the failure message rather than a 500. Call\n``POST /connections/test`` first to check credentials and list the schemas\navailable for the picker.",
         "operationId": "create_connection_api_connections_post",
         "requestBody": {
           "content": {
@@ -4056,6 +4077,7 @@
     },
     "/api/connections/{database_name}": {
       "delete": {
+        "description": "Remove a connection, returning the deleted row.\n\n404 when no connection carries that ``database_name``. Data already ingested\nfrom the connection is not removed here \u2014 reset it through the ingestion\nservice's ``POST /ingest/delete``.",
         "operationId": "delete_connection_api_connections__database_name__delete",
         "parameters": [
           {
@@ -4155,31 +4177,8 @@
     },
     "/api/custom-analyses": {
       "get": {
-        "description": "CustomAnalysis nodes joined with their HAS_SQL neighbour, zone-scoped when zone_ids are provided.",
+        "description": "CustomAnalysis nodes joined with their HAS_SQL neighbour.",
         "operationId": "list_custom_analyses_api_custom_analyses_get",
-        "parameters": [
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -4190,16 +4189,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "List Custom Analyses",
@@ -4391,31 +4380,8 @@
     },
     "/api/datasources/dbs": {
       "get": {
-        "description": "Databases visible via the given zones (all when zone_ids is absent).",
+        "description": "Databases in the catalog.",
         "operationId": "list_databases_api_datasources_dbs_get",
-        "parameters": [
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -4426,16 +4392,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "List Databases",
@@ -4447,31 +4403,8 @@
     },
     "/api/exploration/edges": {
       "get": {
-        "description": "Table connections backed by a shared SQL query or a foreign key, scoped to visible tables.",
+        "description": "Table connections backed by a shared SQL query or a foreign key.",
         "operationId": "list_data_exploration_edges_api_exploration_edges_get",
-        "parameters": [
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -4482,16 +4415,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "List Data Exploration Edges",
@@ -4502,30 +4425,9 @@
     },
     "/api/exploration/graph": {
       "get": {
-        "description": "Return the full data-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the data graph from one request instead of\nwalking the catalog tree (databases \u2192 schemas \u2192 tables) with a request\nper level. Zone-scoped when zone_ids are provided. Node count is capped\nat ``MAX_EXPLORATION_GRAPH_NODES`` regardless of *limit*.",
+        "description": "Return the full data-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the data graph from one request instead of\nwalking the catalog tree (databases \u2192 schemas \u2192 tables) with a request\nper level. Node count is capped at ``MAX_EXPLORATION_GRAPH_NODES``\nregardless of *limit*.",
         "operationId": "get_data_exploration_graph_api_exploration_graph_get",
         "parameters": [
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
-            }
-          },
           {
             "description": "Max nodes returned; always capped at 500 server-side.",
             "in": "query",
@@ -4570,7 +4472,7 @@
     },
     "/api/exploration/nodes/{node_id}/relationships": {
       "get": {
-        "description": "Return one ordered page of zone-visible nodes related to ``node_id``.",
+        "description": "Return one ordered page of nodes related to ``node_id``.",
         "operationId": "get_exploration_node_relationships_api_exploration_nodes__node_id__relationships_get",
         "parameters": [
           {
@@ -4597,27 +4499,6 @@
               ],
               "title": "Layer",
               "type": "string"
-            }
-          },
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
             }
           },
           {
@@ -4684,30 +4565,9 @@
     },
     "/api/exploration/semantic-graph": {
       "get": {
-        "description": "Return the full semantic-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the semantic graph from one request instead of\nfetching related terms once per term (an N+1). Zone-scoped when zone_ids\nare provided. Node count is capped at ``MAX_EXPLORATION_GRAPH_NODES``\nregardless of *limit*.",
+        "description": "Return the full semantic-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the semantic graph from one request instead of\nfetching related terms once per term (an N+1). Node count is capped at\n``MAX_EXPLORATION_GRAPH_NODES`` regardless of *limit*.",
         "operationId": "get_semantic_exploration_graph_api_exploration_semantic_graph_get",
         "parameters": [
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
-            }
-          },
           {
             "description": "Max nodes returned; always capped at 500 server-side.",
             "in": "query",
@@ -4752,31 +4612,8 @@
     },
     "/api/exploration/tables/zones": {
       "get": {
-        "description": "Return ``{table_id: [zone, ...]}`` for every visible Table.\n\nUsed by the Exploration graph to render Zone chips on every data node\nwithout a per-node request.",
+        "description": "Return ``{table_id: [zone, ...]}`` for every Table.\n\nUsed by the Exploration graph to render Zone chips on every data node\nwithout a per-node request.",
         "operationId": "list_table_zones_api_exploration_tables_zones_get",
-        "parameters": [
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -4787,16 +4624,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "List Table Zones",
@@ -4817,27 +4644,6 @@
             "schema": {
               "title": "Table Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
             }
           },
           {
@@ -4904,6 +4710,7 @@
     },
     "/api/health": {
       "get": {
+        "description": "Liveness/readiness probe for the API service.\n\nProbes Neo4j and Postgres on every call and reports each one separately, so\na degraded response names the dependency that is down. 200 when both are\nreachable, 503 otherwise \u2014 suitable for a Kubernetes readiness probe.",
         "operationId": "health_api_health_get",
         "responses": {
           "200": {
@@ -4977,7 +4784,7 @@
     },
     "/api/model/import": {
       "post": {
-        "description": "Import a GSF model YAML file or raw YAML body.",
+        "description": "Import a native GSF or Apache Ossie model YAML file or raw YAML body.",
         "operationId": "import_model_api_model_import_post",
         "parameters": [
           {
@@ -5306,7 +5113,7 @@
     },
     "/api/schemas/{db_id}": {
       "get": {
-        "description": "Schemas for a database, zone-scoped when zone_ids are provided.",
+        "description": "Schemas for a database.",
         "operationId": "list_schemas_by_database_api_schemas__db_id__get",
         "parameters": [
           {
@@ -5316,27 +5123,6 @@
             "schema": {
               "title": "Db Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
             }
           }
         ],
@@ -5590,7 +5376,7 @@
         ]
       },
       "get": {
-        "description": "One SqlAttribute by id, including its resolved zones.\n\nZone-scoped when zone_ids are provided: an attribute whose parent term\nalso represents an out-of-zone table is treated as not found, matching\nthe single-term detail endpoint's zone rules.",
+        "description": "One SqlAttribute by id, including its resolved zones.",
         "operationId": "get_sql_attribute_api_sql_attributes__attr_id__get",
         "parameters": [
           {
@@ -5600,27 +5386,6 @@
             "schema": {
               "title": "Attr Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
             }
           }
         ],
@@ -5799,7 +5564,7 @@
     },
     "/api/tables/{schema_id}": {
       "get": {
-        "description": "Tables under a schema (lazy tree), zone-scoped when zone_ids are provided.",
+        "description": "Tables under a schema (lazy tree).",
         "operationId": "list_tables_by_schema_api_tables__schema_id__get",
         "parameters": [
           {
@@ -5827,27 +5592,6 @@
               ],
               "description": "Accepted for API compatibility and ignored \u2014 schema ids are globally unique, so the database is already implied.",
               "title": "Database Name"
-            }
-          },
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
             }
           }
         ],
@@ -5882,30 +5626,9 @@
     },
     "/api/terms": {
       "get": {
-        "description": "Return Term nodes zone-scoped to the provided zones.\n\n``None`` (param absent) \u2192 no filter, return all (admin callers).\n``[]`` (empty list) \u2192 viewer with no zone access, returns empty.\n``[id, ...]`` \u2192 filter to terms reachable through those zones.\n\n*q*, when given, additionally filters to terms whose name contains it\n(case-insensitive).\n\nTerms come back ordered by name, and *skip*/*limit* select one page of\nthat order; ``total`` reports how many match in full, so a caller knows\nwhen to stop asking. Omitting *limit* returns every matching term.\n\nEach returned term carries its resolved ``zones``, so the Terms list\nand the Exploration graph can render Zone chips from this single\nresponse without a separate per-page zones request.\n\n``column_attribute_counts``, ``sql_attribute_counts`` and\n``related_counts`` are per-term breakdowns (``[{term_id, count}, ...]``)\nthat let the Terms list render per-card badges without an N+1 fetch, and\ncover the terms on this page (see ``service.list_terms_page``). The\nunderlying ColumnAttribute/SqlAttribute nodes are fetched separately, only\nfor the focused Term, via ``/terms/{term_id}/column-attributes`` and\n``/terms/{term_id}/sql-attributes`` below \u2014 this endpoint stays\ncounts-only so the Terms list never pulls attribute nodes it won't show.",
+        "description": "Return Term nodes.\n\n*q*, when given, filters to terms whose name contains it\n(case-insensitive).\n\nTerms come back ordered by name, and *skip*/*limit* select one page of\nthat order; ``total`` reports how many match in full, so a caller knows\nwhen to stop asking. Omitting *limit* returns every matching term.\n\nEach returned term carries its resolved ``zones``, so the Terms list\nand the Exploration graph can render Zone chips from this single\nresponse without a separate per-page zones request.\n\n``column_attribute_counts``, ``sql_attribute_counts`` and\n``related_counts`` are per-term breakdowns (``[{term_id, count}, ...]``)\nthat let the Terms list render per-card badges without an N+1 fetch, and\ncover the terms on this page (see ``service.list_terms_page``). The\nunderlying ColumnAttribute/SqlAttribute nodes are fetched separately, only\nfor the focused Term, via ``/terms/{term_id}/column-attributes`` and\n``/terms/{term_id}/sql-attributes`` below \u2014 this endpoint stays\ncounts-only so the Terms list never pulls attribute nodes it won't show.",
         "operationId": "list_terms_api_terms_get",
         "parameters": [
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
-            }
-          },
           {
             "description": "Case-insensitive substring filter on the term name.",
             "in": "query",
@@ -5988,7 +5711,7 @@
     },
     "/api/terms/{term_id}": {
       "get": {
-        "description": "Return a single Term node by id, including zones and related terms.\n\nZone-scoped when zone_ids are provided: a term that also represents an\nout-of-zone table is treated as not found, so a viewer can't bypass the\n``/terms`` list's zone scoping by requesting a term directly by id.",
+        "description": "Return a single Term node by id, including zones and related terms.",
         "operationId": "get_term_api_terms__term_id__get",
         "parameters": [
           {
@@ -5998,27 +5721,6 @@
             "schema": {
               "title": "Term Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
             }
           }
         ],
@@ -6103,7 +5805,7 @@
     },
     "/api/terms/{term_id}/column-attributes": {
       "get": {
-        "description": "Return ColumnAttribute nodes for a single Term.\n\nZone-scoped when zone_ids are provided, so a viewer can't see attributes\nof out-of-zone tables just because they belong to a term they can see.\n\nAttributes come back ordered by name, and *skip*/*limit* select one page\nof that order. ``count`` is the length of ``data`` (this page), ``total``\nthe number of attributes the term has in full.\n\nEach attribute includes ``primary_column`` and ``referenced_columns``\n(catalog path ids + names) for navigation from the detail page.",
+        "description": "Return ColumnAttribute nodes for a single Term.\n\nAttributes come back ordered by name, and *skip*/*limit* select one page\nof that order. ``count`` is the length of ``data`` (this page), ``total``\nthe number of attributes the term has in full.\n\nEach attribute includes ``primary_column`` and ``referenced_columns``\n(catalog path ids + names) for navigation from the detail page.",
         "operationId": "list_term_column_attributes_by_id_api_terms__term_id__column_attributes_get",
         "parameters": [
           {
@@ -6113,27 +5815,6 @@
             "schema": {
               "title": "Term Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
             }
           },
           {
@@ -6264,7 +5945,7 @@
     },
     "/api/terms/{term_id}/sql-attributes": {
       "get": {
-        "description": "Return SqlAttribute nodes for a single Term.\n\nZone-scoped when zone_ids are provided, matching the term visibility\nrules used by the single-term detail endpoint.\n\nAttributes come back ordered by name, and *skip*/*limit* select one page\nof that order. ``count`` is the length of ``data`` (this page), ``total``\nthe number of attributes the term has in full.",
+        "description": "Return SqlAttribute nodes for a single Term.\n\nAttributes come back ordered by name, and *skip*/*limit* select one page\nof that order. ``count`` is the length of ``data`` (this page), ``total``\nthe number of attributes the term has in full.",
         "operationId": "list_term_sql_attributes_by_id_api_terms__term_id__sql_attributes_get",
         "parameters": [
           {
@@ -6274,27 +5955,6 @@
             "schema": {
               "title": "Term Id",
               "type": "string"
-            }
-          },
-          {
-            "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-            "in": "query",
-            "name": "zone_ids",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Zones the caller may read through. Omit for the unfiltered catalog (admin callers); pass an empty list for a viewer with no zone access, which returns nothing. Scoping is all-or-nothing per record: anything that also reaches a table outside these zones is excluded entirely.",
-              "title": "Zone Ids"
             }
           },
           {

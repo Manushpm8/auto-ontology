@@ -40,6 +40,7 @@ from gsf.semantic.constants import (
     REL_SEMANTIC_FK,
     SQL_ATTR_SOURCE_BRIDGE,
 )
+from gsf.utils.join_columns import parse_join_columns
 from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
@@ -270,7 +271,7 @@ WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                              WHEN col.sample_values IS NOT NULL AND size(col.sample_values) > 0
                              THEN col.sample_values ELSE null END}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       db.name AS database_name, sch.name AS schema_name, cols
+       db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -415,6 +416,10 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
+                # The prediction graph keys its entities on this: a table that
+                # arrives without it reaches KumoRFM with no identity, which
+                # costs it every edge and makes it unusable in `FOR EACH`.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )
@@ -465,8 +470,15 @@ def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
 
 
 def fetch_join_edges() -> list[dict[str, Any]]:
-    """Return all JOIN edges between tables."""
-    return graph().query_read(_FETCH_JOINS_QUERY)
+    """Return all JOIN edges between tables.
+
+    ``join_columns`` is stored as a JSON string (see
+    ``gsf.utils.join_columns``), so it is parsed back to a list here.
+    """
+    rows = graph().query_read(_FETCH_JOINS_QUERY)
+    for row in rows:
+        row["join_columns"] = parse_join_columns(row.get("join_columns"))
+    return rows
 
 
 # ---------------------------------------------------------------------------

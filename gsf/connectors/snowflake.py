@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -17,6 +16,7 @@ from urllib.parse import unquote, urlparse
 
 import pandas as pd
 import snowflake.connector
+from cryptography.hazmat.primitives import serialization
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 from gsf.connectors.url_utils import (
@@ -36,103 +36,23 @@ def _quoted_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _slugify(name: str) -> str:
-    """Normalize a database name into a filesystem-safe slug."""
-    slug = re.sub(r"[^a-z0-9]+", "_", name.lower())
-    return slug.strip("_")
-
-
-def _sql_string_list(values: set[str]) -> str:
-    """Render uppercase identifiers as a Snowflake ``IN (...)`` list literal."""
-    return ", ".join("'" + value.replace("'", "''") + "'" for value in sorted(values))
-
-
-def _datasets_root() -> Path:
-    """Return the datasets root used to resolve enrichment metadata files."""
-    override = os.environ.get("DATASETS_DIR", "").strip()
-    if override:
-        return Path(override).expanduser()
-    return Path.cwd() / "datasets"
-
-
-def resolve_metadata_path(
-    *,
-    database_name: str,
-    physical_database: str,
-    metadata_file: str | None = None,
-    datasets_root: Path | None = None,
-) -> Path | None:
-    """Locate enrichment ``metadata.json`` for a Snowflake database, if any.
-
-    Resolution order:
-
-    1. Explicit ``?metadata_file=`` path from the connection string.
-    2. ``<datasets>/<database_name>/metadata.json`` (``database_name`` may be a
-       logical name such as ``spider2/adventureworks``).
-    3. ``<datasets>/spider2/<slug(physical_database)>/metadata.json`` so Spider2
-       Snowflake URLs without ``metadata_database`` still pick up seeded files.
-    """
-    if metadata_file:
-        path = Path(metadata_file).expanduser()
-        return path if path.is_file() else None
-
-    root = datasets_root if datasets_root is not None else _datasets_root()
-    candidates = [
-        root / database_name / "metadata.json",
-        root / "spider2" / _slugify(physical_database) / "metadata.json",
-    ]
-    if database_name != physical_database:
-        candidates.append(root / "spider2" / _slugify(database_name) / "metadata.json")
-
-    for path in candidates:
-        if path.is_file():
-            return path
-    return None
-
-
-def load_metadata_allowlist(metadata_path: Path) -> MetadataAllowlist:
-    """Parse enrichment metadata into uppercase table / column allowlists."""
-    raw = json.loads(metadata_path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(f"Expected object in metadata file: {metadata_path}")
-
-    tables: set[str] = set()
-    columns_by_table: dict[str, set[str]] = {}
-    for table_name, table_meta in raw.items():
-        table_key = str(table_name).upper()
-        tables.add(table_key)
-        column_names: set[str] = set()
-        if isinstance(table_meta, dict):
-            for column in table_meta.get("columns") or []:
-                if not isinstance(column, dict):
-                    continue
-                column_name = column.get("name")
-                if column_name is None or str(column_name).strip() == "":
-                    continue
-                column_names.add(str(column_name).upper())
-        columns_by_table[table_key] = column_names
-    return tables, columns_by_table
-
-
 def _parse_connection_string(
     connection_string: str,
-) -> tuple[dict[str, Any], str, str, str, str | None, bool]:
-    """Parse a Snowflake URL into connector kwargs, warehouse, and names.
+) -> tuple[dict[str, Any], str, str]:
+    """Parse a Snowflake URL into connector kwargs, warehouse, and database name.
 
-    Returns
-    ``(connect_kwargs, warehouse, physical_database, database_name,
-    metadata_file, spider2_eval)``.
+    Required URL parts: ``user``, ``password``, ``account`` (host), ``warehouse``,
+    and ``database`` query param.
 
-    Multi-database loading matches SQLite: put one URL per Snowflake database in
-    ``CONNECTION_STRINGS`` (different ``?database=``). ``database_name`` defaults
-    to that physical database (same role as the SQLite file stem). Optional
-    ``?metadata_database=`` overrides the routing name when needed. Optional
-    ``?metadata_file=`` points at an enrichment metadata JSON used to restrict
-    introspection to the listed tables and columns.
-
-    Expected format::
+    Expected formats::
 
         snowflake://USER:PASSWORD@ACCOUNT?warehouse=WH&database=SF_DB
+        snowflake://USER@ACCOUNT?warehouse=WH&database=SF_DB&private_key=BASE64_PEM
+
+    Key-pair auth is not merely an alternative: Snowflake accounts that enforce
+    MFA reject password sign-in for ``PERSON`` users and forbid passwords on
+    ``SERVICE`` users entirely, leaving a key pair as the only credential an
+    unattended service can present.
     """
     parsed = urlparse(connection_string)
     if parsed.scheme.split("+", 1)[0].lower() != "snowflake":
@@ -149,7 +69,11 @@ def _parse_connection_string(
             "snowflake://user:pass@account?warehouse=COMPUTE_WH&database=MY_DB"
         )
 
-    if parsed.password is None:
+    query = parse_qs(parsed.query)
+
+    password = unquote(parsed.password) if parsed.password is not None else ""
+    private_key = query.get("private_key", [None])[0]
+    if not password and not private_key:
         raise ValueError(
             "Snowflake connection string requires password in the URL, e.g. "
             "snowflake://user:pass@account?warehouse=COMPUTE_WH&database=MY_DB"
@@ -158,8 +82,8 @@ def _parse_connection_string(
     if not password:
         raise ValueError("Snowflake connection string requires a non-empty password")
 
-    query = parse_query(connection_string)
-    warehouse = query_param(query, "warehouse")
+    query = parse_qs(parsed.query)
+    warehouse = query.get("warehouse", [None])[0]
     if not warehouse:
         raise ValueError("Snowflake connection string requires ?warehouse=COMPUTE_WH")
 
@@ -174,14 +98,13 @@ def _parse_connection_string(
 
     connect_kwargs: dict[str, Any] = {
         "user": user,
-        "password": password,
         "account": parsed.hostname,
         "database": database,
         "warehouse": warehouse,
         "login_timeout": 10,
     }
 
-    role = query_param(query, "role")
+    role = query.get("role", [None])[0]
     if role:
         connect_kwargs["role"] = role
 

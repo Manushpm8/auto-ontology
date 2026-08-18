@@ -13,6 +13,9 @@ from gsf.retrieval.text_to_sql.text_to_sql_graph import (
     _prediction_enabled,
     create_graph,
 )
+from gsf.retrieval.text_to_sql.connector_routing import (
+    resolve_target_database_name,
+)
 from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
@@ -72,11 +75,17 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     target_db = payload.get("target_db")
     if target_db:
-        initial_path_state["target_db"] = target_db
+        initial_path_state["target_db"] = resolve_target_database_name(
+            target_db, connectors
+        )
     elif len(connectors) == 1:
         connector_db = getattr(connectors[0], "database_name", None)
         if connector_db:
             initial_path_state["target_db"] = connector_db
+
+    processing_question = (
+        payload.get("processing_question") or payload["question"]
+    ).strip()
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
@@ -84,12 +93,12 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     )
     messages = [
         SystemMessage(content=main_system_prompt),
-        HumanMessage(content=payload["question"]),
+        HumanMessage(content=processing_question),
     ]
 
     state: dict = {
         "llm": llm_client,
-        "initial_question": payload["question"],
+        "initial_question": processing_question,
         "connectors": connectors,
         "messages": messages,
         "path_state": initial_path_state,

@@ -31,24 +31,15 @@ abbreviations, shortcuts, and internal jargon in the question.
 """
 
 
-def create_question_extraction_prompt(
-    question: str,
-    glossary: list[dict[str, str]] | None = None,
-) -> str:
-    """Single prompt: sanitize, extract entity noun phrases, name the subject."""
-    glossary_section = format_glossary_section(glossary)
-    return f"""You rewrite conversational user requests into concise, SQL-ready questions, \
-extract database entity noun phrases from the sanitized intent, AND name the question's \
-main subject.
-
-## Part 1 — sanitized_question
+_SANITIZE_AND_ENTITIES = """## Part 1 — sanitized_question
 
 Rules:
-- Remove personal background, narrative fluff, and filler.
+- Remove personal background, narrative fluff, filler, politeness, and generic request
+  framing such as "please", "can you", "show me", "find", or
+  "get semantic objects related to". Keep only the underlying domain intent.
 - Preserve every factual constraint: numbers, product names, brands, categories, and \
 qualifiers such as "similar", "natural ingredients", or "expensive is okay".
 - Do NOT invent constraints that are not in the original text.
-- If the input is already a direct question, return it unchanged.
 - Output one concise question or search intent, not a paragraph.
 
 Examples:
@@ -80,6 +71,11 @@ Guidelines for what to include in required_entity_name:
 - Subject nouns and domain terms ("invoice", "customer", "shipment")
 - Qualified entity phrases that combine a subject with its relevant action or attribute
   ("order shipment", "employee hire", "ticket resolution")
+- Aggregation-qualified metric rule: when "count", "total", "average", "sum", "min",
+  or "max" is attached to a domain noun as the name of a requested metric or column,
+  keep it as one entity phrase. This does not
+  apply when the aggregation is only how the user asks a question, such as
+  "How many shipments..."; in that case, extract the subject entity "shipment".
 - Filter-item rule: when several words together describe a single item the user wants to
   filter or search for, keep them in one phrase. Do not split modifier, noun, and purpose
   of the same filter item into separate entries.
@@ -98,7 +94,7 @@ Guidelines for what to exclude from required_entity_name:
 - Numeric values: counts, amounts, prices, years, and other number literals
 - Date/time values when they are numeric or calendar literals
 - Aggregation indicators ("count", "total", "average", "sum", "min", "max")
-  when standing alone
+  when standing alone; preserve them when the aggregation-qualified metric rule applies
 - Status and filter adjectives when standing alone ("open", "active", "high-priority")
 - Bare schema-generic words with no domain meaning on their own: "id", "name",
   "type", "code", "key", "value", "description", "label", "title", "flag",
@@ -115,8 +111,9 @@ Examples:
 
   Q: "Find a waterproof hiking tent for family camping."
   → required_entity_name: ["waterproof hiking tent for family camping"]
+"""
 
-## Part 3 — subject
+_SUBJECT_AND_ACRONYMS = """## Part 3 — subject
 
 Populate "subject" with one short noun phrase naming what the question is about — the
 single thing being asked for. Derive it from the sanitized question, resolving any
@@ -135,9 +132,9 @@ Examples:
   Q: "Which vendors had the highest invoice totals in Q2?"
   → subject: "vendor"
 
-## Part 4 — used_acronyms
+## Part 4 — used_glossary_names
 
-Populate "used_acronyms" with the names of only the Glossary entries you actually used
+Populate "used_glossary_names" with the names of only the Glossary entries you actually used
 to interpret, sanitize, resolve entities in, or determine the subject of this question.
 Copy each name exactly as written in the Glossary. Do not infer entries by lexical
 matching alone: include an entry only when its definition is semantically relevant.
@@ -145,8 +142,42 @@ Return an empty list when no Glossary definition applies.
 
 Example (Glossary contains "MRR: monthly recurring revenue"):
   Q: "Show MRR by region."
-  → used_acronyms: ["MRR"]
+  → used_glossary_names: ["MRR"]
+"""
 
+
+def create_question_extraction_prompt(
+    question: str,
+    glossary: list[dict[str, str]] | None = None,
+    *,
+    include_subject: bool = True,
+) -> str:
+    """Sanitize and extract entity noun phrases; optionally also name subject/acronyms.
+
+    Glossary is always injected so the model can resolve abbreviations while
+    sanitizing and extracting entities, even when ``include_subject`` is False.
+    """
+    glossary_section = format_glossary_section(glossary)
+    if include_subject:
+        intro = (
+            "You rewrite conversational user requests into concise, SQL-ready "
+            "questions, extract database entity noun phrases from the sanitized "
+            "intent, AND name the question's main subject."
+        )
+        trailing = _SUBJECT_AND_ACRONYMS
+    else:
+        intro = (
+            "You rewrite conversational user requests into concise, SQL-ready "
+            "questions and extract database entity noun phrases from the "
+            "sanitized intent. Do not produce a subject field or list of used "
+            "acronyms."
+        )
+        trailing = ""
+
+    return f"""{intro}
+
+{_SANITIZE_AND_ENTITIES}
+{trailing}
 {glossary_section}## Input
 
 {question}

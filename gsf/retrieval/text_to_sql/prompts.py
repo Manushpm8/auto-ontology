@@ -338,7 +338,12 @@ ORDER BY total_sales DESC;"""
   do NOT include that column in SELECT — it adds no information since every row has the same value.
 
 Output (fill fields in this exact order):
-- thought: 1-2 sentence internal reasoning — your approach and key decisions.
+- thought: briefly explain your approach and state every assumption the
+  request or schema doesn't uniquely determine. For each that applies,
+  state the choice AND the reason ("X, because Y"): time window (the
+  boundary for vague/relative phrases), zero/missing values (included,
+  excluded, or coerced to 0; how division guards a zero denominator), and
+  ties (what breaks a tie in a ranking/superlative query).
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
@@ -352,6 +357,8 @@ Example:
 
 thought:
 Join sales and customers, filter last full quarter, aggregate by country.
+"Total sales" means gross SUM(sales_amount), with no refund adjustment
+since the question didn't ask for one.
 
 sql_code:
 {example_sql}
@@ -372,7 +379,12 @@ If no tables are relevant, explain politely and suggest rephrasing.
 Otherwise, construct an optimized SQL query to answer the question.
 
 Output (fill fields in this exact order):
-- thought: 1-2 sentence internal reasoning — your approach and key decisions.
+- thought: briefly explain your approach and state every assumption the
+  request or schema doesn't uniquely determine. For each that applies,
+  state the choice AND the reason ("X, because Y"): time window (the
+  boundary for vague/relative phrases), zero/missing values (included,
+  excluded, or coerced to 0; how division guards a zero denominator), and
+  ties (what breaks a tie in a ranking/superlative query).
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
@@ -396,9 +408,14 @@ problems. Minor issues or alternative approaches are
 acceptable.
 
 Check for CRITICAL issues only:
-1. **Seriously Wrong Joins**: Are there joins that would
-produce completely wrong results? (Minor join variations
-are acceptable)
+1. **Seriously Wrong Joins**: Flag only joins that are
+nonsensical or clearly break the question (e.g. joining
+unrelated tables, inventing keys). Alternate but plausible
+join paths that still answer the question are acceptable —
+including a different entity for a filter dimension, a
+different field/role for the same concept, a
+shorter/longer path, or another valid FK chain. Do NOT
+fail for those.
 2. **Clearly Wrong Aggregations**: Are aggregations
 completely incorrect? (e.g., COUNT when user explicitly
 asks for SUM) (Minor variations are acceptable)
@@ -409,6 +426,11 @@ definitions. Fragments that look unusual, incomplete, or
 nonstandard in isolation are still valid if they follow
 those custom analyses — do NOT mark them as critical issues
 solely for that reason.
+
+When AUTHORITATIVE JOIN PATHS are provided, they come from
+the verified semantic model. If the generated SQL uses a
+join condition from those paths, keep it and do NOT flag
+that join as invalid.
 
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
@@ -585,23 +607,30 @@ def create_intent_validation_prompt(
     entities_text: str,
     sql_code: str,
     custom_analyses: str = "",
+    join_paths: str = "",
 ) -> str:
     question_block = format_dual_question_block(original_question, sanitized_question)
     custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
+    join_paths_block = f"\n{join_paths}" if join_paths.strip() else ""
     return f"""User's Question:
 {question_block}
 {custom_analyses_block}
+{join_paths_block}
 Generated SQL Query:
 ```sql
 {sql_code}
 ```
 
 Check for CRITICAL issues ONLY (be lenient):
-1. Are there any joins that would produce COMPLETELY WRONG results? (Alternative join approaches are OK)
+1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible \
+join paths that could still answer it are OK — including different fields/roles for the same \
+concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those.
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
-If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain definitions — do not flag the generated query as invalid merely for following those patterns.
+If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \
+definitions — do not flag the generated query as invalid merely for following those patterns.
+If AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that follows one of those verified paths.
 
 Provide your analysis."""
 
@@ -709,3 +738,34 @@ Candidate tables:
 
 Provide brief reasoning (1-2 sentences) then return the names of tables that can be safely REMOVED.
 Only remove a table if you are confident it is not needed. When in doubt, do NOT remove."""
+
+
+def create_follow_up_resolution_prompt(
+    *, question: str, conversation_history: str
+) -> str:
+    """Build the prompt that turns a contextual follow-up into a standalone query."""
+
+    return f"""
+You resolve conversational follow-up questions for a text-to-SQL agent.
+
+Use only the completed conversation turns below. Never invent a table, filter,
+entity, metric, date range, or other constraint that is not present in the
+current question or the history.
+
+Return:
+- is_follow_up=true only when the current question depends on prior context,
+  such as pronouns, omitted subjects, "same", "also", "instead", "what about",
+  or a modification to the preceding request.
+- standalone_question as a complete, natural-language question containing all
+  context needed to answer the current request.
+- For an independent question, set is_follow_up=false and copy the current
+  question unchanged into standalone_question.
+
+Do not answer the question and do not generate SQL.
+
+COMPLETED CONVERSATION HISTORY:
+{conversation_history}
+
+CURRENT QUESTION:
+{question}
+""".strip()
