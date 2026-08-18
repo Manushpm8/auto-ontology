@@ -28,7 +28,7 @@ Schema columns already resolved by VDB (drop a gap only if the description direc
 
 Your task — produce a FRESH updated list:
 1. DROP any prior gap that is now fully resolved by the user's answer above \
-   (exact operators, constants, and column names given for every part of it).
+   (exact operators and constants given for every part of it, all column names considered resolved).
 2. KEEP any prior gap that the answer did not fully resolve.
 3. ADD any new gap introduced by the answer or the external knowledge that would \
    prevent writing correct SQL — for example:
@@ -85,7 +85,7 @@ Identify gaps in either of the following categories:
 A gap is only significant if it would prevent writing correct SQL.
 
 Do NOT flag:
-- Terms fully defined with exact column names and operators
+- Terms fully defined with exact operators and all relevant column names found in the schema entities.
 - Business context that does not affect SQL structure
 - Minor ambiguities a SQL generator can resolve on its own
 

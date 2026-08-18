@@ -22,7 +22,7 @@ from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
-from gsf.utils.llm_invoke import safe_invoke_text, safe_invoke_text_nr
+from gsf.utils.llm_invoke import safe_invoke_text_nr
 
 
 # ── Message classifier ──────────────────────────────────────────────────────
@@ -135,51 +135,6 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     )
 
 
-# ── Cross-phase entity resolution ───────────────────────────────────────────
-
-_CROSS_PHASE_PROMPT = """\
-Phase 2 question: {p2_question}
-
-Terms from Phase 2 that could not be resolved from the database schema or \
-external knowledge:
-{unresolved_list}
-
-Phase 1 question (for context):
-{p1_question}
-
-Phase 1 SQL:
-{p1_sql}
-
-For each unresolved Phase 2 term that refers to a concept or formula defined \
-in Phase 1, write one SQL-friendly line:
-  TermInPhase2 = <formula or definition derived from Phase 1>
-Include threshold conditions if relevant (e.g. Low/Medium/High cutoffs). \
-Output NONE if none of the unresolved terms map to Phase 1 concepts."""
-
-
-def _resolve_cross_phase_entities(
-    p2_question: str,
-    unresolved: list,
-    p1_question: str,
-    p1_sql: str,
-) -> str:
-    """Map unresolved Phase 2 entities to Phase 1 definitions (one fast LLM call)."""
-    if not p1_sql or not p1_question or not unresolved:
-        return ""
-    unresolved_list = "\n".join(f"- {name}" for name, _ in unresolved)
-    prompt = _CROSS_PHASE_PROMPT.format(
-        p2_question=p2_question,
-        unresolved_list=unresolved_list,
-        p1_question=p1_question,
-        p1_sql=p1_sql[:800],
-    )
-    response = safe_invoke_text(_get_llm(), prompt).strip()
-    if not response or response.upper() == "NONE":
-        return ""
-    logger.info("Cross-phase resolution: %s", response[:200])
-    return response
-
-
 # ── SQL generation ──────────────────────────────────────────────────────────
 
 _FOLLOW_UP_MERGE_PROMPT = """\
@@ -193,7 +148,6 @@ Previous question (Phase 1):
 {p1_question}
 Previous SQL:
 {p1_sql}
-{cross_phase_section}
 
 
 Task: Rewrite the follow-up question into a single, complete, standalone question \
@@ -204,10 +158,10 @@ Include as much or as little of the previous SQL's structure as the follow-up re
 
 Rules:
 - Resolve references to prior concepts (e.g. "that category", "the same score", "those \
-signals") using the previous SQL and question. If resolved mappings are provided above, \
-use them as the authoritative definition for any matching terms.
+signals") using the previous SQL and question.
 - Carry forward table names, column names, formulas, tresholds and conditions that the follow-up \
-references or implicitly depends on. Carry forward exact numeric values, if they exist.
+references or implicitly depends on, unless requested otherwise by the follow up. Carry forward\
+exact numeric values, if they exist.
 - If the follow-up reuses or extends the previous query's full structure, incorporate it. \
 If it only borrows part of it, incorporate only that part.
 - For any concept or metric in the follow-up that does not clearly map 1:1 to a term \
@@ -216,27 +170,22 @@ the SQL generator can discover it from the schema. Only carry forward table/colu
 assignments for concepts explicitly present in the previous SQL.
 - if the question indicates only a minor change to the question (e.g a short sentence \
 starting with "also"), closely preserve the previous question structure.
-
-- Output only the rewritten question, no preamble or explanation."""
+- If the follow-up explicitly signals that part of the previous SQL's structure should \
+change, narrow, or drop this time (e.g. a different formula, a restricted table/join scope,\
+an output change), do not carry forward that part.
+"""
 
 
 def _merge_follow_up_question(
     p1_question: str,
     p1_sql: str,
-    cross_phase: str,
     p2_question: str,
 ) -> str:
     """Rewrite a raw follow-up question into a self-contained question with column
-    names and conditions drawn from the Phase 1 SQL and any cross-phase resolutions."""
-    cross_phase_section = (
-        f"\nResolved mappings for terms in the follow-up:\n{cross_phase}\n"
-        if cross_phase
-        else ""
-    )
+    names and conditions drawn from the Phase 1 SQL."""
     prompt = _FOLLOW_UP_MERGE_PROMPT.format(
         p1_question=p1_question,
         p1_sql=p1_sql[:800],
-        cross_phase_section=cross_phase_section,
         p2_question=p2_question,
     )
     merged = safe_invoke_text_nr(prompt).strip()
@@ -409,20 +358,10 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             session.working_question, expanded_kg, _get_fast_llm()
         )
 
-    # Cross-phase resolution: map unresolved Phase 2 entities to Phase 1 formulas.
-    # Only runs when there's a Phase 1 SQL to reference and Phase 2 unresolved entities.
     p1_sql = session.phase1_sql or ""
     p1_question = session.phase1_question or ""
-    cross_phase = _resolve_cross_phase_entities(
-        session.working_question,
-        session._cached_unresolvable or [],
-        p1_question,
-        p1_sql,
-    )
 
     # Build Evidence from the union of: Phase 1 carry-over + this-phase KB turns + debug extra.
-    # cross_phase is passed to the follow-up merge (below) rather than evidence, since it
-    # feeds the question directly; adding it to evidence too would be redundant.
     # VDB resolved hits are column descriptions, not formulas — the SQL generator
     # rediscovers schema mappings via its own VDB; they only benefit the decide-LLM prompt.
     combined_kg = "\n".join(filter(None, [session.phase1_grounded_kg, session.cumulative_grounded_kg, extra_kg]))
@@ -435,7 +374,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     # question the SQL generator receives, rather than the shorter raw follow-up.
     if p1_sql and p1_question:
         merged_q = _merge_follow_up_question(
-            p1_question, p1_sql, cross_phase, session.working_question
+            p1_question, p1_sql, session.working_question
         )
         session.working_question = merged_q
         logger.info("[%s] SQL gen — follow-up merged question (p1 sql %d chars)", session.task_id, len(p1_sql))

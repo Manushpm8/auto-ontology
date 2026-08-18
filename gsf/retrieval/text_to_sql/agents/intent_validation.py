@@ -29,6 +29,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.agents.sql_from_semantic import format_semantic_context
 from gsf.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
     create_intent_validation_prompt,
@@ -174,12 +175,26 @@ class IntentValidationAgent(BaseAgent):
                 path_state.get("custom_analyses") or []
             )
 
+        # Feed the already-computed semantic join paths through as "authoritative" so
+        # the validator doesn't second-guess joins CandidatePreparationAgent already
+        # verified against the semantic graph (same data SQLFromCandidatesAgent used
+        # to generate the query — see sql_from_semantic.format_semantic_context).
+        join_paths_section = ""
+        primary_attribute = path_state.get("primary_attribute")
+        if primary_attribute:
+            join_paths_section = format_semantic_context(
+                primary_attribute,
+                path_state.get("attribute_join_paths") or [],
+                target_db=path_state.get("target_db"),
+            )
+
         validation_prompt = create_intent_validation_prompt(
             original_question,
             sanitized_question,
             "",
             sql_code,
             custom_analyses=ca_section,
+            join_paths=join_paths_section,
         )
 
         messages = [

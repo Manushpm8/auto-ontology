@@ -70,7 +70,10 @@ _HINT_FALLBACK = (
     'The query contains explicit conditional branching ("otherwise", "if so", "no action").\n'
     "Consider encoding this as:\n"
     "→ CASE WHEN <condition> THEN (<subquery>)::TEXT ELSE '<fallback message>' END\n"
-    "  The ELSE branch should be a descriptive string, not NULL or an empty result."
+    "  The ELSE branch should be a descriptive string, not NULL or an empty result.\n"
+    "  or if the question only asks for a plain yes/no or true/false fact,\n"
+    "  with no distinct fallback message actually required, a boolean TRUE/FALSE is\n"
+    "  more appropriate."
 )
 
 _HINT_STATUS = (
@@ -78,7 +81,9 @@ _HINT_STATUS = (
     "The query asks to check a condition and return a result for both outcomes.\n"
     "Consider encoding this as:\n"
     "→ CASE WHEN <condition> THEN 'Positive status' ELSE 'Negative status' END\n"
-    "  (not a WHERE filter — both branches must produce output, not just the matching rows)"
+    "  (not a WHERE filter — both branches must produce output, not just the matching rows)\n"
+    "  or if no descriptive label is implied, a boolean TRUE/FALSE \n"
+    "  or a combination: CASE WHEN <condition> THEN TRUE ELSE FALSE END."
 )
 
 _HINT_CLASSIFICATION = (

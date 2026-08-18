@@ -543,19 +543,21 @@ def create_intent_validation_prompt(
     entities_text: str,
     sql_code: str,
     custom_analyses: str = "",
+    join_paths: str = "",
 ) -> str:
     question_block = format_dual_question_block(original_question, sanitized_question)
     custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
+    join_paths_block = f"\n{join_paths}" if join_paths.strip() else ""
     return f"""User's Question:
 {question_block}
-{custom_analyses_block}
+{custom_analyses_block}{join_paths_block}
 Generated SQL Query:
 ```sql
 {sql_code}
 ```
 
 Check for CRITICAL issues ONLY (be lenient):
-1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible join paths that could still answer it are OK — including different fields/roles for the same concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those.
+1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible join paths that could still answer it are OK — including different fields/roles for the same concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those. When AUTHORITATIVE JOIN PATHS are listed above, a join that follows one of them is correct by definition — do not flag it.
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.

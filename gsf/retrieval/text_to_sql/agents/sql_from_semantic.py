@@ -27,7 +27,7 @@ from typing import Any, Dict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from gsf.utils.llm_invoke import safe_invoke_with_structured_output
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.data_access.custom_analyses import (
     build_custom_analyses_section,
@@ -71,7 +71,7 @@ def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
     return f"{prefix}.{column}"
 
 
-def _format_semantic_context(
+def format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
     target_db: str | None = None,
@@ -414,7 +414,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             if primary_attribute:
                 join_paths = (
                     "## Semantic Hints & Join Paths\n"
-                    + _format_semantic_context(
+                    + format_semantic_context(
                         primary_attribute,
                         attribute_join_paths,
                         target_db=target_db,
@@ -520,6 +520,10 @@ class SQLFromCandidatesAgent(BaseAgent):
         # Check if we have a valid response (either SQL or text-based answer from file contents)
         has_sql = bool(response.sql_code and response.sql_code.strip())
         has_response = bool(response.response and response.response.strip())
+
+        thought = (getattr(response, "thought", "") or "").strip()
+        if thought:
+            record_thought(path_state, self.agent_name, thought)
 
         if has_sql:
             custom_analyses_used = []

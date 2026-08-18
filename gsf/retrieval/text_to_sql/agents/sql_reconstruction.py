@@ -36,7 +36,7 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
     format_tables_for_prompt,
 )
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 from gsf.retrieval.text_to_sql.evidence_hints import (
     build_evidence_hints_block,
@@ -396,6 +396,8 @@ class SQLReconstructionAgent(BaseAgent):
                     analysis.error_type.value,
                     analysis.explanation[:150],
                 )
+                if analysis.explanation:
+                    record_thought(path_state, self.agent_name, analysis.explanation)
 
             if (
                 analysis is not None
@@ -537,6 +539,8 @@ class SQLReconstructionAgent(BaseAgent):
             "Reconstruction explanation: %s...",
             response_explanation[:100],
         )
+        if thought and thought != "No explanation":
+            record_thought(path_state, self.agent_name, thought)
 
         custom_analyses_used: list = []
         if hasattr(response, "custom_analyses_used"):
