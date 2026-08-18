@@ -26,6 +26,11 @@ _OPEN_REASONING = os.environ.get("BIRD_OPEN_REASONING", "0").strip().lower() not
     "off",
     "",
 }
+_OPEN_REASONING_SKIP_DBS = {
+    db.strip().lower()
+    for db in os.environ.get("BIRD_OPEN_REASONING_SKIP_DBS", "").split(",")
+    if db.strip()
+}
 _THOUGHT_DESCRIPTION = (
     "Internal reasoning: work the question out here before writing any SQL, at "
     "whatever length it needs. This is NOT shown to the user."

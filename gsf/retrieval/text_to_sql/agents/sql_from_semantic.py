@@ -66,6 +66,7 @@ from gsf.retrieval.text_to_sql.models import (
     SYNTHETIC_EXAMPLE_COUNT,
     SyntheticSQLExamplesModel,
 )
+from gsf.retrieval.text_to_sql.models import _DECOMPOSITION_TREE_SKIP_DBS
 
 
 logger = logging.getLogger(__name__)
@@ -376,10 +377,18 @@ def _slot_plan() -> tuple[str, ...] | None:
     return plan or None
 
 
-def _decomposition_tree_enabled() -> bool:
-    """Whether decomposition emits a recursive tree instead of a flat list.
-    Env ``BIRD_DECOMPOSITION_TREE`` (default ``0`` = current behavior).
+def _decomposition_tree_enabled(db_id: str | None = None) -> bool:
     """
+    Whether decomposition emits a recursive tree instead of a flat list.
+    Env ``BIRD_DECOMPOSITION_TREE`` (default ``0``).
+    ``BIRD_DECOMPOSITION_TREE_SKIP_DBS``: comma-separated databases that opt out
+    even when the global flag is on.
+    """
+    if (
+        _DECOMPOSITION_TREE_SKIP_DBS
+        and (db_id or "").strip().lower() in _DECOMPOSITION_TREE_SKIP_DBS
+    ):
+        return False
     return os.environ.get("BIRD_DECOMPOSITION_TREE", "0").strip().lower() not in {
         "0",
         "false",
@@ -1198,7 +1207,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                     strategy=_QUERY_PLAN_TRANSLATION_PROMPT.format(artifact=plan_text),
                 )
             elif strategy_tag == "decomposition":
-                tree_mode = _decomposition_tree_enabled()
+                tree_mode = _decomposition_tree_enabled(path_state.get("target_db"))
                 stage1_messages = build_messages(
                     tables_variant,
                     similar_questions_variant=few_shot_variant,

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+from gsf.retrieval.text_to_sql.models import _OPEN_REASONING_SKIP_DBS, _OPEN_REASONING
 
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
@@ -247,17 +248,18 @@ revenue, not noise. Country is not a single constant filter, so it stays in
 SELECT."""
 
 
-def _open_reasoning_enabled() -> bool:
+def _open_reasoning_enabled(db_id: str | None = None) -> bool:
     """Whether the ``thought`` field is uncapped.
-    Env ``BIRD_OPEN_REASONING`` (default ``0`` = current 1-2 sentence cap).
+    Env ``BIRD_OPEN_REASONING`` (default ``0``).
+    ``BIRD_OPEN_REASONING_SKIP_DBS``: comma-separated databases that opt out
+    even when the global flag is on.
     """
-    return os.environ.get("BIRD_OPEN_REASONING", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    if (
+        _OPEN_REASONING_SKIP_DBS
+        and (db_id or "").strip().lower() in _OPEN_REASONING_SKIP_DBS
+    ):
+        return False
+    return _OPEN_REASONING
 
 
 # Measured on the 354 pools where no candidate matched gold: 63 (17.8%) have all
@@ -285,13 +287,13 @@ customers.country_name and customers.country_code matched, the sample values
 """
 
 
-def _entity_binding_enabled() -> bool:
+def _entity_binding_enabled(db_id: str | None = None) -> bool:
     """Whether ``thought`` must open with an entity-to-column binding list.
     Env ``BIRD_BIND_ENTITIES`` (default ``0``). Only meaningful alongside
     ``BIRD_OPEN_REASONING``: a binding list does not fit the 1-2 sentence cap, so
     it is ignored while the capped spec is active rather than contradicting it.
     """
-    if not _open_reasoning_enabled():
+    if not _open_reasoning_enabled(db_id):
         return False
     return os.environ.get("BIRD_BIND_ENTITIES", "0").strip().lower() not in {
         "0",
@@ -317,12 +319,12 @@ def create_sql_from_candidates_prompt(
     query to one database (``target_db``) removes only the *database* prefix — the
     schema is still required to resolve the table, so it is never dropped here.
     """
-    open_reasoning = _open_reasoning_enabled()
+    open_reasoning = _open_reasoning_enabled(target_db)
     thought_spec = _OPEN_THOUGHT_SPEC if open_reasoning else _CAPPED_THOUGHT_SPEC
     thought_example = (
         _OPEN_THOUGHT_EXAMPLE if open_reasoning else _CAPPED_THOUGHT_EXAMPLE
     )
-    if _entity_binding_enabled():
+    if _entity_binding_enabled(target_db):
         thought_spec += _BINDING_SPEC
         thought_example = _BINDING_EXAMPLE + thought_example
 
