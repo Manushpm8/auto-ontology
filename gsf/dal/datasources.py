@@ -506,8 +506,9 @@ UNWIND $col_ids AS col_id
 MATCH (col:{Labels.COLUMN} {{id: col_id}})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
       <-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
       <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
-RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name,
-       db.name AS database_name
+RETURN col.id AS col_id, tbl.id AS table_id, tbl.name AS table_name,
+       sch.id AS schema_id, sch.name AS schema_name,
+       db.id AS database_id, db.name AS database_name
 """
 
 
@@ -619,7 +620,14 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
 
 
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Batch lookup: Column id → database/schema/table identity."""
+    """Batch lookup: Column id → database/schema/table identity (ids + names).
+
+    Ids are included alongside names so a caller that needs to let a client
+    expand a Table/Column further (e.g. `find_term_link_path`'s catalog
+    enrichment) can reuse this instead of re-running the same
+    Database→Schema→Table→Column traversal itself; a caller that only wants
+    display text (e.g. `find_join_path`) simply ignores the extra keys.
+    """
     if not col_ids:
         return {}
     try:
@@ -629,8 +637,11 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
         return {}
     return {
         r["col_id"]: {
+            "table_id": r.get("table_id") or "",
             "table_name": r.get("table_name") or "",
+            "schema_id": r.get("schema_id") or "",
             "schema_name": r.get("schema_name") or "",
+            "database_id": r.get("database_id") or "",
             "database_name": r.get("database_name") or "",
         }
         for r in rows

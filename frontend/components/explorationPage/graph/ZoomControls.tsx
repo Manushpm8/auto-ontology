@@ -28,14 +28,18 @@ export const ZoomControls = ({ controller }: ZoomControlsProps) => {
 		};
 	}, [controller]);
 
+	// Sigma's default zoom factor (1.5x per click) feels too subtle for this
+	// graph — use a steeper factor so a single click noticeably changes scale.
+	const ZOOM_FACTOR = 2.5;
+
 	const zoomIn = () => {
 		if (controller == null) return;
-		void controller.getCamera().animatedZoom({ duration: 200 });
+		void controller.getCamera().animatedZoom({ duration: 200, factor: ZOOM_FACTOR });
 	};
 
 	const zoomOut = () => {
 		if (controller == null) return;
-		void controller.getCamera().animatedUnzoom({ duration: 200 });
+		void controller.getCamera().animatedUnzoom({ duration: 200, factor: ZOOM_FACTOR });
 	};
 
 	const resetView = () => {

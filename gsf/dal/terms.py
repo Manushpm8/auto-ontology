@@ -601,51 +601,14 @@ def get_full_term_by_id(
         return None
     result = dict(rows[0])
 
-    zone_filter = (
-        ""
-        if zone_ids is None
-        else f"WHERE z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
+    # Reuses `fetch_term_zones_map`'s own two-path (ColumnAttribute and
+    # SqlAttribute) zone resolution rather than re-running the identical
+    # `CONTAINS*0..2` traversal here — this is just that function narrowed
+    # to one term, so the two can't drift apart the way this used to
+    # duplicate it verbatim.
+    result["zones"] = fetch_term_zones_map(zone_ids, term_ids=[term_id]).get(
+        term_id, []
     )
-    zone_params: dict[str, Any] = {"term_id": term_id}
-    if zone_ids is not None:
-        zone_params["zone_ids"] = zone_ids
-
-    # Each branch's zone MATCH is chained through `item` (found by walking
-    # CONTAINS backwards from `t`, 0..2 hops) rather than matched independently
-    # and filtered via WHERE afterwards — see fetch_table_zones_map in
-    # gsf/dal/exploration.py for why the disconnected-pattern version forces a
-    # cartesian product between every zone/item pair and every candidate `t`.
-    zone_rows = conn.query_read(
-        f"""
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        MATCH (term)<-[:{REL_PROPERTY_OF}]-(:{LABEL_COLUMN_ATTRIBUTE})
-              <-[:{REL_HAS_ATTRIBUTE}]-(:{Labels.COLUMN})
-              <-[:{Edges.CONTAINS}]-(t:{Labels.TABLE})
-        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
-        MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        {zone_filter}
-        RETURN DISTINCT z.id    AS id,
-                        z.name  AS name,
-                        z.color AS color,
-                        NOT z:{LABEL_ZONE_DISABLED} AS enabled
-
-        UNION
-
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        MATCH (term)<-[:{REL_PROPERTY_OF}]-(:{LABEL_SQL_ATTRIBUTE})
-              -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
-              -[:{Edges.SQL}]->(t:{Labels.TABLE})
-        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
-        MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        {zone_filter}
-        RETURN DISTINCT z.id    AS id,
-                        z.name  AS name,
-                        z.color AS color,
-                        NOT z:{LABEL_ZONE_DISABLED} AS enabled
-        """,
-        zone_params,
-    )
-    result["zones"] = sorted((dict(r) for r in zone_rows), key=lambda z: z["name"])
     return result
 
 
@@ -1282,15 +1245,21 @@ def fetch_term_table_pairs(
     term_ids: list[str] | None = None,
     table_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return ``{term_id, table_id}`` rows linking Terms to their tables.
+    """Return ``{term_id, table_id, path}`` rows linking Terms to their tables.
 
     A term is linked to a table via REPRESENTS or via its ColumnAttribute
     (PROPERTY_OF, reached through HAS_ATTRIBUTE or SEMANTIC_FK) — the same
-    three paths used by ``fetch_related_terms``. Shared by
-    ``fetch_related_terms``, ``fetch_related_terms_counts`` and
-    ``gsf.dal.exploration.fetch_semantic_exploration_graph`` so a term's
-    related list, its per-term count and the Exploration graph's term↔term
-    edges are always computed from one definition of "related".
+    three paths used by ``fetch_related_terms``. ``path`` names which of
+    those Neo4j relationship types actually connected this particular pair
+    (``REPRESENTS``, ``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``) so callers that
+    care *why* a term and table are linked — not just *that* they are —
+    don't have to re-run the match themselves;
+    ``gsf.dal.exploration.fetch_semantic_exploration_graph`` uses it to
+    label term↔term edges with the real relationship type(s) behind them.
+    Shared by ``fetch_related_terms``, ``fetch_related_terms_counts`` and
+    that graph builder so a term's related list, its per-term count and the
+    Exploration graph's term↔term edges are always computed from one
+    definition of "related".
 
     Both branches require ``source: SEMANTIC_SOURCE`` on the Term, matching
     ``fetch_all_terms``: a non-semantic Term never appears in the semantic
@@ -1328,13 +1297,14 @@ def fetch_term_table_pairs(
         f"""
         MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{source: $source}})
         {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id
+        RETURN term.id AS term_id, ta.id AS table_id, '{REL_REPRESENTS}' AS path
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+              -[attr_rel:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->
+              (:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{source: $source}})
         {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id
+        RETURN term.id AS term_id, ta.id AS table_id, type(attr_rel) AS path
         """,
         params,
     )

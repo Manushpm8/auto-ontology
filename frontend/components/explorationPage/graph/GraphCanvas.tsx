@@ -8,10 +8,12 @@ import { useEffect, useRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { UndirectedGraph } from 'graphology';
 import Sigma from 'sigma';
-import type { CameraState, EdgeDisplayData, MouseCoords, NodeDisplayData } from 'sigma/types';
+import type { EdgeDisplayData, MouseCoords, NodeDisplayData } from 'sigma/types';
 import { forceSimulation, forceManyBody, forceLink, forceCollide, forceX, forceY } from 'd3-force';
 import type { SimulationNodeDatum, SimulationLinkDatum } from 'd3-force';
 import { createNodeImageProgram } from '@sigma/node-image';
+import { createNodeBorderProgram } from '@sigma/node-border';
+import { createNodeCompoundProgram } from 'sigma/rendering';
 import type {
 	NodeHoverDrawingFunction,
 	NodeLabelDrawingFunction,
@@ -20,8 +22,16 @@ import type {
 
 import SnowflakeSvg from '@/common/icons/svg/snowflake.svg';
 import TermsSvg from '@/common/icons/svg/terms.svg';
+import SchemaSvg from '@/common/icons/svg/schema.svg';
+import ColumnSvg from '@/common/icons/svg/column.svg';
+import KeySvg from '@/common/icons/svg/key.svg';
+import ChartLineSvg from '@/common/icons/svg/chart-line.svg';
+import ChartBarSvg from '@/common/icons/svg/chart-bar.svg';
+import CodeBracketSvg from '@/common/icons/svg/code-bracket.svg';
 import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationGraph } from '@/types/exploration';
+import { NODE_TYPE_ACCENT_COLOR } from './nodeTypeColors';
+import type { NodeType } from './nodeTypeColors';
 
 export type HoveredNode = {
 	id: string;
@@ -34,8 +44,20 @@ export type HoveredNode = {
 // up to fill the largest node radii.
 const ICON_RASTER_SIZE = 128;
 
-const DATA_OBJECT_ICON_COLOR = '#31b9c5';
-const TERM_OBJECT_ICON_COLOR = '#47bac5';
+// A node's border reuses its own icon accent color (rather than a single
+// neutral outline for every kind) so the ring reads as "this node's own
+// color, just more saturated" instead of a generic UI chrome line — the same
+// pastel-fill/vivid-accent pairing Neo4j Browser uses for its node styling.
+// `NODE_TYPE_ACCENT_COLOR` lives in `nodeTypeColors.ts` (rather than here)
+// so `ExplorationView.tsx`'s own "Viewing: ..." legend can color its
+// per-kind swatches with these exact same values too, without a
+// value-level import of this file — see that module's own doc comment.
+const NODE_TYPE_BORDER_COLOR = NODE_TYPE_ACCENT_COLOR;
+
+// A fixed screen-pixel width (via the border program's `mode: 'pixels'`
+// below) rather than a fraction of the node's radius, so the ring reads the
+// same crisp thickness on a small Column node and a large hub Table alike.
+const NODE_BORDER_WIDTH = 2;
 
 const buildIcon = (svgMarkup: string, color: string) =>
 	encodeURI(`data:image/svg+xml;utf-8,${svgMarkup.replaceAll('currentColor', color)}`);
@@ -49,6 +71,22 @@ const NODE_ICON_PADDING = 0.58;
 // when toggling between the semantic and data layers) would otherwise
 // re-register and re-rasterize the same icons each time.
 const NodeIconProgram = createNodeImageProgram({ padding: NODE_ICON_PADDING });
+
+// A single, unfilled ring read off each node's own `borderColor` attribute.
+// With no `fill: true` entry, `@sigma/node-border`'s shader leaves
+// everything inside the ring untouched — so compounding it *after*
+// `NodeIconProgram` below only draws a thin accent stroke around the
+// already-drawn disc+icon, rather than replacing it.
+const NodeBorderProgram = createNodeBorderProgram({
+	borders: [
+		{ size: { value: NODE_BORDER_WIDTH, mode: 'pixels' }, color: { attribute: 'borderColor' } },
+	],
+});
+
+// One compound program so both draws still happen under the single `image`
+// node type every node already carries — no per-node type juggling needed
+// elsewhere (reducers, `addExpansion`, hover program overrides, etc).
+const NodeIconBorderProgram = createNodeCompoundProgram([NodeIconProgram, NodeBorderProgram]);
 
 // Sigma always redraws whichever node is currently under the mouse a
 // second time, on its own WebGL layer stacked *above* the one captions are
@@ -90,13 +128,25 @@ class NoopNodeProgram {
 // Cytoscape pastel backgrounds; dark values are muted tints of the same hues
 // (rather than that same near-white pastel) so nodes read as colored shapes
 // instead of glowing white blobs against a black canvas.
-const LAYER_COLOR_LIGHT: Record<ExplorationLayer, string> = {
-	[ExplorationLayer.Semantic]: '#bfe8ec',
-	[ExplorationLayer.Data]: '#fbd9bd',
+const NODE_TYPE_COLOR_LIGHT: Record<NodeType, string> = {
+	term: '#bfe8ec',
+	table: '#fbd9bd',
+	schema: '#e6e1fb',
+	column: '#e6e9ee',
+	columnAttribute: '#f3e2b8',
+	sqlAttribute: '#f2d9e2',
+	sql: '#d7e3f7',
+	customAnalysis: '#f5ddc4',
 };
-const LAYER_COLOR_DARK: Record<ExplorationLayer, string> = {
-	[ExplorationLayer.Semantic]: '#1f3336',
-	[ExplorationLayer.Data]: '#332821',
+const NODE_TYPE_COLOR_DARK: Record<NodeType, string> = {
+	term: '#1f3336',
+	table: '#332821',
+	schema: '#2a2440',
+	column: '#262b33',
+	columnAttribute: '#362d18',
+	sqlAttribute: '#35202a',
+	sql: '#1e2a3d',
+	customAnalysis: '#3a2917',
 };
 const LABEL_COLOR_LIGHT = '#3f3f46';
 const LABEL_COLOR_DARK = '#e4e4e7';
@@ -161,59 +211,267 @@ const mixTowardColor = (hex: string, target: string, opacity: number) => {
 // dimmed ones rather than reading as a similar, only-slightly-lighter hue.
 const NODE_DIMMED_OPACITY = 0.22;
 
-const LAYER_COLOR_DIMMED_LIGHT: Record<ExplorationLayer, string> = {
-	[ExplorationLayer.Semantic]: mixTowardColor(
-		LAYER_COLOR_LIGHT[ExplorationLayer.Semantic],
+const NODE_TYPE_COLOR_DIMMED_LIGHT: Record<NodeType, string> = {
+	term: mixTowardColor(NODE_TYPE_COLOR_LIGHT.term, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+	table: mixTowardColor(
+		NODE_TYPE_COLOR_LIGHT.table,
 		CANVAS_BACKGROUND_LIGHT,
 		NODE_DIMMED_OPACITY,
 	),
-	[ExplorationLayer.Data]: mixTowardColor(
-		LAYER_COLOR_LIGHT[ExplorationLayer.Data],
+	schema: mixTowardColor(
+		NODE_TYPE_COLOR_LIGHT.schema,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+	column: mixTowardColor(
+		NODE_TYPE_COLOR_LIGHT.column,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+	columnAttribute: mixTowardColor(
+		NODE_TYPE_COLOR_LIGHT.columnAttribute,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+	sqlAttribute: mixTowardColor(
+		NODE_TYPE_COLOR_LIGHT.sqlAttribute,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+	sql: mixTowardColor(NODE_TYPE_COLOR_LIGHT.sql, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+	customAnalysis: mixTowardColor(
+		NODE_TYPE_COLOR_LIGHT.customAnalysis,
 		CANVAS_BACKGROUND_LIGHT,
 		NODE_DIMMED_OPACITY,
 	),
 };
-const LAYER_COLOR_DIMMED_DARK: Record<ExplorationLayer, string> = {
-	[ExplorationLayer.Semantic]: mixTowardColor(
-		LAYER_COLOR_DARK[ExplorationLayer.Semantic],
+const NODE_TYPE_COLOR_DIMMED_DARK: Record<NodeType, string> = {
+	term: mixTowardColor(NODE_TYPE_COLOR_DARK.term, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+	table: mixTowardColor(NODE_TYPE_COLOR_DARK.table, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+	schema: mixTowardColor(
+		NODE_TYPE_COLOR_DARK.schema,
 		CANVAS_BACKGROUND_DARK,
 		NODE_DIMMED_OPACITY,
 	),
-	[ExplorationLayer.Data]: mixTowardColor(
-		LAYER_COLOR_DARK[ExplorationLayer.Data],
+	column: mixTowardColor(
+		NODE_TYPE_COLOR_DARK.column,
+		CANVAS_BACKGROUND_DARK,
+		NODE_DIMMED_OPACITY,
+	),
+	columnAttribute: mixTowardColor(
+		NODE_TYPE_COLOR_DARK.columnAttribute,
+		CANVAS_BACKGROUND_DARK,
+		NODE_DIMMED_OPACITY,
+	),
+	sqlAttribute: mixTowardColor(
+		NODE_TYPE_COLOR_DARK.sqlAttribute,
+		CANVAS_BACKGROUND_DARK,
+		NODE_DIMMED_OPACITY,
+	),
+	sql: mixTowardColor(NODE_TYPE_COLOR_DARK.sql, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+	customAnalysis: mixTowardColor(
+		NODE_TYPE_COLOR_DARK.customAnalysis,
 		CANVAS_BACKGROUND_DARK,
 		NODE_DIMMED_OPACITY,
 	),
 };
 
-const LAYER_ICON: Record<ExplorationLayer, string> = {
-	[ExplorationLayer.Semantic]: buildIcon(
+const NODE_TYPE_ICON: Record<NodeType, string> = {
+	term: buildIcon(
 		renderToStaticMarkup(<TermsSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		TERM_OBJECT_ICON_COLOR,
+		NODE_TYPE_ACCENT_COLOR.term,
 	),
-	[ExplorationLayer.Data]: buildIcon(
+	table: buildIcon(
 		renderToStaticMarkup(<SnowflakeSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		DATA_OBJECT_ICON_COLOR,
+		NODE_TYPE_ACCENT_COLOR.table,
+	),
+	schema: buildIcon(
+		renderToStaticMarkup(<SchemaSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		NODE_TYPE_ACCENT_COLOR.schema,
+	),
+	column: buildIcon(
+		renderToStaticMarkup(<ColumnSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		NODE_TYPE_ACCENT_COLOR.column,
+	),
+	columnAttribute: buildIcon(
+		renderToStaticMarkup(<KeySvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		NODE_TYPE_ACCENT_COLOR.columnAttribute,
+	),
+	sqlAttribute: buildIcon(
+		renderToStaticMarkup(<ChartLineSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		NODE_TYPE_ACCENT_COLOR.sqlAttribute,
+	),
+	sql: buildIcon(
+		renderToStaticMarkup(<CodeBracketSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		NODE_TYPE_ACCENT_COLOR.sql,
+	),
+	customAnalysis: buildIcon(
+		renderToStaticMarkup(<ChartBarSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		NODE_TYPE_ACCENT_COLOR.customAnalysis,
 	),
 };
-const LAYER_ICON_DIMMED_LIGHT: Record<ExplorationLayer, string> = {
-	[ExplorationLayer.Semantic]: buildIcon(
+const NODE_TYPE_ICON_DIMMED_LIGHT: Record<NodeType, string> = {
+	term: buildIcon(
 		renderToStaticMarkup(<TermsSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(TERM_OBJECT_ICON_COLOR, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.term, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
 	),
-	[ExplorationLayer.Data]: buildIcon(
+	table: buildIcon(
 		renderToStaticMarkup(<SnowflakeSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(DATA_OBJECT_ICON_COLOR, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.table, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+	),
+	schema: buildIcon(
+		renderToStaticMarkup(<SchemaSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.schema, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+	),
+	column: buildIcon(
+		renderToStaticMarkup(<ColumnSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.column, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+	),
+	columnAttribute: buildIcon(
+		renderToStaticMarkup(<KeySvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(
+			NODE_TYPE_ACCENT_COLOR.columnAttribute,
+			CANVAS_BACKGROUND_LIGHT,
+			NODE_DIMMED_OPACITY,
+		),
+	),
+	sqlAttribute: buildIcon(
+		renderToStaticMarkup(<ChartLineSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(
+			NODE_TYPE_ACCENT_COLOR.sqlAttribute,
+			CANVAS_BACKGROUND_LIGHT,
+			NODE_DIMMED_OPACITY,
+		),
+	),
+	sql: buildIcon(
+		renderToStaticMarkup(<CodeBracketSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.sql, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+	),
+	customAnalysis: buildIcon(
+		renderToStaticMarkup(<ChartBarSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(
+			NODE_TYPE_ACCENT_COLOR.customAnalysis,
+			CANVAS_BACKGROUND_LIGHT,
+			NODE_DIMMED_OPACITY,
+		),
 	),
 };
-const LAYER_ICON_DIMMED_DARK: Record<ExplorationLayer, string> = {
-	[ExplorationLayer.Semantic]: buildIcon(
+const NODE_TYPE_ICON_DIMMED_DARK: Record<NodeType, string> = {
+	term: buildIcon(
 		renderToStaticMarkup(<TermsSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(TERM_OBJECT_ICON_COLOR, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.term, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
 	),
-	[ExplorationLayer.Data]: buildIcon(
+	table: buildIcon(
 		renderToStaticMarkup(<SnowflakeSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(DATA_OBJECT_ICON_COLOR, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.table, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+	),
+	schema: buildIcon(
+		renderToStaticMarkup(<SchemaSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.schema, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+	),
+	column: buildIcon(
+		renderToStaticMarkup(<ColumnSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.column, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+	),
+	columnAttribute: buildIcon(
+		renderToStaticMarkup(<KeySvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(
+			NODE_TYPE_ACCENT_COLOR.columnAttribute,
+			CANVAS_BACKGROUND_DARK,
+			NODE_DIMMED_OPACITY,
+		),
+	),
+	sqlAttribute: buildIcon(
+		renderToStaticMarkup(<ChartLineSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(
+			NODE_TYPE_ACCENT_COLOR.sqlAttribute,
+			CANVAS_BACKGROUND_DARK,
+			NODE_DIMMED_OPACITY,
+		),
+	),
+	sql: buildIcon(
+		renderToStaticMarkup(<CodeBracketSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(NODE_TYPE_ACCENT_COLOR.sql, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+	),
+	customAnalysis: buildIcon(
+		renderToStaticMarkup(<ChartBarSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
+		mixTowardColor(
+			NODE_TYPE_ACCENT_COLOR.customAnalysis,
+			CANVAS_BACKGROUND_DARK,
+			NODE_DIMMED_OPACITY,
+		),
+	),
+};
+
+// Plain hex counterparts of the dimmed icon maps above (`NodeBorderProgram`
+// reads a flat color attribute, not a data-URL texture), faded the same way
+// so a dimmed node's ring fades in step with its disc/icon.
+const NODE_TYPE_BORDER_COLOR_DIMMED_LIGHT: Record<NodeType, string> = {
+	term: mixTowardColor(NODE_TYPE_BORDER_COLOR.term, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+	table: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.table,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+	schema: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.schema,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+	column: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.column,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+	columnAttribute: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.columnAttribute,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+	sqlAttribute: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.sqlAttribute,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+	sql: mixTowardColor(NODE_TYPE_BORDER_COLOR.sql, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
+	customAnalysis: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.customAnalysis,
+		CANVAS_BACKGROUND_LIGHT,
+		NODE_DIMMED_OPACITY,
+	),
+};
+const NODE_TYPE_BORDER_COLOR_DIMMED_DARK: Record<NodeType, string> = {
+	term: mixTowardColor(NODE_TYPE_BORDER_COLOR.term, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+	table: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.table,
+		CANVAS_BACKGROUND_DARK,
+		NODE_DIMMED_OPACITY,
+	),
+	schema: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.schema,
+		CANVAS_BACKGROUND_DARK,
+		NODE_DIMMED_OPACITY,
+	),
+	column: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.column,
+		CANVAS_BACKGROUND_DARK,
+		NODE_DIMMED_OPACITY,
+	),
+	columnAttribute: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.columnAttribute,
+		CANVAS_BACKGROUND_DARK,
+		NODE_DIMMED_OPACITY,
+	),
+	sqlAttribute: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.sqlAttribute,
+		CANVAS_BACKGROUND_DARK,
+		NODE_DIMMED_OPACITY,
+	),
+	sql: mixTowardColor(NODE_TYPE_BORDER_COLOR.sql, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
+	customAnalysis: mixTowardColor(
+		NODE_TYPE_BORDER_COLOR.customAnalysis,
+		CANVAS_BACKGROUND_DARK,
+		NODE_DIMMED_OPACITY,
 	),
 };
 
@@ -254,33 +512,40 @@ const getEdgeColors = (isDark: boolean) => {
 	};
 };
 
-// Captions stay hidden until the user has zoomed in a bit past the initial
-// "whole graph" view, mirroring Neo4j Browser's "no clutter when zoomed
-// out, read node names once you zoom in" behavior. This is a *fraction* of
-// the camera ratio Sigma settles on right after fitting the whole graph
-// (see `labelRevealRatio` below) rather than a fixed absolute ratio, so it
-// adapts to graphs of any size/spread instead of only working for whichever
-// graph happened to fit near ratio 1. Nodes here render at a fixed
-// on-screen size regardless of zoom (`itemSizesReference: 'screen'` below),
-// so — unlike Neo4j — the node itself doesn't visually grow; only gating
-// the caption on zoom is needed to get the same "declutter, then reveal"
-// effect.
-const NODE_LABEL_REVEAL_ZOOM_FRACTION = 0.75;
+// How much closer than the "whole graph" fit the camera starts by default —
+// applied once, right after the initial fit/center, so the first thing a
+// user sees is already legibly zoomed in rather than the entire (often
+// sparse-looking) graph shrunk to fit the container.
+const INITIAL_ZOOM_IN_FACTOR = 1.5;
 
-// Shared with the `minCameraRatio` Sigma setting below: on a small/tight
-// graph, "75% of the whole-graph ratio" can land below the closest the
-// camera is ever allowed to zoom in, which would make captions
-// unreachable; clamping the reveal threshold to the same floor keeps them
-// reachable no matter how small the graph is.
-const MIN_CAMERA_RATIO = 0.3;
+// How close the camera is ever allowed to zoom in — the `minCameraRatio`
+// Sigma setting below.
+const MIN_CAMERA_RATIO = 0.2;
 
 // Node radii (half of the previous Cytoscape diameters, since Sigma sizes are radii).
 const getNodeRadius = (relationshipCount: number) => {
-	if (relationshipCount >= 8) return 70;
+	if (relationshipCount >= 8) return 50;
 	if (relationshipCount >= 4) return 40;
 	if (relationshipCount >= 1) return 30;
 	return 20;
 };
+
+// Schema/column/columnAttribute/sqlAttribute/sql/customAnalysis nodes have
+// no `relationshipCount` of their own (they're structural/leaf, not
+// analytical), so they get one fixed size each instead of scaling like
+// tables/terms do — small enough that a table's whole column list (or a
+// term's whole attribute list) doesn't dominate the canvas once expanded.
+const NODE_TYPE_FIXED_SIZE: Partial<Record<NodeType, number>> = {
+	schema: 26,
+	column: 14,
+	columnAttribute: 14,
+	sqlAttribute: 14,
+	sql: 14,
+	customAnalysis: 14,
+};
+
+const getNodeSize = (kind: NodeType, relationshipCount: number) =>
+	NODE_TYPE_FIXED_SIZE[kind] ?? getNodeRadius(relationshipCount);
 
 /** Attributes stored on every Sigma/graphology node for the Exploration graph. */
 type GraphNodeAttributes = {
@@ -291,40 +556,128 @@ type GraphNodeAttributes = {
 	color: string;
 	image: string;
 	type: 'image';
-	layer: ExplorationLayer;
+	kind: NodeType;
+	/** Read by `NodeBorderProgram` (see `NodeIconBorderProgram` above). */
+	borderColor: string;
 };
 
 /** Attributes stored on every Sigma/graphology edge for the Exploration graph. */
 type GraphEdgeAttributes = {
 	color: string;
 	size: number;
+	/**
+	 * `relationship` edges come from the base graph payload (shared SQL/FK
+	 * between tables, or shared-table between terms) and are clickable —
+	 * selecting one shows the real hop chain behind it (see
+	 * `ExplorationView`'s `highlightedPath`) rather than naming the
+	 * relationship type(s) on the edge itself. `structural` edges are added
+	 * by `addExpansion` (table→schema, table→column, table→term) and are
+	 * click-inert.
+	 */
+	kind: 'relationship' | 'structural';
 };
 
 /** A d3-force particle mirroring one graphology node, kept in sync by ID. */
 type SimNode = SimulationNodeDatum & { id: string; size: number };
 type SimLink = SimulationLinkDatum<SimNode>;
 
-/** The Sigma renderer instance shared with `ZoomControls`/`ExplorationView`. */
-export type GraphController = Sigma<GraphNodeAttributes, GraphEdgeAttributes>;
+/**
+ * One node to graft onto the live graph from `GraphController.addExpansion`.
+ * `kind` can be any `NodeType` — a Table expansion only ever grafts on
+ * `schema`/`column`/`term` nodes, but a Term expansion (see `expandTermNode`
+ * in `ExplorationView.tsx`) grafts on the `table`/`term` nodes it links to
+ * (some of which may already be permanent nodes on the base graph — see
+ * `GraphController`'s own doc comment for how those are told apart) plus
+ * its own `columnAttribute`/`sqlAttribute` nodes.
+ */
+export type ExpansionNodeInput = {
+	id: string;
+	kind: NodeType;
+	label: string;
+};
+
+/** One edge to graft onto the live graph from `GraphController.addExpansion`. */
+export type ExpansionEdgeInput = {
+	source: string;
+	target: string;
+};
+
+/**
+ * Imperative handle shared with `ZoomControls`/`ExplorationView`. `addExpansion`
+ * mutates the live graphology graph and d3-force simulation directly instead of
+ * going through the `graph` prop, so growing the graph on a node click doesn't
+ * replay the full teardown/rebuild (and its fade-out/re-scatter/fade-in intro)
+ * that a `graph` prop change triggers below.
+ */
+export type GraphController = {
+	getCamera: () => ReturnType<Sigma<GraphNodeAttributes, GraphEdgeAttributes>['getCamera']>;
+	refresh: () => void;
+	/**
+	 * Pans/zooms the camera to bring the given node into view when it's
+	 * currently off-screen (a no-op when it's already visible) — the same
+	 * "only move the camera when it actually needs to" behavior
+	 * `addExpansion` gets from `focusExpansionIfOffscreen` below, exposed
+	 * standalone for callers that select a node without expanding it (e.g.
+	 * picking a result from the search dropdown or a `?semanticId=`/
+	 * `?dataId=` deep link).
+	 */
+	focusNode: (nodeId: string) => void;
+	/**
+	 * Also pans/zooms the camera to bring the origin and its newly-connected
+	 * nodes into view when any of them land off-screen — see
+	 * `focusExpansionIfOffscreen`'s own comment below for why that matters
+	 * most for a Term's expansion onto Tables elsewhere in the base graph.
+	 * A no-op camera-wise when everything's already visible.
+	 */
+	addExpansion: (
+		originNodeId: string,
+		nodes: ExpansionNodeInput[],
+		edges: ExpansionEdgeInput[],
+	) => void;
+	/**
+	 * Reverses one origin's `addExpansion` call (a double click collapsing a
+	 * table or term back down). Nodes/edges shared with another still-live
+	 * expansion (e.g. a Schema or Term reachable from two expanded tables, or
+	 * a structural edge two different expansions both grafted) are kept —
+	 * only removed once every origin referencing them has been collapsed.
+	 * That includes the origin node itself: if it has its own still-live
+	 * expansion rooted on it (e.g. a Column grafted by a Table's expansion,
+	 * then separately double-clicked to graft its own children), it stays
+	 * put — collapsing whichever expansion first grafted it on must never
+	 * orphan its own children. A node that was already part of the *base*
+	 * graph when this origin expanded onto it (e.g. a Term expanding onto
+	 * one of its tables that's already on the graph) is never removed at
+	 * all, no matter how many origins referenced it — only nodes an
+	 * expansion itself created are ever dropped. Returns the node ids that
+	 * were actually dropped from the graph (which may include the origin
+	 * itself) so callers can prune their own id → entity lookups, or `null`
+	 * if this origin has no recorded expansion yet (e.g. its `addExpansion`
+	 * fetch is still in flight) — callers use that to know a pending expand
+	 * should be cancelled instead of grafted on once it resolves.
+	 */
+	removeExpansion: (originNodeId: string) => string[] | null;
+};
 
 const buildGraphologyGraph = (
 	graph: ExplorationGraph,
-	layerColor: Record<ExplorationLayer, string>,
+	nodeTypeColor: Record<NodeType, string>,
 	edgeColor: string,
 	containerAspectRatio: number,
 ) => {
 	const graphology = new UndirectedGraph<GraphNodeAttributes, GraphEdgeAttributes>();
 
 	graph.nodes.forEach((node) => {
+		const kind: NodeType = node.layer === ExplorationLayer.Data ? 'table' : 'term';
 		graphology.addNode(node.id, {
 			x: 0,
 			y: 0,
-			size: getNodeRadius(node.relationshipCount),
+			size: getNodeSize(kind, node.relationshipCount),
 			label: node.layer === ExplorationLayer.Data ? node.name.toUpperCase() : node.name,
-			color: layerColor[node.layer],
-			image: LAYER_ICON[node.layer],
+			color: nodeTypeColor[kind],
+			image: NODE_TYPE_ICON[kind],
 			type: 'image',
-			layer: node.layer,
+			kind,
+			borderColor: NODE_TYPE_BORDER_COLOR[kind],
 		});
 	});
 
@@ -334,6 +687,7 @@ const buildGraphologyGraph = (
 		graphology.addEdgeWithKey(`${link.source}:${link.target}`, link.source, link.target, {
 			color: edgeColor,
 			size: 1.5,
+			kind: 'relationship',
 		});
 	});
 
@@ -362,11 +716,37 @@ const buildGraphologyGraph = (
 	return graphology;
 };
 
+/**
+ * Node/edge ids to keep at full color while everything else on the canvas
+ * dims — the same visual treatment `nodeReducer`/`edgeReducer` already give
+ * an active node's neighbourhood, generalized so selecting an edge (see
+ * `ExplorationView`'s `highlightedPath`) can highlight the real hop chain
+ * behind it instead. Takes precedence over `activeNodeId`'s own dimming
+ * while set.
+ */
+export type HighlightedPath = {
+	nodeIds: string[];
+	/** Edge keys in the same `${source}:${target}` form used everywhere else. */
+	edgeKeys: string[];
+};
+
 type GraphCanvasProps = {
 	graph: ExplorationGraph;
 	activeNodeId: string | null;
+	highlightedPath: HighlightedPath | null;
+	/** Clicking empty canvas — deselects whatever node/edge is active. */
 	onSelectNode: (nodeId: string | null) => void;
 	onSelectEdge: (edgeId: string) => void;
+	/** Single-clicking a node — selects/opens it (its side panel), without
+	 * touching its expansion state. Sigma still tells this apart from a
+	 * node drag (see `draggedEventsTolerance` in its own mouse captor), so
+	 * this doesn't fire while repositioning a node. */
+	onClickNode: (nodeId: string) => void;
+	/** Double-clicking a node — toggles expanding/collapsing a table, or a
+	 * term grafted onto the graph by expanding one, on top of whatever
+	 * `onClickNode` already did for the click that started this double
+	 * click. */
+	onDoubleClickNode: (nodeId: string) => void;
 	onHoverNode: (hoveredNode: HoveredNode | null) => void;
 	onControllerChange: (controller: GraphController | null) => void;
 };
@@ -375,39 +755,65 @@ type GraphCanvasProps = {
 export const GraphCanvas = ({
 	graph,
 	activeNodeId,
+	highlightedPath,
 	onSelectNode,
 	onSelectEdge,
+	onClickNode,
+	onDoubleClickNode,
 	onHoverNode,
 	onControllerChange,
 }: GraphCanvasProps) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const activeNodeIdRef = useRef<string | null>(activeNodeId);
+	const highlightedPathRef = useRef<{ nodeIds: Set<string>; edgeKeys: Set<string> } | null>(null);
+	// The renderer itself, mirrored out of the big mount effect below so
+	// these two small prop-sync effects can force a repaint right after
+	// updating their ref. The node/edge reducers only ever read
+	// `activeNodeIdRef`/`highlightedPathRef` — never the `activeNodeId`/
+	// `highlightedPath` props directly — so without an explicit `refresh()`
+	// here, a selection made while the force simulation has already
+	// settled (alpha decayed to 0, no more per-frame repaints) would sync
+	// the ref but never actually redraw, leaving whichever node was
+	// active/highlighted *before* stuck looking selected until some
+	// unrelated repaint happens to come along.
+	const rendererRef = useRef<Sigma<GraphNodeAttributes, GraphEdgeAttributes> | null>(null);
 
 	useEffect(() => {
 		activeNodeIdRef.current = activeNodeId;
+		rendererRef.current?.refresh();
 	}, [activeNodeId]);
+
+	useEffect(() => {
+		highlightedPathRef.current =
+			highlightedPath == null
+				? null
+				: {
+						nodeIds: new Set(highlightedPath.nodeIds),
+						edgeKeys: new Set(highlightedPath.edgeKeys),
+					};
+		rendererRef.current?.refresh();
+	}, [highlightedPath]);
 
 	useEffect(() => {
 		if (containerRef.current == null) return undefined;
 
 		let isDark = prefersDarkMode();
 		let edgeColors = getEdgeColors(isDark);
-		// Updated live from the camera's `updated` event below; read by
-		// `drawNodeLabel` to decide whether captions are visible yet.
-		let cameraRatio = 1;
-		// Computed once the initial layout settles (see `centerTimeout`
-		// below) as a fraction of the "whole graph" ratio; captions stay
-		// hidden (`cameraRatio` starts far above this) until then.
-		let labelRevealRatio = 0;
 		const containerRect = containerRef.current.getBoundingClientRect();
 		const containerAspectRatio =
 			containerRect.height > 0 ? containerRect.width / containerRect.height : 1;
 		const graphology = buildGraphologyGraph(
 			graph,
-			isDark ? LAYER_COLOR_DARK : LAYER_COLOR_LIGHT,
+			isDark ? NODE_TYPE_COLOR_DARK : NODE_TYPE_COLOR_LIGHT,
 			edgeColors.base,
 			containerAspectRatio,
 		);
+		// Permanent nodes from the base graph payload — an expansion (see
+		// `addExpansion` below) can graft an edge onto one of these (e.g. a
+		// Term expanding onto a Table already drawn from `graph.nodes`), but
+		// must never ref-count or remove it: it stays on the graph regardless
+		// of any expansion's own collapsed/expanded state.
+		const baseNodeIds = new Set(graph.nodes.map((node) => node.id));
 		const hoveredNodeIdRef = { current: null as string | null };
 		const hoveredEdgeIdRef = { current: null as string | null };
 
@@ -438,19 +844,17 @@ export const GraphCanvas = ({
 			context.shadowBlur = 0;
 		};
 
-		// The persistent (non-hover) caption: hidden while zoomed out past
-		// `labelRevealRatio`, then drawn centered *inside* the node's own
-		// circle (à la Neo4j Browser) rather than Sigma's default placement
-		// to the right of it — which is what actually caused the clutter
-		// this is fixing. A stroked halo behind the fill keeps the caption
-		// legible over the node's own color and icon artwork underneath,
-		// the same trick used for text labels on maps.
+		// The persistent (non-hover) caption: always drawn, centered *inside*
+		// the node's own circle (à la Neo4j Browser) rather than Sigma's
+		// default placement to the right of it. A stroked halo behind the
+		// fill keeps the caption legible over the node's own color and icon
+		// artwork underneath, the same trick used for text labels on maps.
 		const drawNodeLabel: NodeLabelDrawingFunction<GraphNodeAttributes, GraphEdgeAttributes> = (
 			context,
 			data,
 			settings,
 		) => {
-			if (!data.label || cameraRatio > labelRevealRatio) return;
+			if (!data.label) return;
 
 			const { labelFont: font, labelWeight: weight } = settings;
 			// Scaled to the node's own on-screen radius so captions on the
@@ -492,22 +896,49 @@ export const GraphCanvas = ({
 		const nodeReducer = (
 			node: string,
 			data: GraphNodeAttributes,
-		): Partial<NodeDisplayData> & Pick<GraphNodeAttributes, 'image'> => {
+		): Partial<NodeDisplayData> & Pick<GraphNodeAttributes, 'image' | 'borderColor'> => {
 			const currentActiveNodeId = activeNodeIdRef.current;
 			const isActive = currentActiveNodeId === node;
 			const isHovered = hoveredNodeIdRef.current === node;
+			const currentHighlightedPath = highlightedPathRef.current;
+			// A highlighted path (see `HighlightedPath`) takes over dimming
+			// entirely while set — `ExplorationView` clears `activeNodeId`
+			// whenever it sets one, so the two never actually compete, but
+			// checking it first keeps that an implementation detail of this
+			// component rather than something callers have to guarantee.
+			// `currentActiveNodeId` is a React-state value mirrored into this
+			// ref by an effect one render behind — if the active node is a
+			// Schema/Column/Term that `removeExpansion` just dropped from the
+			// graph (e.g. collapsing its origin table drops it too, in the
+			// same synchronous click handler that's also re-selecting the
+			// table), this ref can transiently point at an id that no longer
+			// exists. `areNeighbors` throws on an unknown node, so guard with
+			// `hasNode` first rather than let one stale frame crash Sigma.
 			const isDimmed =
-				currentActiveNodeId != null &&
-				!isActive &&
-				!graphology.areNeighbors(currentActiveNodeId, node);
+				currentHighlightedPath != null
+					? !currentHighlightedPath.nodeIds.has(node)
+					: currentActiveNodeId != null &&
+						graphology.hasNode(currentActiveNodeId) &&
+						!isActive &&
+						!graphology.areNeighbors(currentActiveNodeId, node);
 
-			const layerColorDimmed = isDark ? LAYER_COLOR_DIMMED_DARK : LAYER_COLOR_DIMMED_LIGHT;
-			const layerIconDimmed = isDark ? LAYER_ICON_DIMMED_DARK : LAYER_ICON_DIMMED_LIGHT;
+			const nodeTypeColorDimmed = isDark
+				? NODE_TYPE_COLOR_DIMMED_DARK
+				: NODE_TYPE_COLOR_DIMMED_LIGHT;
+			const nodeTypeIconDimmed = isDark
+				? NODE_TYPE_ICON_DIMMED_DARK
+				: NODE_TYPE_ICON_DIMMED_LIGHT;
+			const nodeTypeBorderColorDimmed = isDark
+				? NODE_TYPE_BORDER_COLOR_DIMMED_DARK
+				: NODE_TYPE_BORDER_COLOR_DIMMED_LIGHT;
 
 			return {
 				...data,
-				color: isDimmed ? layerColorDimmed[data.layer] : data.color,
-				image: isDimmed ? layerIconDimmed[data.layer] : LAYER_ICON[data.layer],
+				color: isDimmed ? nodeTypeColorDimmed[data.kind] : data.color,
+				image: isDimmed ? nodeTypeIconDimmed[data.kind] : NODE_TYPE_ICON[data.kind],
+				borderColor: isDimmed
+					? nodeTypeBorderColorDimmed[data.kind]
+					: NODE_TYPE_BORDER_COLOR[data.kind],
 				zIndex: isActive || isHovered ? 1 : 0,
 				highlighted: isActive || isHovered,
 			};
@@ -515,20 +946,32 @@ export const GraphCanvas = ({
 
 		const edgeReducer = (edge: string, data: GraphEdgeAttributes): Partial<EdgeDisplayData> => {
 			const currentActiveNodeId = activeNodeIdRef.current;
+			const currentHighlightedPath = highlightedPathRef.current;
 			const isHovered = hoveredEdgeIdRef.current === edge;
 			const isConnected =
-				currentActiveNodeId != null &&
-				graphology.extremities(edge).includes(currentActiveNodeId);
-			const isDimmed = currentActiveNodeId != null && !isConnected;
+				currentHighlightedPath != null
+					? currentHighlightedPath.edgeKeys.has(edge)
+					: currentActiveNodeId != null &&
+						graphology.extremities(edge).includes(currentActiveNodeId);
+			const isDimmed =
+				currentHighlightedPath != null
+					? !isConnected
+					: currentActiveNodeId != null && !isConnected;
+			const isStructural = data.kind === 'structural';
 
 			// Emphasis for connected/hovered edges comes only from thickness now —
-			// they stay the exact same green as every other edge, just drawn
+			// they stay the exact same color as every other edge, just drawn
 			// wider, instead of also switching to a darker/more-opaque shade.
+			// Structural edges get a subtler bump than relationship edges so
+			// they still read as the "quieter" kind of link even when active,
+			// even though both kinds now share the same brand-green color.
 			let size = data.size;
-			if (isHovered) size = 3.5;
-			else if (isConnected) size = 2.5;
+			if (isHovered) size = isStructural ? 2.5 : 3.5;
+			else if (isConnected) size = isStructural ? 1.5 : 2.5;
 
-			return { ...data, color: isDimmed ? edgeColors.dimmed : edgeColors.base, size };
+			const color = isDimmed ? edgeColors.dimmed : edgeColors.base;
+
+			return { ...data, color, size };
 		};
 
 		const renderer = new Sigma<GraphNodeAttributes, GraphEdgeAttributes>(
@@ -553,13 +996,21 @@ export const GraphCanvas = ({
 				enableEdgeEvents: true,
 				zIndex: true,
 				labelColor: { color: isDark ? LABEL_COLOR_DARK : LABEL_COLOR_LIGHT },
+				// Sigma normally shows only as many labels per screen area as fit
+				// without overlapping (its density-based label grid), which at the
+				// default density hides most node captions until zoomed in close.
+				// Cranked up so every node's caption is a candidate regardless of
+				// on-screen crowding — `drawNodeLabel` below always draws once
+				// selected, so this is what actually makes "all titles visible by
+				// default" happen.
+				labelDensity: 100,
 				defaultDrawNodeHover: drawNodeHover,
 				defaultDrawNodeLabel: drawNodeLabel,
 				// @sigma/node-image's program class is typed generically over the
 				// default `Attributes` type; our stricter node attributes are a
 				// compatible subtype at runtime, so this cast is safe.
 				nodeProgramClasses: {
-					image: NodeIconProgram as unknown as NodeProgramType<
+					image: NodeIconBorderProgram as unknown as NodeProgramType<
 						GraphNodeAttributes,
 						GraphEdgeAttributes
 					>,
@@ -576,6 +1027,7 @@ export const GraphCanvas = ({
 				edgeReducer,
 			},
 		);
+		rendererRef.current = renderer;
 
 		// Mirror the graphology graph as a d3-force simulation. This replaces
 		// graphology-layout-force, whose repulsion never decays with distance
@@ -596,7 +1048,11 @@ export const GraphCanvas = ({
 		// hub nodes, so one heavily-connected node doesn't flatten all its
 		// neighbours onto a uniform circle either.
 		const simNodesById = new Map<string, SimNode>();
-		const simNodes: SimNode[] = graphology.mapNodes((node, attributes) => {
+		// `simNodes`/`simLinks` are reassigned (not just pushed to) by
+		// `removeExpansion` below when collapsing a table drops nodes/edges, so
+		// both are `let` rather than `const` — every reference to them here is
+		// a closure over the binding, which continues to see later reassignments.
+		let simNodes: SimNode[] = graphology.mapNodes((node, attributes) => {
 			const simNode: SimNode = {
 				id: node,
 				size: attributes.size,
@@ -606,22 +1062,47 @@ export const GraphCanvas = ({
 			simNodesById.set(node, simNode);
 			return simNode;
 		});
-		const simLinks: SimLink[] = graphology.mapEdges((_edge, _attributes, source, target) => ({
+		let simLinks: SimLink[] = graphology.mapEdges((_edge, _attributes, source, target) => ({
 			source,
 			target,
 		}));
 
+		// Kept as its own binding (rather than looked up via `simulation.force('link')`
+		// later) so `addExpansion` below can re-feed it a grown `simLinks` array
+		// without an `as` cast back to `ForceLink`.
+		const linkForce = forceLink<SimNode, SimLink>(simLinks)
+			.id((node) => node.id)
+			.distance(220);
+
+		// Bookkeeping for `addExpansion`/`removeExpansion`: how many *live*
+		// expanded tables currently depend on a given expansion node (a Schema
+		// or Term can be shared by more than one expanded table), and exactly
+		// which node ids/edge keys each origin table's own `addExpansion` call
+		// contributed — so collapsing one table only removes what it uniquely
+		// added, leaving anything still shared with another expanded table in
+		// place. `edgeRefCount` mirrors `nodeRefCount` for the same reason on
+		// the edge side — e.g. a link-path graft and a Column's own expansion
+		// can both want the exact same Table↔Column structural edge; whichever
+		// grafted it *second* still needs it to survive should the first one
+		// collapse.
+		const nodeRefCount = new Map<string, number>();
+		const edgeRefCount = new Map<string, number>();
+		const expansionsByOrigin = new Map<string, { nodeIds: string[]; edgeKeys: string[] }>();
+		const structuralEdgeKey = (source: string, target: string) => `${source}:${target}`;
+		const simLinkEndpointId = (endpoint: SimLink['source'] | SimLink['target']): string =>
+			typeof endpoint === 'string' ? endpoint : (endpoint as SimNode).id;
+
 		const simulation = forceSimulation<SimNode>(simNodes)
-			.force('charge', forceManyBody<SimNode>().strength(-450).distanceMax(1000))
-			.force(
-				'link',
-				forceLink<SimNode, SimLink>(simLinks)
-					.id((node) => node.id)
-					.distance(140),
-			)
+			// Stronger repulsion (and a proportionally longer reach) plus a
+			// wider collision margin than the link `distance` above alone
+			// would give, so unconnected/loosely-connected nodes settle with
+			// visible breathing room between them instead of packing in
+			// tight, even in dense clusters.
+			.force('charge', forceManyBody<SimNode>().strength(-700).distanceMax(1400))
+			.force('link', linkForce)
 			.force(
 				'collide',
-				forceCollide<SimNode>((node) => node.size + 6),
+				forceCollide<SimNode>((node) => node.size + 24),
 			)
 			// A very weak pull toward the origin — just enough to stop the
 			// whole graph drifting off-center over time, far too weak to
@@ -648,6 +1129,16 @@ export const GraphCanvas = ({
 					},
 					{ attributes: ['x', 'y'] },
 				);
+			})
+			// Re-freezes the custom bounding box (see the `centerTimeout` comment
+			// above) every time the physics naturally comes to rest — after the
+			// initial layout, after an `addExpansion`/`removeExpansion` grows or
+			// shrinks the graph, and after a drag's reheated alpha decays back
+			// down. Doing it only here (never mid-tick) is what keeps the
+			// canvas's scale/pan rock steady while nodes are actually moving,
+			// while still letting it grow to fit legitimately new content.
+			.on('end', () => {
+				renderer.setCustomBBox(renderer.getBBox());
 			});
 
 		let draggedNode: string | null = null;
@@ -666,13 +1157,11 @@ export const GraphCanvas = ({
 			simulation.alphaTarget(0.3).restart();
 		};
 		const stopDrag = () => {
-			if (draggedNode != null) {
-				const simNode = simNodesById.get(draggedNode);
-				if (simNode) {
-					simNode.fx = null;
-					simNode.fy = null;
-				}
-			}
+			// Deliberately leaves `fx`/`fy` set (rather than nulling them back
+			// out) so the node stays pinned exactly where it was dropped,
+			// mirroring Neo4j Browser — without this, the layout forces would
+			// immediately pull it back toward wherever it "wants" to be,
+			// undoing the manual placement the instant the mouse is released.
 			draggedNode = null;
 			simulation.alphaTarget(0);
 		};
@@ -686,9 +1175,293 @@ export const GraphCanvas = ({
 			coords.preventSigmaDefault();
 		};
 
+		// A Term's own expansion (see `expandTermNode` in `ExplorationView.tsx`)
+		// almost always grafts onto Tables that are *already* permanent nodes
+		// somewhere else in the base graph (`baseNodeIds` below) — often far
+		// outside the current viewport, or already linked by an edge from the
+		// reverse direction — so the only change `addExpansion` makes can be a
+		// single edge stretching off past the container's edge, easy to miss
+		// entirely. Panning/zooming just enough to bring the whole
+		// newly-connected cluster into view (but doing nothing when it's
+		// already fully on screen) makes every expansion visibly register,
+		// without the camera jumping around for the common table expansion
+		// case where the new Schema/Column/Term nodes are already jittered
+		// right next to the origin.
+		const FIT_VIEWPORT_PADDING_PX = 72;
+		const FIT_ANIMATION_DURATION_MS = 400;
+		const focusExpansionIfOffscreen = (nodeIds: string[]) => {
+			const viewportPoints = nodeIds
+				.filter((nodeId) => graphology.hasNode(nodeId))
+				.map((nodeId) => {
+					const attributes = graphology.getNodeAttributes(nodeId);
+					return renderer.graphToViewport({ x: attributes.x, y: attributes.y });
+				});
+			if (viewportPoints.length === 0) return;
+
+			const { width, height } = renderer.getDimensions();
+			const minX = Math.min(...viewportPoints.map((point) => point.x));
+			const maxX = Math.max(...viewportPoints.map((point) => point.x));
+			const minY = Math.min(...viewportPoints.map((point) => point.y));
+			const maxY = Math.max(...viewportPoints.map((point) => point.y));
+			const alreadyVisible = minX >= 0 && maxX <= width && minY >= 0 && maxY <= height;
+			if (alreadyVisible) return;
+
+			const availableWidth = Math.max(width - FIT_VIEWPORT_PADDING_PX * 2, 40);
+			const availableHeight = Math.max(height - FIT_VIEWPORT_PADDING_PX * 2, 40);
+			const zoomOutFactor = Math.max(
+				1,
+				(maxX - minX) / availableWidth,
+				(maxY - minY) / availableHeight,
+			);
+			const centerFramed = renderer.viewportToFramedGraph({
+				x: (minX + maxX) / 2,
+				y: (minY + maxY) / 2,
+			});
+			const camera = renderer.getCamera();
+			void camera.animate(
+				{ x: centerFramed.x, y: centerFramed.y, ratio: camera.ratio * zoomOutFactor },
+				{ duration: FIT_ANIMATION_DURATION_MS },
+			);
+		};
+
+		// Grafts new nodes/edges onto the *live* graphology graph and d3-force
+		// arrays, bypassing the `graph` prop entirely — see the `GraphController`
+		// type comment above for why. Idempotent: nodes/edges that already exist
+		// (a shared schema, or a table expanded twice) aren't recreated, but are
+		// still ref-counted (`nodeRefCount`/`edgeRefCount`) and recorded in this
+		// origin's own entry, so a later `removeExpansion` for *this* origin
+		// behaves correctly either way and every origin that shares a node/edge
+		// has to let go before it actually disappears.
+		const addExpansion: GraphController['addExpansion'] = (originNodeId, nodes, edges) => {
+			const origin = graphology.hasNode(originNodeId)
+				? graphology.getNodeAttributes(originNodeId)
+				: null;
+			const originX = origin?.x ?? 0;
+			const originY = origin?.y ?? 0;
+			const nodeTypeColor = isDark ? NODE_TYPE_COLOR_DARK : NODE_TYPE_COLOR_LIGHT;
+			const addedNodeIds: string[] = [];
+			const addedEdgeKeys: string[] = [];
+
+			// Self-protects a non-base origin (e.g. a Column grafted on by a
+			// Table's own expansion, then itself double-clicked to graft its
+			// *own* Table/ColumnAttribute/FK-column children) against some
+			// *other* origin's `removeExpansion` dropping it later — without
+			// this, collapsing (or `clearHighlightedPath`-ing) whichever
+			// expansion first grafted this node would rip it out from under
+			// its own still-live children, orphaning them even though the
+			// node they're rooted on is still very much in active use. Never
+			// applies to a virtual origin like `LINK_PATH_ORIGIN_ID` (no real
+			// node exists for it) or a base-graph origin (already exempt from
+			// `nodeRefCount` entirely). Released in `removeExpansion` below.
+			if (origin != null && !baseNodeIds.has(originNodeId)) {
+				nodeRefCount.set(originNodeId, (nodeRefCount.get(originNodeId) ?? 0) + 1);
+			}
+
+			nodes.forEach((node) => {
+				addedNodeIds.push(node.id);
+				if (baseNodeIds.has(node.id)) {
+					// Already a permanent node — record it above so this
+					// origin's own edge to it is still created below, but
+					// never ref-count it: `removeExpansion` must never drop
+					// a node from the base graph payload.
+					return;
+				}
+				if (graphology.hasNode(node.id)) {
+					nodeRefCount.set(node.id, (nodeRefCount.get(node.id) ?? 0) + 1);
+					return;
+				}
+				nodeRefCount.set(node.id, 1);
+				// Scattered in a small ring around the table that was just
+				// expanded, rather than at a fixed offset, so a table with many
+				// new nodes blooms outward instead of stacking them all in the
+				// same spot for the simulation to untangle from scratch.
+				const jitterRadius = 60;
+				const angle = Math.random() * Math.PI * 2;
+				const x = originX + Math.cos(angle) * jitterRadius;
+				const y = originY + Math.sin(angle) * jitterRadius;
+				const size = getNodeSize(node.kind, 0);
+				graphology.addNode(node.id, {
+					x,
+					y,
+					size,
+					label: node.label,
+					color: nodeTypeColor[node.kind],
+					image: NODE_TYPE_ICON[node.kind],
+					type: 'image',
+					kind: node.kind,
+					borderColor: NODE_TYPE_BORDER_COLOR[node.kind],
+				});
+				const simNode: SimNode = { id: node.id, size, x, y };
+				simNodesById.set(node.id, simNode);
+				simNodes.push(simNode);
+			});
+
+			edges.forEach((edge) => {
+				if (!graphology.hasNode(edge.source) || !graphology.hasNode(edge.target)) return;
+				if (edge.source === edge.target) return;
+				// The graph is undirected, so a *different* origin describing
+				// this same pair of nodes in the opposite order still resolves
+				// to the one edge graphology already created for it —
+				// `graph.edge` (unlike the `structuralEdgeKey` we'd otherwise
+				// compute) looks it up by node pair and returns whichever key
+				// actually won that race, so ref-counting/removal later keys
+				// off the same string every origin agrees on.
+				const existingEdgeKey = graphology.hasEdge(edge.source, edge.target)
+					? graphology.edge(edge.source, edge.target)
+					: null;
+				if (existingEdgeKey != null) {
+					edgeRefCount.set(existingEdgeKey, (edgeRefCount.get(existingEdgeKey) ?? 1) + 1);
+					addedEdgeKeys.push(existingEdgeKey);
+					return;
+				}
+				const edgeKey = structuralEdgeKey(edge.source, edge.target);
+				graphology.addEdgeWithKey(edgeKey, edge.source, edge.target, {
+					color: edgeColors.base,
+					size: 1,
+					kind: 'structural',
+				});
+				simLinks.push({ source: edge.source, target: edge.target });
+				edgeRefCount.set(edgeKey, 1);
+				addedEdgeKeys.push(edgeKey);
+			});
+
+			expansionsByOrigin.set(originNodeId, {
+				nodeIds: addedNodeIds,
+				edgeKeys: addedEdgeKeys,
+			});
+
+			// d3-force snapshots `nodes`/`links` when assigned rather than
+			// watching the arrays live, so the grown arrays have to be re-fed in —
+			// existing nodes keep their current position/velocity either way,
+			// only the newly-pushed ones get initialized.
+			simulation.nodes(simNodes);
+			linkForce.links(simLinks);
+			simulation.alpha(0.5).restart();
+			renderer.refresh();
+			// Also frames every *pre-existing* neighbour of the origin (e.g. another
+			// Table already linked to it by a direct SQL/FOREIGN_KEY edge on the base
+			// graph) — not just the nodes/edges this specific expansion just grafted
+			// on. A Table's own expansion never re-states that already-drawn edge in
+			// `nodes`/`edges` above (it's already on the canvas), so without this, a
+			// real, already-visible connection sitting off-screen looks exactly like
+			// a missing one the moment a user expands the table expecting to see it.
+			const neighborIds = graphology.hasNode(originNodeId)
+				? graphology.neighbors(originNodeId)
+				: [];
+			focusExpansionIfOffscreen([originNodeId, ...addedNodeIds, ...neighborIds]);
+		};
+
+		// Reverses one origin's `addExpansion` — see the `GraphController` type
+		// comment for the shared-node semantics. Drops nodes and edges whose
+		// ref count reaches zero (dropping a node also drops its incident
+		// edges via graphology's own `dropNode`, so those are simply skipped
+		// when the edge loop below gets to them), leaving anything still kept
+		// alive by another expansion — including, since `addExpansion` self-
+		// protects a non-base origin, this very node's *own* still-live
+		// expansion rooted on it — in place.
+		const removeExpansion: GraphController['removeExpansion'] = (originNodeId) => {
+			const entry = expansionsByOrigin.get(originNodeId);
+			if (entry == null) return null;
+			expansionsByOrigin.delete(originNodeId);
+
+			const removedNodeIds: string[] = [];
+			entry.nodeIds.forEach((nodeId) => {
+				if (baseNodeIds.has(nodeId)) return;
+				const nextCount = (nodeRefCount.get(nodeId) ?? 1) - 1;
+				if (nextCount > 0) {
+					nodeRefCount.set(nodeId, nextCount);
+					return;
+				}
+				nodeRefCount.delete(nodeId);
+				removedNodeIds.push(nodeId);
+			});
+
+			// Releases the self-protection `addExpansion` granted this origin
+			// (see the comment there) now that its own expansion is gone. If
+			// whichever *other* expansion originally grafted this node is
+			// still live, it survives here exactly as it did before self-
+			// protection existed; only once every referrer — including this
+			// origin's own now-closed expansion — has let go does it finally
+			// get swept up alongside its former children above.
+			if (!baseNodeIds.has(originNodeId) && graphology.hasNode(originNodeId)) {
+				const nextOriginCount = (nodeRefCount.get(originNodeId) ?? 1) - 1;
+				if (nextOriginCount > 0) {
+					nodeRefCount.set(originNodeId, nextOriginCount);
+				} else {
+					nodeRefCount.delete(originNodeId);
+					removedNodeIds.push(originNodeId);
+				}
+			}
+
+			const removedNodeIdSet = new Set(removedNodeIds);
+			// The React-state `activeNodeId` this ref mirrors updates one render
+			// behind (it's set from an effect) — if it currently points at a node
+			// this collapse is about to drop (e.g. a Column/Term whose panel was
+			// open), null it out immediately rather than leaving it dangling
+			// until that effect catches up, since `renderer.refresh()` below
+			// re-runs `nodeReducer` synchronously against the *already*-mutated
+			// graph.
+			if (activeNodeIdRef.current != null && removedNodeIdSet.has(activeNodeIdRef.current)) {
+				activeNodeIdRef.current = null;
+			}
+			removedNodeIds.forEach((nodeId) => {
+				if (graphology.hasNode(nodeId)) graphology.dropNode(nodeId);
+				simNodesById.delete(nodeId);
+			});
+			// Mirrors the node ref-counting above: an edge this origin
+			// contributed to `edgeRefCount` (whether it created it outright or
+			// just found another origin's already there — see `addExpansion`)
+			// only actually gets dropped once every origin that wanted it has
+			// let go. Edges to a node dropped above are already gone via
+			// graphology's own `dropNode` cascade, hence the `hasEdge` guard.
+			const removedEdgeKeys: string[] = [];
+			entry.edgeKeys.forEach((edgeKey) => {
+				const nextCount = (edgeRefCount.get(edgeKey) ?? 1) - 1;
+				if (nextCount > 0) {
+					edgeRefCount.set(edgeKey, nextCount);
+					return;
+				}
+				edgeRefCount.delete(edgeKey);
+				removedEdgeKeys.push(edgeKey);
+			});
+			removedEdgeKeys.forEach((edgeKey) => {
+				if (graphology.hasEdge(edgeKey)) graphology.dropEdge(edgeKey);
+			});
+
+			simNodes = simNodes.filter((node) => !removedNodeIdSet.has(node.id));
+			const removedEdgeKeySet = new Set(removedEdgeKeys);
+			simLinks = simLinks.filter((link) => {
+				const sourceId = simLinkEndpointId(link.source);
+				const targetId = simLinkEndpointId(link.target);
+				if (removedNodeIdSet.has(sourceId) || removedNodeIdSet.has(targetId)) return false;
+				return (
+					!removedEdgeKeySet.has(structuralEdgeKey(sourceId, targetId)) &&
+					!removedEdgeKeySet.has(structuralEdgeKey(targetId, sourceId))
+				);
+			});
+
+			simulation.nodes(simNodes);
+			linkForce.links(simLinks);
+			simulation.alpha(0.4).restart();
+			renderer.refresh();
+
+			return removedNodeIds;
+		};
+
 		const handleClickStage = () => onSelectNode(null);
-		const handleClickNode = ({ node }: { node: string }) => onSelectNode(node);
-		const handleClickEdge = ({ edge }: { edge: string }) => onSelectEdge(edge);
+		const handleClickNode = ({ node }: { node: string }) => onClickNode(node);
+		const handleDoubleClickNode = ({ node, event }: { node: string; event: MouseCoords }) => {
+			// Sigma's default double-click behavior is to zoom the camera in on
+			// the node — toggling its expansion instead, so suppress that zoom.
+			event.preventSigmaDefault();
+			onDoubleClickNode(node);
+		};
+		const handleClickEdge = ({ edge }: { edge: string }) => {
+			// Structural edges (see `GraphEdgeAttributes.kind`) have no real
+			// hop chain of their own — they're already the raw structural link.
+			if (graphology.getEdgeAttribute(edge, 'kind') === 'structural') return;
+			onSelectEdge(edge);
+		};
 		const handleEnterNode = ({ node, event }: { node: string; event: MouseCoords }) => {
 			hoveredNodeIdRef.current = node;
 			const displayData = renderer.getNodeDisplayData(node);
@@ -701,18 +1474,56 @@ export const GraphCanvas = ({
 		};
 		const handleEnterEdge = ({ edge }: { edge: string }) => {
 			hoveredEdgeIdRef.current = edge;
+			// Only a `relationship` edge is actually clickable (see
+			// `GraphEdgeAttributes.kind`'s own comment) — a `structural` one
+			// (table→schema/column/term) is click-inert, so the cursor stays
+			// the default arrow over those instead of falsely promising a
+			// click will do something.
+			if (
+				containerRef.current &&
+				graphology.getEdgeAttribute(edge, 'kind') === 'relationship'
+			) {
+				containerRef.current.style.cursor = 'pointer';
+			}
 		};
 		const handleLeaveEdge = () => {
 			hoveredEdgeIdRef.current = null;
+			if (containerRef.current) containerRef.current.style.cursor = '';
 		};
-		const handleCameraUpdated = (cameraState: CameraState) => {
-			cameraRatio = cameraState.ratio;
+		const handleCameraUpdated = () => {
 			onHoverNode(null);
+			// A pan/zoom — whether the user's own scroll/drag or a
+			// programmatic one like `focusNode`/`focusExpansionIfOffscreen`
+			// re-centering on a newly-selected or -expanded node — moves
+			// every node relative to a cursor that hasn't itself moved, so
+			// Sigma never gets the real `mousemove` it needs to notice the
+			// node underneath changed (or disappeared). Left alone,
+			// whichever node was hovered right before the camera moved
+			// stays stuck "hovered" — and, since the node reducer above
+			// draws the exact same ring for `isHovered` as for `isActive`,
+			// that stale ring can visually read as the new selection
+			// itself sitting on the wrong node once the camera settles.
+			// Clearing both refs here (rather than waiting for a `leaveNode`
+			// that may never come) and forcing one reducer pass drops it
+			// immediately; a real hover resumes on the next actual
+			// `mousemove` regardless.
+			let staleHoverCleared = false;
+			if (hoveredNodeIdRef.current != null) {
+				hoveredNodeIdRef.current = null;
+				staleHoverCleared = true;
+			}
+			if (hoveredEdgeIdRef.current != null) {
+				hoveredEdgeIdRef.current = null;
+				if (containerRef.current) containerRef.current.style.cursor = '';
+				staleHoverCleared = true;
+			}
+			if (staleHoverCleared) renderer.refresh();
 		};
 
 		renderer.on('downNode', handleDownNode);
 		renderer.on('clickStage', handleClickStage);
 		renderer.on('clickNode', handleClickNode);
+		renderer.on('doubleClickNode', handleDoubleClickNode);
 		renderer.on('clickEdge', handleClickEdge);
 		renderer.on('enterNode', handleEnterNode);
 		renderer.on('leaveNode', handleLeaveNode);
@@ -735,27 +1546,49 @@ export const GraphCanvas = ({
 		// already-settled, correctly-colored edges.
 		containerRef.current.style.transition = 'none';
 		containerRef.current.style.opacity = '0';
+		// Sigma's mouse/touch captors keep listening even while the canvas is
+		// invisible — without this, hovering over the still-scattering (but
+		// unseen) initial layout fires `enterNode` for whatever happens to be
+		// under the cursor, popping a hover card for a node the user can't
+		// see and never touched.
+		containerRef.current.style.pointerEvents = 'none';
+		// Also clear out any hover state left over from a previous graph (e.g.
+		// switching Data/Semantic layers while the cursor sits over the
+		// canvas) — otherwise its popover would keep floating on screen for
+		// this entire hidden window, over a graph it no longer refers to.
+		onHoverNode(null);
 
 		// Give the layout a moment to settle from its random scatter, then
 		// fit/center the view once, mirroring the previous "layout stop" reset.
 		const centerTimeout = window.setTimeout(() => {
 			renderer.refresh();
+			// Freezes the graph-to-viewport scale to this just-settled bounding
+			// box instead of Sigma's default of recomputing it from *live* node
+			// positions on every single simulation tick (`autoRescale`). Without
+			// this, dragging one node far outside the rest of the graph — or
+			// even just the physics still gently resettling after a drag —
+			// keeps shifting that box, which rescales/repans the *entire*
+			// canvas in lockstep every frame: every other node visibly
+			// trembles even though only the one node actually moved. Freezing
+			// it means a node dragged past this box simply goes off-frame
+			// (pan/zoom to see it) instead of dragging the whole graph's scale
+			// along with it.
+			renderer.setCustomBBox(renderer.getBBox());
 			void renderer
 				.getCamera()
 				.animatedReset()
 				.then(() => {
-					// Baseline is whatever ratio Sigma just settled on to fit the
-					// *whole* graph; captions unlock once the user zooms in past a
-					// fraction of that, however far "the whole graph" ends up being
-					// for this particular graph's size/spread.
-					labelRevealRatio = Math.max(
-						MIN_CAMERA_RATIO,
-						renderer.getCamera().ratio * NODE_LABEL_REVEAL_ZOOM_FRACTION,
-					);
+					// Zoom in a bit further as the actual default starting view,
+					// rather than leaving the user at the (often zoomed-far-out)
+					// whole-graph fit.
+					void renderer
+						.getCamera()
+						.animatedZoom({ duration: 300, factor: INITIAL_ZOOM_IN_FACTOR });
 				});
 			if (containerRef.current) {
 				containerRef.current.style.transition = 'opacity 300ms ease-out';
 				containerRef.current.style.opacity = '1';
+				containerRef.current.style.pointerEvents = 'auto';
 			}
 		}, 1200);
 
@@ -766,9 +1599,9 @@ export const GraphCanvas = ({
 		const handleColorSchemeChange = (event: MediaQueryListEvent) => {
 			isDark = event.matches;
 			edgeColors = getEdgeColors(isDark);
-			const nextLayerColor = isDark ? LAYER_COLOR_DARK : LAYER_COLOR_LIGHT;
+			const nextNodeTypeColor = isDark ? NODE_TYPE_COLOR_DARK : NODE_TYPE_COLOR_LIGHT;
 			graphology.forEachNode((node, attributes) => {
-				graphology.setNodeAttribute(node, 'color', nextLayerColor[attributes.layer]);
+				graphology.setNodeAttribute(node, 'color', nextNodeTypeColor[attributes.kind]);
 			});
 			renderer.setSetting('labelColor', {
 				color: isDark ? LABEL_COLOR_DARK : LABEL_COLOR_LIGHT,
@@ -788,17 +1621,33 @@ export const GraphCanvas = ({
 		});
 		resizeObserver.observe(containerRef.current);
 
-		onControllerChange(renderer);
+		onControllerChange({
+			getCamera: () => renderer.getCamera(),
+			refresh: () => renderer.refresh(),
+			focusNode: (nodeId) => focusExpansionIfOffscreen([nodeId]),
+			addExpansion,
+			removeExpansion,
+		});
 
 		return () => {
 			window.clearTimeout(centerTimeout);
 			colorSchemeQuery.removeEventListener('change', handleColorSchemeChange);
 			resizeObserver.disconnect();
 			onControllerChange(null);
+			onHoverNode(null);
 			simulation.stop();
+			rendererRef.current = null;
 			renderer.kill();
 		};
-	}, [graph, onControllerChange, onHoverNode, onSelectEdge, onSelectNode]);
+	}, [
+		graph,
+		onClickNode,
+		onControllerChange,
+		onDoubleClickNode,
+		onHoverNode,
+		onSelectEdge,
+		onSelectNode,
+	]);
 
 	return <div ref={containerRef} className="h-full w-full" aria-label="Exploration graph" />;
 };

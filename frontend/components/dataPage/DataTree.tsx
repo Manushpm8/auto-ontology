@@ -95,9 +95,23 @@ function useOpenBranch(
 	selectedId: string | undefined,
 	defaultOpen: boolean,
 ) {
-	const [open, setOpenState] = useState(
-		() => focusInsideSubtree || (readPersistedOpenState()[nodeId] ?? defaultOpen),
-	);
+	// Deliberately starts from `defaultOpen` rather than reading
+	// `readPersistedOpenState()` directly here — this initializer runs
+	// during SSR too, where `window` (and so any persisted state) is always
+	// unavailable, so reading it here would make the very first client
+	// render disagree with the server-rendered HTML and force React to
+	// reconcile a hydration mismatch. Persisted state is applied once below
+	// instead, using the same "adjust state during rendering" pattern
+	// `prevSelectedId` already uses further down — React re-renders before
+	// committing/hydrating, so the corrected value is what actually reaches
+	// the DOM, never a mismatch.
+	const [open, setOpenState] = useState(() => focusInsideSubtree || defaultOpen);
+	const [hasAppliedPersisted, setHasAppliedPersisted] = useState(false);
+	if (!hasAppliedPersisted) {
+		setHasAppliedPersisted(true);
+		const persisted = readPersistedOpenState()[nodeId];
+		if (persisted !== undefined) setOpenState(focusInsideSubtree || persisted);
+	}
 	const [prevSelectedId, setPrevSelectedId] = useState(selectedId);
 	if (selectedId !== prevSelectedId) {
 		setPrevSelectedId(selectedId);
