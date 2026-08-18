@@ -14,7 +14,9 @@ from typing import Optional, TYPE_CHECKING
 
 from gsf.utils.llm_invoke import safe_invoke_text
 
-from .entity_resolution import _find_unresolvable_entities, _FILLER, _CONNECTIVES
+from .entity_resolution import (
+    _find_unresolvable_entities, _normalize_entity, _FILLER, _CONNECTIVES,
+)
 from .kg_coverage import _parse_kg_entries, _compact_schema
 
 if TYPE_CHECKING:
@@ -272,41 +274,57 @@ def should_clarify(
         # For terms covered by BOTH KB and VDB (score < 0.62), inject a
         # disambiguation note so the evidence LLM can choose between the KB
         # formula and the direct schema column rather than blindly applying both.
+        #
+        # Accumulated ACROSS turns, not just this turn's snapshot: the coverage-LLM
+        # classification (KB side) and the VDB retrieval (schema side) are both
+        # re-run fresh every turn against the evolving working_question, so the two
+        # signals for the same normalized term frequently land on different turns
+        # (e.g. KB confirms it turn 2, VDB only finds the column turn 3). Requiring
+        # both to be true within a single turn's local resolved_hits/kb_covered_norms
+        # silently missed every term whose two signals arrived a turn apart.
         _KB_VDB_DISAMBIG_THRESHOLD = 0.62
+        kb_entries_parsed = _parse_kg_entries(relevant_kg)
+        for entry_name, matched_terms in entry_to_original_terms.items():
+            entry_text = next(
+                (v for k, v in kb_entries_parsed.items()
+                 if k.startswith(entry_name) or entry_name.startswith(k)), ""
+            )
+            if not entry_text:
+                continue
+            for t in matched_terms:
+                # Normalize the key — the coverage LLM's raw phrasing (e.g. "event
+                # count") doesn't always equal the normalized form (e.g. "event"),
+                # and a mismatch here silently dropped an otherwise-qualifying term.
+                key = _normalize_entity(t) or t.lower().strip()
+                session._ever_kb_covered_norms.add(key)
+                session._ever_term_to_kb_entry.setdefault(key, (entry_name, entry_text))
+        for norm, col_text, score, *_ in resolved_hits:
+            session._ever_vdb_hit_norms.setdefault(norm, (col_text, score))
+
         kb_covered_hits = [
-            (norm, col_text, score) for norm, col_text, score, *_ in resolved_hits
-            if norm not in vdb_only_norms and score < _KB_VDB_DISAMBIG_THRESHOLD
+            (norm, col_text, score)
+            for norm, (col_text, score) in session._ever_vdb_hit_norms.items()
+            if norm in session._ever_kb_covered_norms and score < _KB_VDB_DISAMBIG_THRESHOLD
         ]
-        if kb_covered_hits:
-            # Build term → (entry_name, kb_text) from entry_to_original_terms + parsed KB
-            kb_entries_parsed = _parse_kg_entries(relevant_kg)
-            term_to_kb_entry: dict[str, tuple[str, str]] = {}
-            for entry_name, matched_terms in entry_to_original_terms.items():
-                entry_text = next(
-                    (v for k, v in kb_entries_parsed.items()
-                     if k.startswith(entry_name) or entry_name.startswith(k)), ""
-                )
-                for t in matched_terms:
-                    term_to_kb_entry.setdefault(t, (entry_name, entry_text))
-            for norm, col_text, score in kb_covered_hits:
-                entry_name, kb_text = term_to_kb_entry.get(norm, ("", ""))
-                if not kb_text:
-                    continue
-                # Dedup by KB entry name — stable across turns unlike norm phrasing
-                marker = f"[DISAMBIGUATION for KB:'{entry_name}'"
-                if marker in session.cumulative_grounded_kg:
-                    continue
-                note = (
-                    f"\n{marker}: "
-                    f"KB defines it as: {kb_text[:200].strip()} "
-                    f"— but schema also has a direct column: {col_text[:120].strip()}. "
-                    f"In evidence, choose whichever fits the question domain — not both.]"
-                )
-                session.cumulative_grounded_kg += note
-                logger.info(
-                    "Clarify — KB+VDB disambiguation note added for KB entry %r (VDB score=%.3f)",
-                    entry_name, score,
-                )
+        for norm, col_text, score in kb_covered_hits:
+            entry_name, kb_text = session._ever_term_to_kb_entry.get(norm, ("", ""))
+            if not kb_text:
+                continue
+            # Dedup by KB entry name — stable across turns unlike norm phrasing
+            marker = f"[DISAMBIGUATION for KB:'{entry_name}'"
+            if marker in session.cumulative_grounded_kg:
+                continue
+            note = (
+                f"\n{marker}: "
+                f"KB defines it as: {kb_text[:200].strip()} "
+                f"— but schema also has a direct column: {col_text[:120].strip()}. "
+                f"In evidence, choose whichever fits the question domain — not both.]"
+            )
+            session.cumulative_grounded_kg += note
+            logger.info(
+                "Clarify — KB+VDB disambiguation note added for KB entry %r (VDB score=%.3f)",
+                entry_name, score,
+            )
 
         # Capture all extracted entities on the very first clarify call (turn 0).
         if not session.initial_extracted_entities:

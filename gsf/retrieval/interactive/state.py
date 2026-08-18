@@ -28,6 +28,14 @@ class InteractiveSessionState:
     _cached_resolved_hits: Optional[list] = None  # VDB resolved hits for current question
     _json_shared_notes: list[str] = field(default_factory=list)  # collision groups resolved as "shared JSON column" — injected verbatim into Evidence
     _cached_vdb_only_norms: set = field(default_factory=set)  # VDB-resolved but KB-uncovered norms
+    # KB+VDB disambiguation bookkeeping, accumulated across turns within a phase (see
+    # clarify.py) — a normalized term's KB coverage and VDB hit are re-derived fresh
+    # each turn and can land on different turns, so these persist both signals instead
+    # of only checking the current turn's snapshot. Reset at Phase 1→2 handoff, same
+    # as cumulative_grounded_kg, since Phase 2 is a different question.
+    _ever_kb_covered_norms: set = field(default_factory=set)
+    _ever_vdb_hit_norms: dict = field(default_factory=dict)  # norm -> (col_text, score)
+    _ever_term_to_kb_entry: dict = field(default_factory=dict)  # norm -> (entry_name, entry_text)
     _grounded_kg: Optional[str] = None  # relevant KB text extracted during coverage check
     _grounded_kg_for: Optional[str] = None  # working_question when _grounded_kg was set
     phase1_grounded_kg: str = ""  # snapshot of cumulative_grounded_kg at Phase 1 PROCEED, carried into Phase 2

@@ -121,6 +121,11 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     # then reset so Phase 2 accumulates its own entries fresh.
     session.phase1_grounded_kg = session.cumulative_grounded_kg
     session.cumulative_grounded_kg = ""
+    # Phase 2 asks a different question — don't carry Phase 1's cross-turn
+    # KB/VDB disambiguation bookkeeping into it (see clarify.py).
+    session._ever_kb_covered_norms = set()
+    session._ever_vdb_hit_norms = {}
+    session._ever_term_to_kb_entry = {}
 
     # Reset clarify state for Phase 2; clarification questions are not allowed.
     session.working_question = follow_up_q if follow_up_q else session.working_question
@@ -158,10 +163,11 @@ Include as much or as little of the previous SQL's structure as the follow-up re
 
 Rules:
 - Resolve references to prior concepts (e.g. "that category", "the same score", "those \
-signals") using the previous SQL and question.
+signals") using the previous SQL and question. Make sure to use the context of both the \
+previous and follow up questions to determine wether a concept in the follow up is actually a reference.
 - Carry forward table names, column names, formulas, tresholds and conditions that the follow-up \
 references or implicitly depends on, unless requested otherwise by the follow up. Carry forward\
-exact numeric values, if they exist.
+exact numeric values, if they exist. 
 - If the follow-up reuses or extends the previous query's full structure, incorporate it. \
 If it only borrows part of it, incorporate only that part.
 - For any concept or metric in the follow-up that does not clearly map 1:1 to a term \
