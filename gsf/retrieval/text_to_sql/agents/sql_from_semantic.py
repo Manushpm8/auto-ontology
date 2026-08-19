@@ -61,9 +61,9 @@ from gsf.retrieval.text_to_sql.evidence_hints import (
 from gsf.retrieval.text_to_sql.models import (
     SQLDecompositionModel,
     SQLDecompositionTreeModel,
-    SQLGenerationModel,
     SQLQueryPlanModel,
     SyntheticSQLExamplesModel,
+    get_sql_generation_model,
 )
 
 
@@ -1291,7 +1291,9 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             try:
                 response = safe_invoke_with_structured_output(
-                    client, messages, SQLGenerationModel
+                    client,
+                    messages,
+                    get_sql_generation_model(path_state.get("target_db")),
                 )
             except Exception as e:
                 self.logger.error(
