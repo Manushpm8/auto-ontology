@@ -84,12 +84,12 @@ def _build_client(
     if model.startswith(("openai/", "azure/", "aws/")):
         from langchain_openai import ChatOpenAI
 
-        # gpt-5.x / o-series reject an explicit temperature and only allow the
-        # provider default. gpt-4o / gpt-4o-mini (and most other chat models)
-        # honor temperature, which is what makes BIRD_NCAND_TEMP actually
-        # diversify candidates 2..N.
+        # gpt-5.x / o-series reject an explicit temperature, but support
+        # reasoning effort. gpt-4o / gpt-4o-mini (and most other chat models)
+        # honor temperature, which is what makes BIRD_NCAND_TEMP diversify
+        # candidates 2..N.
         model_leaf = model.rsplit("/", 1)[-1].lower()
-        omit_temperature = model_leaf.startswith(("gpt-5", "o1", "o3", "o4"))
+        is_reasoning_model = model_leaf.startswith(("gpt-5", "o1", "o3", "o4"))
         kwargs: dict = {
             "model": model,
             "api_key": api_key,
@@ -98,7 +98,9 @@ def _build_client(
             "timeout": LLM_INVOKE_TIMEOUT_S,
             "max_retries": 0,
         }
-        if not omit_temperature:
+        if is_reasoning_model:
+            kwargs["reasoning_effort"] = "low"
+        else:
             kwargs["temperature"] = temperature
         # langchain sends parallel_tool_calls=False alongside a named tool_choice
         # for method="function_calling". litellm's Bedrock adapter mistranslates

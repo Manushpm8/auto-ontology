@@ -84,7 +84,7 @@ def test_openai_client_uses_requested_configuration(chat_openai) -> None:
 
 
 @patch("langchain_openai.ChatOpenAI")
-def test_gpt5_omits_unsupported_temperature(chat_openai) -> None:
+def test_gpt5_uses_low_reasoning_effort_instead_of_temperature(chat_openai) -> None:
     _build_client(
         model="openai/gpt-5.2",
         api_key="key",
@@ -93,7 +93,9 @@ def test_gpt5_omits_unsupported_temperature(chat_openai) -> None:
         max_tokens=1024,
     )
 
-    assert "temperature" not in chat_openai.call_args.kwargs
+    kwargs = chat_openai.call_args.kwargs
+    assert "temperature" not in kwargs
+    assert kwargs["reasoning_effort"] == "low"
 
 
 @patch("langchain_openai.ChatOpenAI")
