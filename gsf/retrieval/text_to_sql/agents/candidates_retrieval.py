@@ -16,10 +16,11 @@ Responsibilities:
 - Recall ``BIRD_CAND_RETRIEVE_K`` hits, rerank with NIM (``BIRD_CAND_RERANK``),
   keep ``BIRD_CAND_KEEP_K_*`` before the LLM filter.
 - Deduplicate across entities and store results in path_state.
+
+Every flag named above is declared with its default in :mod:`gsf.flags`.
 """
 
 import logging
-import os
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
@@ -34,8 +35,8 @@ from gsf.semantic.constants import (
     LABEL_TERM,
 )
 
+from gsf import flags
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
-from gsf.utils.env import read_env_bool, read_env_int
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.evidence_hints import evidence_retrieval_phrases
@@ -53,27 +54,6 @@ from gsf.retrieval.text_to_sql.state import (
 
 logger = logging.getLogger(__name__)
 
-# Embedding recall pool size (before rerank), kept small enough that NIM
-# rerank latency stays acceptable under parallel eval.
-_CAND_RETRIEVE_K = read_env_int("BIRD_CAND_RETRIEVE_K", 12)
-_CAND_KEEP_COL = read_env_int("BIRD_CAND_KEEP_K_COL", 3)
-_CAND_KEEP_CUSTOM = read_env_int("BIRD_CAND_KEEP_K_CUSTOM", 3)
-_CAND_KEEP_SQL = read_env_int("BIRD_CAND_KEEP_K_SQL", 3)
-_CAND_RERANK = read_env_bool("BIRD_CAND_RERANK", "1")
-# Databases whose custom analyses skip the LLM intent filter: the filter cuts the
-# rerank-capped pool to one hit on many questions, which splits knowledge that has
-# to arrive together — a share of translated sets needs both the percentage
-# analysis and the one saying a set's translation lives in set_translations.
-_INTENT_FILTER_SKIP_DBS = {
-    db.strip().lower()
-    for db in os.environ.get("BIRD_CUSTOM_FILTER_SKIP_DBS", "").split(",")
-    if db.strip()
-}
-# SqlAttribute candidates reach the generator two ways — their expression/SQL go
-# into the prompt, and the tables their SQL names get added to the schema — both
-# unwanted where the semantic layer alone should carry the knowledge.
-_USE_SQL_ATTRS = read_env_bool("BIRD_USE_SQL_ATTRIBUTES", "1")
-
 
 def _rerank_hits(
     question: str,
@@ -88,7 +68,7 @@ def _rerank_hits(
     """
     if not hits:
         return []
-    if not _CAND_RERANK or len(hits) <= 1:
+    if not flags.CAND_RERANK() or len(hits) <= 1:
         return hits[:keep_k]
 
     from gsf.utils.rerank import rerank_passages
@@ -510,9 +490,17 @@ class CandidateRetrievalAgent(BaseAgent):
         all_sql_attr_hits: list[dict] = []
         subject_term_hits: list[dict] = []
 
+        # Recall pool size before rerank, kept small enough that NIM rerank
+        # latency stays acceptable under parallel eval.
+        retrieve_k = flags.CAND_RETRIEVE_K()
+        # SqlAttribute candidates reach the generator two ways — their
+        # expression/SQL go into the prompt, and the tables their SQL names get
+        # added to the schema — both unwanted where the semantic layer alone
+        # should carry the knowledge.
+        use_sql_attrs = flags.USE_SQL_ATTRIBUTES()
+
         if semantic_retriever is not None:
             clean_entities = entities
-            retrieve_k = _CAND_RETRIEVE_K
             search_question = original_question or question
             search_tasks: list[tuple[str, Any]] = [
                 (
@@ -538,7 +526,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             ),
                         )
                     ]
-                    if _USE_SQL_ATTRS
+                    if use_sql_attrs
                     else []
                 ),
                 *[
@@ -590,7 +578,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         kept = _rerank_hits(
                             search_question,
                             result,
-                            keep_k=_CAND_KEEP_COL,
+                            keep_k=flags.CAND_KEEP_K_COL(),
                             label=f"column_attribute:{entity}",
                         )
                         for hit in kept:
@@ -698,19 +686,23 @@ class CandidateRetrievalAgent(BaseAgent):
         deduped_custom = _rerank_hits(
             search_question,
             deduped_custom,
-            keep_k=_CAND_KEEP_CUSTOM,
+            keep_k=flags.CAND_KEEP_K_CUSTOM(),
             label="custom_analysis",
         )
         if deduped_sql_attr:
             deduped_sql_attr = _rerank_hits(
                 search_question,
                 deduped_sql_attr,
-                keep_k=_CAND_KEEP_SQL,
+                keep_k=flags.CAND_KEEP_K_SQL(),
                 label="sql_attribute",
             )
 
-        # LLM intent filter on the (already-shrunk) custom/sql pools.
-        skip_filter = str(target_db or "").lower() in _INTENT_FILTER_SKIP_DBS
+        # LLM intent filter on the (already-shrunk) custom/sql pools. Some
+        # databases opt out: the filter cuts the rerank-capped pool to one hit on
+        # many questions, which splits knowledge that has to arrive together — a
+        # share of translated sets needs both the percentage analysis and the one
+        # saying a set's translation lives in set_translations.
+        skip_filter = str(target_db or "").lower() in flags.CUSTOM_FILTER_SKIP_DBS()
         if not skip_filter:
             deduped_custom, deduped_sql_attr = _llm_filter_both(
                 llm, search_question, deduped_custom, deduped_sql_attr
@@ -719,7 +711,7 @@ class CandidateRetrievalAgent(BaseAgent):
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = (
-            deduped_sql_attr if _USE_SQL_ATTRS else []
+            deduped_sql_attr if use_sql_attrs else []
         )
         if subject:
             path_state["retrieved_subject_term"] = subject_term
@@ -744,8 +736,8 @@ class CandidateRetrievalAgent(BaseAgent):
             ),
             len(entities),
             subject,
-            _CAND_RETRIEVE_K,
-            _CAND_RERANK,
+            retrieve_k,
+            flags.CAND_RERANK(),
         )
 
         return {"path_state": path_state}

@@ -30,6 +30,7 @@ from typing import Sequence
 
 import requests
 
+from gsf import flags
 from gsf.utils.model_config import resolve
 
 logger = logging.getLogger(__name__)
@@ -195,8 +196,7 @@ def _timeout_s() -> float:
 
 def rerank_enabled() -> bool:
     """True when few-shot reranking is on and a key is available."""
-    flag = os.environ.get("BIRD_FEW_SHOT_RERANK", "1").strip().lower()
-    if flag in {"0", "false", "no", "off"}:
+    if not flags.FEW_SHOT_RERANK():
         return False
     return bool(_rerank_api_key())
 

@@ -21,13 +21,13 @@ Design Decisions:
 """
 
 import logging
-import os
 from typing import Dict, Any
 
 import sqlglot
 from sqlglot import expressions as exp
 
 from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
+from gsf import flags
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
@@ -135,13 +135,7 @@ def asc_null_guard_enabled() -> bool:
     intent, and a user asking for the earliest value may well want to see that
     the field is empty.
     """
-    return os.environ.get("BIRD_ASC_NULL_GUARD", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.ASC_NULL_GUARD()
 
 
 def _null_guarded_columns(tree: exp.Expression) -> set[str]:

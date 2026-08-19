@@ -23,7 +23,6 @@ Design Decisions:
 """
 
 import logging
-import os
 import re
 import random
 import time
@@ -31,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from gsf import flags
 from gsf.utils.llm_invoke import get_llm_client, safe_invoke_with_structured_output
 from gsf.semantic.deterministic import VALUE_SUFFIX_MARKERS
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
@@ -61,11 +61,9 @@ from gsf.retrieval.text_to_sql.evidence_hints import (
 from gsf.retrieval.text_to_sql.models import (
     SQLDecompositionModel,
     SQLDecompositionTreeModel,
-    SQLGenerationModel,
     SQLQueryPlanModel,
-    SYNTHETIC_EXAMPLE_COUNT,
     SyntheticSQLExamplesModel,
-    _OPEN_REASONING_DBS,
+    get_sql_generation_model,
 )
 
 
@@ -74,7 +72,6 @@ logger = logging.getLogger(__name__)
 
 _GRAPH_NODE_NAME = "construct_sql_from_candidates"
 # Multi-candidate SQL generation (off by default: BIRD_NCAND=1 → today's behavior).
-_DEFAULT_CANDIDATE_TEMP = 0.8
 _sampling_llm_cache: dict[float, Any] = {}
 
 # Generation methods for candidates 1..N. Cand0 stays "" so BIRD_NCAND=1
@@ -188,7 +185,7 @@ _DECOMPOSITION_TREE_ARTIFACT_PROMPT = (
 )
 _SYNTHETIC_ARTIFACT_PROMPT = (
     "STAGE 1 OF 2 — ONLINE SAME-SCHEMA DEMONSTRATIONS ONLY. Generate "
-    f"{SYNTHETIC_EXAMPLE_COUNT} realistic question-to-SQL examples using ONLY "
+    f"{flags.SYNTHETIC_N} realistic question-to-SQL examples using ONLY "
     "the supplied target schema and documented join keys. Make them "
     "structurally useful for the target question (relevant joins, filters, "
     "aggregation, or output grain) but do not paraphrase or solve the target "
@@ -287,11 +284,7 @@ _SQL_WORDS = {
 
 def _schema_slots_enabled() -> bool:
     """Whether slots carry distinct schema readings. Env ``BIRD_SCHEMA_SLOTS``."""
-    return os.environ.get("BIRD_SCHEMA_SLOTS", "0").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
+    return flags.SCHEMA_SLOTS()
 
 
 def _schema_directive(index: int, entity_columns: list[dict] | None) -> str:
@@ -338,7 +331,7 @@ def _pinned_strategy() -> str | None:
     behavior exactly; left alone it would make one of N draws deterministic and
     understate the spread the experiment is trying to measure.
     """
-    raw = os.environ.get("BIRD_PIN_STRATEGY", "").strip().lower()
+    raw = flags.PIN_STRATEGY()
     if raw in _CANDIDATE_STRATEGY_TAGS:
         return raw
     if raw:
@@ -363,10 +356,9 @@ def _slot_plan() -> tuple[str, ...] | None:
     of 9.34/7. Scaling the examples inside one slot cannot escape that ceiling, so
     the slot share has to move instead.
     """
-    raw = os.environ.get("BIRD_SLOT_PLAN", "").strip().lower()
-    if not raw:
+    plan = flags.SLOT_PLAN()
+    if not plan:
         return None
-    plan = tuple(tag.strip() for tag in raw.split(",") if tag.strip())
     unknown = sorted({tag for tag in plan if tag not in _CANDIDATE_STRATEGY_TAGS})
     if unknown:
         logger.warning(
@@ -383,7 +375,7 @@ def _decomposition_tree_enabled(db_id: str | None = None) -> bool:
     Shares its opt-in list with open reasoning (``BIRD_OPEN_REASONING_DBS``):
     a database only gets the tree once it also gets uncapped reasoning.
     """
-    return (db_id or "").strip().lower() in _OPEN_REASONING_DBS
+    return (db_id or "").strip().lower() in flags.OPEN_REASONING_DBS()
 
 
 def _format_decomposition_tree(artifact) -> str:
@@ -415,21 +407,12 @@ def _synthetic_reasoning_enabled() -> bool:
     """Whether online demonstrations carry their derivation into the prompt.
     Env ``BIRD_SYNTHETIC_REASONING`` (default ``0`` = current behavior).
     """
-    return os.environ.get("BIRD_SYNTHETIC_REASONING", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.SYNTHETIC_REASONING()
 
 
 def _num_candidates() -> int:
     """Number of SQL candidates to generate (env ``BIRD_NCAND``, default 1)."""
-    try:
-        return max(1, int(os.environ.get("BIRD_NCAND", "1")))
-    except (TypeError, ValueError):
-        return 1
+    return flags.NCAND()
 
 
 def _prompt_sql_attrs_enabled() -> bool:
@@ -439,19 +422,12 @@ def _prompt_sql_attrs_enabled() -> bool:
     to the generator, and the system prompt drops the "reuse these expressions"
     instruction.
     """
-    return os.environ.get("BIRD_PROMPT_SQL_ATTRS", "1").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-    }
+    return flags.PROMPT_SQL_ATTRS()
 
 
 def _candidate_temperature() -> float:
     """Sampling temperature for candidates 2..N (env ``BIRD_NCAND_TEMP``)."""
-    try:
-        return float(os.environ.get("BIRD_NCAND_TEMP", str(_DEFAULT_CANDIDATE_TEMP)))
-    except (TypeError, ValueError):
-        return _DEFAULT_CANDIDATE_TEMP
+    return flags.NCAND_TEMP()
 
 
 def _get_sampling_llm(temperature: float):
@@ -569,17 +545,6 @@ def _cross_table_join_eqs_from_path(
     return eqs
 
 
-def _entity_columns_enabled() -> bool:
-    """Whether to print the entity -> competing columns block. Env ``BIRD_ENTITY_COLUMNS``."""
-    return os.environ.get("BIRD_ENTITY_COLUMNS", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
-
-
 def format_entity_columns_for_prompt(entity_columns: list[dict]) -> str:
     """Group the columns that matched each question entity, with their real values.
     The columns themselves are mostly already in the schema block; what is missing
@@ -591,7 +556,7 @@ def format_entity_columns_for_prompt(entity_columns: list[dict]) -> str:
     """
     if not entity_columns:
         return ""
-    max_cols = _env_int_local("BIRD_ENTITY_COLUMNS_PER_ENTITY", 4)
+    max_cols = flags.ENTITY_COLUMNS_PER_ENTITY()
     lines = [
         "ENTITY -> CANDIDATE COLUMNS (each question term matched several columns in "
         "the tables above; their real values tell them apart. These are listed "
@@ -621,13 +586,6 @@ def format_entity_columns_for_prompt(entity_columns: list[dict]) -> str:
     if len(lines) == 1:
         return ""
     return "\n".join(lines) + "\n\n"
-
-
-def _env_int_local(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.environ.get(name, str(default))))
-    except (TypeError, ValueError):
-        return default
 
 
 def _short_description(description: str, column: str) -> str:
@@ -1222,7 +1180,9 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             try:
                 response = safe_invoke_with_structured_output(
-                    client, messages, SQLGenerationModel
+                    client,
+                    messages,
+                    get_sql_generation_model(path_state.get("target_db")),
                 )
             except Exception as e:
                 self.logger.error(

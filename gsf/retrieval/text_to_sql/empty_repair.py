@@ -25,12 +25,13 @@ the result and shows the model what is actually stored in that column.
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
+
+from gsf import flags
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +57,7 @@ class _RepairedSQL(BaseModel):
 
 def enabled() -> bool:
     """Whether the empty-result repair runs. Env ``BIRD_EMPTY_REPAIR``."""
-    return os.environ.get("BIRD_EMPTY_REPAIR", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.EMPTY_REPAIR()
 
 
 # --------------------------------------------------------------------------

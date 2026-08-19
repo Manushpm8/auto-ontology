@@ -23,43 +23,30 @@ which keeps a revision that makes things worse from costing shipped accuracy and
 keeps the measurement attributable. Set ``BIRD_VERIFY_REVISE_VOTE=1`` to let
 revisions also compete in the vote once they have proven themselves.
 
-Env:
-- ``BIRD_VERIFY_REVISE``      master switch (default off)
-- ``BIRD_VERIFY_REVISE_MAX``  how many candidates to revise (default 4)
-- ``BIRD_VERIFY_REVISE_VOTE`` let revisions join the selection vote (default off)
-- ``BIRD_VERIFY_REVISE_ROWS`` result rows shown back to the model (default 10)
-- ``BIRD_VERIFY_REVISE_FAIL_ALONE`` only append revisions whose result signature
-  differs from the audited draft and from the draft plurality, and is non-empty
-  (default on). Makes revise slots behave like generation slot 2: wrong answers
-  that merely reinforce the wrong majority are dropped.
-- ``BIRD_VERIFY_REVISE_WHEN``  which drafts get an audit call (default ``smart``):
-  ``always`` = today's behavior; ``broken`` = empty/error only; ``disagree`` =
-  broken or disagrees with peer plurality; ``smart`` = disagree, plus **one**
-  skeptical revise when all drafts share the same non-empty result (the
-  unanimous-wrong case no disagreement gate can see).
-- ``BIRD_WRONGNESS_GATE``     after selection, if winner is empty OR
-  (binary WRONG and another cluster beats winner by ``BIRD_WRONGNESS_MARGIN``),
-  ship the largest-other cluster instead of rewriting (default off)
-- ``BIRD_WRONGNESS_MARGIN``   other_size - winner_size required to trust WRONG
-  (default 2)
-- ``BIRD_WRONGNESS_MODEL``    judge model for the binary gate (default:
-  ``ENTITY_EXTRACTION_MODEL`` / ``JUDGE_MODEL_NAME`` / generator llm)
-- ``BIRD_HARVEST_FORCE``      after selection, force-fix the winner with K
-  prompt variants; if ≥agree share a result sig already in the pool, switch
-  (default off)
-- ``BIRD_HARVEST_FORCE_K``    number of force-fix variants (default 3)
-- ``BIRD_HARVEST_FORCE_AGREE`` min agreeing samples to switch (default 2)
-- ``BIRD_HARVEST_FORCE_MODEL`` judge model for harvest (default: wrongness /
-  generator model; try ``aws/anthropic/bedrock-claude-opus-4-8``)
+Every flag named below is declared with its default in :mod:`gsf.flags`.
+
+Which drafts get an audit call is chosen by ``BIRD_VERIFY_REVISE_WHEN``:
+``always`` audits everything, ``broken`` only empty/error results, ``disagree``
+adds drafts that dissent from the peer plurality, and ``smart`` (the default)
+extends ``disagree`` with a single skeptical pass when all drafts share one
+non-empty result — the unanimous-wrong case that no disagreement gate can see.
+
+After selection two independent gates can still change what ships:
+``BIRD_WRONGNESS_GATE`` swaps in the largest other cluster when the winner is
+empty, or is judged WRONG while another cluster leads it by
+``BIRD_WRONGNESS_MARGIN``; ``BIRD_HARVEST_FORCE`` instead force-fixes the winner
+with K prompt variants and switches when enough of them agree on a result
+signature already present in the pool.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
+
+from gsf import flags
 
 logger = logging.getLogger(__name__)
 
@@ -67,24 +54,12 @@ _MAX_PREVIEW_CHARS = 1200
 
 
 def enabled() -> bool:
-    return os.environ.get("BIRD_VERIFY_REVISE", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.VERIFY_REVISE()
 
 
 def vote_enabled() -> bool:
     """Whether revisions compete in selection, not just in the oracle pool."""
-    return os.environ.get("BIRD_VERIFY_REVISE_VOTE", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.VERIFY_REVISE_VOTE()
 
 
 def fail_alone_enabled() -> bool:
@@ -94,12 +69,7 @@ def fail_alone_enabled() -> bool:
     slot0 is wrong; filtering same-sig / empty cuts that without costing oracle
     on v20 pools. Set ``BIRD_VERIFY_REVISE_FAIL_ALONE=0`` to restore append-all.
     """
-    return os.environ.get("BIRD_VERIFY_REVISE_FAIL_ALONE", "1").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-    }
+    return flags.VERIFY_REVISE_FAIL_ALONE()
 
 
 def revise_when_mode() -> str:
@@ -110,17 +80,7 @@ def revise_when_mode() -> str:
     calls. ``smart`` adds one skeptical pass when all drafts agree — the case
     where disagreement cannot fire but ~half of unique rescues hid.
     """
-    raw = os.environ.get("BIRD_VERIFY_REVISE_WHEN", "smart").strip().lower()
-    if raw in {"always", "all", "1", "true", "yes", "on"}:
-        return "always"
-    if raw in {"broken", "empty", "error"}:
-        return "broken"
-    if raw in {"disagree", "dissent"}:
-        return "disagree"
-    if raw in {"smart", "needed", ""}:
-        return "smart"
-    logger.warning("BIRD_VERIFY_REVISE_WHEN=%r unknown; using smart", raw)
-    return "smart"
+    return flags.VERIFY_REVISE_WHEN()
 
 
 def ship_enabled() -> bool:
@@ -131,13 +91,7 @@ def ship_enabled() -> bool:
     because the model cannot pick among many results; rewriting one query from
     its own result is the skill verify/revise already demonstrated for oracle.
     """
-    return os.environ.get("BIRD_VERIFY_REVISE_SHIP", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.VERIFY_REVISE_SHIP()
 
 
 def wrongness_gate_enabled() -> bool:
@@ -147,41 +101,21 @@ def wrongness_gate_enabled() -> bool:
     71.06% → 73.08% at ~97% switch precision. Prefer a *different* judge model
     than the generator (see ``wrongness_model``).
     """
-    return os.environ.get("BIRD_WRONGNESS_GATE", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.WRONGNESS_GATE()
 
 
 def wrongness_margin() -> int:
-    try:
-        return max(0, int(os.environ.get("BIRD_WRONGNESS_MARGIN", "2")))
-    except (TypeError, ValueError):
-        return 2
+    return flags.WRONGNESS_MARGIN()
 
 
 def wrongness_model() -> str | None:
     """Model id for the binary gate, or None to reuse the generator client."""
-    for key in (
-        "BIRD_WRONGNESS_MODEL",
-        "ENTITY_EXTRACTION_MODEL",
-        "JUDGE_MODEL_NAME",
-    ):
-        val = (os.environ.get(key) or "").strip()
-        if val:
-            return val
-    return None
+    return flags.WRONGNESS_MODEL()
 
 
 def harvest_force_model() -> str | None:
     """Model for force-fix harvest; falls back to wrongness/generator model."""
-    val = (os.environ.get("BIRD_HARVEST_FORCE_MODEL") or "").strip()
-    if val:
-        return val
-    return wrongness_model()
+    return flags.HARVEST_FORCE_MODEL()
 
 
 def harvest_force_enabled() -> bool:
@@ -191,41 +125,23 @@ def harvest_force_enabled() -> bool:
     Default off until a full-dev offline score clears the bar; enable with
     ``BIRD_HARVEST_FORCE=1``.
     """
-    return os.environ.get("BIRD_HARVEST_FORCE", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.HARVEST_FORCE()
 
 
 def harvest_force_k() -> int:
-    try:
-        return max(1, min(5, int(os.environ.get("BIRD_HARVEST_FORCE_K", "3"))))
-    except (TypeError, ValueError):
-        return 3
+    return flags.HARVEST_FORCE_K()
 
 
 def harvest_force_agree() -> int:
-    try:
-        return max(2, int(os.environ.get("BIRD_HARVEST_FORCE_AGREE", "2")))
-    except (TypeError, ValueError):
-        return 2
+    return flags.HARVEST_FORCE_AGREE()
 
 
 def _max_candidates() -> int:
-    try:
-        return max(0, int(os.environ.get("BIRD_VERIFY_REVISE_MAX", "4")))
-    except (TypeError, ValueError):
-        return 4
+    return flags.VERIFY_REVISE_MAX()
 
 
 def _max_rows() -> int:
-    try:
-        return max(1, int(os.environ.get("BIRD_VERIFY_REVISE_ROWS", "10")))
-    except (TypeError, ValueError):
-        return 10
+    return flags.VERIFY_REVISE_ROWS()
 
 
 class RevisionModel(BaseModel):

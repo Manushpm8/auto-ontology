@@ -1,59 +1,35 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-import os
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Annotated, Literal
 
-# Cap on same-schema demos per stage-1 call, enforced here (not just in the
-# prompt) since structured output validates against it.
-#
-# CHASE generates 75/question for +9.0pp; we generate 2-3. More is nearly free —
-# one call's output grows, not the call count — and every example executes
-# against the target DB before reaching the prompt, so a bigger batch only
-# costs output tokens, never an invalid table/column.
-SYNTHETIC_EXAMPLE_COUNT = max(2, int(os.environ.get("BIRD_SYNTHETIC_N", "3")))
-
+from gsf import flags
 
 # The "thought" length cap was stated twice — in the prompt and in this schema
-# description sent alongside it — but BIRD_OPEN_REASONING only swapped the
-# prompt copy, leaving the model two conflicting instructions. Both now follow
-# the flag.
-_OPEN_REASONING = os.environ.get("BIRD_OPEN_REASONING", "0").strip().lower() not in {
-    "0",
-    "false",
-    "no",
-    "off",
-    "",
-}
-_OPEN_REASONING_SKIP_DBS = {
-    db.strip().lower()
-    for db in os.environ.get("BIRD_OPEN_REASONING_SKIP_DBS", "").split(",")
-    if db.strip()
-}
-# Opt-in list: when non-empty, reasoning is ON only for DBs in this set,
-# superseding both the global flag and the skip list.
-_OPEN_REASONING_DBS = {
-    db.strip().lower()
-    for db in os.environ.get("BIRD_OPEN_REASONING_DBS", "").split(",")
-    if db.strip()
-}
-_THOUGHT_DESCRIPTION = (
+# description sent alongside it. ``flags.OPEN_REASONING`` (the eager global
+# snapshot) once drove both, but ``prompts.py``/``sql_from_semantic.py`` since
+# moved to the per-db, lazily-read ``flags.OPEN_REASONING_DBS()`` — leaving
+# this schema description keyed to a flag that ``BIRD_OPEN_REASONING_DBS``
+# alone never sets, so the two conflicting instructions were back. Pydantic
+# bakes a field's description into the class at definition time, so a per-db
+# choice can't be a single description string picked at import; it has to be
+# two classes, picked per call by ``get_sql_generation_model``.
+_CAPPED_THOUGHT_DESCRIPTION = (
+    "Briefly explain the SQL approach and explicitly state every assumption "
+    "made where the user's request or available schema does not uniquely "
+    "determine the query. Do not omit assumptions. For each of the following "
+    'that applies, state the choice AND the reason ("X, because Y"): '
+    "(1) time window — the concrete boundary for any vague/relative time "
+    "phrase (e.g. 'recently'); (2) zero/missing values — whether zero-count "
+    "or NULL groups are included, excluded, or coerced to 0, and how any "
+    "division guards against a zero denominator; (3) ties — what breaks a "
+    "tie in a ranking/superlative query. If none were needed, state that "
+    "explicitly. This is NOT shown to the user."
+)
+_OPEN_THOUGHT_DESCRIPTION = (
     "Internal reasoning: work the question out here before writing any SQL, at "
     "whatever length it needs. This is NOT shown to the user."
-    if _OPEN_REASONING
-    else (
-        "Briefly explain the SQL approach and explicitly state every assumption "
-        "made where the user's request or available schema does not uniquely "
-        "determine the query. Do not omit assumptions. For each of the following "
-        'that applies, state the choice AND the reason ("X, because Y"): '
-        "(1) time window — the concrete boundary for any vague/relative time "
-        "phrase (e.g. 'recently'); (2) zero/missing values — whether zero-count "
-        "or NULL groups are included, excluded, or coerced to 0, and how any "
-        "division guards against a zero denominator; (3) ties — what breaks a "
-        "tie in a ranking/superlative query. If none were needed, state that "
-        "explicitly. This is NOT shown to the user."
-    )
 )
 
 # ==================== TYPE ALIASES ====================
@@ -217,9 +193,13 @@ class SQLGenerationModel(StrictModel):
 
     Field order matters: the LLM fills fields sequentially, so ``thought``
     comes first to drain reasoning before it writes the clean output fields.
+
+    Capped ``thought`` (default). Use ``SQLGenerationModelOpenThought`` for
+    databases in ``BIRD_OPEN_REASONING_DBS``, or call
+    ``get_sql_generation_model(db_id)`` to pick the right one.
     """
 
-    thought: str = Field(..., description=_THOUGHT_DESCRIPTION)
+    thought: str = Field(..., description=_CAPPED_THOUGHT_DESCRIPTION)
     sql_code: NonEmptyStr = Field(
         ...,
         description=(
@@ -254,6 +234,28 @@ class SQLGenerationModel(StrictModel):
                 "sql_code must be the full executable statement; response must be a real explanation."
             )
         return value
+
+
+class SQLGenerationModelOpenThought(SQLGenerationModel):
+    """``SQLGenerationModel`` with an uncapped ``thought`` schema description.
+
+    A subclass, not a flag on the base model, because the structured-output
+    schema sent to the LLM is fixed at class-definition time — swapping the
+    description string after the fact would not reach the model.
+    """
+
+    thought: str = Field(..., description=_OPEN_THOUGHT_DESCRIPTION)
+
+
+def get_sql_generation_model(db_id: str | None) -> type[SQLGenerationModel]:
+    """Pick the capped or open-thought ``SQLGenerationModel`` for ``db_id``.
+
+    Reads ``flags.OPEN_REASONING_DBS()`` (per-call, unlike the eager
+    ``flags.OPEN_REASONING``) so the schema sent to the LLM always agrees with
+    the ``db_id``-scoped prompt text built by ``prompts.py`` for the same call.
+    """
+    is_open = (db_id or "").strip().lower() in flags.OPEN_REASONING_DBS()
+    return SQLGenerationModelOpenThought if is_open else SQLGenerationModel
 
 
 class SQLQueryPlanModel(StrictModel):
@@ -406,9 +408,9 @@ class SyntheticSQLExamplesModel(StrictModel):
     examples: list[SyntheticSQLExample] = Field(
         ...,
         min_length=2,
-        max_length=SYNTHETIC_EXAMPLE_COUNT,
+        max_length=flags.SYNTHETIC_N,
         description=(
-            f"Up to {SYNTHETIC_EXAMPLE_COUNT} diverse same-schema question-to-SQL "
+            f"Up to {flags.SYNTHETIC_N} diverse same-schema question-to-SQL "
             "demonstrations. Together they should cover the range of joins, "
             "filters, aggregations, and output grains this schema supports, "
             "without solving the target question itself."
