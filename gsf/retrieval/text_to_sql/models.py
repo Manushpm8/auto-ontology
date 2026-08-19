@@ -1,47 +1,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-import os
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Annotated, Literal
 
-# Cap on same-schema demos per stage-1 call, enforced here (not just in the
-# prompt) since structured output validates against it.
-#
-# CHASE generates 75/question for +9.0pp; we generate 2-3. More is nearly free —
-# one call's output grows, not the call count — and every example executes
-# against the target DB before reaching the prompt, so a bigger batch only
-# costs output tokens, never an invalid table/column.
-SYNTHETIC_EXAMPLE_COUNT = max(2, int(os.environ.get("BIRD_SYNTHETIC_N", "3")))
-
+from gsf import flags
 
 # The "thought" length cap was stated twice — in the prompt and in this schema
 # description sent alongside it — but BIRD_OPEN_REASONING only swapped the
 # prompt copy, leaving the model two conflicting instructions. Both now follow
 # the flag.
-_OPEN_REASONING = os.environ.get("BIRD_OPEN_REASONING", "0").strip().lower() not in {
-    "0",
-    "false",
-    "no",
-    "off",
-    "",
-}
-_OPEN_REASONING_SKIP_DBS = {
-    db.strip().lower()
-    for db in os.environ.get("BIRD_OPEN_REASONING_SKIP_DBS", "").split(",")
-    if db.strip()
-}
-# Opt-in list: when non-empty, reasoning is ON only for DBs in this set,
-# superseding both the global flag and the skip list.
-_OPEN_REASONING_DBS = {
-    db.strip().lower()
-    for db in os.environ.get("BIRD_OPEN_REASONING_DBS", "").split(",")
-    if db.strip()
-}
 _THOUGHT_DESCRIPTION = (
     "Internal reasoning: work the question out here before writing any SQL, at "
     "whatever length it needs. This is NOT shown to the user."
-    if _OPEN_REASONING
+    if flags.OPEN_REASONING
     else (
         "Briefly explain the SQL approach and explicitly state every assumption "
         "made where the user's request or available schema does not uniquely "
@@ -406,9 +378,9 @@ class SyntheticSQLExamplesModel(StrictModel):
     examples: list[SyntheticSQLExample] = Field(
         ...,
         min_length=2,
-        max_length=SYNTHETIC_EXAMPLE_COUNT,
+        max_length=flags.SYNTHETIC_N,
         description=(
-            f"Up to {SYNTHETIC_EXAMPLE_COUNT} diverse same-schema question-to-SQL "
+            f"Up to {flags.SYNTHETIC_N} diverse same-schema question-to-SQL "
             "demonstrations. Together they should cover the range of joins, "
             "filters, aggregations, and output grains this schema supports, "
             "without solving the target question itself."

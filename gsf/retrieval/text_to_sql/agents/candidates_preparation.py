@@ -23,13 +23,13 @@ Design Decisions:
 """
 
 import logging
-import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf import flags
 from gsf.dal.attributes import fetch_attr_column_contexts, find_join_path
 from gsf.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
@@ -74,56 +74,11 @@ from gsf.retrieval.text_to_sql.state import (
     get_question_for_processing,
     rules_to_text,
 )
-from gsf.utils.env import read_env_bool, read_env_float, read_env_int
 from gsf.utils.llm_invoke import invoke_with_structured_output
 
-
-def _read_env_count(name: str, default: int) -> int:
-    """``read_env_int``, floored at 1 — these knobs are all search/closure widths."""
-    return max(1, read_env_int(name, default))
-
-
-_TABLE_SEARCH_K = _read_env_count("BIRD_TABLE_SEARCH_K", 12)
-# Floor on hits fetched per search query, so adding entity/evidence queries
-# cannot make each individual search shallower than this.
-_TABLE_SEARCH_MIN_K = _read_env_count("BIRD_TABLE_SEARCH_MIN_K", 5)
-_TABLE_SEARCH_CAP = _read_env_count("BIRD_TABLE_SEARCH_CAP", 20)
-_TABLE_FILTER_ENABLED = read_env_bool("BIRD_TABLE_FILTER", "1")
-# Search COLUMNS per entity and keep which entity matched which columns — the table
-# searches below filter to Labels.TABLE, so column-level matches never surface there.
-# Measured on california_schools: searching "charter" returns schools.Charter (1/0),
-# frpm.'Charter Funding Type', schools.FundingType and frpm.'Charter School (Y/N)' in
-# its top five — exactly the columns that get confused for each other.
-_ENTITY_COLUMNS = read_env_bool("BIRD_ENTITY_COLUMNS", "0")
-_ENTITY_COLUMNS_K = _read_env_count("BIRD_ENTITY_COLUMNS_K", 6)
-# Only entities where at least this many distinct columns compete are worth printing:
-# a noun with one match is not a choice, and rendering it is pure prompt bloat.
-_ENTITY_COLUMNS_MIN = _read_env_count("BIRD_ENTITY_COLUMNS_MIN", 2)
-_ENTITY_COLUMNS_MAX_ENTITIES = _read_env_count("BIRD_ENTITY_COLUMNS_MAX_ENTITIES", 8)
-
-
-# Keep only hits within this vector distance of the entity's best match, or every
-# entity prints its full k and "phone numbers" drags in schools.Ext as noise. Sized
-# off the charter case: genuine competitors span 0.717-0.808, the first irrelevant
-# hit is 0.832, and 0.10 keeps all five confusable columns while cutting the tail.
-_ENTITY_COLUMNS_MARGIN = read_env_float("BIRD_ENTITY_COLUMNS_MARGIN", 0.10)
-_EVIDENCE_FORCE_KEEP = read_env_bool("BIRD_EVIDENCE_FORCE_KEEP_TABLES", "1")
-_FK_CLOSURE = read_env_bool("BIRD_FK_CLOSURE", "1")
-# Cap on tables added by FK closure, so a hub table cannot pull in a whole DB.
-_FK_CLOSURE_MAX = _read_env_count("BIRD_FK_CLOSURE_MAX", 4)
-# Ship the physical FK edges among the final tables to the generator, so join
-# conditions come from the schema rather than from semantic path inference.
-_PHYSICAL_FK_JOINS = read_env_bool("BIRD_PHYSICAL_FK_JOINS", "0")
-_FORCE_ANCHOR_TABLE = read_env_bool("BIRD_FORCE_ANCHOR_TABLE", "0")
-# Databases where the anchor's table is added but not pinned against the relevance
-# filter: on formula_1, pinning cost five questions their gold table, the anchor
-# landing on results/constructorResults while the answer lived in standings. Elsewhere
-# the pin is what has been measured, so it stays until a database is checked without it.
-_ANCHOR_PIN_SKIP_DBS = {
-    db.strip().lower()
-    for db in os.environ.get("BIRD_ANCHOR_PIN_SKIP_DBS", "").split(",")
-    if db.strip()
-}
+# Every BIRD_* knob this module reads is declared in gsf.flags. The notes that
+# used to sit beside each read now live with the declaration, except where the
+# reasoning is specific to how this module uses the value.
 
 
 def _parse_column_hit(text: str) -> dict:
@@ -201,9 +156,16 @@ def fetch_entity_columns(
     entities = [e.strip() for e in dict.fromkeys(entities or []) if (e or "").strip()]
     if not entities:
         return []
-    k = _ENTITY_COLUMNS_K if k is None else k
-    min_competing = _ENTITY_COLUMNS_MIN if min_competing is None else min_competing
+    k = flags.ENTITY_COLUMNS_K() if k is None else k
+    min_competing = (
+        flags.ENTITY_COLUMNS_MIN() if min_competing is None else min_competing
+    )
     fk_partners = _fk_partner_tables(verified_fks)
+    # Keep only hits within this vector distance of the entity's best match, or every
+    # entity prints its full k and "phone numbers" drags in schools.Ext as noise. Sized
+    # off the charter case: genuine competitors span 0.717-0.808, the first irrelevant
+    # hit is 0.832, and 0.10 keeps all five confusable columns while cutting the tail.
+    margin = flags.ENTITY_COLUMNS_MARGIN()
 
     def _one(entity: str) -> tuple[str, list[dict]]:
         rows = list(
@@ -246,13 +208,12 @@ def fetch_entity_columns(
                 }
             )
         scored = [c for c in cols if c.get("score") is not None]
-        if scored and _ENTITY_COLUMNS_MARGIN > 0:
+        if scored and margin > 0:
             best = min(float(c["score"]) for c in scored)
             cols = [
                 c
                 for c in cols
-                if c.get("score") is None
-                or float(c["score"]) <= best + _ENTITY_COLUMNS_MARGIN
+                if c.get("score") is None or float(c["score"]) <= best + margin
             ]
         # Distance decides who is shown, never the order they are shown in. Vector
         # rank is unreliable at the top — MailCity outranks City for "city", and
@@ -278,7 +239,7 @@ def fetch_entity_columns(
     out.sort(
         key=lambda d: entities.index(d["entity"]) if d["entity"] in entities else 99
     )
-    return out[:_ENTITY_COLUMNS_MAX_ENTITIES]
+    return out[: flags.ENTITY_COLUMNS_MAX_ENTITIES()]
 
 
 def _qualified_name(t: dict) -> str:
@@ -507,8 +468,11 @@ class CandidatePreparationAgent(BaseAgent):
         # ranked 3rd for every query was never retrieved. Search each query to a
         # fixed depth instead and let the dedupe + relevance filter downstream
         # do the narrowing.
+        # The floor keeps each individual search from getting shallower as entity
+        # and evidence phrases are added to the query list.
         k_per_query = max(
-            _TABLE_SEARCH_MIN_K, _TABLE_SEARCH_K // max(1, len(search_queries))
+            flags.TABLE_SEARCH_MIN_K(),
+            flags.TABLE_SEARCH_K() // max(1, len(search_queries)),
         )
 
         def _fetch_tables_for_query(query: str) -> list[dict]:
@@ -531,8 +495,9 @@ class CandidatePreparationAgent(BaseAgent):
                     self.logger.warning(
                         "Table retrieval failed for query: %s", query, exc_info=True
                     )
+        table_search_cap = flags.TABLE_SEARCH_CAP()
         additional_tables = dedupe_merge_relevant_tables(additional_tables)[
-            :_TABLE_SEARCH_CAP
+            :table_search_cap
         ]
         seen_qnames: set[str] = set()
         deduped_tables: list[dict] = []
@@ -546,7 +511,7 @@ class CandidatePreparationAgent(BaseAgent):
 
         # Force-inject evidence-named tables (exact Neo4j name lookup + vector).
         force_kept: list[str] = []
-        if _EVIDENCE_FORCE_KEEP and evidence_table_hints:
+        if flags.EVIDENCE_FORCE_KEEP_TABLES() and evidence_table_hints:
             existing_ids = {t.get("id") for t in relevant_tables}
             existing_names = {(t.get("name") or "").lower() for t in relevant_tables}
             for hint in evidence_table_hints:
@@ -600,7 +565,7 @@ class CandidatePreparationAgent(BaseAgent):
         self.logger.info(
             "Found %d relevant tables (after dedupe, capped at %d): %s",
             len(relevant_tables),
-            _TABLE_SEARCH_CAP,
+            table_search_cap,
             [_qualified_name(t) for t in relevant_tables],
         )
 
@@ -680,7 +645,8 @@ class CandidatePreparationAgent(BaseAgent):
         # The prompt names an anchor column; omitting its table leaves the
         # generator with a hint it cannot act on.
         anchor_table = str((primary_attribute or {}).get("table_name") or "")
-        if _FORCE_ANCHOR_TABLE and anchor_table:
+        force_anchor_table = flags.FORCE_ANCHOR_TABLE()
+        if force_anchor_table and anchor_table:
             have = {
                 (t.get("name") or "").split(".")[-1].lower() for t in relevant_tables
             }
@@ -714,13 +680,15 @@ class CandidatePreparationAgent(BaseAgent):
             if any((t.get("name") or "").lower() == h.lower() for t in relevant_tables)
         }
         # Step 4e already added the anchor's table so the generator can act on the
-        # hint; pinning it as well is what _ANCHOR_PIN_SKIP_DBS opts a database out
-        # of. Evidence-named tables stay pinned either way, being the ones the
-        # question states outright rather than the ones retrieval guessed.
+        # hint; pinning it as well is what BIRD_ANCHOR_PIN_SKIP_DBS opts a database
+        # out of. On formula_1 pinning cost five questions their gold table, the
+        # anchor landing on results/constructorResults while the answer lived in
+        # standings. Evidence-named tables stay pinned either way, being the ones
+        # the question states outright rather than the ones retrieval guessed.
         if (
-            _FORCE_ANCHOR_TABLE
+            force_anchor_table
             and anchor_table
-            and str(target_db or "").lower() not in _ANCHOR_PIN_SKIP_DBS
+            and str(target_db or "").lower() not in flags.ANCHOR_PIN_SKIP_DBS()
         ):
             force_keep.add(anchor_table.split(".")[-1].lower())
 
@@ -744,7 +712,7 @@ class CandidatePreparationAgent(BaseAgent):
         # 77.8% of gold tables missing from the prompt sat one foreign key away
         # from a table that *was* retrieved, so closing over FK edges recovers
         # most of them while adding far fewer tables than the whole schema.
-        if _FK_CLOSURE and target_db:
+        if flags.FK_CLOSURE() and target_db:
             before_names = [_qualified_name(t) for t in relevant_tables]
             relevant_tables = self._expand_by_fk(relevant_tables, target_db)
             added = [
@@ -759,7 +727,7 @@ class CandidatePreparationAgent(BaseAgent):
         # Join conditions the model can trust: these come from the schema, not
         # from walking the semantic graph.
         verified_fks: list[dict] = []
-        if _PHYSICAL_FK_JOINS:
+        if flags.PHYSICAL_FK_JOINS():
             table_ids = [t.get("id") for t in relevant_tables if t.get("id")]
             if table_ids:
                 try:
@@ -780,7 +748,7 @@ class CandidatePreparationAgent(BaseAgent):
         # the join to frpm entirely, because a same-table lookalike was presented
         # as a peer of the column gold needed.
         entity_columns: list[dict] = []
-        if _ENTITY_COLUMNS:
+        if flags.ENTITY_COLUMNS():
             entity_columns = fetch_entity_columns(
                 state["data_retriever"],
                 list(path_state.get("entities") or []) + evidence_phrases,
@@ -835,8 +803,8 @@ class CandidatePreparationAgent(BaseAgent):
     def _expand_by_fk(self, tables: list[dict], target_db: str) -> list[dict]:
         """Append tables one foreign key away from *tables*.
         Runs after the relevance filter so the LLM's choices seed the expansion
-        rather than compete with it. Capped at ``_FK_CLOSURE_MAX`` additions to
-        keep a hub table from dragging in the whole database.
+        rather than compete with it. Capped at ``BIRD_FK_CLOSURE_MAX`` additions
+        to keep a hub table from dragging in the whole database.
         """
         names = [(t.get("name") or "") for t in tables if t.get("name")]
         if not names:
@@ -845,9 +813,10 @@ class CandidatePreparationAgent(BaseAgent):
         if not neighbours:
             return tables
         existing = {t.get("id") for t in tables}
+        max_added = flags.FK_CLOSURE_MAX()
         added = 0
         for tbl in neighbours:
-            if added >= _FK_CLOSURE_MAX:
+            if added >= max_added:
                 break
             if tbl.get("id") in existing:
                 continue
@@ -951,7 +920,7 @@ class CandidatePreparationAgent(BaseAgent):
         force_keep_names: set[str] | None = None,
     ) -> tuple[list[dict], str]:
         """Use the LLM to decide which candidate tables are actually needed."""
-        if not _TABLE_FILTER_ENABLED:
+        if not flags.TABLE_FILTER():
             return tables, "BIRD_TABLE_FILTER=0"
         if len(tables) <= 2:
             return tables, ""

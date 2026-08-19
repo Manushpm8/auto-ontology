@@ -32,9 +32,10 @@ everywhere.
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Iterable, Optional, Sequence
+
+from gsf import flags
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +44,9 @@ _WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 
 def enabled_for(db_id: str | None) -> bool:
     """Whether projection-order handling applies to *db_id*."""
-    raw = os.environ.get("BIRD_PROJECTION_ORDER_DBS", "").strip()
-    if not raw:
+    wanted = flags.PROJECTION_ORDER_DBS()
+    if not wanted:
         return False
-    wanted = {p.strip() for p in raw.split(",") if p.strip()}
     return "*" in wanted or (bool(db_id) and str(db_id) in wanted)
 
 

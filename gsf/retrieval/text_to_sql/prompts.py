@@ -2,8 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import os
-from gsf.retrieval.text_to_sql.models import _OPEN_REASONING_DBS
+from gsf import flags
 
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
@@ -17,9 +16,7 @@ def _question_last_enabled() -> bool:
     Env ``BIRD_PROMPT_ORDER`` (default ``legacy``; ``question_last`` to move
     them).
     """
-    return (
-        os.environ.get("BIRD_PROMPT_ORDER", "legacy").strip().lower() == "question_last"
-    )
+    return flags.PROMPT_ORDER() == "question_last"
 
 
 _USER_TASK = (
@@ -254,7 +251,7 @@ def _open_reasoning_enabled(db_id: str | None = None) -> bool:
     Opt-in only: uncapped for the databases named in
     ``BIRD_OPEN_REASONING_DBS`` (comma-separated), capped everywhere else.
     """
-    return (db_id or "").strip().lower() in _OPEN_REASONING_DBS
+    return (db_id or "").strip().lower() in flags.OPEN_REASONING_DBS()
 
 
 # Measured on the 354 pools where no candidate matched gold: 63 (17.8%) have all
@@ -284,19 +281,14 @@ customers.country_name and customers.country_code matched, the sample values
 
 def _entity_binding_enabled(db_id: str | None = None) -> bool:
     """Whether ``thought`` must open with an entity-to-column binding list.
-    Env ``BIRD_BIND_ENTITIES`` (default ``0``). Only meaningful alongside
-    ``BIRD_OPEN_REASONING``: a binding list does not fit the 1-2 sentence cap, so
-    it is ignored while the capped spec is active rather than contradicting it.
+    Env ``BIRD_BIND_ENTITIES`` (default ``0``). Only meaningful for a database
+    opted in through ``BIRD_OPEN_REASONING_DBS``: a binding list does not fit the
+    1-2 sentence cap, so it is ignored while the capped spec is active rather
+    than contradicting it.
     """
     if not _open_reasoning_enabled(db_id):
         return False
-    return os.environ.get("BIRD_BIND_ENTITIES", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.BIND_ENTITIES()
 
 
 def create_sql_from_candidates_prompt(

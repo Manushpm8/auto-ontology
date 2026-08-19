@@ -21,32 +21,30 @@ non-gold columns per table. Unset disables it entirely.
 from __future__ import annotations
 
 import logging
-import os
 import random
 import re
 from typing import Any
+
+from gsf import flags
 
 logger = logging.getLogger(__name__)
 
 _WARNED = False
 
+# The default only applies once the flag is set to something unusable, which the
+# enabled check below already rejects; it exists so the sampler still has a width
+# if a caller reaches it directly.
+_DEFAULT_DISTRACTORS = 5
+
 
 def oracle_prune_enabled() -> bool:
     """Whether oracle pruning is on. Read per call so tests can toggle it."""
-    raw = os.environ.get("BIRD_ORACLE_PRUNE_COLS", "").strip()
-    if not raw:
-        return False
-    try:
-        return int(raw) >= 0
-    except ValueError:
-        return False
+    return flags.ORACLE_PRUNE_COLS() is not None
 
 
 def _keep_distractors() -> int:
-    try:
-        return max(0, int(os.environ.get("BIRD_ORACLE_PRUNE_COLS", "5").strip()))
-    except ValueError:
-        return 5
+    count = flags.ORACLE_PRUNE_COLS()
+    return _DEFAULT_DISTRACTORS if count is None else count
 
 
 def _warn_once() -> None:

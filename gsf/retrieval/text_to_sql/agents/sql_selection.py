@@ -31,16 +31,18 @@ their result set, then:
 
 When fewer than two candidates are present (the default, ``BIRD_NCAND=1``),
 this node is a pass-through with zero execution overhead.
+
+Every flag named above is declared with its default in :mod:`gsf.flags`.
 """
 
 import json
 import logging
-import os
 from typing import Any, Dict, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from gsf import flags
 from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
 from gsf.retrieval.text_to_sql import empty_repair, projection_order, verify_revise
 from gsf.retrieval.text_to_sql.agents.sql_execution import QueryResponse, _run_sql
@@ -58,22 +60,8 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_select_mode() -> str:
-    """``majority`` | ``rerank`` | ``llm_judge``.
-
-    ``BIRD_SQL_SELECT`` wins when set. Otherwise ``BIRD_SQL_JUDGE=1`` maps to
-    ``llm_judge`` (legacy) and ``0`` to ``majority``.
-    """
-    raw = os.environ.get("BIRD_SQL_SELECT", "").strip().lower()
-    if raw in {"majority", "rerank", "llm_judge", "judge"}:
-        return "llm_judge" if raw == "judge" else raw
-    judge_on = os.environ.get("BIRD_SQL_JUDGE", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
-    return "llm_judge" if judge_on else "majority"
+    """``majority`` | ``rerank`` | ``llm_judge``."""
+    return flags.sql_select_mode()
 
 
 class _SQLJudgePick(BaseModel):
@@ -120,30 +108,16 @@ class _UnanimousCriticVerdict(BaseModel):
 
 
 def _unanimous_critic_enabled() -> bool:
-    return os.environ.get("BIRD_UNANIMOUS_CRITIC", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.UNANIMOUS_CRITIC()
 
 
 def _unanimous_critic_shadow() -> bool:
     """Shadow mode logs challenger outcomes but keeps the original winner."""
-    return os.environ.get("BIRD_UNANIMOUS_CRITIC_SHADOW", "1").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-    }
+    return flags.UNANIMOUS_CRITIC_SHADOW()
 
 
 def _unanimous_critic_min_success() -> int:
-    try:
-        return max(2, int(os.environ.get("BIRD_UNANIMOUS_CRITIC_MIN_SUCCESS", "3")))
-    except (TypeError, ValueError):
-        return 3
+    return flags.UNANIMOUS_CRITIC_MIN_SUCCESS()
 
 
 def _format_few_shot_for_critic(examples: list, limit: int = 4) -> str:
@@ -368,13 +342,7 @@ def _nonempty_first_enabled() -> bool:
     return nothing cluster together even when they fail for unrelated reasons.
     Under plain size-first voting that hands them an artificial majority.
     """
-    return os.environ.get("BIRD_NONEMPTY_FIRST", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    }
+    return flags.NONEMPTY_FIRST()
 
 
 # Slot reliability priors from v20 pools (full-set fit). Used when
@@ -416,14 +384,7 @@ _VOTER_Q_WEIGHTS: tuple[float, ...] = (
 
 def _slot_vote_weight_mode() -> str:
     """``off`` | ``solo_acc`` | ``voter_q``. Env ``BIRD_SLOT_VOTE_WEIGHTS``."""
-    raw = os.environ.get("BIRD_SLOT_VOTE_WEIGHTS", "").strip().lower()
-    if raw in {"solo_acc", "solo", "acc", "accuracy"}:
-        return "solo_acc"
-    if raw in {"voter_q", "voter", "vq", "voter_quality"}:
-        return "voter_q"
-    if raw in {"1", "true", "yes", "on"}:
-        return "solo_acc"
-    return "off"
+    return flags.SLOT_VOTE_WEIGHTS()
 
 
 def _slot_vote_weights() -> list[float] | None:
@@ -435,17 +396,9 @@ def _slot_vote_weights() -> list[float] | None:
     mode = _slot_vote_weight_mode()
     if mode == "off":
         return None
-    raw = os.environ.get("BIRD_SLOT_VOTE_WEIGHTS_JSON", "").strip()
-    if raw:
-        try:
-            parsed = json.loads(raw)
-            weights = [float(x) for x in parsed]
-            if weights:
-                return weights
-        except (TypeError, ValueError, json.JSONDecodeError):
-            logger.warning(
-                "BIRD_SLOT_VOTE_WEIGHTS_JSON unparseable; using %s prior", mode
-            )
+    override = flags.SLOT_VOTE_WEIGHTS_JSON()
+    if override:
+        return override
     return list(_SOLO_ACC_WEIGHTS if mode == "solo_acc" else _VOTER_Q_WEIGHTS)
 
 
@@ -497,18 +450,12 @@ def _majority_cluster_size(clusters: dict[tuple, list[int]], majority_idx: int) 
 
 def _majority_lock_k() -> int:
     """Min majority size that blocks weak rerank overrides. ``0`` disables."""
-    try:
-        return max(0, int(os.environ.get("BIRD_SQL_MAJORITY_LOCK_K", "3")))
-    except (TypeError, ValueError):
-        return 3
+    return flags.SQL_MAJORITY_LOCK_K()
 
 
 def _rerank_override_margin() -> float:
     """Min logit gap (top − majority) required to override a locked majority."""
-    try:
-        return float(os.environ.get("BIRD_SQL_RERANK_MARGIN", "0.5"))
-    except (TypeError, ValueError):
-        return 0.5
+    return flags.SQL_RERANK_MARGIN()
 
 
 def _answer_passage(sql: str, qr: QueryResponse, cluster_size: int) -> str:
@@ -844,9 +791,9 @@ class SQLSelectionAgent(BaseAgent):
                 # Weighted vote *is* the measured policy (CV +0.7–0.85pp). Do not
                 # let rerank/judge undo it unless explicitly allowed.
                 selection_method = f"majority_weighted_{_slot_vote_weight_mode()}"
-            allow_override = slot_weights is None or os.environ.get(
-                "BIRD_SLOT_VOTE_WEIGHTS_ALLOW_RERANK", "0"
-            ).strip().lower() in {"1", "true", "yes", "on"}
+            allow_override = (
+                slot_weights is None or flags.SLOT_VOTE_WEIGHTS_ALLOW_RERANK()
+            )
             if allow_override and len(clusters) > 1 and mode in {"rerank", "llm_judge"}:
                 question = get_original_question(state) or get_question_for_processing(
                     state
