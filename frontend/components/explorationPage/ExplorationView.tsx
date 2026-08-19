@@ -55,14 +55,16 @@ import { ActiveTermCard, buildSemanticGraph } from './ExplorationSemantic';
 
 const EMPTY_GRAPH: ExplorationGraph = { nodes: [], links: [] };
 
-// Fake "origin" id for the transient Table/Column/ColumnAttribute nodes a
-// clicked semantic edge grafts onto the graph to draw its real hop chain
-// (see `loadSemanticLinkPath`) — never a real node id, so it can't collide
-// with one, and lets `clearHighlightedPath` reverse the graft the same way
-// `collapseTableNode`/etc. reverse a real expansion (`GraphController`
-// ref-counts nodes by origin, so a plain node id couldn't safely double as
-// one here without risking a real expansion's own nodes).
-const LINK_PATH_ORIGIN_ID = '__link_path__';
+// Prefix for the "origin" id under which a clicked semantic edge's
+// transient Table/Column/ColumnAttribute hop nodes are grafted onto the
+// graph (see `expandSemanticConnection`) — one distinct origin per edge
+// (rather than a single shared one) so expanding a connection behaves
+// exactly like expanding a node: multiple connections can be expanded at
+// once, and expanding/collapsing one never touches another's own graft
+// (`GraphController` ref-counts nodes by origin — see `collapseSemanticConnection`).
+// Never a real node id itself, so it can't collide with one.
+const LINK_PATH_ORIGIN_PREFIX = '__link_path__:';
+const linkPathOriginId = (edgeId: string): string => `${LINK_PATH_ORIGIN_PREFIX}${edgeId}`;
 
 // The four types an `ExplorationLinkPathHopDto` node can be (see
 // `find_term_link_path` in `gsf/dal/attributes.py`) — narrows the backend's
@@ -204,14 +206,19 @@ export const ExplorationView = () => {
 	const [activeNodeId, setActiveNodeId] = useState<string | null>(activeNodeIdFromUrl);
 	const [hoveredNodePosition, setHoveredNodePosition] = useState<HoveredNode | null>(null);
 	const [selectedSemanticEdgeId, setSelectedSemanticEdgeId] = useState<string | null>(null);
-	// The real hop chain behind `selectedSemanticEdgeId`, fetched from
-	// `explorationApi.getSemanticLinkPath` — `null` while that request is
-	// still in flight (distinct from `[]`, an edge whose two terms
-	// genuinely share no path), read via `activeSemanticConnectionEntity`'s
-	// `connectionHops` below.
-	const [semanticLinkPathHops, setSemanticLinkPathHops] = useState<
-		ExplorationLinkPathHopDto[] | null
-	>(null);
+	// The real hop chain behind each currently-expanded connection (see
+	// `expandSemanticConnection`), keyed by edge id — fetched from
+	// `explorationApi.getSemanticLinkPath`. A missing key means that edge's
+	// request is still in flight (`ConnectionDetails` in
+	// `ActiveExpansionCard.tsx` treats `undefined` the same as `null`,
+	// distinct from `[]`, an edge whose two terms genuinely share no path),
+	// read via `activeSemanticConnectionEntity`'s `connectionHops` below.
+	// Kept as one map (rather than a single "current" value) so multiple
+	// connections can be expanded at once, each remembering its own hops —
+	// same rationale as `expandedNodesById` below for node expansions.
+	const [connectionHopsByEdgeId, setConnectionHopsByEdgeId] = useState<
+		Map<string, ExplorationLinkPathHopDto[]>
+	>(new Map());
 	// Mirrors `selectedSemanticEdgeId` for the same reason every other ref
 	// in this file mirrors its state — `loadSemanticLinkPath`'s fetch can
 	// resolve after the user has already clicked a different edge (or
@@ -268,7 +275,11 @@ export const ExplorationView = () => {
 	// grafted on by a Sql node's own expansion — see
 	// `expandSqlNode`/`collapseSqlNode`.
 	const expandedSqlIdsRef = useRef<Set<string>>(new Set());
-	// Tables/terms/schemas/columnAttributes/columns double-clicked to
+	// Mirrors `expandedSqlIdsRef` above, for semantic edges (Term↔Term
+	// "connections") whose real hop chain is currently grafted onto the
+	// graph — see `expandSemanticConnection`/`collapseSemanticConnection`.
+	const expandedConnectionIdsRef = useRef<Set<string>>(new Set());
+	// Tables/terms/schemas/columnAttributes/columns/connections double-clicked to
 	// collapse *while* their own expand fetch was still in flight —
 	// `controller.removeExpansion` has nothing to remove yet in that case
 	// (`addExpansion` hasn't run), so every `expandXNode` below checks this
@@ -307,13 +318,6 @@ export const ExplorationView = () => {
 	useEffect(() => {
 		semanticGraphRef.current = semanticGraph;
 	}, [semanticGraph]);
-	// The Table/Column/ColumnAttribute node ids `loadSemanticLinkPath` most
-	// recently grafted under `LINK_PATH_ORIGIN_ID` — read by `handleSelectNode`
-	// so that clicking one of *these* nodes (to view/expand it) doesn't itself
-	// trigger the `clearHighlightedPath` every other node click does, which
-	// would tear the graft (and the very node just clicked) right back off
-	// the graph before the user had a chance to do anything with it.
-	const linkPathGraftedNodeIdsRef = useRef<Set<string>>(new Set());
 
 	useEffect(() => {
 		let cancelled = false;
@@ -1484,41 +1488,21 @@ export const ExplorationView = () => {
 		});
 	}, []);
 
-	// Reverses `loadSemanticLinkPath`'s graft — see `LINK_PATH_ORIGIN_ID`'s
-	// own comment — and clears the highlight itself, whether or not
-	// anything was actually grafted (a Data-layer edge, or a stale/empty
-	// hop chain, never grafts anything, but `removeExpansion` is a no-op
-	// then anyway).
-	const clearHighlightedPath = useCallback(() => {
-		const removedNodeIds = controllerRef.current?.removeExpansion(LINK_PATH_ORIGIN_ID);
-		if (removedNodeIds != null && removedNodeIds.length > 0) {
-			setExpandedNodesById((previous) => {
-				const next = new Map(previous);
-				removedNodeIds.forEach((id) => next.delete(id));
-				return next;
-			});
-		}
-		linkPathGraftedNodeIdsRef.current = new Set();
-		setHighlightedPath(null);
-		setSemanticLinkPathHops(null);
-	}, []);
-
 	const handleSelectNode = useCallback(
 		(nodeId: string | null) => {
 			setHoveredNodePosition(null);
+			// Deselects whichever connection's card is currently open and
+			// drops its highlight/dimming — but, unlike before, never
+			// collapses that connection's own graft (`removeExpansion`):
+			// selecting a node is no different from selecting any other
+			// node while some *other* node's own expansion is live, which
+			// has never collapsed that expansion either. A connection now
+			// only ever collapses the same way a node does — an explicit
+			// toggle back on the very thing that expanded it (see
+			// `handleSelectEdge`) — never as a side effect of clicking
+			// something else.
 			setSelectedSemanticEdgeId(null);
-			// Skip tearing the link-path graft down when the node being
-			// selected is one of its own grafted nodes — see
-			// `linkPathGraftedNodeIdsRef`'s own comment — and, just as
-			// importantly, when nothing was clicked at all (`nodeId ==
-			// null`, e.g. clicking empty canvas to dismiss whatever card is
-			// open): that already hides the connection's own card via
-			// `setSelectedSemanticEdgeId` above, but shouldn't also rip the
-			// hop chain it grafted off the graph — only an actual click on
-			// some *other*, unrelated node should collapse it back down.
-			if (nodeId != null && !linkPathGraftedNodeIdsRef.current.has(nodeId)) {
-				clearHighlightedPath();
-			}
+			setHighlightedPath(null);
 			setRelationshipsNodeId(null);
 			setDataDetailsType(null);
 			setColumnAttributesNodeId(null);
@@ -1553,7 +1537,7 @@ export const ExplorationView = () => {
 				controllerRef.current?.focusNode(nodeId);
 			}
 		},
-		[layer, router, clearHighlightedPath],
+		[layer, router],
 	);
 
 	// Single-clicking a node selects it — see `handleSelectNode` above,
@@ -1723,22 +1707,28 @@ export const ExplorationView = () => {
 		],
 	);
 
-	// Fetches and grafts the real hop chain behind a clicked semantic edge
-	// onto the live graph — see `LINK_PATH_ORIGIN_ID`/`pathNodeGraphId`
-	// above. `edgeId` (rather than reading `selectedSemanticEdgeId` back
-	// out of state) is what `selectedSemanticEdgeIdRef` is compared against
-	// once the request resolves, so a stale response — the user already
-	// selected a different edge, or deselected entirely — updates neither
-	// the graph nor `semanticLinkPathHops` instead of clobbering a newer
-	// selection's own path.
-	const loadSemanticLinkPath = useCallback(
+	// Grafts the real hop chain behind a clicked semantic edge onto the live
+	// graph — see `linkPathOriginId`/`pathNodeGraphId` above. The mirror
+	// image of `expandTermNode`/etc: `expandedConnectionIdsRef` guards
+	// against re-fetching/re-adding a second click of an already-expanded
+	// connection, and `pendingCollapseIdsRef` (shared with every other
+	// `expandXNode` above — ids never collide across them, and this one's
+	// `linkPathOriginId` prefix guarantees that) covers the same
+	// collapsed-while-in-flight race. Unlike the single shared
+	// `LINK_PATH_ORIGIN_ID` this used to graft under, every connection now
+	// gets its own origin id, so expanding one never disturbs another's
+	// already-live graft — the same "expanding something doesn't collapse
+	// anything else" guarantee every other `expandXNode` above already
+	// gives node expansions.
+	const expandSemanticConnection = useCallback(
 		async (sourceTermId: string, targetTermId: string, edgeId: string) => {
-			const response = await explorationApi.getSemanticLinkPath(sourceTermId, targetTermId);
-			if (selectedSemanticEdgeIdRef.current !== edgeId) return;
+			const activeController = controllerRef.current;
+			if (activeController == null || expandedConnectionIdsRef.current.has(edgeId)) return;
+			expandedConnectionIdsRef.current.add(edgeId);
 
+			const originId = linkPathOriginId(edgeId);
+			const response = await explorationApi.getSemanticLinkPath(sourceTermId, targetTermId);
 			const hops = response.error ? [] : (response.data?.hops ?? []);
-			setSemanticLinkPathHops(hops);
-			if (hops.length === 0) return;
 
 			const expansionNodes: ExpansionNodeInput[] = [];
 			const expansionEdges: ExpansionEdgeInput[] = [];
@@ -1824,39 +1814,96 @@ export const ExplorationView = () => {
 				pathEdgeKeys.add(`${targetGraphId}:${sourceGraphId}`);
 			});
 
-			controllerRef.current?.addExpansion(
-				LINK_PATH_ORIGIN_ID,
-				expansionNodes,
-				expansionEdges,
-			);
-			linkPathGraftedNodeIdsRef.current = new Set(newEntities.keys());
+			if (pendingCollapseIdsRef.current.delete(originId)) {
+				// Double-clicked to collapse before this fetch resolved — see
+				// `expandTableNode`'s identical guard above.
+				return;
+			}
+
+			controllerRef.current?.addExpansion(originId, expansionNodes, expansionEdges);
 			setExpandedNodesById((previous) => {
 				const next = new Map(previous);
 				newEntities.forEach((value, key) => next.set(key, value));
 				return next;
 			});
+			setConnectionHopsByEdgeId((previous) => {
+				const next = new Map(previous);
+				next.set(edgeId, hops);
+				return next;
+			});
+			// Only touches the shared `highlightedPath` when this edge is
+			// still the one actually selected — the user may have already
+			// clicked away (or onto a different connection) by the time this
+			// resolves, and unlike the graft above (which always completes,
+			// so a connection expanded this way reliably stays expanded),
+			// the *highlight* is a single shared "whichever connection's
+			// card is open" spotlight that a stale response must never
+			// clobber out from under a newer selection.
+			//
 			// No explicit `controllerRef.current?.refresh()` here: it would
 			// fire before this `setHighlightedPath` commits and `GraphCanvas`'s
 			// own `highlightedPath` prop-sync effect updates the ref its
 			// reducers actually read — see that effect's own comment, and
 			// `handleSelectNode`'s, for why that stale-ref race is a bug
 			// rather than a harmless extra repaint.
-			setHighlightedPath({
-				nodeIds: Array.from(pathNodeIds),
-				edgeKeys: Array.from(pathEdgeKeys),
-			});
+			if (selectedSemanticEdgeIdRef.current === edgeId) {
+				setHighlightedPath({
+					nodeIds: Array.from(pathNodeIds),
+					edgeKeys: Array.from(pathEdgeKeys),
+				});
+			}
 		},
 		[],
 	);
+
+	// Reverses `expandSemanticConnection` — see `collapseTableNode`'s
+	// identical shape. Also drops this connection's own cached hops (the
+	// next expand re-fetches them fresh).
+	const collapseSemanticConnection = useCallback((edgeId: string) => {
+		const activeController = controllerRef.current;
+		if (activeController == null) return;
+		expandedConnectionIdsRef.current.delete(edgeId);
+		const originId = linkPathOriginId(edgeId);
+		const removedNodeIds = activeController.removeExpansion(originId);
+		if (removedNodeIds == null) {
+			pendingCollapseIdsRef.current.add(originId);
+			return;
+		}
+		if (removedNodeIds.length > 0) {
+			setExpandedNodesById((previous) => {
+				const next = new Map(previous);
+				removedNodeIds.forEach((id) => next.delete(id));
+				return next;
+			});
+		}
+		setConnectionHopsByEdgeId((previous) => {
+			if (!previous.has(edgeId)) return previous;
+			const next = new Map(previous);
+			next.delete(edgeId);
+			return next;
+		});
+	}, []);
 
 	// Only ever fires for a Semantic-layer (Term↔Term) edge — a Data-layer
 	// (Table↔Table) one is drawn with the click-inert `structural` kind
 	// instead (see `buildGraphologyGraph` in `GraphCanvas.tsx`), since that
 	// edge's own SQL query/foreign key details are no longer surfaced here.
+	// Clicking a connection toggles its own expansion exactly like
+	// double-clicking a node does (see `handleDoubleClickNode`): clicking an
+	// already-expanded connection collapses it back down, and clicking a
+	// not-yet-expanded one expands it — without collapsing any *other*
+	// connection (or node) that's already expanded, same guarantee every
+	// other expansion on this graph gives.
 	const handleSelectEdge = useCallback(
 		(edgeId: string) => {
-			controllerRef.current?.removeExpansion(LINK_PATH_ORIGIN_ID);
-			setSemanticLinkPathHops(null);
+			if (expandedConnectionIdsRef.current.has(edgeId)) {
+				collapseSemanticConnection(edgeId);
+				if (selectedSemanticEdgeIdRef.current === edgeId) {
+					setSelectedSemanticEdgeId(null);
+					setHighlightedPath(null);
+				}
+				return;
+			}
 
 			setSelectedSemanticEdgeId(edgeId);
 			const link = semanticGraph.links.find(
@@ -1867,13 +1914,13 @@ export const ExplorationView = () => {
 				return;
 			}
 			// Highlights just the two terms/edge immediately, then widens to
-			// the full hop chain once `loadSemanticLinkPath` resolves — so
-			// there's no flash of a fully-undimmed graph while that request
-			// is in flight.
+			// the full hop chain once `expandSemanticConnection` resolves —
+			// so there's no flash of a fully-undimmed graph while that
+			// request is in flight.
 			setHighlightedPath({ nodeIds: [link.source, link.target], edgeKeys: [edgeId] });
-			void loadSemanticLinkPath(link.source, link.target, edgeId);
+			void expandSemanticConnection(link.source, link.target, edgeId);
 		},
-		[semanticGraph.links, loadSemanticLinkPath],
+		[semanticGraph.links, expandSemanticConnection, collapseSemanticConnection],
 	);
 
 	const handleToggleLayer = useCallback(() => {
@@ -1881,7 +1928,7 @@ export const ExplorationView = () => {
 		setActiveNodeId(null);
 		setHoveredNodePosition(null);
 		setSelectedSemanticEdgeId(null);
-		clearHighlightedPath();
+		setHighlightedPath(null);
 		setRelationshipsNodeId(null);
 		setDataDetailsType(null);
 		setColumnAttributesNodeId(null);
@@ -1897,11 +1944,13 @@ export const ExplorationView = () => {
 		expandedTermIdsRef.current.clear();
 		expandedColumnIdsRef.current.clear();
 		expandedSqlIdsRef.current.clear();
+		expandedConnectionIdsRef.current.clear();
+		setConnectionHopsByEdgeId(new Map());
 		router.replace(
 			layer === ExplorationLayer.Semantic ? '/exploration?view=data' : '/exploration',
 			{ scroll: false },
 		);
-	}, [layer, router, clearHighlightedPath]);
+	}, [layer, router]);
 
 	const handleControllerChange = useCallback((nextController: GraphController | null) => {
 		controllerRef.current = nextController;
@@ -2014,7 +2063,10 @@ export const ExplorationView = () => {
 						description: null,
 						viewHref: '',
 						relationshipTypes: selectedSemanticEdge.relationshipTypes,
-						connectionHops: semanticLinkPathHops,
+						connectionHops:
+							selectedSemanticEdgeId != null
+								? (connectionHopsByEdgeId.get(selectedSemanticEdgeId) ?? null)
+								: null,
 						connectionSource: {
 							id: selectedSemanticEdge.source,
 							name: semanticEdgeSourceName,
@@ -2029,7 +2081,7 @@ export const ExplorationView = () => {
 			selectedSemanticEdgeId,
 			semanticEdgeSourceName,
 			semanticEdgeTargetName,
-			semanticLinkPathHops,
+			connectionHopsByEdgeId,
 		],
 	);
 
@@ -2311,8 +2363,14 @@ export const ExplorationView = () => {
 					key={selectedSemanticEdgeId}
 					node={activeSemanticConnectionEntity}
 					onClose={() => {
+						// Closing the card only deselects/un-highlights this
+						// connection — same as closing a node's own card
+						// (`handleSelectNode(null)`) never collapses that
+						// node's expansion. Collapsing a connection is only
+						// ever the explicit toggle in `handleSelectEdge`
+						// (clicking the same edge again).
 						setSelectedSemanticEdgeId(null);
-						clearHighlightedPath();
+						setHighlightedPath(null);
 					}}
 					onView={() => {}}
 				/>

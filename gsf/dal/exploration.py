@@ -20,7 +20,6 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 from gsf.dal.cypher_fragments import paging_clause, table_description_expr
 from gsf.dal.datasources import TABLE_COUNTS_SUBQUERY
 from gsf.dal.sql_attributes import fetch_sql_attribute_counts
-from gsf.dal.attributes import find_term_link_path
 from gsf.dal.terms import (
     build_term_table_maps,
     fetch_all_terms,
@@ -29,6 +28,7 @@ from gsf.dal.terms import (
     fetch_related_terms_counts,
     fetch_term_table_pairs,
     fetch_terms_by_ids,
+    find_term_link_path,
     term_is_in_scope,
 )
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter

@@ -5,9 +5,10 @@
 """Neo4j read/write for ColumnAttribute and SemanticFK entities.
 
 Also contains find_join_path, which traverses SEMANTIC_FK / HAS_ATTRIBUTE /
-CONTAINS edges to resolve multi-hop join routes at retrieval time, and
-find_term_link_path, the same traversal one level up (Term-to-Term instead
-of Column-to-Column) for the Exploration graph.
+CONTAINS edges to resolve multi-hop join routes at retrieval time, and the
+shared find_shortest_labeled_path helper underneath it — reused by
+gsf.dal.terms.find_term_link_path for the same traversal one level up
+(Term-to-Term instead of Column-to-Column) for the Exploration graph.
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ from gsf.semantic.constants import (
     LABEL_TERM,
     REL_HAS_ATTRIBUTE,
     REL_PROPERTY_OF,
-    REL_REPRESENTS,
     REL_SEMANTIC_FK,
     SEMANTIC_SOURCE,
 )
@@ -335,7 +335,7 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _find_shortest_labeled_path(
+def find_shortest_labeled_path(
     anchor_id: str,
     dest_id: str,
     *,
@@ -347,20 +347,26 @@ def _find_shortest_labeled_path(
 ) -> tuple[list[dict], list[str]]:
     """Run `apoc.path.expandConfig` for the shortest path between two same-labeled nodes.
 
-    The actual Neo4j traversal shared by `find_join_path` (Column-to-Column)
-    and `find_term_link_path` (Term-to-Term) below — apoc.path.expandConfig
-    is used instead of a plain Cypher variable-length pattern because a
-    variable-length pattern applies a single direction to every
-    relationship type, whereas both callers need one relationship type
-    (SEMANTIC_FK) to behave differently from the others (see each
-    function's own docstring for *why* it picks the direction it does).
-    Everything else — which relationship types are even walkable, which
-    labels the path may pass through, how far it's allowed to search, and
-    what the raw node/relationship chain gets turned into afterwards —
-    differs enough between the two callers that only this innermost "run
-    the query, hand back the raw nodes/relationship types" part is
-    actually shared. `bfs: true` + `limit: 1` yields the shortest path;
-    `uniqueness: 'NODE_GLOBAL'` keeps the search from revisiting a node.
+    The actual Neo4j traversal shared by `find_join_path` below
+    (Column-to-Column) and `gsf.dal.terms.find_term_link_path`
+    (Term-to-Term) — apoc.path.expandConfig is used instead of a plain
+    Cypher variable-length pattern because a variable-length pattern
+    applies a single direction to every relationship type, whereas both
+    callers need one relationship type (SEMANTIC_FK) to behave differently
+    from the others (see each function's own docstring for *why* it picks
+    the direction it does). Everything else — which relationship types are
+    even walkable, which labels the path may pass through, how far it's
+    allowed to search, and what the raw node/relationship chain gets
+    turned into afterwards — differs enough between the two callers that
+    only this innermost "run the query, hand back the raw
+    nodes/relationship types" part is actually shared. Deliberately kept
+    here (rather than moved alongside `find_term_link_path` into
+    `gsf.dal.terms`) so `find_join_path` doesn't have to reach into that
+    module for it — `gsf.dal.terms` already imports from here for other
+    helpers (e.g. `fetch_column_attribute_columns_map`), so the dependency
+    only has to run one way. `bfs: true` + `limit: 1` yields the shortest
+    path; `uniqueness: 'NODE_GLOBAL'` keeps the search from revisiting a
+    node.
 
     Returns `(path_nodes, path_rel_types)` — both empty when the two ids
     are equal, either endpoint doesn't exist, no such path exists, or the
@@ -419,7 +425,7 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
           target_schema, target_table, target_column}, ...]
     Returns [] when anchor == dest or no path exists.
     """
-    path_nodes, _ = _find_shortest_labeled_path(
+    path_nodes, _ = find_shortest_labeled_path(
         anchor_col_id,
         dest_col_id,
         node_label=Labels.COLUMN,
@@ -467,146 +473,3 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
             }
         )
     return hops
-
-
-def _enrich_catalog_path_nodes(path_nodes: list[dict]) -> None:
-    """Attach catalog ids/names onto each Table/Column node in *path_nodes*,
-    in place.
-
-    `find_term_link_path`'s own traversal excludes Schema/Database from the
-    path (see its own ``labelFilter``), so a Table/Column hop otherwise
-    carries nothing beyond a bare id/name — not enough for a client to
-    expand either one any further the way every other Table/Column
-    expansion does (see ``expandTableNode``/``expandColumnNode`` in
-    ``ExplorationView.tsx``, which need a Table's own database/schema ids,
-    or a Column's own owning Table id, respectively). Best-effort: a failed
-    lookup just leaves those nodes without the extra fields, same as if
-    this were never called.
-    """
-    table_ids = list(
-        {
-            node["id"]
-            for node in path_nodes
-            if node.get("label") == Labels.TABLE and node.get("id")
-        }
-    )
-    if table_ids:
-        try:
-            rows = get_neo4j_conn().query_read(
-                f"""
-                MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-                      (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-                      (t:{Labels.TABLE})
-                WHERE t.id IN $table_ids
-                RETURN t.id AS table_id, db.id AS database_id, db.name AS database_name,
-                       s.id AS schema_id, s.name AS schema_name
-                """,
-                {"table_ids": table_ids},
-            )
-        except Exception:
-            logger.warning(
-                "find_term_link_path: table catalog lookup failed for %s",
-                table_ids,
-                exc_info=True,
-            )
-            rows = []
-
-        by_table_id = {row["table_id"]: row for row in rows if row.get("table_id")}
-        for node in path_nodes:
-            if node.get("label") != Labels.TABLE:
-                continue
-            info = by_table_id.get(node.get("id"))
-            if info is not None:
-                node["database_id"] = info.get("database_id")
-                node["database_name"] = info.get("database_name")
-                node["schema_id"] = info.get("schema_id")
-                node["schema_name"] = info.get("schema_name")
-
-    column_ids = list(
-        {
-            node["id"]
-            for node in path_nodes
-            if node.get("label") == Labels.COLUMN and node.get("id")
-        }
-    )
-    if column_ids:
-        col_ctx = fetch_col_table_contexts(column_ids)
-        for node in path_nodes:
-            if node.get("label") != Labels.COLUMN:
-                continue
-            info = col_ctx.get(node.get("id") or "")
-            if info is not None:
-                node["table_id"] = info.get("table_id")
-                node["table_name"] = info.get("table_name")
-                node["database_id"] = info.get("database_id")
-                node["database_name"] = info.get("database_name")
-                node["schema_id"] = info.get("schema_id")
-                node["schema_name"] = info.get("schema_name")
-
-
-def find_term_link_path(term_a_id: str, term_b_id: str) -> list[dict]:
-    """Find the shortest semantic path connecting two Term nodes.
-
-    One level up from ``find_join_path``'s Column-to-Column traversal: this
-    walks Term-to-Term across whichever of REPRESENTS (Table-Term),
-    CONTAINS (Table-Column), HAS_ATTRIBUTE/SEMANTIC_FK
-    (Column-ColumnAttribute) and PROPERTY_OF (ColumnAttribute-Term)
-    actually connects them — the same edges
-    ``fetch_semantic_exploration_graph`` folds into one term↔term edge's
-    collapsed ``relationship_types`` label, but returned here as the real
-    ordered hop chain a client can graft/highlight instead — e.g. Term1
-    <-REPRESENTS- Table -CONTAINS-> Column -SEMANTIC_FK-> ColumnAttribute
-    -PROPERTY_OF-> Term2 — rather than just the relationship type names
-    involved.
-
-    Unlike ``find_join_path``, SEMANTIC_FK is traversed *undirected* here
-    rather than outgoing-only: a term↔term edge already means the two
-    terms genuinely share a table under ``fetch_semantic_exploration_graph``'s
-    own rules, so tracing *some* real path between them can't fabricate a
-    join the way ``find_join_path``'s Column-to-Column search could — it
-    can only ever surface a real, already-existing relationship chain.
-    This matters for join-table-shaped connections where *both* terms
-    reach their shared table only via SEMANTIC_FK (e.g. a
-    ``request_attribute_values`` table with one FK column pointing at
-    Term1's own id attribute and another pointing at Term2's): tracing
-    that chain needs to step *against* one of the two SEMANTIC_FK edges'
-    stored (Column -> ColumnAttribute) direction no matter which term the
-    search starts from, which an outgoing-only filter would always reject
-    from one side or the other.
-
-    Returns a list of hop dicts, ordered from *term_a_id* to *term_b_id*:
-        [{relationship: str,
-          source: {id, name, label}, target: {id, name, label}}, ...]
-    Returns [] when the two ids are equal, either Term doesn't exist, or no
-    such path connects them (shouldn't happen for a real Exploration graph
-    edge, but guards a stale/hand-crafted request).
-    """
-    # `labelFilter` keeps Schema/Database out of the path (a Term never
-    # needs to walk through either to reach a Table/Column) — unlike
-    # `find_join_path`, SEMANTIC_FK carries no `>` direction marker here
-    # (see this function's own docstring for why that's safe).
-    path_nodes, path_rel_types = _find_shortest_labeled_path(
-        term_a_id,
-        term_b_id,
-        node_label=LABEL_TERM,
-        relationship_filter=(
-            f"{REL_REPRESENTS}|{Edges.CONTAINS}|{REL_HAS_ATTRIBUTE}|"
-            f"{REL_SEMANTIC_FK}|{REL_PROPERTY_OF}"
-        ),
-        label_filter=f"-{Labels.SCHEMA}|-{Labels.DB}",
-        max_level=10,
-        log_label="find_term_link_path",
-    )
-    if len(path_nodes) < 2 or len(path_rel_types) != len(path_nodes) - 1:
-        return []
-
-    _enrich_catalog_path_nodes(path_nodes)
-
-    return [
-        {
-            "relationship": path_rel_types[i],
-            "source": path_nodes[i],
-            "target": path_nodes[i + 1],
-        }
-        for i in range(len(path_rel_types))
-    ]
