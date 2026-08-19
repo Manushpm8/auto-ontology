@@ -352,13 +352,12 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     """Find the shortest semantic join path between two Column nodes.
 
-    SEMANTIC_FK is stored directed (FK Column -> referenced ColumnAttribute),
-    but traversal is **undirected**. Two FK columns that share a target
-    attribute (e.g. ``frpm.CDSCode`` and ``satscores.cds`` both -> CDS Code)
-    must be joinable as ``frpm.CDSCode = satscores.cds``; outgoing-only
-    traversal cannot leave the shared attribute and returns an empty path.
-    HAS_ATTRIBUTE and CONTAINS stay undirected. Schema nodes are excluded
-    (``labelFilter: -Schema``), so cross-table routes require SEMANTIC_FK.
+    SEMANTIC_FK is directional (FK Column -> ColumnAttribute) and is followed
+    only in that outgoing direction. From the referenced attribute, the path
+    reaches its owning PK Column through undirected HAS_ATTRIBUTE traversal.
+    Keeping SEMANTIC_FK directional prevents a path from leaving the attribute
+    through another incoming FK edge and fabricating an FK-to-FK join.
+    HAS_ATTRIBUTE and CONTAINS stay undirected.
 
     Returns a list of hop dicts:
         [{source_schema, source_table, source_column,
@@ -368,14 +367,14 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     if anchor_col_id == dest_col_id:
         return []
 
-    # apoc.path.expandConfig: SEMANTIC_FK must be bidirectional so shared-PK
-    # FK pairs connect; HAS_ATTRIBUTE / CONTAINS stay bidirectional.
-    # bfs + limit:1 → shortest path; -Schema blocks table↔table via Schema.
+    # apoc.path.expandConfig supports the mixed traversal directions needed
+    # here: SEMANTIC_FK outgoing-only, HAS_ATTRIBUTE / CONTAINS bidirectional.
+    # bfs + limit:1 yields the shortest path; -Schema excludes Schema nodes.
     path_query = """
     MATCH (col_anchor:Column {id: $anchor_col_id})
     MATCH (col_dest:Column {id: $dest_col_id})
     CALL apoc.path.expandConfig(col_anchor, {
-        relationshipFilter: 'SEMANTIC_FK|HAS_ATTRIBUTE|CONTAINS',
+        relationshipFilter: 'SEMANTIC_FK>|HAS_ATTRIBUTE|CONTAINS',
         labelFilter: '-Schema',
         terminatorNodes: [col_dest],
         bfs: true,
