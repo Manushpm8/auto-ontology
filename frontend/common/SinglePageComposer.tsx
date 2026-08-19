@@ -38,7 +38,6 @@ import { TextVariant } from '@/enums/text';
 export type ComposerEditValue = string | string[];
 
 export const LabelList = ({ values }: { values: string[] }) => {
-
 	const nonEmptyValues = (Array.isArray(values) ? values : []).filter((v) => v.trim() !== '');
 	if (nonEmptyValues.length === 0) return <span>—</span>;
 	return (
