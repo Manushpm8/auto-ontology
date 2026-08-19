@@ -20,6 +20,7 @@ prompt so the LLM does not repeat the same broken SQL.
 from __future__ import annotations
 
 import logging
+import re
 from enum import Enum
 from typing import Any, Dict
 
@@ -121,8 +122,25 @@ def _format_known_columns(
 
 
 # ------------------------------------------------------------------
-# Error classification models
+# Deterministic fast-path classification
 # ------------------------------------------------------------------
+
+# Postgres raises this when a CAST/::numeric hits a formatted string value
+# (e.g. "45.2%" or "USD 81,931.00") instead of a bare number — always fixable
+# with the same tables by stripping non-numeric characters before casting,
+# never a missing_data situation. Matching here skips the LLM classification
+# call, same as the existing db_probe pre-classification checks below.
+_NUMERIC_FORMAT_CAST_ERROR_RE = re.compile(
+    r'invalid input syntax for type (?:numeric|double precision|integer|bigint):'
+    r'\s*"[^"]*(?:%|\$|USD|EUR|GBP)[^"]*"',
+    re.IGNORECASE,
+)
+
+
+def _is_numeric_format_cast_error(error: str) -> bool:
+    """Whether ``error`` is a Postgres cast failure on a %/currency-formatted
+    string value (see ``_NUMERIC_FORMAT_CAST_ERROR_RE``)."""
+    return bool(_NUMERIC_FORMAT_CAST_ERROR_RE.search(error or ""))
 
 
 class ErrorType(str, Enum):
@@ -376,6 +394,13 @@ class SQLReconstructionAgent(BaseAgent):
                 self.logger.info(
                     "Error pre-classified fixable (db_probe check) — skipping "
                     "LLM error analysis and table discovery"
+                )
+                path_state["error_type"] = ErrorType.FIXABLE.value
+                analysis = None
+            elif _is_numeric_format_cast_error(error):
+                self.logger.info(
+                    "Error pre-classified fixable (numeric/currency-format cast) "
+                    "— skipping LLM error analysis and table discovery"
                 )
                 path_state["error_type"] = ErrorType.FIXABLE.value
                 analysis = None

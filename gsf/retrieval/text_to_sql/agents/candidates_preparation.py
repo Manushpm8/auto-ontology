@@ -416,8 +416,11 @@ class CandidatePreparationAgent(BaseAgent):
             str(subject_term.get("id") or "") if isinstance(subject_term, dict) else ""
         )
         if subject_term_id:
+            # database_name scopes the Term->Table lookup to the current DB —
+            # Term nodes are global, so without this a shared term name
+            # (e.g. "Case") can pull in tables from an unrelated database.
             pairs = [
-                p for p in fetch_term_table_pairs()
+                p for p in fetch_term_table_pairs(database_name=target_db)
                 if str(p.get("term_id") or "") == subject_term_id
             ]
             subject_table_ids = list(

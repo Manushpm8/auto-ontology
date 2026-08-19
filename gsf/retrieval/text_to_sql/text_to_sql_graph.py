@@ -27,6 +27,9 @@ from gsf.retrieval.text_to_sql.agents.proactive_value_check import (
 from gsf.retrieval.text_to_sql.agents.jsonb_path_check import (
     JsonbPathCheckAgent,
 )
+from gsf.retrieval.text_to_sql.agents.join_path_check import (
+    JoinPathCheckAgent,
+)
 from gsf.retrieval.entity_coverage.agents.question_extraction import (
     QuestionExtractionAgent,
 )
@@ -50,6 +53,7 @@ from gsf.retrieval.text_to_sql.base import agent_wrapper
 from gsf.retrieval.text_to_sql.db_probe.config import (
     is_db_probe_proactive,
     is_db_probe_jsonb_path_check,
+    is_db_probe_join_path_check,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,6 +133,43 @@ def route_intent_validation(state: AgentState) -> str:
     else:
         # Intent is valid, proceed to formatting
         return "valid_sql"
+
+
+def _make_soft_check_router(check_name: str):
+    """Build a router for a post-construction "soft" check (jsonb/join/value
+    prechecks, empty-LIKE check, value-repair check).
+
+    These send SQL back to ``reconstruct_sql`` on failure but — unlike
+    ``validate_sql_query``/``execute_sql_query``, which enforce sql_attempts-based
+    fallback/unconstructable caps via :func:`route_sql_validation` — they carry no
+    attempt counter of their own. A persistently failing check could loop with
+    ``reconstruct_sql`` indefinitely, bounded only by the global recursion_limit,
+    which aborts the whole run (including any already-executed SQL) instead of
+    degrading gracefully. This reuses the same ``reconstruction_count`` safety net
+    as the "skip_intent_validation" branch of :func:`route_sql_validation`: once
+    too many reconstructions have already happened, stop blocking on this check
+    and let the SQL through as-is.
+
+    Args:
+        check_name: Node name, used only for the log message when the cap fires.
+
+    Returns:
+        A router function usable in ``add_conditional_edges``.
+    """
+
+    def _route(state: AgentState) -> str:
+        decision = state.get("decision", "") or ""
+        if decision != "invalid_sql":
+            return "valid_sql"
+        reconstruction_count = len(state["path_state"].get("failed_attempts") or [])
+        if reconstruction_count > 5:
+            logger.info(
+                f"Skipping {check_name} after {reconstruction_count} reconstructions"
+            )
+            return "valid_sql"
+        return "invalid_sql"
+
+    return _route
 
 
 def route_translation(state: AgentState) -> str:
@@ -275,6 +316,17 @@ def create_graph():
         if proactive_enabled
         else None
     )
+    # Optional proactive (pre-execution) join-path check — opt-in via
+    # DB_PROBE_JOIN_PATH_CHECK. Runs before the JSONB check: if the join
+    # topology itself is wrong, fix that first rather than repair a JSONB
+    # path against tables the join is about to be rewritten around.
+    join_path_enabled = is_db_probe_join_path_check()
+    logger.info("Text-to-SQL graph: db-probe join path check %s", join_path_enabled)
+    join_path_node = (
+        _make_node("precheck_join_path", agent_wrapper(JoinPathCheckAgent()))
+        if join_path_enabled
+        else None
+    )
     # Optional proactive (pre-execution) JSONB key-path check — opt-in via
     # DB_PROBE_JSONB_PATH_CHECK.
     jsonb_path_enabled = is_db_probe_jsonb_path_check()
@@ -337,6 +389,8 @@ def create_graph():
     graph.add_node("check_value_repair", value_repair_node)
     if proactive_value_node is not None:
         graph.add_node("precheck_value_repair", proactive_value_node)
+    if join_path_node is not None:
+        graph.add_node("precheck_join_path", join_path_node)
     if jsonb_path_node is not None:
         graph.add_node("precheck_jsonb_path", jsonb_path_node)
     graph.add_node(
@@ -419,6 +473,7 @@ def create_graph():
         name
         for name, node in (
             ("precheck_value_repair", proactive_value_node),
+            ("precheck_join_path", join_path_node),
             ("precheck_jsonb_path", jsonb_path_node),
         )
         if node is not None
@@ -458,7 +513,7 @@ def create_graph():
         )
         graph.add_conditional_edges(
             name,
-            route_decision,
+            _make_soft_check_router(name),
             {
                 "valid_sql": next_target,
                 "invalid_sql": "reconstruct_sql",
@@ -482,7 +537,7 @@ def create_graph():
     # empty result at run time).
     graph.add_conditional_edges(
         "check_empty_like_result",
-        route_decision,
+        _make_soft_check_router("check_empty_like_result"),
         {
             "valid_sql": "check_value_repair",
             "invalid_sql": "reconstruct_sql",
@@ -490,7 +545,7 @@ def create_graph():
     )
     graph.add_conditional_edges(
         "check_value_repair",
-        route_decision,
+        _make_soft_check_router("check_value_repair"),
         {
             "valid_sql": "format_and_respond",
             "invalid_sql": "reconstruct_sql",

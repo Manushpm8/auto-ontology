@@ -165,7 +165,12 @@ def _ambiguity_check(
 _COLLISION_WINNER_MARGIN = 0.04  # winner's 1st-hit score must beat the loser's by at least this
 _COLLISION_LOSER_MAX_GAP = 0.08  # loser's own gap (shared hit -> its next-distinct hit) must be under this
 
-_COMPOSITE_HIT_RE = re.compile(r"\b(json|structured)\b", re.IGNORECASE)
+_COMPOSITE_HIT_RE = re.compile(r"\b(json|jsonb|structured)\b", re.IGNORECASE)
+# "jsonb" needs its own alternative, not just "json": `\bjson\b` requires a word
+# boundary right after "json", which "JSONB" never has (the "b" is a word char
+# glued onto it), so a description reading "JSONB column..." — the exact phrasing
+# every *_column_meaning_base.json in this dataset uses for Postgres jsonb columns —
+# silently fell through to the sample-values fallback and was missed.
 # "Sample values: a, b, c" with 2+ comma-separated entries — a column description
 # listing multiple distinct sample values is a reliable sign of a multi-key/composite
 # column regardless of how the description happens to phrase the type (some say
@@ -179,9 +184,17 @@ def _is_composite_hit(hit: dict) -> bool:
     legitimately refer to it — as different sub-keys — rather than one of them
     being a wrong match.
 
-    Prefers structured type metadata when present; falls back to text checks on
-    the hit's description (the reliable signal available at this call site
-    today — no data_type metadata is threaded through to here yet).
+    Prefers structured type metadata (``data_type``) when present; falls back
+    to text checks on the hit's description otherwise.
+
+    ``data_type`` is now threaded through from Neo4j's ``attr.datatype``
+    (dal/terms.py -> semantic/embed.py -> data_access/semantic_search.py), but
+    only for rows embedded *after* that change landed — existing VDB rows
+    won't carry it until the semantic index is re-embedded. Until then this
+    still falls through to the text-heuristic path below for most hits. Once
+    a broad re-embed has happened, the ``data_type`` branch above should be
+    handling the large majority of cases and the text-heuristic fallback can
+    likely be trimmed down (or dropped) — revisit then.
     """
     data_type = hit.get("data_type") or hit.get("type")
     if data_type:
@@ -423,6 +436,20 @@ def _resolve_collisions(
             if chosen_id.upper() != "NONE" and chosen_id in by_id:
                 new_id_to_entities.setdefault(chosen_id, []).append(entity)
         for new_id, ents in new_id_to_entities.items():
+            # Same Step-0 exclusion as the pre-LLM collision above: a KB-covered
+            # entity doesn't need a column identity at all, so it shouldn't be
+            # able to trigger (or be caught up in) this composite-column check
+            # just because the LLM also happened to assign it the same id.
+            kb_covered_here = [
+                e for e in ents if (_normalize_entity(e) or e.lower().strip()) in kb_covered_norms
+            ]
+            for e in kb_covered_here:
+                logger.info(
+                    "Clarify — collision (post-LLM): %r is already KB-covered, "
+                    "dropping its VDB column claim to %r instead of resolving it", e, new_id,
+                )
+                best_hit_per_entity.pop(e, None)
+            ents = [e for e in ents if e not in kb_covered_here]
             if len(ents) < 2:
                 continue
             if _is_composite_hit(by_id[new_id]):

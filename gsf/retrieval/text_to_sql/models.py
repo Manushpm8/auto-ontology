@@ -64,7 +64,10 @@ class TableRelevanceModel(BaseModel):
     )
     tables_to_remove: list[str] = Field(
         ...,
-        description="Names of tables that can be safely removed. Leave empty if unsure.",
+        description=(
+            "Names of tables that can be safely removed. "
+            "Leave EMPTY [] if unsure or none should be removed."
+        ),
     )
 
 

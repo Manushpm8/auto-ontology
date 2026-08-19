@@ -28,9 +28,12 @@ Schema columns already resolved by VDB (drop a gap only if the description direc
 
 Your task — produce a FRESH updated list:
 1. DROP any prior gap that is now fully resolved by the user's answer above \
-   (exact operators and constants given for every part of it, all column names considered resolved).
-2. KEEP any prior gap that the answer did not fully resolve.
-3. ADD any new gap introduced by the answer or the external knowledge that would \
+   (exact operators and constants given for every part of it, all column names considered resolved).\
+2. UPDATE a prior gap if the user's answer, relevant knowledge, or the working question provides \
+    information which requires a change in the gap's description (e.g, narrowing the gap in light \
+    of additional information).
+2. KEEP any prior gap that the answer did not fully resolve and does not require an update.
+4. ADD any new gap introduced by the answer or the external knowledge that would \
    prevent writing correct SQL — for example:
    - A formula whose exact operators, constants, or column combinations are still unknown
    - A threshold or classification condition expressed vaguely or in natural language \
@@ -73,6 +76,9 @@ Schema entities found in the database but with NO formula in the external knowle
 (the question may or may not require computing a formula for these — check each one):
 {vdb_only_section}
 
+Schema columns already resolved by VDB (drop a gap only if the description directly resolves it):
+{resolved_schema_terms}
+
 Identify gaps in either of the following categories:
 1. Terms in the external knowledge that are ambiguously defined:
    - Expressed with hedged language ("typically", "often", "approximately", "things like")
@@ -86,6 +92,7 @@ A gap is only significant if it would prevent writing correct SQL.
 
 Do NOT flag:
 - Terms fully defined with exact operators and all relevant column names found in the schema entities.
+- Terms already resolved to a specific column above (schema columns already resolved by VDB).
 - Business context that does not affect SQL structure
 - Minor ambiguities a SQL generator can resolve on its own
 
@@ -127,7 +134,8 @@ def detect_incomplete_formulas(
     """Return an updated (term, what_is_missing) gap list.
 
     When last_turn is None (turn 0): scans the KB and any VDB-only entities for
-    missing formulas — no user answer to evaluate.
+    missing formulas — no user answer to evaluate. resolved_schema_terms is also
+    used here to drop gaps for terms already resolved by the same VDB pass.
     When last_turn is provided: evaluates the answer against prior gaps and KB,
     dropping resolved terms, keeping unresolved ones, adding new gaps.
     resolved_schema_terms: pre-formatted VDB hit descriptions (entity → description)
@@ -142,6 +150,7 @@ def detect_incomplete_formulas(
             working_question=working_question,
             relevant_kg=relevant_kg or "None",
             vdb_only_section=vdb_section,
+            resolved_schema_terms=resolved_schema_terms or "None",
         )
     else:
         prior_text = "\n".join(f"- {t}: {m}" for t, m in current_gaps) if current_gaps else "None"
@@ -155,7 +164,7 @@ def detect_incomplete_formulas(
         )
 
     response = safe_invoke_text(llm, prompt).strip()
-    logger.info("Completeness — raw response: %s", response[:400])
+    logger.info("Completeness — raw response: %s", response[:600])
     gaps = _parse_gaps(response)
     logger.info("Completeness — gaps found: %s", gaps)
     return gaps

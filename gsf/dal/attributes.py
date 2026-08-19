@@ -183,6 +183,183 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Column lookup by name (for verifying a join predicate already written in SQL)
+# ---------------------------------------------------------------------------
+
+
+def find_column_id_by_table_and_name(
+    table_name: str,
+    column_name: str,
+    database_name: str | None = None,
+) -> str | None:
+    """Resolve a ``table.column`` reference from generated SQL to its Column id.
+
+    Case-insensitive on both table and column name, since the SQL came from an
+    LLM and may not match the graph's stored casing exactly. When
+    *database_name* is given, scopes the match to that database only — the
+    same table/column name can exist in multiple co-resident BIRD databases
+    (see :func:`find_unlinked_fk_columns`), and an unscoped match could
+    silently resolve to the wrong database's column. Returns ``None`` (not an
+    exception) on no match or an ambiguous multi-database match without
+    *database_name*, so callers can treat "can't verify" the same as "no
+    known edge" rather than crash.
+    """
+    if not table_name or not column_name:
+        return None
+    if database_name:
+        rows = get_neo4j_conn().query_read(
+            f"""
+            MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+                  (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+                  (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+            WHERE toLower(t.name) = toLower($table_name)
+              AND toLower(col.name) = toLower($column_name)
+            RETURN col.id AS id
+            LIMIT 1
+            """,
+            {
+                "database_name": database_name,
+                "table_name": table_name,
+                "column_name": column_name,
+            },
+        )
+    else:
+        rows = get_neo4j_conn().query_read(
+            f"""
+            MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+            WHERE toLower(t.name) = toLower($table_name)
+              AND toLower(col.name) = toLower($column_name)
+            RETURN col.id AS id
+            LIMIT 2
+            """,
+            {"table_name": table_name, "column_name": column_name},
+        )
+        if len(rows) > 1:
+            logger.info(
+                "find_column_id_by_table_and_name: ambiguous match for %s.%s "
+                "with no database_name given — treating as unresolved",
+                table_name,
+                column_name,
+            )
+            return None
+    return rows[0]["id"] if rows else None
+
+
+def find_table_id_by_name(
+    table_name: str, database_name: str | None = None
+) -> str | None:
+    """Resolve a bare table name (from a join-path hop) to its Table id.
+
+    Same database-scoping rationale as :func:`find_column_id_by_table_and_name`
+    — an unscoped lookup (e.g. ``datasources.fetch_table_by_name``) risks
+    matching a same-named table in a different co-resident BIRD database.
+    """
+    if not table_name:
+        return None
+    if database_name:
+        rows = get_neo4j_conn().query_read(
+            f"""
+            MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+                  (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+                  (t:{Labels.TABLE})
+            WHERE toLower(t.name) = toLower($table_name)
+            RETURN t.id AS id
+            LIMIT 1
+            """,
+            {"database_name": database_name, "table_name": table_name},
+        )
+    else:
+        rows = get_neo4j_conn().query_read(
+            f"""
+            MATCH (t:{Labels.TABLE})
+            WHERE toLower(t.name) = toLower($table_name)
+            RETURN t.id AS id
+            LIMIT 2
+            """,
+            {"table_name": table_name},
+        )
+        if len(rows) > 1:
+            logger.info(
+                "find_table_id_by_name: ambiguous match for %s with no "
+                "database_name given — treating as unresolved",
+                table_name,
+            )
+            return None
+    return rows[0]["id"] if rows else None
+
+
+def find_table_key_columns(
+    table_name: str, database_name: str | None = None
+) -> dict[str, list[str]]:
+    """Return ``{"pk": [...], "unique": [...]}`` column names (lowercased) for
+    a bare table name, used to detect a vacuous ``GROUP BY``/``PARTITION BY``
+    (grouping by a column already unique per row makes the aggregate a no-op).
+
+    Same database-scoping rationale as :func:`find_table_id_by_name` — scope
+    to *database_name* when given, since an unscoped lookup risks matching a
+    same-named table in a different co-resident BIRD database. ``pk`` comes
+    from the Table node's ``pk`` property (set at ingestion from the DDL);
+    ``unique`` comes from ``Column.is_unique`` (set from observed-data
+    profiling — see :func:`gsf.dal.datasources.store_column_uniqueness`), so
+    it also catches a unique-in-practice column with no declared constraint.
+    Returns ``{"pk": [], "unique": []}`` (not ``None``) when no match is found.
+    """
+    empty: dict[str, list[str]] = {"pk": [], "unique": []}
+    if not table_name:
+        return empty
+    db_scope = (
+        f"MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->"
+        f"      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)\n"
+        if database_name
+        else ""
+    )
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (t:{Labels.TABLE})
+        WHERE toLower(t.name) = toLower($table_name)
+        {db_scope}
+        OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+        WHERE c.is_unique = true
+        RETURN t.pk AS pk, collect(DISTINCT toLower(c.name)) AS unique_cols
+        LIMIT 1
+        """,
+        {"table_name": table_name, "database_name": database_name},
+    )
+    if not rows:
+        return empty
+    pk = [str(c).lower() for c in (rows[0].get("pk") or [])]
+    unique_cols = [c for c in (rows[0].get("unique_cols") or []) if c]
+    return {"pk": pk, "unique": unique_cols}
+
+
+def column_participates_in_semantic_fk(col_id: str) -> bool:
+    """Whether *col_id* is already known to the FK graph, on either side.
+
+    True if the column is itself an FK-holder (outgoing ``SEMANTIC_FK``) or is
+    the referenced/identity side of one (its own ``ColumnAttribute``, via
+    ``HAS_ATTRIBUTE``, is the target of some other column's ``SEMANTIC_FK``).
+    Used to scope the join-path check to columns ingestion already treats as
+    FK-shaped, rather than flagging arbitrary equality joins (date ranges,
+    status matches, business logic) the graph was never meant to model.
+    """
+    if not col_id:
+        return False
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (col:{Labels.COLUMN} {{id: $col_id}})
+        RETURN
+            EXISTS {{ (col)-[:{REL_SEMANTIC_FK}]->() }}
+            OR EXISTS {{
+                (col)-[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
+                    <-[:{REL_SEMANTIC_FK}]-()
+            }} AS participates
+        """,
+        {"col_id": col_id},
+    )
+    return bool(rows and rows[0].get("participates"))
+
+
+# ---------------------------------------------------------------------------
 # SemanticFK
 # ---------------------------------------------------------------------------
 
@@ -488,6 +665,68 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     return hops
 
 
+def find_shared_hub_bridge(col_a_id: str, col_b_id: str) -> dict:
+    """Find a genuine shared-identity hub connecting two FK columns that
+    :func:`find_join_path` cannot reach.
+
+    ``find_join_path``'s forward-only ``SEMANTIC_FK`` traversal is a
+    deliberate guard: two unrelated FK columns that merely reference the
+    same target (e.g. two ``person_id`` columns for different roles) must
+    never be reported as directly joined by walking the edge backwards.
+    But that guard also blocks a *legitimate* case with the identical shape
+    — two spokes of the same real identity hub (e.g. ``robot_details`` and
+    ``actuation_data`` both referencing ``robot_record`` via its own primary
+    key) — from ever being discovered, since neither spoke has anything
+    pointing *out* toward the other.
+
+    This is intentionally much narrower than lifting the forward-only guard
+    in general: it only reports a bridge when BOTH columns independently
+    hold a *forward* ``SEMANTIC_FK`` edge to the exact same
+    ``ColumnAttribute``, AND that attribute's defining column is the real,
+    declared primary key of its own table (``hubCol.name IN hubTable.pk``)
+    — the same discipline :func:`find_anchor_hub_siblings` already applies.
+    Requiring the shared target to be a genuine identity column (not just
+    any attribute two FK columns happen to share) is what keeps this from
+    reopening the "two unrelated FK columns, coincidentally shared target"
+    fabrication risk the forward-only design exists to prevent.
+
+    Returns ``{"hub_table", "hub_column"}`` (schema-unqualified — callers
+    already have the written table/column names and schema from the SQL
+    itself, so this only needs to supply the hub side), or ``{}`` if no such
+    shared, PK-anchored hub exists.
+    """
+    if col_a_id == col_b_id:
+        return {}
+
+    query = """
+    MATCH (ca:Column {id: $col_a_id})-[:SEMANTIC_FK]->(hubAttr:ColumnAttribute)
+          <-[:SEMANTIC_FK]-(cb:Column {id: $col_b_id})
+    MATCH (hubCol:Column)-[:HAS_ATTRIBUTE]->(hubAttr)
+    MATCH (hubTable:Table)-[:CONTAINS]->(hubCol)
+    WHERE hubCol.name IN coalesce(hubTable.pk, [])
+    RETURN hubCol.name AS hub_column, hubTable.name AS hub_table
+    LIMIT 1
+    """
+    try:
+        rows = get_neo4j_conn().query_read(
+            query, {"col_a_id": col_a_id, "col_b_id": col_b_id}
+        )
+    except Exception:
+        logger.warning(
+            "find_shared_hub_bridge: Neo4j query failed for %s / %s",
+            col_a_id,
+            col_b_id,
+            exc_info=True,
+        )
+        return {}
+    if not rows:
+        return {}
+    return {
+        "hub_table": rows[0].get("hub_table") or "",
+        "hub_column": rows[0].get("hub_column") or "",
+    }
+
+
 def find_anchor_hub_siblings(
     anchor_table_id: str, max_siblings: int = 5
 ) -> tuple[list[dict], int]:
@@ -541,9 +780,7 @@ def find_anchor_hub_siblings(
            anchorTable.name AS anchor_table
     """
     try:
-        rows = get_neo4j_conn().query_read(
-            query, {"anchor_table_id": anchor_table_id}
-        )
+        rows = get_neo4j_conn().query_read(query, {"anchor_table_id": anchor_table_id})
     except Exception:
         logger.warning(
             "find_anchor_hub_siblings: Neo4j query failed for table %s",
@@ -656,9 +893,7 @@ def find_table_bridge(
     """
     for src, dst in ((table_a_id, table_b_id), (table_b_id, table_a_id)):
         try:
-            rows = get_neo4j_conn().query_read(
-                query, {"start_id": src, "end_id": dst}
-            )
+            rows = get_neo4j_conn().query_read(query, {"start_id": src, "end_id": dst})
         except Exception:
             logger.warning(
                 "find_table_bridge: Neo4j query failed for %s -> %s",
@@ -673,9 +908,7 @@ def find_table_bridge(
         rel_types: list[str] = rows[0].get("rel_types") or []
         tables = [n for n in path_nodes if n.get("label") == "Table"]
         bridge = {
-            t["id"]: t
-            for t in tables
-            if t.get("id") not in (table_a_id, table_b_id)
+            t["id"]: t for t in tables if t.get("id") not in (table_a_id, table_b_id)
         }
         if not bridge:
             continue
@@ -687,7 +920,11 @@ def find_table_bridge(
                 "%s were never a candidate, not just restoring a dropped one",
                 src,
                 dst,
-                [t["name"] for t in bridge.values() if t["id"] not in allowed_table_ids],
+                [
+                    t["name"]
+                    for t in bridge.values()
+                    if t["id"] not in allowed_table_ids
+                ],
             )
             continue
 

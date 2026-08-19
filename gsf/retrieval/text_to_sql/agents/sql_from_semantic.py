@@ -304,6 +304,7 @@ class SQLFromCandidatesAgent(BaseAgent):
 
         primary_attribute: dict | None = path_state.get("primary_attribute")
         attribute_join_paths: list[dict] = path_state.get("attribute_join_paths") or []
+        self.logger.info("Join path detail: %s", attribute_join_paths)
         relevant_tables = path_state.get("relevant_tables", [])
         relevant_queries = path_state.get("relevant_queries", [])
         similar_questions = path_state.get("similar_questions", [])

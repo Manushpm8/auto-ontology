@@ -402,6 +402,7 @@ def should_clarify(
             current_gaps=[],
             llm=llm,
             vdb_only_entities=vdb_only,
+            resolved_schema_terms=resolved_schema_text,
         )
         if gaps:
             session.incomplete_formula_terms = gaps

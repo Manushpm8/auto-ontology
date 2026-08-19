@@ -182,7 +182,22 @@ def stream_agent_response(
 
     except Exception as exc:
         logger.exception("Error during agent stream")
-        yield {"type": "error", "message": f"Agent failed: {exc}"}
+        # Same fallback as get_agent_response_with_state: surface whatever
+        # SQL had already been reconstructed/executed before the crash
+        # (e.g. GraphRecursionError) instead of forcing an empty submission.
+        interrupted_path_state = final_state.get("path_state") or {}
+        fallback_sql = interrupted_path_state.get("sql_code", "") or ""
+        if fallback_sql:
+            yield {
+                "type": "result",
+                "answer": {
+                    "response": f"Agent failed: {exc}",
+                    "sql_code": fallback_sql,
+                    "path_state": interrupted_path_state,
+                },
+            }
+        else:
+            yield {"type": "error", "message": f"Agent failed: {exc}"}
 
 
 def get_agent_response(payload: TextToSQLPayload) -> dict:
@@ -213,7 +228,20 @@ def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
                             final_state[key] = value
     except Exception as exc:
         logger.exception("Error during agent stream in get_agent_response_with_state")
-        return {"response": f"Agent failed: {exc}", "sql_code": "", "path_state": {}}
+        # The stream may have already produced a valid, executed SQL query
+        # (e.g. several reconstruction rounds succeeded) before a later node
+        # raised — most commonly GraphRecursionError from an intent-validation
+        # <-> reconstruction oscillation. Fall back to whatever SQL is already
+        # sitting in path_state instead of discarding it and submitting blank
+        # SQL, which is a guaranteed Phase 1 failure even when the last known
+        # SQL was correct.
+        interrupted_path_state = final_state.get("path_state") or {}
+        fallback_sql = interrupted_path_state.get("sql_code", "") or ""
+        return {
+            "response": f"Agent failed: {exc}",
+            "sql_code": fallback_sql,
+            "path_state": interrupted_path_state,
+        }
 
     # merge path_state: start with initial, overlay final accumulated
     merged_path_state = dict(state.get("path_state") or {})

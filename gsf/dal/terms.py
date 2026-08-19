@@ -310,7 +310,8 @@ def fetch_all_terms_and_attributes(
                col.name AS column_name,
                col.sample_values AS sample_values,
                attr.id AS id,
-               sch.name AS schema_name
+               sch.name AS schema_name,
+               attr.datatype AS datatype
         """,
         attr_params,
     )
@@ -960,6 +961,7 @@ def fetch_related_terms_counts(
 def fetch_term_table_pairs(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
+    database_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return ``{term_id, table_id}`` rows linking Terms to their tables.
 
@@ -974,6 +976,17 @@ def fetch_term_table_pairs(
     pre-resolved *data_ids_by_zone* (see ``resolve_accessible_catalog_ids``)
     when the caller already resolved *zone_ids* for this request, to skip a
     repeat Neo4j round trip.
+
+    *database_name*, when given, additionally restricts results to tables in
+    that database only — same idiom as ``fetch_terms_with_sqls``'s db_scope.
+    This matters because Term nodes are global (no ``database_name``
+    property, and not scoped by *zone_ids* either, since a zone can span
+    multiple databases): the same Term can legitimately be REPRESENTS-linked
+    to tables in two unrelated databases that happen to model a similar
+    concept under the same term name (e.g. "Case" in both a reverse-logistics
+    and a labor-certification schema). Without this filter, a caller resolving
+    "which tables does this term touch" for one specific live database can
+    silently get tables back from a *different* database too.
     """
     conn = get_neo4j_conn()
     resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
@@ -991,16 +1004,26 @@ def fetch_term_table_pairs(
         )
         params = {"source": SEMANTIC_SOURCE, "table_ids": table_ids}
 
+    db_scope = ""
+    if database_name is not None:
+        db_scope = f"""
+        MATCH (db:{Labels.DB} {{name: $db_name}})-[:{Edges.CONTAINS}]->
+              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(ta)
+        """
+        params["db_name"] = database_name
+
     return conn.query_read(
         f"""
         MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{source: $source}})
         {filter_clause}
+        {db_scope}
         RETURN term.id AS term_id, ta.id AS table_id
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
               -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         {filter_clause}
+        {db_scope}
         RETURN term.id AS term_id, ta.id AS table_id
         """,
         params,

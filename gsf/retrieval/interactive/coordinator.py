@@ -15,14 +15,13 @@ from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, 
 from .kg_coverage import expand_kg_with_children
 from .output_type import output_type_enabled, should_skip_output_type_question, OUTPUT_TYPE_QUESTION, SCALAR_HINT
 from .conditional_output import conditional_output_enabled, get_conditional_output_hint
-from gsf.retrieval.data_access.semantic_search import search_semantic_index
-from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from .completeness import detect_incomplete_formulas
+from .evidence import build_grounded_terms_hint, detect_and_resolve_named_columns, generate_evidence
+from .followup_merge import merge_follow_up_question
 from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
-from gsf.utils.llm_invoke import safe_invoke_text_nr
 
 
 # ── Message classifier ──────────────────────────────────────────────────────
@@ -142,214 +141,6 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
 
 # ── SQL generation ──────────────────────────────────────────────────────────
 
-_FOLLOW_UP_MERGE_PROMPT = """\
-You are rewriting a follow-up database question into a clear, self-contained question \
-for a SQL generator.
-
-Follow-up question:
-{p2_question}
-
-Previous question (Phase 1):
-{p1_question}
-Previous SQL:
-{p1_sql}
-
-
-Task: Rewrite the follow-up question into a single, complete, standalone question \
-for the SQL generator. Resolve any underspecified terms, references, or concepts \
-in the follow-up using the previous question and SQL — pull in the exact column names, \
-table names, formulas, thresholds, and conditions that the follow-up depends on. \
-Include as much or as little of the previous SQL's structure as the follow-up requires.
-
-Rules:
-- Resolve references to prior concepts (e.g. "that category", "the same score", "those \
-signals") using the previous SQL and question. Make sure to use the context of both the \
-previous and follow up questions to determine wether a concept in the follow up is actually a reference.
-- Carry forward table names, column names, formulas, tresholds and conditions that the follow-up \
-references or implicitly depends on, unless requested otherwise by the follow up. Carry forward\
-exact numeric values, if they exist. 
-- If the follow-up reuses or extends the previous query's full structure, incorporate it. \
-If it only borrows part of it, incorporate only that part.
-- For any concept or metric in the follow-up that does not clearly map 1:1 to a term \
-in the previous SQL, do NOT assign it a table or column, or new name — leave it unresolved so \
-the SQL generator can discover it from the schema. Only carry forward table/column \
-assignments for concepts explicitly present in the previous SQL.
-- if the question indicates only a minor change to the question (e.g a short sentence \
-starting with "also"), closely preserve the previous question structure.
-- If the follow-up explicitly signals that part of the previous SQL's structure should \
-change, narrow, or drop this time (e.g. a different formula, a restricted table/join scope,\
-an output change), do not carry forward that part.
-"""
-
-
-def _merge_follow_up_question(
-    p1_question: str,
-    p1_sql: str,
-    p2_question: str,
-) -> str:
-    """Rewrite a raw follow-up question into a self-contained question with column
-    names and conditions drawn from the Phase 1 SQL."""
-    prompt = _FOLLOW_UP_MERGE_PROMPT.format(
-        p1_question=p1_question,
-        p1_sql=p1_sql[:800],
-        p2_question=p2_question,
-    )
-    merged = safe_invoke_text_nr(prompt).strip()
-    if not merged:
-        logger.warning("Follow-up merge returned empty; falling back to raw follow-up question")
-        return p2_question
-    logger.info("Follow-up merged question: %s", merged)
-    return merged
-
-_EVIDENCE_PROMPT = """\
-Working question: {question}
-
-Relevant external knowledge (one entry per term):
-{grounded_kg}
-{resolved_terms_section}
-Extract the formulas, calculation rules, and threshold/filter conditions that are \
-directly needed to answer the working question above. For each such entry, output one \
-line in SQL-friendly notation:
-  TermName = <formula, threshold, filter condition or definition using column names and values, if present>
-Only include conditions expressible with specific column names and values — skip \
-natural-language qualifiers with no clear SQL translation. \
-Never invent a column-like name (Title_Case/snake_case) for a term with no confirmed \
-mapping. If no term in a formula has a confirmed mapping, omit the line entirely. If \
-only some terms are confirmed, keep the formula structure and substitute \
-[UNRESOLVED: <term>] — using the term's exact original wording from the question — \
-for each unconfirmed operand, never a name that could pass as a real column. \
-Skip any entry not required by the working question. \
-Entries may include a "# matched from: <terms>" annotation line listing the original \
-natural-language phrases from the question that correspond to this KB entry — use these \
-to connect KB entries to the working question even when the phrasing differs. \
-If an entry is marked [DISAMBIGUATION], it means a KB formula and a direct schema column \
-both matched the same term — include only whichever is correct given the question context. \
-If nothing applies, output: NONE"""
-
-
-# Matches a column name in parentheses: (battlifeh), (pwractmw)
-_PAREN_COL_RE = re.compile(r'\(([a-zA-Z][a-zA-Z0-9_]*)\)')
-# Matches explicit "column <name>" or 'column "name"' or "column 'name'"
-_KEYWORD_COL_RE = re.compile(r'\bcolumns?\s+["\']?([a-zA-Z][a-zA-Z0-9_]+)["\']?', re.IGNORECASE)
-# Strict score threshold for exact column name lookup (lower = closer match)
-_NAMED_COL_SCORE_THRESHOLD = 0.45
-
-
-def _detect_and_resolve_named_columns(session: InteractiveSessionState, answer: str) -> None:
-    """Extract explicit column names from a user answer and resolve them to schema entries.
-
-    Detects two patterns:
-    - Parenthetical: "battery life in hours (battlifeh)"
-    - Keyword: "stored in the column dogs" / 'column "pwractmw"'
-
-    For each candidate, runs a VDB lookup. On a confident hit, injects a direct
-    "column_name → <schema description>" line into session._named_column_evidence
-    so the SQL generator knows which table the column belongs to.
-    """
-    if session.semantic_retriever is None:
-        return
-
-    candidates: set[str] = set()
-    for m in _PAREN_COL_RE.finditer(answer):
-        candidates.add(m.group(1))
-    for m in _KEYWORD_COL_RE.finditer(answer):
-        candidates.add(m.group(1))
-
-    if not candidates:
-        return
-
-    already = session._named_column_evidence
-    for col in candidates:
-        if col in already:
-            continue
-        try:
-            hits = search_semantic_index(
-                session.semantic_retriever, col, [LABEL_COLUMN_ATTRIBUTE], 1, session.db_name
-            )
-        except Exception:
-            continue
-        if not hits:
-            continue
-        score = hits[0].get("score", 1.0)
-        if score > _NAMED_COL_SCORE_THRESHOLD:
-            continue
-        hit_text = hits[0].get("text", "")
-        entry = f"{col} → {hit_text}"
-        logger.info("Named column resolved: %r (score=%.3f) → %s", col, score, hit_text[:120])
-        session._named_column_evidence = (
-            already + "\n" + entry if already else entry
-        )
-        already = session._named_column_evidence
-
-
-def _build_grounded_terms_hint(session: InteractiveSessionState) -> str:
-    """Surface already-resolved schema mappings for terms VDB-matched to the
-    current question, so the evidence LLM grounds formula terms in real
-    columns instead of guessing table/column names — and can correctly skip a
-    term instead of inventing one when nothing is confirmed.
-
-    Collisions (two terms landing on the same column) are resolved upstream,
-    during clarify's _resolve_collisions — by the time _cached_resolved_hits
-    reaches here every term is already mapped to a distinct column, or
-    confirmed as legitimately sharing one (in which case a note is injected
-    directly into evidence separately — see _run_sql_generation). So every
-    hit here can be presented as a plain confirmed mapping.
-    """
-    hits = session._cached_resolved_hits or []
-    if not hits:
-        return ""
-
-    # Keep the best (lowest-distance) hit per term.
-    best: dict[str, tuple[str, float, str]] = {}
-    for norm, hit_text, score, hit_id in hits:
-        if norm not in best or score < best[norm][1]:
-            best[norm] = (hit_text, score, hit_id)
-    if not best:
-        return ""
-
-    lines = [f'  "{norm}" → {hit_text}' for norm, (hit_text, _score, _hit_id) in best.items()]
-    return (
-        "\nConfirmed schema mappings for terms VDB-matched to the question "
-        "(terms not listed here have no confirmed mapping):\n"
-        + "\n".join(lines) + "\n"
-    )
-
-
-def _generate_evidence(question: str, grounded_kg: str, resolved_terms_section: str = "") -> str:
-    """Convert grounded KB text into a short Evidence string for the SQL generator."""
-    if not grounded_kg:
-        return ""
-    prompt = _EVIDENCE_PROMPT.format(
-        question=question, grounded_kg=grounded_kg, resolved_terms_section=resolved_terms_section
-    )
-    response = safe_invoke_text_nr(prompt).strip()
-    logger.debug("SQL gen — Evidence raw response: %s", response)
-    if not response or response.upper() == "NONE":
-        return ""
-    # Valid output is "Term = <expression>" anchored at the start of the line.
-    # The old "=" in l" check passed long prose lines that contained "=" anywhere.
-    _FORMULA_LINE = re.compile(r"^\s*[\w][\w\s/()-]*\s*=\s*\S")
-    _CONTINUATION = re.compile(r"^\s+(AND|OR)\b", re.IGNORECASE)
-    _AGG_ONLY = re.compile(r"^\s*[\w][\w\s/()-]*\s*=\s*(STDDEV|AVG|COUNT|SUM|MIN|MAX)\s*\(", re.IGNORECASE)
-    # Join AND/OR continuation lines onto the preceding valid formula line before filtering,
-    # so multi-condition expressions like "A = x AND y IN (...)" survive even if the LLM
-    # wraps the second clause onto a new line.
-    joined_lines: list[str] = []
-    for line in response.splitlines():
-        if _CONTINUATION.match(line) and joined_lines:
-            joined_lines[-1] = joined_lines[-1].rstrip() + " " + line.strip()
-        else:
-            joined_lines.append(line)
-    valid_lines = [
-        l for l in joined_lines
-        if _FORMULA_LINE.match(l) and not l.lstrip().startswith("#") and not _AGG_ONLY.match(l)
-    ]
-    if not valid_lines:
-        logger.warning("SQL gen — Evidence generation returned prose, discarding: %s", response[:100])
-        return ""
-    return "\n".join(valid_lines)
-
-
 def _run_sql_generation(session: InteractiveSessionState) -> str:
     """Call GSF and persist the returned path_state back to session."""
     from gsf.retrieval.text_to_sql.main import get_agent_response_with_state
@@ -379,7 +170,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     # Evidence extraction uses the merged question so it is calibrated to the same
     # question the SQL generator receives, rather than the shorter raw follow-up.
     if p1_sql and p1_question:
-        merged_q = _merge_follow_up_question(
+        merged_q = merge_follow_up_question(
             p1_question, p1_sql, session.working_question
         )
         session.working_question = merged_q
@@ -396,8 +187,8 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             f"thresholds, and formulas from this SQL where applicable]\n{p1_sql}"
         )
 
-    resolved_terms_section = _build_grounded_terms_hint(session)
-    evidence = _generate_evidence(evidence_question, combined_kg, resolved_terms_section)
+    resolved_terms_section = build_grounded_terms_hint(session)
+    evidence = generate_evidence(evidence_question, combined_kg, resolved_terms_section)
     if session._named_column_evidence:
         evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
     if session._json_shared_notes:
@@ -628,7 +419,7 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
                 )
                 session._cached_vdb_only_norms = set(remaining_vdb)
 
-        _detect_and_resolve_named_columns(session, last_turn["a"])
+        detect_and_resolve_named_columns(session, last_turn["a"])
 
         if merged:
             session.working_question = merged

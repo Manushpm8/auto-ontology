@@ -297,6 +297,13 @@ def _build_rows(
         }
         if a.get("schema_name"):
             fields["schema_name"] = a["schema_name"]
+        if a.get("datatype"):
+            # Threaded through so downstream consumers (e.g. entity_resolution's
+            # composite-column check) can read the real column type instead of
+            # guessing from description text. Only present on rows embedded after
+            # this field was added — existing embedded rows keep the text-based
+            # fallback until they're re-embedded.
+            fields["data_type"] = a["datatype"]
         if a.get("id"):
             fields["id"] = a["id"]
         rows.append(
