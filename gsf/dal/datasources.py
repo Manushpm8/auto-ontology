@@ -339,28 +339,6 @@ WITH db, s, t, columns_count, sql_count,
      ) AS unique_term_ids
 """
 
-_FETCH_FK_NEIGHBOUR_TABLES = f"""
-MATCH (db:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
-      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(src:{Labels.TABLE})
-WHERE toLower(src.name) IN $table_names
-MATCH (src)-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-      -[:{Edges.FOREIGN_KEY}]-(:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
-WHERE NOT toLower(tbl.name) IN $table_names
-MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-WITH tbl, sch, col ORDER BY col.ordinal_position
-WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: {column_description_expr("col")},
-                         sample_values: col.sample_values,
-                         is_unique: col.is_unique,
-                         exhaustive: col.exhaustive,
-                         n_distinct: col.n_distinct,
-                         date_format: col.date_format}}) AS cols
-RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       sch.name AS schema_name, tbl.n_rows AS n_rows, cols
-ORDER BY name
-"""
-
 
 def fetch_tables_for_schema(
     schema_id: str,
@@ -465,60 +443,6 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 # arrives without it reaches KumoRFM with no identity, which
                 # costs it every edge and makes it unusable in `FOR EACH`.
                 "pk": row.get("pk") or [],
-                "columns": cols,
-            }
-        )
-    return tables
-
-
-def fetch_fk_neighbour_tables(
-    database_name: str, table_names: list[str]
-) -> list[dict[str, Any]]:
-    """Tables one foreign key away from *table_names*, in ``relevant_tables`` shape.
-    Retrieval ranks tables by how well their name and description match the
-    question, which systematically misses tables the question never names but
-    the query still has to join through. Following FK edges out of the tables we
-    did find recovers those without resorting to the whole schema.
-    *table_names* is matched case-insensitively; the inputs themselves are
-    excluded from the result.
-    """
-    if not database_name or not table_names:
-        return []
-    try:
-        rows = graph().query_read(
-            _FETCH_FK_NEIGHBOUR_TABLES,
-            {
-                "database_name": database_name,
-                "table_names": [t.lower() for t in table_names],
-            },
-        )
-    except Exception:
-        logger.warning("fetch_fk_neighbour_tables: Neo4j query failed", exc_info=True)
-        return []
-    tables = []
-    for row in rows:
-        if not row.get("id"):
-            continue
-        cols = []
-        for col in row.get("cols") or []:
-            if not col.get("name"):
-                continue
-            # Most descriptions already end in "— samples: ..." (or "— one of:
-            # ..." for a closed enumeration); keeping sample_values as well would
-            # print the same values twice and adds ~30% to the rendered schema
-            # block.
-            description = col.get("description") or ""
-            if "samples:" in description or "one of:" in description:
-                col.pop("sample_values", None)
-            cols.append(col)
-        tables.append(
-            {
-                "id": row["id"],
-                "name": row.get("name") or "",
-                "description": row.get("description") or "",
-                "schema_name": row.get("schema_name") or "",
-                "label": "Table",
-                "n_rows": row.get("n_rows"),
                 "columns": cols,
             }
         )

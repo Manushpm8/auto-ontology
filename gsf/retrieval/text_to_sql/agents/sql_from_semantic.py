@@ -569,60 +569,6 @@ def _cross_table_join_eqs_from_path(
     return eqs
 
 
-def _physical_fk_joins_enabled() -> bool:
-    """Whether physical FK edges replace semantic paths as the join authority.
-    Env ``BIRD_PHYSICAL_FK_JOINS`` (default ``0`` = current behavior). When on,
-    the prompt lists the schema's own FK equations and any semantic path hop not
-    backed by an FK is dropped instead of being presented as authoritative.
-    """
-    return os.environ.get("BIRD_PHYSICAL_FK_JOINS", "0").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-    }
-
-
-def _fk_side(ref: str) -> str:
-    """Normalize one side of a join equation to ``table.column``."""
-    parts = [p for p in str(ref).strip().lower().split(".") if p]
-    return ".".join(parts[-2:]) if len(parts) >= 2 else str(ref).strip().lower()
-
-
-def _fk_equation_key(left: str, right: str) -> str:
-    return "=".join(sorted((_fk_side(left), _fk_side(right))))
-
-
-def _fk_index(verified_fks: list[dict]) -> tuple[set[str], dict[str, set[str]]]:
-    """Return ``(equation keys, column -> columns it is FK-linked to)``.
-    The second map lets two columns that both reference the same parent key be
-    recognized as a legitimate join even though no FK edge directly connects
-    them (the common ``a.fk = b.fk`` sibling join).
-    """
-    keys: set[str] = set()
-    linked: dict[str, set[str]] = {}
-    for fk in verified_fks or []:
-        left = f"{fk.get('table1', '')}.{fk.get('column1', '')}"
-        right = f"{fk.get('table2', '')}.{fk.get('column2', '')}"
-        if not fk.get("column1") or not fk.get("column2"):
-            continue
-        keys.add(_fk_equation_key(left, right))
-        a, b = _fk_side(left), _fk_side(right)
-        linked.setdefault(a, set()).add(b)
-        linked.setdefault(b, set()).add(a)
-    return keys, linked
-
-
-def _fk_supports(eq: str, keys: set[str], linked: dict[str, set[str]]) -> bool:
-    """True when *eq* is a real FK edge or a shared-parent sibling join."""
-    sides = str(eq).split("=")
-    if len(sides) != 2:
-        return False
-    a, b = _fk_side(sides[0]), _fk_side(sides[1])
-    if "=".join(sorted((a, b))) in keys:
-        return True
-    return bool(linked.get(a) and linked.get(b) and linked[a] & linked[b])
-
-
 def _entity_columns_enabled() -> bool:
     """Whether to print the entity -> competing columns block. Env ``BIRD_ENTITY_COLUMNS``."""
     return os.environ.get("BIRD_ENTITY_COLUMNS", "0").strip().lower() not in {
@@ -659,21 +605,10 @@ def format_entity_columns_for_prompt(entity_columns: list[dict]) -> str:
         if not entity or len(cols) < 2:
             continue
         lines.append(f'  "{entity}":')
-        tables_here = {str(c.get("table") or "").lower() for c in cols}
         for c in cols:
             bits = [f"    - {c.get('qualified')}"]
             if c.get("type"):
                 bits.append(f"({c['type']})")
-            # Naming the join cost inline is the point: v1 presented a same-table
-            # lookalike as a peer of the column gold needed, and the model took the
-            # single-table shortcut rather than joining.
-            if len(tables_here) > 1:
-                partners = [p for p in (c.get("fk_partners") or []) if p in tables_here]
-                bits.append(
-                    f"[in {c.get('table')}; FK to {', '.join(partners)}]"
-                    if partners
-                    else f"[in {c.get('table')}; no FK to the other tables listed here]"
-                )
             desc = _short_description(
                 str(c.get("description") or ""), str(c.get("column") or "")
             )
@@ -725,37 +660,10 @@ def _description_lists_values(description: str | None) -> bool:
     return any(marker in (description or "") for marker in _VALUE_SUFFIX_MARKERS)
 
 
-def _format_verified_fk_block(verified_fks: list[dict], target_db: str | None) -> str:
-    """Render the schema's own FK equations as the join authority."""
-    seen: set[str] = set()
-    lines: list[str] = []
-    for fk in verified_fks or []:
-        if not fk.get("column1") or not fk.get("column2"):
-            continue
-        left = f"{fk.get('table1', '')}.{fk.get('column1', '')}"
-        right = f"{fk.get('table2', '')}.{fk.get('column2', '')}"
-        key = _fk_equation_key(left, right)
-        if key in seen:
-            continue
-        seen.add(key)
-        lines.append(f"  {_fk_side(left)} = {_fk_side(right)}")
-    if not lines:
-        return ""
-    return "\n".join(
-        [
-            "VERIFIED FOREIGN KEYS (from the database schema — these are the only "
-            "join conditions known to be correct; use them whenever you join these "
-            "tables):",
-            *sorted(lines),
-        ]
-    )
-
-
 def _format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
     target_db: str | None = None,
-    verified_fks: list[dict] | None = None,
 ) -> str:
     """Format the semantic anchor + join-path context for the SQL prompt.
 
@@ -788,33 +696,14 @@ def _format_semantic_context(
         f"  Table: {anchor_full}",
         f"  Column: {anchor_col}  ({anchor_name})",
     ]
-    physical = _physical_fk_joins_enabled()
-    fk_keys, fk_linked = _fk_index(verified_fks or [])
-
-    if physical:
-        fk_block = _format_verified_fk_block(verified_fks or [], target_db)
-        if fk_block:
-            lines.append("")
-            lines.append(fk_block)
-
     if attribute_join_paths:
         lines.append("")
-        if physical:
-            lines.append(
-                "RELATED COLUMNS reachable from the anchor. The equations below are "
-                "cross-checked against the foreign keys above; prefer the verified "
-                "foreign keys whenever both apply. Use only the hops you need:"
-            )
-        else:
-            lines.append(
-                "JOIN PATHS (AUTHORITATIVE — derived from the verified semantic model). "
-                "This is our most reliable knowledge of how these tables join: use these "
-                "exact join conditions almost always, and only deviate if they clearly "
-                "cannot answer the question. Use only the hops you need:"
-            )
-        n_same_skipped = 0
-        n_cross_shown = 0
-        n_unbacked_dropped = 0
+        lines.append(
+            "JOIN PATHS (AUTHORITATIVE — derived from the verified semantic model). "
+            "This is our most reliable knowledge of how these tables join: use these "
+            "exact join conditions almost always, and only deviate if they clearly "
+            "cannot answer the question. Use only the hops you need:"
+        )
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
             col_name = entry.get("col_name", "")
@@ -824,20 +713,10 @@ def _format_semantic_context(
             lines.append(f"  {attr_name}: {full_table}.{col_name}")
             path = entry.get("path") or []
 
-            # Count same-table-only single hops (legacy noise) for debug.
-            if len(path) == 1 and _hop_table(path[0], "source") == _hop_table(
-                path[0], "target"
-            ):
-                n_same_skipped += 1
             eqs = _cross_table_join_eqs_from_path(path, target_db)
-            if physical:
-                kept = [e for e in eqs if _fk_supports(e, fk_keys, fk_linked)]
-                n_unbacked_dropped += len(eqs) - len(kept)
-                eqs = kept
             if eqs:
                 for eq in eqs:
                     lines.append(f"      {eq}")
-                    n_cross_shown += 1
 
     return "\n".join(lines)
 
@@ -1023,7 +902,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                 )
 
             target_db = path_state.get("target_db")
-            verified_fks = path_state.get("verified_fks") or []
             # Build the join-paths section (semantic hint + suggested joins).
             join_paths = ""
             if primary_attribute:
@@ -1033,7 +911,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                         primary_attribute,
                         attribute_join_paths,
                         target_db=target_db,
-                        verified_fks=verified_fks,
                     )
                     + "\n\n"
                 )

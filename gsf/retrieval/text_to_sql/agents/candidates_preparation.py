@@ -37,11 +37,9 @@ from gsf.dal.custom_analyses import (
     fetch_tables_from_custom_analyses,
 )
 from gsf.dal.datasources import (
-    fetch_fk_neighbour_tables,
     fetch_table_by_name,
     fetch_tables_by_ids,
 )
-from gsf.dal.foreign_keys import get_relevant_fks
 from gsf.dal.sql_attributes import (
     fetch_sql_attributes_with_sql,
     fetch_tables_from_sql_attributes,
@@ -116,12 +114,6 @@ _ENTITY_COLUMNS_MAX_ENTITIES = _read_env_count("BIRD_ENTITY_COLUMNS_MAX_ENTITIES
 # hit is 0.832, and 0.10 keeps all five confusable columns while cutting the tail.
 _ENTITY_COLUMNS_MARGIN = read_env_float("BIRD_ENTITY_COLUMNS_MARGIN", 0.10)
 _EVIDENCE_FORCE_KEEP = read_env_bool("BIRD_EVIDENCE_FORCE_KEEP_TABLES", "1")
-_FK_CLOSURE = read_env_bool("BIRD_FK_CLOSURE", "1")
-# Cap on tables added by FK closure, so a hub table cannot pull in a whole DB.
-_FK_CLOSURE_MAX = _read_env_count("BIRD_FK_CLOSURE_MAX", 4)
-# Ship the physical FK edges among the final tables to the generator, so join
-# conditions come from the schema rather than from semantic path inference.
-_PHYSICAL_FK_JOINS = read_env_bool("BIRD_PHYSICAL_FK_JOINS", "0")
 _FORCE_ANCHOR_TABLE = read_env_bool("BIRD_FORCE_ANCHOR_TABLE", "0")
 # Databases where the anchor's table is added but not pinned against the relevance
 # filter: on formula_1, pinning cost five questions their gold table, the anchor
@@ -168,28 +160,6 @@ def _qualify(table: str, column: str) -> str:
     return f'{table}."{column}"'
 
 
-def _fk_partner_tables(verified_fks: list[dict] | None) -> dict[str, set[str]]:
-    """table -> tables it has a physical FK edge to, lowercased and unqualified.
-    ``get_relevant_fks`` returns ``table1``/``table2`` schema-qualified ("main.frpm"),
-    while column hits carry the bare table name, so the prefix has to go or nothing
-    ever matches and every column is labelled as having no FK.
-    """
-
-    def _bare(value: object) -> str:
-        return str(value or "").strip().lower().rpartition(".")[2]
-
-    out: dict[str, set[str]] = {}
-    for fk in verified_fks or []:
-        if not isinstance(fk, dict):
-            continue
-        left, right = _bare(fk.get("table1")), _bare(fk.get("table2"))
-        if not left or not right or left == right:
-            continue
-        out.setdefault(left, set()).add(right)
-        out.setdefault(right, set()).add(left)
-    return out
-
-
 def fetch_entity_columns(
     retriever,
     entities: list[str],
@@ -197,7 +167,6 @@ def fetch_entity_columns(
     k: int | None = None,
     min_competing: int | None = None,
     allowed_tables: set[str] | None = None,
-    verified_fks: list[dict] | None = None,
 ) -> list[dict]:
     """Per entity, the columns whose descriptions match it — provenance kept.
     Returns only entities where ``min_competing`` or more distinct columns match, since
@@ -211,7 +180,6 @@ def fetch_entity_columns(
         return []
     k = _ENTITY_COLUMNS_K if k is None else k
     min_competing = _ENTITY_COLUMNS_MIN if min_competing is None else min_competing
-    fk_partners = _fk_partner_tables(verified_fks)
 
     def _one(entity: str) -> tuple[str, list[dict]]:
         rows = list(
@@ -248,9 +216,6 @@ def fetch_entity_columns(
                     "description": parsed.get("description") or "",
                     "sample_values": parsed.get("sample_values") or "",
                     "score": r.get("score"),
-                    "fk_partners": sorted(
-                        fk_partners.get(table.strip().lower(), set())
-                    ),
                 }
             )
         scored = [c for c in cols if c.get("score") is not None]
@@ -749,45 +714,10 @@ class CandidatePreparationAgent(BaseAgent):
         if table_relevance_reasoning:
             record_thought(path_state, _GRAPH_NODE_NAME, table_relevance_reasoning)
 
-        # --- 5b. Pull in FK neighbours of the tables we kept ---
-        # 77.8% of gold tables missing from the prompt sat one foreign key away
-        # from a table that *was* retrieved, so closing over FK edges recovers
-        # most of them while adding far fewer tables than the whole schema.
-        if _FK_CLOSURE and target_db:
-            before_names = [_qualified_name(t) for t in relevant_tables]
-            relevant_tables = self._expand_by_fk(relevant_tables, target_db)
-            added = [
-                _qualified_name(t)
-                for t in relevant_tables
-                if _qualified_name(t) not in before_names
-            ]
-            if added:
-                self.logger.info("FK closure added table(s): %s", added)
-
-        # --- 5c. Physical FK edges among the final tables ---
-        # Join conditions the model can trust: these come from the schema, not
-        # from walking the semantic graph.
-        verified_fks: list[dict] = []
-        if _PHYSICAL_FK_JOINS:
-            table_ids = [t.get("id") for t in relevant_tables if t.get("id")]
-            if table_ids:
-                try:
-                    verified_fks = get_relevant_fks(table_ids)
-                except Exception:
-                    self.logger.warning("get_relevant_fks failed", exc_info=True)
-                    verified_fks = []
-            self.logger.info(
-                "Verified FK edges among prompt tables: %d", len(verified_fks)
-            )
-
-        # --- 5d. Per-entity candidate columns, scoped to the final table set ---
+        # --- 5b. Per-entity candidate columns, scoped to the final table set ---
         # Runs here and not beside the table search: v1 ran before the relevance
-        # filter, FK closure and evidence force-keep, so it offered columns from
-        # tables that were never in the prompt. Measured cost of that on 137
-        # questions — q71 answered from schools.DOC instead of frpm."District Code"
-        # and q74 from schools.GSserved instead of frpm."Low Grade", both dropping
-        # the join to frpm entirely, because a same-table lookalike was presented
-        # as a peer of the column gold needed.
+        # filter and evidence force-keep, so it offered columns from tables that
+        # were never in the prompt.
         entity_columns: list[dict] = []
         if _ENTITY_COLUMNS:
             entity_columns = fetch_entity_columns(
@@ -799,7 +729,6 @@ class CandidatePreparationAgent(BaseAgent):
                     for t in relevant_tables
                     if t.get("name")
                 },
-                verified_fks=verified_fks,
             )
 
         # --- 6. Cross-database Train few-shot Q→SQL demos ---
@@ -830,7 +759,6 @@ class CandidatePreparationAgent(BaseAgent):
                 "similar_questions": similar_questions,
                 "custom_analyses": custom_analyses,
                 "custom_analyses_str": custom_analyses_str,
-                "verified_fks": verified_fks,
                 "sql_attributes": sql_attributes,
                 "sql_attributes_str": sql_attributes_str,
                 "table_relevance_reasoning": table_relevance_reasoning,
@@ -840,30 +768,6 @@ class CandidatePreparationAgent(BaseAgent):
                 "entity_columns": entity_columns,
             }
         }
-
-    def _expand_by_fk(self, tables: list[dict], target_db: str) -> list[dict]:
-        """Append tables one foreign key away from *tables*.
-        Runs after the relevance filter so the LLM's choices seed the expansion
-        rather than compete with it. Capped at ``_FK_CLOSURE_MAX`` additions to
-        keep a hub table from dragging in the whole database.
-        """
-        names = [(t.get("name") or "") for t in tables if t.get("name")]
-        if not names:
-            return tables
-        neighbours = fetch_fk_neighbour_tables(target_db, names)
-        if not neighbours:
-            return tables
-        existing = {t.get("id") for t in tables}
-        added = 0
-        for tbl in neighbours:
-            if added >= _FK_CLOSURE_MAX:
-                break
-            if tbl.get("id") in existing:
-                continue
-            tables.append(tbl)
-            existing.add(tbl.get("id"))
-            added += 1
-        return tables
 
     def _filter_custom_analyses_by_relevance(
         self,
