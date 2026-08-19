@@ -5,8 +5,13 @@
 """Tests for LLM invocation helpers."""
 
 from typing import Any
+from unittest.mock import patch
 
-from gsf.utils.llm_invoke import _structured_output_kwargs
+from gsf.utils.llm_invoke import (
+    LLM_INVOKE_TIMEOUT_S,
+    _build_client,
+    _structured_output_kwargs,
+)
 
 
 class _Model:
@@ -55,3 +60,52 @@ def test_a_client_exposing_model_instead_of_model_name_still_matches() -> None:
         model: Any = "aws/anthropic/bedrock-claude-opus-4-8"
 
     assert _structured_output_kwargs(_AltModel())["tool_choice"] is None
+
+
+@patch("langchain_openai.ChatOpenAI")
+def test_openai_client_uses_requested_configuration(chat_openai) -> None:
+    _build_client(
+        model="openai/gpt-4o",
+        api_key="non-reasoning-key",
+        base_url="https://non-reasoning.example/v1",
+        temperature=0.7,
+        max_tokens=1024,
+    )
+
+    chat_openai.assert_called_once_with(
+        model="openai/gpt-4o",
+        api_key="non-reasoning-key",
+        base_url="https://non-reasoning.example/v1",
+        temperature=0.7,
+        max_tokens=1024,
+        timeout=LLM_INVOKE_TIMEOUT_S,
+        max_retries=0,
+    )
+
+
+@patch("langchain_openai.ChatOpenAI")
+def test_gpt5_omits_unsupported_temperature(chat_openai) -> None:
+    _build_client(
+        model="openai/gpt-5.2",
+        api_key="key",
+        base_url="https://example.test/v1",
+        temperature=0.7,
+        max_tokens=1024,
+    )
+
+    assert "temperature" not in chat_openai.call_args.kwargs
+
+
+@patch("langchain_openai.ChatOpenAI")
+def test_bedrock_disables_parallel_tool_calls(chat_openai) -> None:
+    _build_client(
+        model="aws/anthropic/bedrock-claude-opus-4-8",
+        api_key="key",
+        base_url="https://example.test/v1",
+        temperature=0.0,
+        max_tokens=1024,
+    )
+
+    assert chat_openai.call_args.kwargs["disabled_params"] == {
+        "parallel_tool_calls": None
+    }
