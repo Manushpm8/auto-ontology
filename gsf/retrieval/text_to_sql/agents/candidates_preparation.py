@@ -32,6 +32,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from gsf.dal.attributes import fetch_attr_column_contexts, find_join_path
 from gsf.dal.custom_analyses import (
+    fetch_custom_analyses,
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
 )
@@ -76,6 +77,13 @@ from gsf.retrieval.text_to_sql.state import (
 )
 from gsf.utils.env import read_env_bool, read_env_float, read_env_int
 from gsf.utils.llm_invoke import invoke_with_structured_output
+
+
+def _refresh_domain_rules(state: AgentState, database_name: str | None) -> None:
+    """Load custom-analysis rules after retrieval chooses the database."""
+    state["domain_rules"] = fetch_custom_analyses(database_name) + list(
+        state.get("glossary") or []
+    )
 
 
 def _read_env_count(name: str, default: int) -> int:
@@ -360,11 +368,12 @@ class CandidatePreparationAgent(BaseAgent):
         original_question = get_original_question(state) or question
         evidence_phrases = evidence_retrieval_phrases(original_question)
         evidence_table_hints = evidence_table_name_hints(original_question)
-        target_db = path_state.get("target_db")
+        target_db = path_state.get("target_db") or path_state.get("retrieval_database")
         if not target_db:
             connectors = state.get("connectors") or []
             if len(connectors) == 1:
                 target_db = getattr(connectors[0], "database_name", None)
+        _refresh_domain_rules(state, target_db)
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])

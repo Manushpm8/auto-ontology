@@ -20,7 +20,6 @@ from gsf.retrieval.text_to_sql.connector_routing import (
 from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
-from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
 from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
@@ -87,12 +86,9 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         payload.get("processing_question") or payload["question"]
     ).strip()
 
-    # Rules are quoted verbatim into the table relevance prompt, so on a graph
-    # holding several databases the ones belonging elsewhere name tables the
-    # question's schema does not have.
-    domain_rules = fetch_custom_analyses(initial_path_state.get("target_db")) + list(
-        acronyms or []
-    )
+    # Custom-analysis rules are loaded after candidate retrieval has selected
+    # the database. Until then, retain only caller-supplied glossary rules.
+    domain_rules = list(acronyms or [])
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
