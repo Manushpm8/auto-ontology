@@ -39,6 +39,12 @@ _USER_CONTEXT = (
     "{queries}\n\n"
     "## Conversation History\n"
     "{qa_from_conversations}\n\n"
+    "## Similar Questions from Training Data\n"
+    "Use these examples as guidance for SQL structure and reasoning. "
+    "Their databases, schemas, tables, and columns may differ from the current "
+    "context, so do not copy identifiers from them. Use only identifiers from "
+    "the Available Schema above.\n\n"
+    "{qa_from_training}\n\n"
     "{custom_analyses}"
 )
 

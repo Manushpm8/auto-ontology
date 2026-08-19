@@ -287,6 +287,7 @@ class CandidatePreparationAgent(BaseAgent):
         (same per-table dict shape as ``get_relevant_tables``)
     - path_state["relevant_queries"]: Relevant queries for context
     - path_state["similar_questions"]: Similar questions from history
+    - path_state["trained_questions"]: Similar Q→SQL examples from training data
     - path_state["custom_analyses"]: Filtered complex candidates
     - path_state["custom_analyses_str"]: String representation for prompts
     - path_state["sql_attributes"]: Retrieved SqlAttribute details
@@ -732,22 +733,7 @@ class CandidatePreparationAgent(BaseAgent):
             )
 
         # --- 6. Cross-database Train few-shot Q→SQL demos ---
-        retrieved_questions = fetch_similar_questions(question)
-        # Preserve examples supplied by callers / conversation retrieval, then
-        # append Train demos without introducing duplicate Q→SQL pairs.
-        similar_questions = []
-        seen_examples: set[tuple[str, str]] = set()
-        for example in [
-            *(path_state.get("similar_questions") or []),
-            *retrieved_questions,
-        ]:
-            if not isinstance(example, (list, tuple)) or len(example) < 2:
-                continue
-            pair = (str(example[0]).strip(), str(example[1]).strip())
-            if not pair[0] or not pair[1] or pair in seen_examples:
-                continue
-            seen_examples.add(pair)
-            similar_questions.append(pair)
+        trained_questions = fetch_similar_questions(question)
 
         return {
             "path_state": {
@@ -756,7 +742,7 @@ class CandidatePreparationAgent(BaseAgent):
                 "relevant_queries": [
                     r["sql"] for r in relevant_queries if r.get("sql")
                 ],
-                "similar_questions": similar_questions,
+                "trained_questions": trained_questions,
                 "custom_analyses": custom_analyses,
                 "custom_analyses_str": custom_analyses_str,
                 "sql_attributes": sql_attributes,

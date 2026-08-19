@@ -201,7 +201,7 @@ def _schema_debug_snapshot(path_state: dict) -> dict:
             for x in sql_attrs
             if isinstance(x, dict) and x.get("name")
         ],
-        "n_few_shot": len(path_state.get("similar_questions") or []),
+        "n_few_shot": len(path_state.get("trained_questions") or []),
     }
 
 

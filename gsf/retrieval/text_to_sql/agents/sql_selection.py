@@ -167,7 +167,7 @@ def _run_unanimous_critic(
     winner_qr: QueryResponse,
     winner_sig: Optional[tuple],
     relevant_tables: list,
-    similar_questions: list,
+    trained_questions: list,
     connector,
     n_success: int,
 ) -> tuple[Any | None, dict]:
@@ -216,7 +216,7 @@ def _run_unanimous_critic(
         f"Question:\n{question}\n\n"
         f"Evidence (authoritative if present):\n{evidence or '(none)'}\n\n"
         f"Available tables:\n{', '.join(table_names) or '(unknown)'}\n\n"
-        f"Similar train demos:\n{_format_few_shot_for_critic(similar_questions)}\n\n"
+        f"Similar train demos:\n{_format_few_shot_for_critic(trained_questions)}\n\n"
         f"Unanimous SQL:\n{winner_sql}\n\n"
         f"Execution result preview:\n{_result_preview(winner_qr)}\n\n"
         "Audit the SQL. If and only if there is a concrete issue, propose "
@@ -1044,7 +1044,7 @@ class SQLSelectionAgent(BaseAgent):
                 winner_qr=query_responses[winner_idx],
                 winner_sig=signatures[winner_idx],
                 relevant_tables=relevant_tables,
-                similar_questions=list(path_state.get("similar_questions") or []),
+                trained_questions=list(path_state.get("trained_questions") or []),
                 connector=connector,
                 n_success=n_success,
             )

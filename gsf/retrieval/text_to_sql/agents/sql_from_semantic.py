@@ -789,6 +789,7 @@ class SQLFromCandidatesAgent(BaseAgent):
         relevant_tables = path_state.get("relevant_tables", [])
         relevant_queries = path_state.get("relevant_queries", [])
         similar_questions = path_state.get("similar_questions", [])
+        trained_questions = path_state.get("trained_questions", [])
         custom_analyses = path_state.get("custom_analyses", [])
         custom_analyses_str = path_state.get("custom_analyses_str", [])
         sql_attributes = path_state.get("sql_attributes", [])
@@ -811,10 +812,13 @@ class SQLFromCandidatesAgent(BaseAgent):
         self.logger.info(
             f"Using {len(similar_questions)} similar questions from conversations."
         )
+        self.logger.info(
+            "Using %d similar questions from training data.", len(trained_questions)
+        )
 
         def build_messages(
             tables_variant: list | None = None,
-            similar_questions_variant: list[tuple[str, str]] | None = None,
+            trained_questions_variant: list[tuple[str, str]] | None = None,
             strategy: str = "",
             schema_directive: str = "",
         ) -> list:
@@ -825,7 +829,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             extracted file data or file excerpts.
 
             ``tables_variant`` overrides the schema tables used in the prompt.
-            ``similar_questions_variant`` supplies a per-candidate demo subset.
+            ``trained_questions_variant`` supplies a per-candidate demo subset.
             ``strategy`` adds a candidate-specific reasoning lens.
             ``schema_directive`` adds a candidate-specific *schema* reading, which
             is a different axis: ``strategy`` changes how the slot reasons, this
@@ -836,17 +840,20 @@ class SQLFromCandidatesAgent(BaseAgent):
                 tables_variant if tables_variant is not None else relevant_tables
             )
             few_shots_for_prompt = (
-                similar_questions_variant
-                if similar_questions_variant is not None
-                else similar_questions
+                trained_questions_variant
+                if trained_questions_variant is not None
+                else trained_questions
             )
-            similar_questions_txt = "\n".join(
+            trained_questions_txt = "\n".join(
                 (
                     f"question: {x[0]}\nreasoning: {x[2]}\nanswer: {x[1]}"
                     if len(x) > 2 and str(x[2]).strip()
                     else f"question: {x[0]}\nanswer: {x[1]}"
                 )
                 for x in few_shots_for_prompt
+            )
+            similar_questions_txt = "\n".join(
+                f"question: {x[0]}\nanswer: {x[1]}" for x in similar_questions
             )
             relevance_reasoning = path_state.get("table_relevance_reasoning", "")
             observation_block = ""
@@ -932,6 +939,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 observation_block=observation_block,
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
+                qa_from_training=trained_questions_txt,
                 tables=tables_section,
                 join_paths=join_paths,
                 custom_analyses=ca_section + sa_section,
@@ -987,7 +995,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 tables_variant = _shuffled(relevant_tables, rng)
                 client = _get_sampling_llm(candidate_temp)
             few_shot_variant, few_shot_indices = _candidate_few_shots(
-                similar_questions, index
+                trained_questions, index
             )
             plan = _slot_plan() if n_candidates > 1 else None
             if pinned:
@@ -1038,14 +1046,14 @@ class SQLFromCandidatesAgent(BaseAgent):
             if strategy_tag == "baseline":
                 messages = build_messages(
                     tables_variant,
-                    similar_questions_variant=few_shot_variant,
+                    trained_questions_variant=few_shot_variant,
                     schema_directive=schema_directive,
                     strategy="",
                 )
             elif strategy_tag.startswith("query_plan"):
                 stage1_messages = build_messages(
                     tables_variant,
-                    similar_questions_variant=few_shot_variant,
+                    trained_questions_variant=few_shot_variant,
                     schema_directive=schema_directive,
                     strategy=_QUERY_PLAN_ARTIFACT_PROMPT,
                 )
@@ -1067,7 +1075,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 )
                 messages = build_messages(
                     tables_variant,
-                    similar_questions_variant=few_shot_variant,
+                    trained_questions_variant=few_shot_variant,
                     schema_directive=schema_directive,
                     strategy=_QUERY_PLAN_TRANSLATION_PROMPT.format(artifact=plan_text),
                 )
@@ -1075,7 +1083,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 tree_mode = _decomposition_tree_enabled(path_state.get("target_db"))
                 stage1_messages = build_messages(
                     tables_variant,
-                    similar_questions_variant=few_shot_variant,
+                    trained_questions_variant=few_shot_variant,
                     schema_directive=schema_directive,
                     strategy=(
                         _DECOMPOSITION_TREE_ARTIFACT_PROMPT
@@ -1111,7 +1119,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 )
                 messages = build_messages(
                     tables_variant,
-                    similar_questions_variant=few_shot_variant,
+                    trained_questions_variant=few_shot_variant,
                     schema_directive=schema_directive,
                     strategy=(
                         _DECOMPOSITION_TREE_TRANSLATION_PROMPT
@@ -1126,7 +1134,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 with_reasoning = _synthetic_reasoning_enabled()
                 stage1_messages = build_messages(
                     tables_variant,
-                    similar_questions_variant=[],
+                    trained_questions_variant=[],
                     schema_directive=schema_directive,
                     strategy=(
                         _SYNTHETIC_ARTIFACT_PROMPT_WITH_REASONING
@@ -1192,7 +1200,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                     )
                 messages = build_messages(
                     tables_variant,
-                    similar_questions_variant=synthetic_examples,
+                    trained_questions_variant=synthetic_examples,
                     schema_directive=schema_directive,
                     strategy=_SYNTHETIC_USE_PROMPT,
                 )
@@ -1205,7 +1213,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 ) + _ALT_TABLE_SET_STRATEGY
                 messages = build_messages(
                     tables_variant,
-                    similar_questions_variant=few_shot_variant,
+                    trained_questions_variant=few_shot_variant,
                     schema_directive=alt_directive,
                     strategy="",
                 )
