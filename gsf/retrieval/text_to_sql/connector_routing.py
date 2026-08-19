@@ -59,9 +59,9 @@ def resolve_connector_from_tables(
     """Return the connector that owns every relevant table.
 
     A single connector is unambiguous even when legacy table metadata lacks a
-    ``database_name``. With multiple connectors, missing, unknown, or mixed
-    database names are rejected instead of silently executing on the first
-    configured database.
+    ``database_name``. Unknown or mixed database names are always rejected, and
+    missing ones are rejected once multiple connectors are configured, instead
+    of silently executing on an arbitrary configured database.
     """
     if not connectors:
         return None
@@ -81,6 +81,12 @@ def resolve_connector_from_tables(
             table_database_names.add(database_name)
 
     if table_database_names:
+        if len(table_database_names) > 1:
+            conflicting = ", ".join(sorted(table_database_names))
+            raise ValueError(
+                "Relevant tables span multiple databases and cannot be executed "
+                f"as a single query. Conflicting databases: {conflicting}."
+            )
         database_name = next(iter(table_database_names))
         connector = db_to_connector.get(database_name)
         if connector is None:
