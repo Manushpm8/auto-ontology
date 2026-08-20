@@ -140,7 +140,7 @@ export const streamChat = (
 	// separate `charts` event — no second request needed from here.
 	const body = JSON.stringify({
 		question: payload.question,
-		conversation_id: payload.conversationId,
+		conversation_id: payload.conversationId ?? undefined,
 		target_db: payload.target_db ?? undefined,
 	});
 

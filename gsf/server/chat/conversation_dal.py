@@ -236,10 +236,50 @@ def persist_result_message(
             )
 
 
+def create_stateless_analytics(*, user_id: str, question: str, source: str) -> str:
+    """Create analytics for an authenticated one-shot request."""
+
+    analytics_id = str(uuid.uuid4())
+    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO conversation_analytics
+                    (id, user_id, source, question, question_timestamp)
+                VALUES (%s, %s, %s, %s, NOW())
+                """,
+                (analytics_id, user_id, source, question),
+            )
+    return analytics_id
+
+
+def persist_analytics_result(
+    *,
+    analytics_id: str,
+    user_id: str,
+    response: str,
+    sql_code: str | None,
+) -> None:
+    """Complete an analytics row for a stateless authenticated request."""
+
+    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE conversation_analytics
+                SET response = %s, sql = %s, response_timestamp = NOW()
+                WHERE id = %s AND user_id = %s
+                """,
+                (response, sql_code, analytics_id, user_id),
+            )
+
+
 __all__ = [
     "ConversationAccessError",
     "ConversationTurn",
     "PreparedConversation",
+    "create_stateless_analytics",
+    "persist_analytics_result",
     "persist_assistant_result",
     "persist_result_message",
     "prepare_conversation",

@@ -37,10 +37,17 @@
         "description": "Payload sent by the frontend to start a chat completion.",
         "properties": {
           "conversation_id": {
-            "description": "Stable thread UUID. Prior completed turns for it are loaded and the new turn \u2014 including the chart/table bubble, once ready \u2014 is persisted to it. An unknown UUID creates the conversation; one owned by another user is rejected with 404.",
-            "format": "uuid",
-            "title": "Conversation Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable thread UUID. When supplied, prior completed turns for it are loaded and the new turn \u2014 including the chart/table bubble, once ready \u2014 is persisted to it. An unknown UUID creates the conversation; one owned by another user is rejected with 404. Omitting it runs the question statelessly, with no history and no chart step.",
+            "title": "Conversation Id"
           },
           "prediction": {
             "anyOf": [
@@ -72,8 +79,7 @@
           }
         },
         "required": [
-          "question",
-          "conversation_id"
+          "question"
         ],
         "title": "ChatRequest",
         "type": "object"
@@ -3689,7 +3695,7 @@
     },
     "/api/chat/completions": {
       "post": {
-        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nEmits the SQL and formatted answer as a ``result`` event, then \u2014 if that\nanswer has an executed result \u2014 generates and persists the chart/table\nbubble itself and streams it back as a ``charts`` event before the stream\ncloses with ``[DONE]``. Callers that only care about the text/SQL answer\ncan still stop reading after ``result``; the chart step and its\npersistence happen server-side regardless of whether anyone keeps\nlistening (see ``_build_charts_event``).\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. ``conversation_id`` persists the\nturn and claims that conversation's single run slot \u2014 a second concurrent\nrequest for the same conversation gets 409 too.",
+        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nEmits the SQL and formatted answer as a ``result`` event, then \u2014 if that\nanswer has an executed result \u2014 generates and persists the chart/table\nbubble itself and streams it back as a ``charts`` event before the stream\ncloses with ``[DONE]``. Callers that only care about the text/SQL answer\ncan still stop reading after ``result``; the chart step and its\npersistence happen server-side regardless of whether anyone keeps\nlistening (see ``_build_charts_event``).\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. ``conversation_id`` persists the\nturn and claims that conversation's single run slot \u2014 a second concurrent\nrequest for the same conversation gets 409 too. Omitting ``conversation_id``\nruns the question statelessly: no history, no persisted turn, and no chart\nstep (``_build_charts_event`` needs a conversation to save into).",
         "operationId": "chat_completions_api_chat_completions_post",
         "requestBody": {
           "content": {

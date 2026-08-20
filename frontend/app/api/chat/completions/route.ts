@@ -38,21 +38,19 @@ const parseBody = (rawBody: string): Record<string, unknown> => {
 
 // Ask a question and stream the answer back as Server-Sent Events.
 //
-// `conversation_id` is required — there is no stateless mode. FastAPI emits
-// the SQL plus the formatted answer first (`result`), then — when that
-// answer has an executed result — generates and persists the chart/table
-// bubble itself and streams it back as its own `charts` event before the
-// stream closes. No second request needed from this route or the browser.
-// Persisting the turn additionally requires `conversation: ['write']`; the
-// route answers 409 while that conversation already has a run in flight.
+// FastAPI emits the SQL plus the formatted answer first (`result`), then —
+// when that answer has an executed result — generates and persists the
+// chart/table bubble itself and streams it back as its own `charts` event
+// before the stream closes. No second request needed from this route or the
+// browser. Passing `conversation_id` persists the turn and additionally
+// requires `conversation: ['write']`; the route answers 409 while that
+// conversation already has a run in flight. Omitting it runs the question
+// statelessly, with no history and no chart step.
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const payload = parseBody(await req.text());
 	const hasConversationId =
 		typeof payload.conversation_id === 'string' && payload.conversation_id.trim() !== '';
-	if (!hasConversationId) {
-		return new Response('conversation_id is required', { status: 400 });
-	}
-	if (!userCan(user, { conversation: ['write'] })) {
+	if (hasConversationId && !userCan(user, { conversation: ['write'] })) {
 		return new Response('Forbidden', { status: 403 });
 	}
 

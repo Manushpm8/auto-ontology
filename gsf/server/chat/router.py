@@ -15,8 +15,9 @@ Each conversation gets its own warm agent subprocess and may only have one
 in-flight stream at a time; different conversations run fully independently
 (each `WarmPool.acquire()` cold-starts a fresh subprocess if no standby is
 free, so there's no cap on how many conversations can run concurrently).
-Every request requires both an authenticated caller and a ``conversation_id``
-— see ``ChatRequest`` — and slots are keyed by the two together.
+Slots are keyed by the authenticated user plus ``conversation_id``. Stateless
+calls (no ``conversation_id``, see ``ChatRequest``) get a fresh, unique key
+per request instead and so never contend with anything.
 
 * If the conversation's slot is empty → request runs.
 * If the slot is held by a stream whose **client is still connected**
@@ -53,8 +54,10 @@ persists the chart-or-table bubble ("Message 2") itself — see
 ready, so a still-connected client renders it with no extra request, and
 ``/chat/watch`` replays it for anyone who reattaches later. Same guarantee as
 the SQL answer: it exists whether or not a browser tab is still around to ask
-for it. There used to be a client-driven ``POST /chat/visualize`` second step
-for this; it's gone now that every caller of this endpoint gets it for free.
+for it — provided the call had a ``conversation_id`` to persist into.
+Stateless calls (no ``conversation_id``) don't get a chart step at all, same
+as they never got the old client-driven visualize step without an
+authenticated conversation to save into.
 
 Disconnect detection
 --------------------
@@ -73,6 +76,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Generator
 from uuid import UUID
@@ -90,6 +94,8 @@ from gsf.server.chat.helpers import (
 )
 from gsf.server.chat.conversation_dal import (
     ConversationAccessError,
+    create_stateless_analytics,
+    persist_analytics_result,
     persist_assistant_result,
     persist_result_message,
     prepare_conversation,
@@ -212,8 +218,8 @@ class _Slot:
     finished: threading.Event = field(default_factory=threading.Event)
 
 
-# Keyed by authenticated user + conversation_id, so distinct users and
-# conversations never contend.
+# Keyed by authenticated user + conversation_id (or a per-request unique key
+# for stateless calls), so distinct users and conversations never contend.
 _active_slots: dict[str, _Slot] = {}
 _slot_lock = threading.Lock()
 
@@ -307,10 +313,8 @@ def _build_charts_event(slot: _Slot, answer: dict[str, Any]) -> dict[str, Any] |
     show (no executed result).
     """
 
-    # Every slot has both by construction (``ChatRequest.conversation_id`` is
-    # required and identity is checked before a slot is ever built) — kept as
-    # a guard rather than an assertion so a malformed slot degrades to "no
-    # chart" instead of a 500 mid-stream.
+    # Stateless calls (no ``conversation_id``) have nowhere to persist a
+    # chart bubble to, so they simply don't get one.
     if slot.conversation_id is None or slot.user_id is None:
         return None
 
@@ -381,17 +385,22 @@ def _pump(slot: _Slot) -> None:
         if not response and not sql_code:
             return
 
-        if slot.conversation_id is None:
-            return
-
         try:
-            persist_assistant_result(
-                conversation_id=slot.conversation_id,
-                user_id=slot.user_id,
-                analytics_id=slot.analytics_id,
-                response=response,
-                sql_code=sql_code,
-            )
+            if slot.conversation_id is not None:
+                persist_assistant_result(
+                    conversation_id=slot.conversation_id,
+                    user_id=slot.user_id,
+                    analytics_id=slot.analytics_id,
+                    response=response,
+                    sql_code=sql_code,
+                )
+            else:
+                persist_analytics_result(
+                    analytics_id=slot.analytics_id,
+                    user_id=slot.user_id,
+                    response=response,
+                    sql_code=sql_code,
+                )
             persisted = True
         except Exception:  # noqa: BLE001 — persistence must not break SSE
             logger.exception("Failed to persist assistant conversation turn")
@@ -507,7 +516,9 @@ async def chat_completions(
     Requires a compiled semantic layer; without one the request is rejected with
     409 rather than run against a bare schema. ``conversation_id`` persists the
     turn and claims that conversation's single run slot — a second concurrent
-    request for the same conversation gets 409 too.
+    request for the same conversation gets 409 too. Omitting ``conversation_id``
+    runs the question statelessly: no history, no persisted turn, and no chart
+    step (``_build_charts_event`` needs a conversation to save into).
     """
     logger.info("Chat completions request: %s", request.model_dump())
 
@@ -519,9 +530,15 @@ async def chat_completions(
     target_db = await asyncio.to_thread(_resolve_chat_target_db, request.target_db)
 
     # Conversation persistence trusts identity forwarded by the private Next.js
-    # gateway; every call needs both, so this raises 401 without one.
-    user_id = resolve_internal_user(http_request, required=True)
-    key = f"{user_id}:{request.conversation_id}"
+    # gateway; only calls that persist (i.e. carry a conversation_id) need it.
+    user_id = resolve_internal_user(
+        http_request, required=request.conversation_id is not None
+    )
+    key = (
+        f"{user_id}:{request.conversation_id}"
+        if request.conversation_id is not None
+        else str(uuid.uuid4())
+    )
 
     subject_token = _subject_token(http_request)
 
@@ -554,33 +571,47 @@ async def chat_completions(
         displaced.cancelled.set()
         _release(displaced)
 
-    try:
-        prepared = await asyncio.to_thread(
-            prepare_conversation,
-            conversation_id=request.conversation_id,
-            user_id=user_id,
-            question=request.question,
-            source=http_request.headers.get("x-gsf-source") or "api",
-        )
-    except ConversationAccessError as exc:
-        _release(slot)
-        raise HTTPException(status_code=404, detail="Conversation not found") from exc
-    except Exception as exc:
-        logger.exception("Failed to prepare conversation history")
-        _release(slot)
-        raise HTTPException(
-            status_code=503, detail="Conversation storage unavailable"
-        ) from exc
+    conversation_history: list[dict[str, str | None]] = []
+    if request.conversation_id is not None and user_id is not None:
+        try:
+            prepared = await asyncio.to_thread(
+                prepare_conversation,
+                conversation_id=request.conversation_id,
+                user_id=user_id,
+                question=request.question,
+                source=http_request.headers.get("x-gsf-source") or "api",
+            )
+        except ConversationAccessError as exc:
+            _release(slot)
+            raise HTTPException(
+                status_code=404, detail="Conversation not found"
+            ) from exc
+        except Exception as exc:
+            logger.exception("Failed to prepare conversation history")
+            _release(slot)
+            raise HTTPException(
+                status_code=503, detail="Conversation storage unavailable"
+            ) from exc
 
-    slot.analytics_id = prepared.analytics_id
-    conversation_history: list[dict[str, str | None]] = [
-        {
-            "question": turn.question,
-            "response": turn.response,
-            "sql_code": turn.sql_code,
-        }
-        for turn in prepared.history
-    ]
+        slot.analytics_id = prepared.analytics_id
+        conversation_history = [
+            {
+                "question": turn.question,
+                "response": turn.response,
+                "sql_code": turn.sql_code,
+            }
+            for turn in prepared.history
+        ]
+    elif user_id is not None:
+        try:
+            slot.analytics_id = await asyncio.to_thread(
+                create_stateless_analytics,
+                user_id=user_id,
+                question=request.question,
+                source=http_request.headers.get("x-gsf-source") or "api",
+            )
+        except Exception:  # noqa: BLE001 — analytics is best-effort
+            logger.exception("Failed to create stateless conversation analytics")
 
     worker.submit(
         request.question,

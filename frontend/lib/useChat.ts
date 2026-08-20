@@ -312,7 +312,7 @@ export const useChat = () => {
 	// refused before the stream started — the caller uses that to decide
 	// whether the typed text can be discarded.
 	const sendMessage = useCallback(
-		async (text: string, conversationId: string): Promise<boolean> => {
+		async (text: string, conversationId: string | null): Promise<boolean> => {
 			// A background resume may still be tailing this conversation (its
 			// `isLoading` only flips on the first step, so the input isn't locked).
 			// Drop it — this send supersedes it.

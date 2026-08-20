@@ -33,13 +33,15 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
-    conversation_id: UUID = Field(
-        ...,
+    conversation_id: UUID | None = Field(
+        default=None,
         description=(
-            "Stable thread UUID. Prior completed turns for it are loaded and the "
-            "new turn — including the chart/table bubble, once ready — is "
-            "persisted to it. An unknown UUID creates the conversation; one owned "
-            "by another user is rejected with 404."
+            "Stable thread UUID. When supplied, prior completed turns for it are "
+            "loaded and the new turn — including the chart/table bubble, once "
+            "ready — is persisted to it. An unknown UUID creates the "
+            "conversation; one owned by another user is rejected with 404. "
+            "Omitting it runs the question statelessly, with no history and no "
+            "chart step."
         ),
     )
     # Force the prediction/SQL branch instead of classifying the question:

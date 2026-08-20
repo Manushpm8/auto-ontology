@@ -15,11 +15,12 @@ export type ChatMessage = {
 export type ChatRequest = {
 	question: string;
 	/**
-	 * Required by the backend's `ChatRequest` — every chat turn is persisted
-	 * and gets the chart/table bubble automatically; there is no stateless
-	 * mode. An unknown UUID creates the conversation.
+	 * Stable thread UUID. When supplied, prior completed turns are loaded and
+	 * the new turn — including the chart/table bubble, once ready — is
+	 * persisted to it. An unknown UUID creates the conversation. Omitting it
+	 * runs the question statelessly, with no chart step or history.
 	 */
-	conversationId: string;
+	conversationId?: string | null;
 	/** Scope retrieval/SQL to one connected database when multiple are loaded. */
 	target_db?: string | null;
 };
