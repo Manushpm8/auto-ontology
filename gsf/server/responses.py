@@ -56,7 +56,6 @@ T = TypeVar("T")
 JsonObject = dict[str, Any]
 
 __all__ = [
-    "ChartsResponse",
     "ChatCancelResponse",
     "ColumnAttributePageResponse",
     "ColumnAttributePatchResponse",
@@ -171,12 +170,6 @@ class ChatCancelResponse(_Payload):
 # ---------------------------------------------------------------------------
 # Route-specific shapes
 # ---------------------------------------------------------------------------
-
-
-class ChartsResponse(_Payload):
-    """``charts`` is null when the model declined to propose a chart."""
-
-    charts: list[JsonObject] | None
 
 
 class ConnectionTestResponse(_Payload):

@@ -198,41 +198,41 @@ def persist_assistant_result(
             )
 
 
-def create_stateless_analytics(*, user_id: str, question: str, source: str) -> str:
-    """Create analytics for an authenticated one-shot request."""
-
-    analytics_id = str(uuid.uuid4())
-    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO conversation_analytics
-                    (id, user_id, source, question, question_timestamp)
-                VALUES (%s, %s, %s, %s, NOW())
-                """,
-                (analytics_id, user_id, source, question),
-            )
-    return analytics_id
-
-
-def persist_analytics_result(
+def persist_result_message(
     *,
-    analytics_id: str,
+    conversation_id: uuid.UUID,
     user_id: str,
-    response: str,
-    sql_code: str | None,
+    content: str,
+    sql_response: str | None,
 ) -> None:
-    """Complete an analytics row for a stateless authenticated request."""
+    """Persist the chart/table bubble ("Message 2") for a completed turn.
 
+    Called unconditionally from ``_pump`` so this bubble is guaranteed to
+    exist — same guarantee ``persist_assistant_result`` already gives the
+    SQL answer — instead of depending on a browser tab staying around to
+    ask for it.
+    """
+
+    conversation_str = str(conversation_id)
     with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
         with conn.cursor() as cur:
             cur.execute(
+                "SELECT 1 FROM conversations WHERE id = %s AND user_id = %s",
+                (conversation_str, user_id),
+            )
+            if cur.fetchone() is None:
+                raise ConversationAccessError(conversation_str)
+            cur.execute(
                 """
-                UPDATE conversation_analytics
-                SET response = %s, sql = %s, response_timestamp = NOW()
-                WHERE id = %s AND user_id = %s
+                INSERT INTO messages
+                    (id, conversation_id, role, content, sql_response, created_at)
+                VALUES (%s, %s, 'assistant', %s, %s, NOW())
                 """,
-                (response, sql_code, analytics_id, user_id),
+                (str(uuid.uuid4()), conversation_str, content, sql_response),
+            )
+            cur.execute(
+                "UPDATE conversations SET updated_at = NOW() WHERE id = %s",
+                (conversation_str,),
             )
 
 
@@ -240,8 +240,7 @@ __all__ = [
     "ConversationAccessError",
     "ConversationTurn",
     "PreparedConversation",
-    "create_stateless_analytics",
-    "persist_analytics_result",
     "persist_assistant_result",
+    "persist_result_message",
     "prepare_conversation",
 ]

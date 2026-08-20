@@ -38,23 +38,26 @@ const parseBody = (rawBody: string): Record<string, unknown> => {
 
 // Ask a question and stream the answer back as Server-Sent Events.
 //
-// Step 1 of a chat turn: SQL plus the formatted answer. Charts are a separate
-// second request (`POST /api/chat/visualize`) the client makes once this
-// completes, so the answer never waits on an extra LLM round trip. Passing
-// `conversation_id` persists the turn and additionally requires
-// `conversation: ['write']`; it answers 409 while that conversation already has
-// a run in flight. Omitting it runs the question statelessly.
+// `conversation_id` is required — there is no stateless mode. FastAPI emits
+// the SQL plus the formatted answer first (`result`), then — when that
+// answer has an executed result — generates and persists the chart/table
+// bubble itself and streams it back as its own `charts` event before the
+// stream closes. No second request needed from this route or the browser.
+// Persisting the turn additionally requires `conversation: ['write']`; the
+// route answers 409 while that conversation already has a run in flight.
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const payload = parseBody(await req.text());
 	const hasConversationId =
 		typeof payload.conversation_id === 'string' && payload.conversation_id.trim() !== '';
-	if (hasConversationId && !userCan(user, { conversation: ['write'] })) {
+	if (!hasConversationId) {
+		return new Response('conversation_id is required', { status: 400 });
+	}
+	if (!userCan(user, { conversation: ['write'] })) {
 		return new Response('Forbidden', { status: 403 });
 	}
 
-	// Step 1 only: SQL + formatted answer. Charts are a separate, second-step
-	// request (POST /api/chat/visualize) the client makes after this
-	// completes, so the answer never waits on an extra LLM round trip.
+	// Forwarded verbatim to FastAPI, which streams the SQL/answer and then the
+	// chart/table bubble on this same connection — see the module docstring.
 	const body = JSON.stringify(payload);
 
 	// Forward the caller's SSO token whenever we have one. Only the backend knows
