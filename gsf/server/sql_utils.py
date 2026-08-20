@@ -96,4 +96,3 @@ def validate_sql(sql: str, dialects: list[str], schemas: dict) -> Any:
             "ingest the schema first or check the query",
         )
     return query_obj
-#checked this
