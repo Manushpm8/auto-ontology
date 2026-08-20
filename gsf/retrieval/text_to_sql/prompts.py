@@ -226,23 +226,9 @@ def format_dialect_rules(dialect: str | None) -> str:
     return ""
 
 
-_CAPPED_THOUGHT_SPEC = (
-    "- thought: 1-2 sentence internal reasoning — your approach and key decisions."
-)
 _CAPPED_THOUGHT_EXAMPLE = """- thought: Join sales and customers, filter last full quarter, aggregate by country.
     "Total sales" means gross SUM(sales_amount), with no refund adjustment
     since the question didn't ask for one."""
-# The cap and the one-line example beneath it are the only place the prompt
-# demonstrates how much reasoning to do, and a demonstration outweighs an
-# instruction. Two sentences is not enough room to check the query against the
-# rule block above it, so the model commits to a shape before any rule applies.
-_OPEN_THOUGHT_SPEC = (
-    "- thought: work the question out here before writing any SQL. Name the "
-    "tables you need and why, the keys that join them, the exact filter "
-    "literals, the row grain, and the projection. Check the shape against the "
-    "rules above and say what you rejected. Take as much room as the question "
-    "needs."
-)
 _OPEN_THOUGHT_EXAMPLE = """The question asks for revenue per country for the last full quarter, so the
 output grain is one row per country and the projection is (country, revenue).
 Revenue lives in sales.sales_amount but country only exists on customers, so
@@ -263,43 +249,6 @@ def _open_reasoning_enabled(db_id: str | None = None) -> bool:
     return (db_id or "").strip().lower() in flags.OPEN_REASONING_DBS()
 
 
-# Measured on the 354 pools where no candidate matched gold: 63 (17.8%) have all
-# seven candidates using a column gold does not while missing one gold needs, and
-# 252 (71.2%) agree on an identical column set. The wrong column is chosen
-# unanimously, which is why neither candidate diversity nor selection can reach
-# these. The disambiguating values are already rendered — "charter" in the
-# California schools DB matches schools.Charter (1, 0) and schools.FundingType
-# ('Directly funded', 'Locally funded', ...), both printed with sample values in
-# the same prompt — so this asks for no new information. It only forces the
-# binding to be written down as an explicit decision instead of glided past.
-_BINDING_SPEC = (
-    " Begin by binding the question's nouns to the schema: for each meaningful "
-    "noun or modifier, name the exact table.column you will use. Where more than "
-    "one column plausibly matches, list every candidate with its sample values "
-    "and state why you chose one — a boolean flag column and a text column "
-    "describing a category are different questions, and their values show which "
-    "is which. Only then write the SQL."
-)
-_BINDING_EXAMPLE = """Bindings: "revenue" -> sales.sales_amount (numeric measure);
-"country" -> customers.country_name (only country column in scope);
-"last full quarter" -> sales.order_date. No ambiguous nouns here; had both
-customers.country_name and customers.country_code matched, the sample values
-('Germany' vs 'DE') decide it, and the question asks for a name.
-"""
-
-
-def _entity_binding_enabled(db_id: str | None = None) -> bool:
-    """Whether ``thought`` must open with an entity-to-column binding list.
-    Env ``BIRD_BIND_ENTITIES`` (default ``0``). Only meaningful for a database
-    opted in through ``BIRD_OPEN_REASONING_DBS``: a binding list does not fit the
-    1-2 sentence cap, so it is ignored while the capped spec is active rather
-    than contradicting it.
-    """
-    if not _open_reasoning_enabled(db_id):
-        return False
-    return flags.BIND_ENTITIES()
-
-
 def create_sql_from_candidates_prompt(
     *,
     dialect: str | None = None,
@@ -316,14 +265,9 @@ def create_sql_from_candidates_prompt(
     schema is still required to resolve the table, so it is never dropped here.
     """
     open_reasoning = _open_reasoning_enabled(target_db)
-    thought_spec = _OPEN_THOUGHT_SPEC if open_reasoning else _CAPPED_THOUGHT_SPEC
     thought_example = (
         _OPEN_THOUGHT_EXAMPLE if open_reasoning else _CAPPED_THOUGHT_EXAMPLE
     )
-    if _entity_binding_enabled(target_db):
-        thought_spec += _BINDING_SPEC
-        thought_example = _BINDING_EXAMPLE + thought_example
-
     bare_table_names = (dialect or "").lower() in _SCHEMALESS_DIALECTS
     if bare_table_names:
         table_name_rule = (
