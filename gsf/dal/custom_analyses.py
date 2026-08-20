@@ -211,7 +211,12 @@ def embed_custom_analyses(
 
     query = f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        WHERE $analysis_id IS NULL OR ca.id = $analysis_id
+        WHERE ($analysis_id IS NULL OR ca.id = $analysis_id)
+          AND ($database_name IS NULL OR EXISTS {{
+              MATCH (sql)-[:{Edges.SQL}]->(:{Labels.TABLE})
+                    <-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA})
+                    <-[:{Edges.CONTAINS}]-(:{Labels.DB} {{name: $database_name}})
+          }})
         WITH DISTINCT ca, sql,
              CASE
                  WHEN ca.description IS NOT NULL AND trim(toString(ca.description)) <> ''
@@ -234,7 +239,7 @@ def embed_custom_analyses(
     """
     result = graph().query_read(
         query,
-        parameters={"analysis_id": analysis_id},
+        parameters={"analysis_id": analysis_id, "database_name": database_name},
     )
     docs = result[0].get("docs") if result else None
     if not docs:

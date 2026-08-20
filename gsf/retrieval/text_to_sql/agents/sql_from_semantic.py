@@ -879,7 +879,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                     )
                     + "\n\n"
                 )
-
             # Build the available-tables schema section.
             tables_section = (
                 "AVAILABLE TABLES (schema context):\n"
