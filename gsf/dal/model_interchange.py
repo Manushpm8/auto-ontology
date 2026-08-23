@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
@@ -496,21 +496,45 @@ def _assemble_sql_attributes(
     return ModelSqlAttributesBySource(**grouped)
 
 
-def resolve_sql_column_ids(sql: str, database_name: str | None) -> list[str]:
-    """Parse SQL against the scoped catalog and return referenced column ids."""
-    if not sql.strip():
-        return []
+def _column_ids_from_sql(
+    sql: str, dialects: list[str], schemas: dict[str, Any]
+) -> list[str]:
     try:
-        query_obj = validate_sql(
-            sql,
-            get_dialects(database_name),
-            get_schemas(database_name),
-        )
+        query_obj = validate_sql(sql, dialects, schemas)
     except Exception:
         logger.debug("Could not resolve sql_column_is for SQL snippet", exc_info=True)
         return []
     column_ids = query_obj.get_column_ids()
     return [str(col_id) for col_id in column_ids if col_id]
+
+
+def resolve_sql_column_ids(sql: str, database_name: str | None) -> list[str]:
+    """Parse SQL against the scoped catalog and return referenced column ids."""
+    if not sql.strip():
+        return []
+    return _column_ids_from_sql(
+        sql, get_dialects(database_name), get_schemas(database_name)
+    )
+
+
+def make_cached_sql_column_resolver() -> Callable[[str, str | None], list[str]]:
+    """Build a ``sql_column_resolver`` that reuses ``(dialects, schemas)`` per database.
+
+    A single export calls this once per sql_attribute/custom_analysis, and
+    those usually share a handful of database names. Unlike
+    :func:`resolve_sql_column_ids`, which rebuilds the whole catalog snapshot
+    on every call (see :func:`_cached_dialects_and_schemas`), the resolver
+    returned here caches that snapshot for the lifetime of one export.
+    """
+    cache: dict[str | None, tuple[list[str], dict[str, Any]]] = {}
+
+    def _resolve(sql: str, database_name: str | None) -> list[str]:
+        if not sql.strip():
+            return []
+        dialects, schemas = _cached_dialects_and_schemas(cache, database_name)
+        return _column_ids_from_sql(sql, dialects, schemas)
+
+    return _resolve
 
 
 _IMPORTED_ID_INDEX_LABELS = (
