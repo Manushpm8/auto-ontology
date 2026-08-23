@@ -16,7 +16,6 @@ Non-Neo4j helpers that call these functions remain in their original locations:
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -649,15 +648,17 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
     }
 
 
-def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
-    """Write sample_values JSON onto Column nodes for a given table.
+def store_column_sample_values(table_id: str, samples: dict[str, list[str]]) -> None:
+    """Write sample_values as a native list onto Column nodes for a given table.
 
-    Skips silently when *samples* is empty.
+    Skips silently when *samples* is empty. Values are coerced to ``str``
+    so the stored list is always homogeneous, same as ``parse_sample_values``
+    would return it back.
     """
     if not samples:
         return
     entries = [
-        {"column_name": col, "sample_values": json.dumps(vals)}
+        {"column_name": col, "sample_values": [str(v) for v in vals]}
         for col, vals in samples.items()
     ]
     graph().query_write(

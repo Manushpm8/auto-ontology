@@ -59,8 +59,18 @@ const NODE_TYPE_BORDER_COLOR = NODE_TYPE_ACCENT_COLOR;
 // same crisp thickness on a small Column node and a large hub Table alike.
 const NODE_BORDER_WIDTH = 2;
 
+// `encodeURI` (unlike `encodeURIComponent`) leaves `#` unescaped, since it's
+// a valid — if here unintended — URI fragment delimiter. Every accent color
+// in `nodeTypeColors.ts` is a `#rrggbb` hex literal, so encoding the whole
+// data URI with `encodeURI` truncated it at the icon's own `stroke="#..."`
+// attribute: everything from that `#` onward became a URL fragment instead
+// of image data, leaving a malformed (closing-tag-less) SVG that rendered
+// as a bare disc with no glyph. Only the markup itself is percent-encoded
+// (not the `data:image/svg+xml;utf-8,` prefix, whose own `:`/`;`/`,` need
+// to stay literal) so every character the SVG's attributes/text can contain
+// — `#`, `<`, `"`, etc. — round-trips intact.
 const buildIcon = (svgMarkup: string, color: string) =>
-	encodeURI(`data:image/svg+xml;utf-8,${svgMarkup.replaceAll('currentColor', color)}`);
+	`data:image/svg+xml;utf-8,${encodeURIComponent(svgMarkup.replaceAll('currentColor', color))}`;
 
 // Leaves the node's `color` visible as a ring around the icon, mirroring the
 // previous Cytoscape look (small fixed icon centered on a larger colored shape).

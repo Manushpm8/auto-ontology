@@ -166,8 +166,10 @@ function Row({
 	onChevronFocusSync,
 }: {
 	depth: number;
-	open: boolean;
-	onToggle: () => void;
+	/** Only meaningful when `hasChildren` — leaf rows can omit it. */
+	open?: boolean;
+	/** Only called when `hasChildren` — leaf rows can omit it. */
+	onToggle?: () => void;
 	hasChildren: boolean;
 	loading?: boolean;
 	name: string;
@@ -198,7 +200,7 @@ function Row({
 			onClick={(e) => {
 				e.stopPropagation();
 				if (!hasChildren) return;
-				onToggle();
+				onToggle?.();
 				onChevronFocusSync?.();
 			}}
 			onKeyDown={(e) => {
@@ -206,7 +208,7 @@ function Row({
 					e.preventDefault();
 					e.stopPropagation();
 					if (!hasChildren) return;
-					onToggle();
+					onToggle?.();
 					onChevronFocusSync?.();
 				}
 			}}
@@ -241,7 +243,7 @@ function Row({
 				if (onActivateBranch) {
 					onActivateBranch();
 				} else if (hasChildren) {
-					onToggle();
+					onToggle?.();
 				}
 				onClick?.();
 			}}
@@ -268,8 +270,6 @@ function ColumnBlock({
 		<div>
 			<Row
 				depth={depth}
-				open={false}
-				onToggle={() => {}}
 				hasChildren={false}
 				name={column.column_name}
 				icon={catalogNodeInfo[DataModels.COLUMN].icon}

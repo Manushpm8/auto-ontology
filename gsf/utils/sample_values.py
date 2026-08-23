@@ -13,9 +13,10 @@ from typing import Any
 def parse_sample_values(raw: Any) -> list[str] | None:
     """Normalize Column.sample_values (JSON string or list) to a string list.
 
-    Profiling persists ``col.sample_values`` as a JSON string (see
-    ``store_column_sample_values``); catalog PATCH may store a list. Callers
-    expect ``list[str] | None``.
+    ``store_column_sample_values`` and catalog PATCH both persist
+    ``col.sample_values`` as a native list nowadays; the JSON-string branch
+    below only covers rows profiled before that (still-unmigrated installs).
+    Callers expect ``list[str] | None`` either way.
     """
     if raw is None:
         return None

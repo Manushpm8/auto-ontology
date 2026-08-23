@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 
@@ -383,6 +383,72 @@ export const ExplorationView = () => {
 		setActiveNodeId(activeNodeIdFromUrl);
 	}, [activeNodeIdFromUrl]);
 
+	// Every ref set above that tracks a kind of node/connection expansion,
+	// together — the single list `handleToggleLayer` below clears in full
+	// on every layer switch. Previously each ref was cleared there by a
+	// separate hand-written line, and it's exactly that hand-maintained
+	// list that silently fell out of sync with three of these refs; adding
+	// a ref here is now the only thing a new expansion kind needs to be
+	// included in that sweep. A plain `useRef` (rather than a fresh array
+	// literal each render) so its identity is stable, same rationale as
+	// every individual ref it holds.
+	const expandedIdsRefs = useRef<RefObject<Set<string>>[]>([
+		expandedTableIdsRef,
+		expandedTermIdsRef,
+		expandedSchemaIdsRef,
+		expandedColumnAttributeIdsRef,
+		expandedColumnIdsRef,
+		expandedSqlAttributeIdsRef,
+		expandedSqlIdsRef,
+		expandedConnectionIdsRef,
+	]);
+
+	// Shared tail of every `collapseXNode`/`collapseSemanticConnection`
+	// below: drop `trackingId` from that kind's own expansion-tracking ref
+	// set, ask the controller to remove the graft, and — if it hasn't
+	// grafted anything yet because its `expandXNode` fetch is still in
+	// flight — flag it as pending instead so that fetch cancels itself
+	// rather than grafting nodes on right after this collapse. `graphId`
+	// defaults to `trackingId` for every caller except
+	// `collapseSemanticConnection`, whose graft lives under a derived
+	// origin id (see `linkPathOriginId`) rather than the raw edge id its
+	// own ref set is keyed by. Returns whether the graft was actually
+	// resolved (i.e. neither of the two guards above short-circuited it) —
+	// `collapseSemanticConnection` uses this to decide whether it's safe to
+	// drop this connection's own cached hops too.
+	const collapseExpansion = useCallback(
+		(expandedIdsRef: RefObject<Set<string>>, trackingId: string, graphId = trackingId) => {
+			const activeController = controllerRef.current;
+			if (activeController == null) return false;
+			expandedIdsRef.current.delete(trackingId);
+			const removedNodeIds = activeController.removeExpansion(graphId);
+			if (removedNodeIds == null) {
+				pendingCollapseIdsRef.current.add(graphId);
+				return false;
+			}
+			if (removedNodeIds.length > 0) {
+				setExpandedNodesById((previous) => {
+					const next = new Map(previous);
+					removedNodeIds.forEach((removedId) => next.delete(removedId));
+					return next;
+				});
+			}
+			return true;
+		},
+		[],
+	);
+
+	// Shared tail of every `expandXNode`/`expandSemanticConnection` below:
+	// merges the entities it just fetched into `expandedNodesById` without
+	// touching any entity some other expansion already put there.
+	const mergeExpandedNodes = useCallback((newEntities: Map<string, ExpansionEntity>) => {
+		setExpandedNodesById((previous) => {
+			const next = new Map(previous);
+			newEntities.forEach((value, key) => next.set(key, value));
+			return next;
+		});
+	}, []);
+
 	// Grafts a double-clicked table's Schema, Columns, linked Terms, and
 	// referencing Sql queries onto the live graph — see
 	// `GraphController.addExpansion` in `GraphCanvas.tsx`. Schema metadata
@@ -519,38 +585,21 @@ export const ExplorationView = () => {
 			}
 
 			activeController.addExpansion(tableNode.id, expansionNodes, expansionEdges);
-			setExpandedNodesById((previous) => {
-				const next = new Map(previous);
-				newEntities.forEach((value, key) => next.set(key, value));
-				return next;
-			});
+			mergeExpandedNodes(newEntities);
 		},
-		[],
+		[mergeExpandedNodes],
 	);
 
 	// Reverses `expandTableNode` on a double click of an already-expanded
 	// table — see `GraphController.removeExpansion` in `GraphCanvas.tsx` for
 	// how shared Schema/Term nodes (reachable from more than one expanded
 	// table) are kept alive until every table referencing them is collapsed.
-	const collapseTableNode = useCallback((tableId: string) => {
-		const activeController = controllerRef.current;
-		if (activeController == null) return;
-		expandedTableIdsRef.current.delete(tableId);
-		const removedNodeIds = activeController.removeExpansion(tableId);
-		if (removedNodeIds == null) {
-			// Nothing to remove yet — `expandTableNode`'s fetch for this table
-			// is still in flight. Flag it so that fetch cancels itself instead
-			// of grafting expansion nodes on right after this collapse.
-			pendingCollapseIdsRef.current.add(tableId);
-			return;
-		}
-		if (removedNodeIds.length === 0) return;
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			removedNodeIds.forEach((id) => next.delete(id));
-			return next;
-		});
-	}, []);
+	// See `collapseExpansion` for the shared shape every `collapseXNode`
+	// below follows too.
+	const collapseTableNode = useCallback(
+		(tableId: string) => collapseExpansion(expandedTableIdsRef, tableId),
+		[collapseExpansion],
+	);
 
 	// Grafts a double-clicked Term's linked Tables, related Terms, and own
 	// Column/SQL Attributes onto the live graph — the mirror image of
@@ -566,186 +615,173 @@ export const ExplorationView = () => {
 	// from `dataGraph` itself); `GraphController.addExpansion` tells the
 	// two apart so collapsing this term later never removes one of those
 	// (see its own doc comment in `GraphCanvas.tsx`).
-	const expandTermNode = useCallback(async (termEntity: { id: string }) => {
-		const activeController = controllerRef.current;
-		if (activeController == null || expandedTermIdsRef.current.has(termEntity.id)) return;
-		expandedTermIdsRef.current.add(termEntity.id);
+	const expandTermNode = useCallback(
+		async (termEntity: { id: string }) => {
+			const activeController = controllerRef.current;
+			if (activeController == null || expandedTermIdsRef.current.has(termEntity.id)) return;
+			expandedTermIdsRef.current.add(termEntity.id);
 
-		const [detailsResponse, columnAttributesResponse, sqlAttributesResponse] =
-			await Promise.all([
-				explorationApi.getTermExplorationDetails(termEntity.id, {
-					skip: 0,
-					limit: TERM_TABLE_EXPAND_LIMIT,
-				}),
-				termsApi.getColumnAttributes(termEntity.id, {
-					skip: 0,
-					limit: TERM_COLUMN_ATTRIBUTE_EXPAND_LIMIT,
-				}),
-				termsApi.getSqlAttributes(termEntity.id, {
-					skip: 0,
-					limit: TERM_SQL_ATTRIBUTE_EXPAND_LIMIT,
-				}),
-			]);
+			const [detailsResponse, columnAttributesResponse, sqlAttributesResponse] =
+				await Promise.all([
+					explorationApi.getTermExplorationDetails(termEntity.id, {
+						skip: 0,
+						limit: TERM_TABLE_EXPAND_LIMIT,
+					}),
+					termsApi.getColumnAttributes(termEntity.id, {
+						skip: 0,
+						limit: TERM_COLUMN_ATTRIBUTE_EXPAND_LIMIT,
+					}),
+					termsApi.getSqlAttributes(termEntity.id, {
+						skip: 0,
+						limit: TERM_SQL_ATTRIBUTE_EXPAND_LIMIT,
+					}),
+				]);
 
-		const expansionNodes: ExpansionNodeInput[] = [];
-		const expansionEdges: ExpansionEdgeInput[] = [];
-		const newEntities = new Map<string, ExpansionEntity>();
+			const expansionNodes: ExpansionNodeInput[] = [];
+			const expansionEdges: ExpansionEdgeInput[] = [];
+			const newEntities = new Map<string, ExpansionEntity>();
 
-		if (!detailsResponse.error && detailsResponse.data) {
-			detailsResponse.data.tables.forEach((table) => {
-				expansionNodes.push({ id: table.id, kind: 'table', label: table.name });
-				expansionEdges.push({ source: termEntity.id, target: table.id });
-				// Harmless to record even when `table.id` is already a
-				// permanent node on the base graph — `activeNode` always
-				// takes precedence over this map when a node is clicked
-				// (see `activeExpansionEntity` below), so the entry is
-				// simply unused in that case. The raw catalog fields below
-				// (`undefined` when the table has none on record) let
-				// `handleDoubleClickNode` expand this table in turn — see
-				// `expandTableNode`.
-				newEntities.set(table.id, {
-					id: table.id,
-					kind: 'table',
-					name: table.name,
-					description: null,
-					viewHref: catalogPathFromFocusId(
-						`${table.database_id}|${table.schema_id}|${table.id}`,
-					),
-					databaseId: table.database_id ?? undefined,
-					databaseName: table.database_name ?? undefined,
-					schemaId: table.schema_id ?? undefined,
-					schemaName: table.schema_name ?? undefined,
+			if (!detailsResponse.error && detailsResponse.data) {
+				detailsResponse.data.tables.forEach((table) => {
+					expansionNodes.push({ id: table.id, kind: 'table', label: table.name });
+					expansionEdges.push({ source: termEntity.id, target: table.id });
+					// Harmless to record even when `table.id` is already a
+					// permanent node on the base graph — `activeNode` always
+					// takes precedence over this map when a node is clicked
+					// (see `activeExpansionEntity` below), so the entry is
+					// simply unused in that case. The raw catalog fields below
+					// (`undefined` when the table has none on record) let
+					// `handleDoubleClickNode` expand this table in turn — see
+					// `expandTableNode`.
+					newEntities.set(table.id, {
+						id: table.id,
+						kind: 'table',
+						name: table.name,
+						description: null,
+						viewHref: catalogPathFromFocusId(
+							`${table.database_id}|${table.schema_id}|${table.id}`,
+						),
+						databaseId: table.database_id ?? undefined,
+						databaseName: table.database_name ?? undefined,
+						schemaId: table.schema_id ?? undefined,
+						schemaName: table.schema_name ?? undefined,
+					});
 				});
-			});
-		}
+			}
 
-		const relatedTermIds = new Set<string>();
-		semanticGraphRef.current.links.forEach((link) => {
-			if (link.source !== termEntity.id && link.target !== termEntity.id) return;
-			const relatedTermId = link.source === termEntity.id ? link.target : link.source;
-			if (relatedTermId === termEntity.id || relatedTermIds.has(relatedTermId)) return;
-			if (relatedTermIds.size >= TERM_RELATED_TERMS_EXPAND_LIMIT) return;
-			const relatedTermNode = semanticGraphRef.current.nodes.find(
-				(node) => node.id === relatedTermId,
-			);
-			if (relatedTermNode == null) return;
-			relatedTermIds.add(relatedTermId);
+			const relatedTermIds = new Set<string>();
+			semanticGraphRef.current.links.forEach((link) => {
+				if (link.source !== termEntity.id && link.target !== termEntity.id) return;
+				const relatedTermId = link.source === termEntity.id ? link.target : link.source;
+				if (relatedTermId === termEntity.id || relatedTermIds.has(relatedTermId)) return;
+				if (relatedTermIds.size >= TERM_RELATED_TERMS_EXPAND_LIMIT) return;
+				const relatedTermNode = semanticGraphRef.current.nodes.find(
+					(node) => node.id === relatedTermId,
+				);
+				if (relatedTermNode == null) return;
+				relatedTermIds.add(relatedTermId);
 
-			expansionNodes.push({
-				id: relatedTermNode.id,
-				kind: 'term',
-				label: relatedTermNode.name,
-			});
-			expansionEdges.push({ source: termEntity.id, target: relatedTermNode.id });
-			// `activeExpansionTermNode` (see below) always re-resolves a `term`
-			// kind entity's full record straight from `semanticGraph` by id, so
-			// this entry only needs to carry enough for `handleDoubleClickNode`
-			// to recognize it as an expandable Term.
-			newEntities.set(relatedTermNode.id, {
-				id: relatedTermNode.id,
-				kind: 'term',
-				name: relatedTermNode.name,
-				description: relatedTermNode.description,
-				viewHref: `/terms?focus=${encodeURIComponent(relatedTermNode.id)}`,
-			});
-		});
-
-		if (!columnAttributesResponse.error && columnAttributesResponse.data) {
-			columnAttributesResponse.data.forEach((attribute) => {
-				// Prefixed like `column`/`schema` above — a ColumnAttribute's own
-				// id could otherwise collide with the id of the Column it's
-				// backed by (see `primary_column` below).
-				const attributeNodeId = `attribute:${attribute.id}`;
 				expansionNodes.push({
-					id: attributeNodeId,
-					kind: 'columnAttribute',
-					label: attribute.name,
+					id: relatedTermNode.id,
+					kind: 'term',
+					label: relatedTermNode.name,
 				});
-				// The real direction is `(ColumnAttribute)-[:PROPERTY_OF]->(Term)`
-				// (see `fetch_column_attributes` in `gsf/dal/terms.py`) — drawn
-				// from the term regardless, same as every other structural edge
-				// `addExpansion` grafts on.
-				expansionEdges.push({ source: termEntity.id, target: attributeNodeId });
-				newEntities.set(attributeNodeId, {
-					id: attributeNodeId,
-					kind: 'columnAttribute',
-					name: attribute.name,
-					description: attribute.description,
-					viewHref:
-						attribute.primary_column != null
-							? catalogPathFromFocusId(
-									`${attribute.primary_column.db_id}|${attribute.primary_column.schema_id}|${attribute.primary_column.table_id}|${attribute.primary_column.id}`,
-								)
-							: `/terms?focus=${encodeURIComponent(termEntity.id)}`,
-					// Carried through so `expandColumnAttributeNode` can graft
-					// this attribute's own `HAS_ATTRIBUTE` Column on without a
-					// second request — `undefined` (and so unexpandable) when
-					// no Column owns it.
-					databaseId: attribute.primary_column?.db_id,
-					schemaId: attribute.primary_column?.schema_id,
-					tableId: attribute.primary_column?.table_id,
-					tableName: attribute.primary_column?.table_name,
-					columnId: attribute.primary_column?.id,
-					columnName: attribute.primary_column?.column_name,
+				expansionEdges.push({ source: termEntity.id, target: relatedTermNode.id });
+				// `activeExpansionTermNode` (see below) always re-resolves a `term`
+				// kind entity's full record straight from `semanticGraph` by id, so
+				// this entry only needs to carry enough for `handleDoubleClickNode`
+				// to recognize it as an expandable Term.
+				newEntities.set(relatedTermNode.id, {
+					id: relatedTermNode.id,
+					kind: 'term',
+					name: relatedTermNode.name,
+					description: relatedTermNode.description,
+					viewHref: `/terms?focus=${encodeURIComponent(relatedTermNode.id)}`,
 				});
 			});
-		}
 
-		if (!sqlAttributesResponse.error && sqlAttributesResponse.data) {
-			sqlAttributesResponse.data.forEach((attribute) => {
-				// Prefixed like the ColumnAttribute nodes above — no catalog
-				// column backs a SqlAttribute, so there's no id collision risk,
-				// but the prefix keeps every expansion node kind consistent.
-				const attributeNodeId = `attribute:${attribute.id}`;
-				expansionNodes.push({
-					id: attributeNodeId,
-					kind: 'sqlAttribute',
-					label: attribute.name,
+			if (!columnAttributesResponse.error && columnAttributesResponse.data) {
+				columnAttributesResponse.data.forEach((attribute) => {
+					// Prefixed like `column`/`schema` above — a ColumnAttribute's own
+					// id could otherwise collide with the id of the Column it's
+					// backed by (see `primary_column` below).
+					const attributeNodeId = `attribute:${attribute.id}`;
+					expansionNodes.push({
+						id: attributeNodeId,
+						kind: 'columnAttribute',
+						label: attribute.name,
+					});
+					// The real direction is `(ColumnAttribute)-[:PROPERTY_OF]->(Term)`
+					// (see `fetch_column_attributes` in `gsf/dal/terms.py`) — drawn
+					// from the term regardless, same as every other structural edge
+					// `addExpansion` grafts on.
+					expansionEdges.push({ source: termEntity.id, target: attributeNodeId });
+					newEntities.set(attributeNodeId, {
+						id: attributeNodeId,
+						kind: 'columnAttribute',
+						name: attribute.name,
+						description: attribute.description,
+						viewHref:
+							attribute.primary_column != null
+								? catalogPathFromFocusId(
+										`${attribute.primary_column.db_id}|${attribute.primary_column.schema_id}|${attribute.primary_column.table_id}|${attribute.primary_column.id}`,
+									)
+								: `/terms?focus=${encodeURIComponent(termEntity.id)}`,
+						// Carried through so `expandColumnAttributeNode` can graft
+						// this attribute's own `HAS_ATTRIBUTE` Column on without a
+						// second request — `undefined` (and so unexpandable) when
+						// no Column owns it.
+						databaseId: attribute.primary_column?.db_id,
+						schemaId: attribute.primary_column?.schema_id,
+						tableId: attribute.primary_column?.table_id,
+						tableName: attribute.primary_column?.table_name,
+						columnId: attribute.primary_column?.id,
+						columnName: attribute.primary_column?.column_name,
+					});
 				});
-				expansionEdges.push({ source: termEntity.id, target: attributeNodeId });
-				newEntities.set(attributeNodeId, {
-					id: attributeNodeId,
-					kind: 'sqlAttribute',
-					name: attribute.name,
-					description: attribute.description,
-					// No catalog Column backs a SqlAttribute (it's computed, not
-					// stored) — the only place to view it further is the Term.
-					viewHref: `/terms?focus=${encodeURIComponent(termEntity.id)}`,
+			}
+
+			if (!sqlAttributesResponse.error && sqlAttributesResponse.data) {
+				sqlAttributesResponse.data.forEach((attribute) => {
+					// Prefixed like the ColumnAttribute nodes above — no catalog
+					// column backs a SqlAttribute, so there's no id collision risk,
+					// but the prefix keeps every expansion node kind consistent.
+					const attributeNodeId = `attribute:${attribute.id}`;
+					expansionNodes.push({
+						id: attributeNodeId,
+						kind: 'sqlAttribute',
+						label: attribute.name,
+					});
+					expansionEdges.push({ source: termEntity.id, target: attributeNodeId });
+					newEntities.set(attributeNodeId, {
+						id: attributeNodeId,
+						kind: 'sqlAttribute',
+						name: attribute.name,
+						description: attribute.description,
+						// No catalog Column backs a SqlAttribute (it's computed, not
+						// stored) — the only place to view it further is the Term.
+						viewHref: `/terms?focus=${encodeURIComponent(termEntity.id)}`,
+					});
 				});
-			});
-		}
+			}
 
-		if (pendingCollapseIdsRef.current.delete(termEntity.id)) {
-			// Double-clicked to collapse before this fetch resolved — see
-			// `expandTableNode`'s identical guard above.
-			return;
-		}
+			if (pendingCollapseIdsRef.current.delete(termEntity.id)) {
+				// Double-clicked to collapse before this fetch resolved — see
+				// `expandTableNode`'s identical guard above.
+				return;
+			}
 
-		activeController.addExpansion(termEntity.id, expansionNodes, expansionEdges);
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			newEntities.forEach((value, key) => next.set(key, value));
-			return next;
-		});
-	}, []);
+			activeController.addExpansion(termEntity.id, expansionNodes, expansionEdges);
+			mergeExpandedNodes(newEntities);
+		},
+		[mergeExpandedNodes],
+	);
 
-	// Reverses `expandTermNode` — see `collapseTableNode`'s identical shape.
-	const collapseTermNode = useCallback((termId: string) => {
-		const activeController = controllerRef.current;
-		if (activeController == null) return;
-		expandedTermIdsRef.current.delete(termId);
-		const removedNodeIds = activeController.removeExpansion(termId);
-		if (removedNodeIds == null) {
-			pendingCollapseIdsRef.current.add(termId);
-			return;
-		}
-		if (removedNodeIds.length === 0) return;
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			removedNodeIds.forEach((id) => next.delete(id));
-			return next;
-		});
-	}, []);
+	// Reverses `expandTermNode` — see `collapseExpansion`'s shared shape.
+	const collapseTermNode = useCallback(
+		(termId: string) => collapseExpansion(expandedTermIdsRef, termId),
+		[collapseExpansion],
+	);
 
 	// Grafts a double-clicked Schema's full table list onto the live graph —
 	// a Schema node only ever exists as one already grafted on by
@@ -757,86 +793,73 @@ export const ExplorationView = () => {
 	// edge onto those without duplicating the node itself (see its own doc
 	// comment in `GraphCanvas.tsx`), so expanding a Schema mostly just draws
 	// in the edges connecting it to tables that were already on the canvas.
-	const expandSchemaNode = useCallback(async (schemaEntity: ExpansionEntity) => {
-		const activeController = controllerRef.current;
-		if (
-			activeController == null ||
-			schemaEntity.schemaId == null ||
-			expandedSchemaIdsRef.current.has(schemaEntity.id)
-		) {
-			return;
-		}
-		expandedSchemaIdsRef.current.add(schemaEntity.id);
+	const expandSchemaNode = useCallback(
+		async (schemaEntity: ExpansionEntity) => {
+			const activeController = controllerRef.current;
+			if (
+				activeController == null ||
+				schemaEntity.schemaId == null ||
+				expandedSchemaIdsRef.current.has(schemaEntity.id)
+			) {
+				return;
+			}
+			expandedSchemaIdsRef.current.add(schemaEntity.id);
 
-		const tablesResponse = await datasources.getTablesForSchema(schemaEntity.schemaId, {
-			databaseName: schemaEntity.databaseName,
-		});
-
-		const expansionNodes: ExpansionNodeInput[] = [];
-		const expansionEdges: ExpansionEdgeInput[] = [];
-		const newEntities = new Map<string, ExpansionEntity>();
-
-		if (!tablesResponse.error) {
-			(tablesResponse.data ?? []).slice(0, SCHEMA_TABLE_EXPAND_LIMIT).forEach((table) => {
-				// Reuses the real table id as the node id (like a table
-				// expansion's own Term nodes), so a table already on the base
-				// graph — or grafted on by another expansion — is shared
-				// instead of duplicated.
-				expansionNodes.push({ id: table.id, kind: 'table', label: table.name });
-				expansionEdges.push({ source: schemaEntity.id, target: table.id });
-				newEntities.set(table.id, {
-					id: table.id,
-					kind: 'table',
-					name: table.name,
-					description: table.description ?? null,
-					viewHref: catalogPathFromFocusId(
-						`${schemaEntity.databaseId}|${schemaEntity.schemaId}|${table.id}`,
-					),
-					// Carried through (same as a Term's own Table neighbours in
-					// `expandTermNode`) so `handleDoubleClickNode` can expand
-					// *this* table in turn via `expandTableNode` — without these,
-					// its `databaseId`/`databaseName`/`schemaId`/`schemaName`
-					// guard there silently no-ops on every table a Schema
-					// expansion grafts on.
-					databaseId: schemaEntity.databaseId,
-					databaseName: schemaEntity.databaseName,
-					schemaId: schemaEntity.schemaId,
-					schemaName: schemaEntity.name,
-				});
+			const tablesResponse = await datasources.getTablesForSchema(schemaEntity.schemaId, {
+				databaseName: schemaEntity.databaseName,
 			});
-		}
 
-		if (pendingCollapseIdsRef.current.delete(schemaEntity.id)) {
-			// Double-clicked to collapse before this fetch resolved — see
-			// `expandTableNode`'s identical guard above.
-			return;
-		}
+			const expansionNodes: ExpansionNodeInput[] = [];
+			const expansionEdges: ExpansionEdgeInput[] = [];
+			const newEntities = new Map<string, ExpansionEntity>();
 
-		activeController.addExpansion(schemaEntity.id, expansionNodes, expansionEdges);
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			newEntities.forEach((value, key) => next.set(key, value));
-			return next;
-		});
-	}, []);
+			if (!tablesResponse.error) {
+				(tablesResponse.data ?? []).slice(0, SCHEMA_TABLE_EXPAND_LIMIT).forEach((table) => {
+					// Reuses the real table id as the node id (like a table
+					// expansion's own Term nodes), so a table already on the base
+					// graph — or grafted on by another expansion — is shared
+					// instead of duplicated.
+					expansionNodes.push({ id: table.id, kind: 'table', label: table.name });
+					expansionEdges.push({ source: schemaEntity.id, target: table.id });
+					newEntities.set(table.id, {
+						id: table.id,
+						kind: 'table',
+						name: table.name,
+						description: table.description ?? null,
+						viewHref: catalogPathFromFocusId(
+							`${schemaEntity.databaseId}|${schemaEntity.schemaId}|${table.id}`,
+						),
+						// Carried through (same as a Term's own Table neighbours in
+						// `expandTermNode`) so `handleDoubleClickNode` can expand
+						// *this* table in turn via `expandTableNode` — without these,
+						// its `databaseId`/`databaseName`/`schemaId`/`schemaName`
+						// guard there silently no-ops on every table a Schema
+						// expansion grafts on.
+						databaseId: schemaEntity.databaseId,
+						databaseName: schemaEntity.databaseName,
+						schemaId: schemaEntity.schemaId,
+						schemaName: schemaEntity.name,
+					});
+				});
+			}
 
-	// Reverses `expandSchemaNode` — see `collapseTableNode`'s identical shape.
-	const collapseSchemaNode = useCallback((schemaNodeId: string) => {
-		const activeController = controllerRef.current;
-		if (activeController == null) return;
-		expandedSchemaIdsRef.current.delete(schemaNodeId);
-		const removedNodeIds = activeController.removeExpansion(schemaNodeId);
-		if (removedNodeIds == null) {
-			pendingCollapseIdsRef.current.add(schemaNodeId);
-			return;
-		}
-		if (removedNodeIds.length === 0) return;
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			removedNodeIds.forEach((id) => next.delete(id));
-			return next;
-		});
-	}, []);
+			if (pendingCollapseIdsRef.current.delete(schemaEntity.id)) {
+				// Double-clicked to collapse before this fetch resolved — see
+				// `expandTableNode`'s identical guard above.
+				return;
+			}
+
+			activeController.addExpansion(schemaEntity.id, expansionNodes, expansionEdges);
+			mergeExpandedNodes(newEntities);
+		},
+		[mergeExpandedNodes],
+	);
+
+	// Reverses `expandSchemaNode` — see `collapseExpansion`'s shared shape.
+	const collapseSchemaNode = useCallback(
+		(schemaNodeId: string) => collapseExpansion(expandedSchemaIdsRef, schemaNodeId),
+		[collapseExpansion],
+	);
 
 	// Grafts a double-clicked ColumnAttribute's own owning Term *and* every
 	// Column that shares it onto the live graph — the real Neo4j edges are
@@ -852,113 +875,100 @@ export const ExplorationView = () => {
 	// halves need the one request below. Reuses the same `column:${id}`/
 	// real term id node ids a Table's/Term's own expansion would use for
 	// the same Column/Term, so either is shared instead of duplicated.
-	const expandColumnAttributeNode = useCallback(async (attributeEntity: ExpansionEntity) => {
-		const activeController = controllerRef.current;
-		if (
-			activeController == null ||
-			expandedColumnAttributeIdsRef.current.has(attributeEntity.id)
-		) {
-			return;
-		}
-		expandedColumnAttributeIdsRef.current.add(attributeEntity.id);
+	const expandColumnAttributeNode = useCallback(
+		async (attributeEntity: ExpansionEntity) => {
+			const activeController = controllerRef.current;
+			if (
+				activeController == null ||
+				expandedColumnAttributeIdsRef.current.has(attributeEntity.id)
+			) {
+				return;
+			}
+			expandedColumnAttributeIdsRef.current.add(attributeEntity.id);
 
-		const expansionNodes: ExpansionNodeInput[] = [];
-		const expansionEdges: ExpansionEdgeInput[] = [];
-		const newEntities = new Map<string, ExpansionEntity>();
+			const expansionNodes: ExpansionNodeInput[] = [];
+			const expansionEdges: ExpansionEdgeInput[] = [];
+			const newEntities = new Map<string, ExpansionEntity>();
 
-		// Strips the `attribute:` prefix `expandTermNode`/`expandColumnNode`
-		// give this node's id back down to the raw ColumnAttribute id the
-		// details endpoint expects.
-		const rawAttrId = attributeEntity.id.replace(/^attribute:/, '');
-		const detailsResponse = await explorationApi.getColumnAttributeExplorationDetails(
-			rawAttrId,
-			{ skip: 0, limit: COLUMN_ATTRIBUTE_COLUMN_EXPAND_LIMIT },
-		);
+			// Strips the `attribute:` prefix `expandTermNode`/`expandColumnNode`
+			// give this node's id back down to the raw ColumnAttribute id the
+			// details endpoint expects.
+			const rawAttrId = attributeEntity.id.replace(/^attribute:/, '');
+			const detailsResponse = await explorationApi.getColumnAttributeExplorationDetails(
+				rawAttrId,
+				{ skip: 0, limit: COLUMN_ATTRIBUTE_COLUMN_EXPAND_LIMIT },
+			);
 
-		if (!detailsResponse.error) {
-			(detailsResponse.data?.columns ?? []).forEach((column) => {
-				const columnNodeId = `column:${column.id}`;
-				expansionNodes.push({
-					id: columnNodeId,
-					kind: 'column',
-					label: column.name ?? '',
+			if (!detailsResponse.error) {
+				(detailsResponse.data?.columns ?? []).forEach((column) => {
+					const columnNodeId = `column:${column.id}`;
+					expansionNodes.push({
+						id: columnNodeId,
+						kind: 'column',
+						label: column.name ?? '',
+					});
+					expansionEdges.push({ source: attributeEntity.id, target: columnNodeId });
+					newEntities.set(columnNodeId, {
+						id: columnNodeId,
+						kind: 'column',
+						name: column.name ?? '',
+						description: column.description,
+						viewHref:
+							column.database_id != null &&
+							column.schema_id != null &&
+							column.table_id != null
+								? catalogPathFromFocusId(
+										`${column.database_id}|${column.schema_id}|${column.table_id}|${column.id}`,
+									)
+								: '/data',
+						// Carried through (same rationale as `expandTableNode`'s own
+						// column entities) so double-clicking this column in turn can
+						// graft its own owning Table back on via `expandColumnNode`.
+						databaseId: column.database_id ?? undefined,
+						databaseName: column.database_name ?? undefined,
+						schemaId: column.schema_id ?? undefined,
+						schemaName: column.schema_name ?? undefined,
+						tableId: column.table_id ?? undefined,
+						tableName: column.table_name ?? undefined,
+						dataType: column.data_type ?? undefined,
+					});
 				});
-				expansionEdges.push({ source: attributeEntity.id, target: columnNodeId });
-				newEntities.set(columnNodeId, {
-					id: columnNodeId,
-					kind: 'column',
-					name: column.name ?? '',
-					description: column.description,
-					viewHref:
-						column.database_id != null &&
-						column.schema_id != null &&
-						column.table_id != null
-							? catalogPathFromFocusId(
-									`${column.database_id}|${column.schema_id}|${column.table_id}|${column.id}`,
-								)
-							: '/data',
-					// Carried through (same rationale as `expandTableNode`'s own
-					// column entities) so double-clicking this column in turn can
-					// graft its own owning Table back on via `expandColumnNode`.
-					databaseId: column.database_id ?? undefined,
-					databaseName: column.database_name ?? undefined,
-					schemaId: column.schema_id ?? undefined,
-					schemaName: column.schema_name ?? undefined,
-					tableId: column.table_id ?? undefined,
-					tableName: column.table_name ?? undefined,
-					dataType: column.data_type ?? undefined,
+			}
+
+			const term = detailsResponse.error ? null : (detailsResponse.data?.term ?? null);
+			if (term != null) {
+				// Reuses the real term id as the node id, like every other Term
+				// node an expansion grafts on — shared with the one already on
+				// the graph instead of duplicated.
+				expansionNodes.push({ id: term.id, kind: 'term', label: term.name ?? '' });
+				expansionEdges.push({ source: attributeEntity.id, target: term.id });
+				newEntities.set(term.id, {
+					id: term.id,
+					kind: 'term',
+					name: term.name ?? '',
+					description: term.description,
+					viewHref: `/terms?focus=${encodeURIComponent(term.id)}`,
 				});
-			});
-		}
+			}
 
-		const term = detailsResponse.error ? null : (detailsResponse.data?.term ?? null);
-		if (term != null) {
-			// Reuses the real term id as the node id, like every other Term
-			// node an expansion grafts on — shared with the one already on
-			// the graph instead of duplicated.
-			expansionNodes.push({ id: term.id, kind: 'term', label: term.name ?? '' });
-			expansionEdges.push({ source: attributeEntity.id, target: term.id });
-			newEntities.set(term.id, {
-				id: term.id,
-				kind: 'term',
-				name: term.name ?? '',
-				description: term.description,
-				viewHref: `/terms?focus=${encodeURIComponent(term.id)}`,
-			});
-		}
+			if (pendingCollapseIdsRef.current.delete(attributeEntity.id)) {
+				// Double-clicked to collapse before this fetch resolved — see
+				// `expandTableNode`'s identical guard above.
+				return;
+			}
 
-		if (pendingCollapseIdsRef.current.delete(attributeEntity.id)) {
-			// Double-clicked to collapse before this fetch resolved — see
-			// `expandTableNode`'s identical guard above.
-			return;
-		}
+			activeController.addExpansion(attributeEntity.id, expansionNodes, expansionEdges);
+			mergeExpandedNodes(newEntities);
+		},
+		[mergeExpandedNodes],
+	);
 
-		activeController.addExpansion(attributeEntity.id, expansionNodes, expansionEdges);
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			newEntities.forEach((value, key) => next.set(key, value));
-			return next;
-		});
-	}, []);
-
-	// Reverses `expandColumnAttributeNode` — see `collapseTableNode`'s
-	// identical shape.
-	const collapseColumnAttributeNode = useCallback((attributeId: string) => {
-		const activeController = controllerRef.current;
-		if (activeController == null) return;
-		expandedColumnAttributeIdsRef.current.delete(attributeId);
-		const removedNodeIds = activeController.removeExpansion(attributeId);
-		if (removedNodeIds == null) {
-			pendingCollapseIdsRef.current.add(attributeId);
-			return;
-		}
-		if (removedNodeIds.length === 0) return;
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			removedNodeIds.forEach((id) => next.delete(id));
-			return next;
-		});
-	}, []);
+	// Reverses `expandColumnAttributeNode` — see `collapseExpansion`'s
+	// shared shape.
+	const collapseColumnAttributeNode = useCallback(
+		(attributeId: string) => collapseExpansion(expandedColumnAttributeIdsRef, attributeId),
+		[collapseExpansion],
+	);
 
 	// Grafts a double-clicked Column's own owning Table, its own
 	// ColumnAttribute (if it has one), its own outgoing *and* incoming
@@ -989,220 +999,211 @@ export const ExplorationView = () => {
 	// Column doesn't already know whether some ColumnAttribute owns it,
 	// which Column its own FK (if any) points at, which Columns point at
 	// it in turn, or which Sql queries (if any) reference it.
-	const expandColumnNode = useCallback(async (columnEntity: ExpansionEntity) => {
-		const activeController = controllerRef.current;
-		if (
-			activeController == null ||
-			columnEntity.tableId == null ||
-			expandedColumnIdsRef.current.has(columnEntity.id)
-		) {
-			return;
-		}
-		expandedColumnIdsRef.current.add(columnEntity.id);
+	const expandColumnNode = useCallback(
+		async (columnEntity: ExpansionEntity) => {
+			const activeController = controllerRef.current;
+			if (
+				activeController == null ||
+				columnEntity.tableId == null ||
+				expandedColumnIdsRef.current.has(columnEntity.id)
+			) {
+				return;
+			}
+			expandedColumnIdsRef.current.add(columnEntity.id);
 
-		const { tableId } = columnEntity;
-		// Strips the `column:` prefix `expandTableNode`/`expandColumnAttributeNode`
-		// give this node's id (see either's own comment) back down to the raw
-		// catalog id the details endpoint expects.
-		const rawColumnId = columnEntity.id.replace(/^column:/, '');
-		const expansionNodes: ExpansionNodeInput[] = [
-			{ id: tableId, kind: 'table', label: columnEntity.tableName ?? '' },
-		];
-		const expansionEdges: ExpansionEdgeInput[] = [{ source: columnEntity.id, target: tableId }];
-		const newEntities = new Map<string, ExpansionEntity>();
-		newEntities.set(tableId, {
-			id: tableId,
-			kind: 'table',
-			name: columnEntity.tableName ?? '',
-			description: null,
-			viewHref:
-				columnEntity.databaseId != null && columnEntity.schemaId != null
-					? catalogPathFromFocusId(
-							`${columnEntity.databaseId}|${columnEntity.schemaId}|${tableId}`,
-						)
-					: '/data',
-			// Carried through (`undefined` when the owning Column's own origin
-			// never had them — see `expandColumnAttributeNode`'s column entity
-			// below) so `handleDoubleClickNode` can expand *this* table in turn
-			// via `expandTableNode`, same as a Term's/Schema's own Table
-			// neighbours.
-			databaseId: columnEntity.databaseId,
-			databaseName: columnEntity.databaseName,
-			schemaId: columnEntity.schemaId,
-			schemaName: columnEntity.schemaName,
-		});
-
-		const detailsResponse = await explorationApi.getColumnExplorationDetails(rawColumnId);
-		const attribute = detailsResponse.error
-			? null
-			: (detailsResponse.data?.column_attribute ?? null);
-		if (attribute != null) {
-			// Reuses the same `attribute:${id}` node id a Term's own expansion
-			// would use for this ColumnAttribute (see `expandTermNode`), so the
-			// two share one node instead of duplicating it.
-			const attributeNodeId = `attribute:${attribute.id}`;
-			expansionNodes.push({
-				id: attributeNodeId,
-				kind: 'columnAttribute',
-				label: attribute.name ?? '',
-			});
-			expansionEdges.push({ source: columnEntity.id, target: attributeNodeId });
-			newEntities.set(attributeNodeId, {
-				id: attributeNodeId,
-				kind: 'columnAttribute',
-				name: attribute.name ?? '',
-				description: attribute.description,
+			const { tableId } = columnEntity;
+			// Strips the `column:` prefix `expandTableNode`/`expandColumnAttributeNode`
+			// give this node's id (see either's own comment) back down to the raw
+			// catalog id the details endpoint expects.
+			const rawColumnId = columnEntity.id.replace(/^column:/, '');
+			const expansionNodes: ExpansionNodeInput[] = [
+				{ id: tableId, kind: 'table', label: columnEntity.tableName ?? '' },
+			];
+			const expansionEdges: ExpansionEdgeInput[] = [
+				{ source: columnEntity.id, target: tableId },
+			];
+			const newEntities = new Map<string, ExpansionEntity>();
+			newEntities.set(tableId, {
+				id: tableId,
+				kind: 'table',
+				name: columnEntity.tableName ?? '',
+				description: null,
 				viewHref:
 					columnEntity.databaseId != null && columnEntity.schemaId != null
 						? catalogPathFromFocusId(
-								`${columnEntity.databaseId}|${columnEntity.schemaId}|${tableId}|${rawColumnId}`,
+								`${columnEntity.databaseId}|${columnEntity.schemaId}|${tableId}`,
 							)
 						: '/data',
+				// Carried through (`undefined` when the owning Column's own origin
+				// never had them — see `expandColumnAttributeNode`'s column entity
+				// below) so `handleDoubleClickNode` can expand *this* table in turn
+				// via `expandTableNode`, same as a Term's/Schema's own Table
+				// neighbours.
 				databaseId: columnEntity.databaseId,
+				databaseName: columnEntity.databaseName,
 				schemaId: columnEntity.schemaId,
-				tableId,
-				tableName: columnEntity.tableName,
-				columnId: rawColumnId,
-				columnName: columnEntity.name,
-				relationshipType: attribute.relationship_type ?? undefined,
+				schemaName: columnEntity.schemaName,
 			});
-		}
 
-		const sqlQueries = detailsResponse.error ? [] : (detailsResponse.data?.sql_queries ?? []);
-		sqlQueries.forEach((sql) => {
-			// Reuses the `sql:${id}` node id a SqlAttribute's own expansion
-			// would use for this Sql node (see `expandSqlAttributeNode`), so
-			// the two share one node instead of duplicating it.
-			const sqlNodeId = `sql:${sql.id}`;
-			expansionNodes.push({ id: sqlNodeId, kind: 'sql', label: 'SQL Query' });
-			expansionEdges.push({ source: columnEntity.id, target: sqlNodeId });
-			newEntities.set(sqlNodeId, {
-				id: sqlNodeId,
-				kind: 'sql',
-				name: 'SQL Query',
-				description: null,
-				viewHref: columnEntity.viewHref,
-				sqlText: sql.sql,
+			const detailsResponse = await explorationApi.getColumnExplorationDetails(rawColumnId);
+			const attribute = detailsResponse.error
+				? null
+				: (detailsResponse.data?.column_attribute ?? null);
+			if (attribute != null) {
+				// Reuses the same `attribute:${id}` node id a Term's own expansion
+				// would use for this ColumnAttribute (see `expandTermNode`), so the
+				// two share one node instead of duplicating it.
+				const attributeNodeId = `attribute:${attribute.id}`;
+				expansionNodes.push({
+					id: attributeNodeId,
+					kind: 'columnAttribute',
+					label: attribute.name ?? '',
+				});
+				expansionEdges.push({ source: columnEntity.id, target: attributeNodeId });
+				newEntities.set(attributeNodeId, {
+					id: attributeNodeId,
+					kind: 'columnAttribute',
+					name: attribute.name ?? '',
+					description: attribute.description,
+					viewHref:
+						columnEntity.databaseId != null && columnEntity.schemaId != null
+							? catalogPathFromFocusId(
+									`${columnEntity.databaseId}|${columnEntity.schemaId}|${tableId}|${rawColumnId}`,
+								)
+							: '/data',
+					databaseId: columnEntity.databaseId,
+					schemaId: columnEntity.schemaId,
+					tableId,
+					tableName: columnEntity.tableName,
+					columnId: rawColumnId,
+					columnName: columnEntity.name,
+					relationshipType: attribute.relationship_type ?? undefined,
+				});
+			}
+
+			const sqlQueries = detailsResponse.error
+				? []
+				: (detailsResponse.data?.sql_queries ?? []);
+			sqlQueries.forEach((sql) => {
+				// Reuses the `sql:${id}` node id a SqlAttribute's own expansion
+				// would use for this Sql node (see `expandSqlAttributeNode`), so
+				// the two share one node instead of duplicating it.
+				const sqlNodeId = `sql:${sql.id}`;
+				expansionNodes.push({ id: sqlNodeId, kind: 'sql', label: 'SQL Query' });
+				expansionEdges.push({ source: columnEntity.id, target: sqlNodeId });
+				newEntities.set(sqlNodeId, {
+					id: sqlNodeId,
+					kind: 'sql',
+					name: 'SQL Query',
+					description: null,
+					viewHref: columnEntity.viewHref,
+					sqlText: sql.sql,
+				});
 			});
-		});
 
-		const foreignKeyColumn = detailsResponse.error
-			? null
-			: (detailsResponse.data?.foreign_key_column ?? null);
-		if (foreignKeyColumn != null) {
-			// Reuses the `column:${id}` node id `expandTableNode` gives every
-			// Column node (see `pathNodeGraphId`'s own comment above), so a
-			// target column already grafted on by some other expansion is
-			// shared instead of duplicated.
-			const fkColumnNodeId = `column:${foreignKeyColumn.id}`;
-			expansionNodes.push({
-				id: fkColumnNodeId,
-				kind: 'column',
-				label: foreignKeyColumn.name ?? '',
+			const foreignKeyColumn = detailsResponse.error
+				? null
+				: (detailsResponse.data?.foreign_key_column ?? null);
+			if (foreignKeyColumn != null) {
+				// Reuses the `column:${id}` node id `expandTableNode` gives every
+				// Column node (see `pathNodeGraphId`'s own comment above), so a
+				// target column already grafted on by some other expansion is
+				// shared instead of duplicated.
+				const fkColumnNodeId = `column:${foreignKeyColumn.id}`;
+				expansionNodes.push({
+					id: fkColumnNodeId,
+					kind: 'column',
+					label: foreignKeyColumn.name ?? '',
+				});
+				expansionEdges.push({ source: columnEntity.id, target: fkColumnNodeId });
+				newEntities.set(fkColumnNodeId, {
+					id: fkColumnNodeId,
+					kind: 'column',
+					name: foreignKeyColumn.name ?? '',
+					description: foreignKeyColumn.description,
+					viewHref:
+						foreignKeyColumn.database_id != null &&
+						foreignKeyColumn.schema_id != null &&
+						foreignKeyColumn.table_id != null
+							? catalogPathFromFocusId(
+									`${foreignKeyColumn.database_id}|${foreignKeyColumn.schema_id}|${foreignKeyColumn.table_id}|${foreignKeyColumn.id}`,
+								)
+							: '/data',
+					// Carried through (same rationale as `expandTableNode`'s own
+					// column entities) so double-clicking this FK-target column in
+					// turn can graft its own owning Table back on via
+					// `expandColumnNode` above, or itself be expanded further.
+					databaseId: foreignKeyColumn.database_id ?? undefined,
+					databaseName: foreignKeyColumn.database_name ?? undefined,
+					schemaId: foreignKeyColumn.schema_id ?? undefined,
+					schemaName: foreignKeyColumn.schema_name ?? undefined,
+					tableId: foreignKeyColumn.table_id ?? undefined,
+					tableName: foreignKeyColumn.table_name ?? undefined,
+					dataType: foreignKeyColumn.data_type ?? undefined,
+				});
+			}
+
+			// The reverse of `foreignKeyColumn` above — every Column whose own
+			// outgoing FK points *at* this one (typically this Column is a
+			// table's primary key and the others are foreign keys into it).
+			// Without this, expanding an FK target Column showed nothing for
+			// the referencing side even though it's a real, direct edge.
+			const referencingColumns = detailsResponse.error
+				? []
+				: (detailsResponse.data?.referencing_columns ?? []);
+			referencingColumns.slice(0, COLUMN_REFERENCING_EXPAND_LIMIT).forEach((referencing) => {
+				// Reuses the `column:${id}` node id `expandTableNode` gives
+				// every Column node, so a referencing column already grafted on
+				// by some other expansion is shared instead of duplicated.
+				const referencingNodeId = `column:${referencing.id}`;
+				expansionNodes.push({
+					id: referencingNodeId,
+					kind: 'column',
+					label: referencing.name ?? '',
+				});
+				expansionEdges.push({ source: columnEntity.id, target: referencingNodeId });
+				newEntities.set(referencingNodeId, {
+					id: referencingNodeId,
+					kind: 'column',
+					name: referencing.name ?? '',
+					description: referencing.description,
+					viewHref:
+						referencing.database_id != null &&
+						referencing.schema_id != null &&
+						referencing.table_id != null
+							? catalogPathFromFocusId(
+									`${referencing.database_id}|${referencing.schema_id}|${referencing.table_id}|${referencing.id}`,
+								)
+							: '/data',
+					// Carried through (same rationale as `expandTableNode`'s own
+					// column entities) so double-clicking this referencing
+					// column in turn can graft its own owning Table back on via
+					// `expandColumnNode`.
+					databaseId: referencing.database_id ?? undefined,
+					databaseName: referencing.database_name ?? undefined,
+					schemaId: referencing.schema_id ?? undefined,
+					schemaName: referencing.schema_name ?? undefined,
+					tableId: referencing.table_id ?? undefined,
+					tableName: referencing.table_name ?? undefined,
+					dataType: referencing.data_type ?? undefined,
+				});
 			});
-			expansionEdges.push({ source: columnEntity.id, target: fkColumnNodeId });
-			newEntities.set(fkColumnNodeId, {
-				id: fkColumnNodeId,
-				kind: 'column',
-				name: foreignKeyColumn.name ?? '',
-				description: foreignKeyColumn.description,
-				viewHref:
-					foreignKeyColumn.database_id != null &&
-					foreignKeyColumn.schema_id != null &&
-					foreignKeyColumn.table_id != null
-						? catalogPathFromFocusId(
-								`${foreignKeyColumn.database_id}|${foreignKeyColumn.schema_id}|${foreignKeyColumn.table_id}|${foreignKeyColumn.id}`,
-							)
-						: '/data',
-				// Carried through (same rationale as `expandTableNode`'s own
-				// column entities) so double-clicking this FK-target column in
-				// turn can graft its own owning Table back on via
-				// `expandColumnNode` above, or itself be expanded further.
-				databaseId: foreignKeyColumn.database_id ?? undefined,
-				databaseName: foreignKeyColumn.database_name ?? undefined,
-				schemaId: foreignKeyColumn.schema_id ?? undefined,
-				schemaName: foreignKeyColumn.schema_name ?? undefined,
-				tableId: foreignKeyColumn.table_id ?? undefined,
-				tableName: foreignKeyColumn.table_name ?? undefined,
-				dataType: foreignKeyColumn.data_type ?? undefined,
-			});
-		}
 
-		// The reverse of `foreignKeyColumn` above — every Column whose own
-		// outgoing FK points *at* this one (typically this Column is a
-		// table's primary key and the others are foreign keys into it).
-		// Without this, expanding an FK target Column showed nothing for
-		// the referencing side even though it's a real, direct edge.
-		const referencingColumns = detailsResponse.error
-			? []
-			: (detailsResponse.data?.referencing_columns ?? []);
-		referencingColumns.slice(0, COLUMN_REFERENCING_EXPAND_LIMIT).forEach((referencing) => {
-			// Reuses the `column:${id}` node id `expandTableNode` gives
-			// every Column node, so a referencing column already grafted on
-			// by some other expansion is shared instead of duplicated.
-			const referencingNodeId = `column:${referencing.id}`;
-			expansionNodes.push({
-				id: referencingNodeId,
-				kind: 'column',
-				label: referencing.name ?? '',
-			});
-			expansionEdges.push({ source: columnEntity.id, target: referencingNodeId });
-			newEntities.set(referencingNodeId, {
-				id: referencingNodeId,
-				kind: 'column',
-				name: referencing.name ?? '',
-				description: referencing.description,
-				viewHref:
-					referencing.database_id != null &&
-					referencing.schema_id != null &&
-					referencing.table_id != null
-						? catalogPathFromFocusId(
-								`${referencing.database_id}|${referencing.schema_id}|${referencing.table_id}|${referencing.id}`,
-							)
-						: '/data',
-				// Carried through (same rationale as `expandTableNode`'s own
-				// column entities) so double-clicking this referencing
-				// column in turn can graft its own owning Table back on via
-				// `expandColumnNode`.
-				databaseId: referencing.database_id ?? undefined,
-				databaseName: referencing.database_name ?? undefined,
-				schemaId: referencing.schema_id ?? undefined,
-				schemaName: referencing.schema_name ?? undefined,
-				tableId: referencing.table_id ?? undefined,
-				tableName: referencing.table_name ?? undefined,
-				dataType: referencing.data_type ?? undefined,
-			});
-		});
+			if (pendingCollapseIdsRef.current.delete(columnEntity.id)) {
+				return;
+			}
 
-		if (pendingCollapseIdsRef.current.delete(columnEntity.id)) {
-			return;
-		}
+			activeController.addExpansion(columnEntity.id, expansionNodes, expansionEdges);
+			mergeExpandedNodes(newEntities);
+		},
+		[mergeExpandedNodes],
+	);
 
-		activeController.addExpansion(columnEntity.id, expansionNodes, expansionEdges);
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			newEntities.forEach((value, key) => next.set(key, value));
-			return next;
-		});
-	}, []);
-
-	// Reverses `expandColumnNode` — see `collapseTableNode`'s identical shape.
-	const collapseColumnNode = useCallback((columnId: string) => {
-		const activeController = controllerRef.current;
-		if (activeController == null) return;
-		expandedColumnIdsRef.current.delete(columnId);
-		const removedNodeIds = activeController.removeExpansion(columnId);
-		if (removedNodeIds == null) {
-			pendingCollapseIdsRef.current.add(columnId);
-			return;
-		}
-		if (removedNodeIds.length === 0) return;
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			removedNodeIds.forEach((id) => next.delete(id));
-			return next;
-		});
-	}, []);
+	// Reverses `expandColumnNode` — see `collapseExpansion`'s shared shape.
+	const collapseColumnNode = useCallback(
+		(columnId: string) => collapseExpansion(expandedColumnIdsRef, columnId),
+		[collapseExpansion],
+	);
 
 	// Grafts a double-clicked SqlAttribute's own owning Term and its own Sql
 	// query node onto the live graph — the SqlAttribute counterpart to
@@ -1214,89 +1215,77 @@ export const ExplorationView = () => {
 	// `SqlBlock`. Unlike `expandColumnAttributeNode`, neither is already
 	// known on `attributeEntity` (see `expandTermNode`, which only carries
 	// the SqlAttribute's own name/description) — one request fetches both.
-	const expandSqlAttributeNode = useCallback(async (attributeEntity: ExpansionEntity) => {
-		const activeController = controllerRef.current;
-		if (
-			activeController == null ||
-			expandedSqlAttributeIdsRef.current.has(attributeEntity.id)
-		) {
-			return;
-		}
-		expandedSqlAttributeIdsRef.current.add(attributeEntity.id);
+	const expandSqlAttributeNode = useCallback(
+		async (attributeEntity: ExpansionEntity) => {
+			const activeController = controllerRef.current;
+			if (
+				activeController == null ||
+				expandedSqlAttributeIdsRef.current.has(attributeEntity.id)
+			) {
+				return;
+			}
+			expandedSqlAttributeIdsRef.current.add(attributeEntity.id);
 
-		// Strips the `attribute:` prefix `expandTermNode` gives this node's
-		// id back down to the raw SqlAttribute id the details endpoint expects.
-		const rawAttrId = attributeEntity.id.replace(/^attribute:/, '');
-		const detailsResponse = await explorationApi.getSqlAttributeExplorationDetails(rawAttrId);
-		const details = detailsResponse.error ? null : detailsResponse.data;
+			// Strips the `attribute:` prefix `expandTermNode` gives this node's
+			// id back down to the raw SqlAttribute id the details endpoint expects.
+			const rawAttrId = attributeEntity.id.replace(/^attribute:/, '');
+			const detailsResponse =
+				await explorationApi.getSqlAttributeExplorationDetails(rawAttrId);
+			const details = detailsResponse.error ? null : detailsResponse.data;
 
-		const expansionNodes: ExpansionNodeInput[] = [];
-		const expansionEdges: ExpansionEdgeInput[] = [];
-		const newEntities = new Map<string, ExpansionEntity>();
+			const expansionNodes: ExpansionNodeInput[] = [];
+			const expansionEdges: ExpansionEdgeInput[] = [];
+			const newEntities = new Map<string, ExpansionEntity>();
 
-		if (details?.term != null) {
-			const { term } = details;
-			// Reuses the real term id as the node id, like every other Term
-			// node an expansion grafts on — shared with the one already on
-			// the graph instead of duplicated.
-			expansionNodes.push({ id: term.id, kind: 'term', label: term.name ?? '' });
-			expansionEdges.push({ source: attributeEntity.id, target: term.id });
-			newEntities.set(term.id, {
-				id: term.id,
-				kind: 'term',
-				name: term.name ?? '',
-				description: term.description,
-				viewHref: `/terms?focus=${encodeURIComponent(term.id)}`,
-			});
-		}
+			if (details?.term != null) {
+				const { term } = details;
+				// Reuses the real term id as the node id, like every other Term
+				// node an expansion grafts on — shared with the one already on
+				// the graph instead of duplicated.
+				expansionNodes.push({ id: term.id, kind: 'term', label: term.name ?? '' });
+				expansionEdges.push({ source: attributeEntity.id, target: term.id });
+				newEntities.set(term.id, {
+					id: term.id,
+					kind: 'term',
+					name: term.name ?? '',
+					description: term.description,
+					viewHref: `/terms?focus=${encodeURIComponent(term.id)}`,
+				});
+			}
 
-		if (details?.sql != null) {
-			const { sql } = details;
-			// Prefixed like `column`/`attribute` above — a Sql node's own id
-			// could otherwise collide with some other kind's.
-			const sqlNodeId = `sql:${sql.id}`;
-			expansionNodes.push({ id: sqlNodeId, kind: 'sql', label: 'SQL Query' });
-			expansionEdges.push({ source: attributeEntity.id, target: sqlNodeId });
-			newEntities.set(sqlNodeId, {
-				id: sqlNodeId,
-				kind: 'sql',
-				name: 'SQL Query',
-				description: null,
-				viewHref: attributeEntity.viewHref,
-				sqlText: sql.sql ?? '',
-			});
-		}
+			if (details?.sql != null) {
+				const { sql } = details;
+				// Prefixed like `column`/`attribute` above — a Sql node's own id
+				// could otherwise collide with some other kind's.
+				const sqlNodeId = `sql:${sql.id}`;
+				expansionNodes.push({ id: sqlNodeId, kind: 'sql', label: 'SQL Query' });
+				expansionEdges.push({ source: attributeEntity.id, target: sqlNodeId });
+				newEntities.set(sqlNodeId, {
+					id: sqlNodeId,
+					kind: 'sql',
+					name: 'SQL Query',
+					description: null,
+					viewHref: attributeEntity.viewHref,
+					sqlText: sql.sql ?? '',
+				});
+			}
 
-		if (pendingCollapseIdsRef.current.delete(attributeEntity.id)) {
-			return;
-		}
+			if (pendingCollapseIdsRef.current.delete(attributeEntity.id)) {
+				return;
+			}
 
-		activeController.addExpansion(attributeEntity.id, expansionNodes, expansionEdges);
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			newEntities.forEach((value, key) => next.set(key, value));
-			return next;
-		});
-	}, []);
+			activeController.addExpansion(attributeEntity.id, expansionNodes, expansionEdges);
+			mergeExpandedNodes(newEntities);
+		},
+		[mergeExpandedNodes],
+	);
 
-	// Reverses `expandSqlAttributeNode` — see `collapseTableNode`'s
-	// identical shape.
-	const collapseSqlAttributeNode = useCallback((attributeId: string) => {
-		const activeController = controllerRef.current;
-		if (activeController == null) return;
-		expandedSqlAttributeIdsRef.current.delete(attributeId);
-		const removedNodeIds = activeController.removeExpansion(attributeId);
-		if (removedNodeIds == null) {
-			pendingCollapseIdsRef.current.add(attributeId);
-			return;
-		}
-		if (removedNodeIds.length === 0) return;
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			removedNodeIds.forEach((id) => next.delete(id));
-			return next;
-		});
-	}, []);
+	// Reverses `expandSqlAttributeNode` — see `collapseExpansion`'s shared
+	// shape.
+	const collapseSqlAttributeNode = useCallback(
+		(attributeId: string) => collapseExpansion(expandedSqlAttributeIdsRef, attributeId),
+		[collapseExpansion],
+	);
 
 	// Grafts a double-clicked Sql node's own CustomAnalysis neighbours,
 	// referenced Columns and Tables, and backing SqlAttributes onto the live
@@ -1323,170 +1312,157 @@ export const ExplorationView = () => {
 	// `column:${id}`/`attribute:${id}`/real table id node ids a Table's/
 	// ColumnAttribute's/Term's own expansion would use for the same
 	// Column/SqlAttribute/Table, so any is shared instead of duplicated.
-	const expandSqlNode = useCallback(async (sqlEntity: ExpansionEntity) => {
-		const activeController = controllerRef.current;
-		if (activeController == null || expandedSqlIdsRef.current.has(sqlEntity.id)) {
-			return;
-		}
-		expandedSqlIdsRef.current.add(sqlEntity.id);
+	const expandSqlNode = useCallback(
+		async (sqlEntity: ExpansionEntity) => {
+			const activeController = controllerRef.current;
+			if (activeController == null || expandedSqlIdsRef.current.has(sqlEntity.id)) {
+				return;
+			}
+			expandedSqlIdsRef.current.add(sqlEntity.id);
 
-		// Strips the `sql:` prefix `expandSqlAttributeNode` gives this
-		// node's id back down to the raw Sql id the details endpoint expects.
-		const rawSqlId = sqlEntity.id.replace(/^sql:/, '');
-		const detailsResponse = await explorationApi.getSqlExplorationDetails(rawSqlId);
+			// Strips the `sql:` prefix `expandSqlAttributeNode` gives this
+			// node's id back down to the raw Sql id the details endpoint expects.
+			const rawSqlId = sqlEntity.id.replace(/^sql:/, '');
+			const detailsResponse = await explorationApi.getSqlExplorationDetails(rawSqlId);
 
-		const expansionNodes: ExpansionNodeInput[] = [];
-		const expansionEdges: ExpansionEdgeInput[] = [];
-		const newEntities = new Map<string, ExpansionEntity>();
+			const expansionNodes: ExpansionNodeInput[] = [];
+			const expansionEdges: ExpansionEdgeInput[] = [];
+			const newEntities = new Map<string, ExpansionEntity>();
 
-		if (!detailsResponse.error && detailsResponse.data) {
-			detailsResponse.data.custom_analyses.forEach((analysis) => {
-				// Prefixed like `attribute`/`column` above — a CustomAnalysis's
-				// own id could otherwise collide with some other kind's.
-				const analysisNodeId = `customAnalysis:${analysis.id}`;
-				expansionNodes.push({
-					id: analysisNodeId,
-					kind: 'customAnalysis',
-					label: analysis.name ?? '',
+			if (!detailsResponse.error && detailsResponse.data) {
+				detailsResponse.data.custom_analyses.forEach((analysis) => {
+					// Prefixed like `attribute`/`column` above — a CustomAnalysis's
+					// own id could otherwise collide with some other kind's.
+					const analysisNodeId = `customAnalysis:${analysis.id}`;
+					expansionNodes.push({
+						id: analysisNodeId,
+						kind: 'customAnalysis',
+						label: analysis.name ?? '',
+					});
+					expansionEdges.push({ source: sqlEntity.id, target: analysisNodeId });
+					newEntities.set(analysisNodeId, {
+						id: analysisNodeId,
+						kind: 'customAnalysis',
+						name: analysis.name ?? '',
+						description: analysis.description,
+						// No per-analysis focus deep link exists (unlike
+						// `/data`/`/terms`) — the list page is the closest
+						// thing to a "view" for a CustomAnalysis.
+						viewHref: '/analysis',
+					});
 				});
-				expansionEdges.push({ source: sqlEntity.id, target: analysisNodeId });
-				newEntities.set(analysisNodeId, {
-					id: analysisNodeId,
-					kind: 'customAnalysis',
-					name: analysis.name ?? '',
-					description: analysis.description,
-					// No per-analysis focus deep link exists (unlike
-					// `/data`/`/terms`) — the list page is the closest
-					// thing to a "view" for a CustomAnalysis.
-					viewHref: '/analysis',
-				});
-			});
 
-			detailsResponse.data.columns.forEach((column) => {
-				const columnNodeId = `column:${column.id}`;
-				expansionNodes.push({
-					id: columnNodeId,
-					kind: 'column',
-					label: column.name ?? '',
+				detailsResponse.data.columns.forEach((column) => {
+					const columnNodeId = `column:${column.id}`;
+					expansionNodes.push({
+						id: columnNodeId,
+						kind: 'column',
+						label: column.name ?? '',
+					});
+					expansionEdges.push({ source: sqlEntity.id, target: columnNodeId });
+					newEntities.set(columnNodeId, {
+						id: columnNodeId,
+						kind: 'column',
+						name: column.name ?? '',
+						description: column.description,
+						viewHref:
+							column.database_id != null &&
+							column.schema_id != null &&
+							column.table_id != null
+								? catalogPathFromFocusId(
+										`${column.database_id}|${column.schema_id}|${column.table_id}|${column.id}`,
+									)
+								: '/data',
+						// Carried through (same rationale as `expandTableNode`'s own
+						// column entities) so double-clicking this column in turn
+						// can graft its own owning Table back on via
+						// `expandColumnNode`.
+						databaseId: column.database_id ?? undefined,
+						databaseName: column.database_name ?? undefined,
+						schemaId: column.schema_id ?? undefined,
+						schemaName: column.schema_name ?? undefined,
+						tableId: column.table_id ?? undefined,
+						tableName: column.table_name ?? undefined,
+						dataType: column.data_type ?? undefined,
+					});
 				});
-				expansionEdges.push({ source: sqlEntity.id, target: columnNodeId });
-				newEntities.set(columnNodeId, {
-					id: columnNodeId,
-					kind: 'column',
-					name: column.name ?? '',
-					description: column.description,
-					viewHref:
-						column.database_id != null &&
-						column.schema_id != null &&
-						column.table_id != null
-							? catalogPathFromFocusId(
-									`${column.database_id}|${column.schema_id}|${column.table_id}|${column.id}`,
-								)
-							: '/data',
-					// Carried through (same rationale as `expandTableNode`'s own
-					// column entities) so double-clicking this column in turn
-					// can graft its own owning Table back on via
-					// `expandColumnNode`.
-					databaseId: column.database_id ?? undefined,
-					databaseName: column.database_name ?? undefined,
-					schemaId: column.schema_id ?? undefined,
-					schemaName: column.schema_name ?? undefined,
-					tableId: column.table_id ?? undefined,
-					tableName: column.table_name ?? undefined,
-					dataType: column.data_type ?? undefined,
+
+				detailsResponse.data.tables.forEach((table) => {
+					// Reuses the real table id as the node id — like a Term's own
+					// Table neighbours in `expandTermNode` — so a table already on
+					// the base graph (almost always the case) is shared instead of
+					// duplicated, mirroring the real `Sql-[SQL]->Table` edge Neo4j
+					// Browser itself shows expanding a Sql node.
+					expansionNodes.push({ id: table.id, kind: 'table', label: table.name ?? '' });
+					expansionEdges.push({ source: sqlEntity.id, target: table.id });
+					newEntities.set(table.id, {
+						id: table.id,
+						kind: 'table',
+						name: table.name ?? '',
+						description: null,
+						viewHref:
+							table.database_id != null && table.schema_id != null
+								? catalogPathFromFocusId(
+										`${table.database_id}|${table.schema_id}|${table.id}`,
+									)
+								: '/data',
+						// Carried through so double-clicking this table in turn can
+						// expand it via `expandTableNode`, same as a Term's/Schema's
+						// own Table neighbours elsewhere in this file.
+						databaseId: table.database_id ?? undefined,
+						databaseName: table.database_name ?? undefined,
+						schemaId: table.schema_id ?? undefined,
+						schemaName: table.schema_name ?? undefined,
+					});
 				});
-			});
 
-			detailsResponse.data.tables.forEach((table) => {
-				// Reuses the real table id as the node id — like a Term's own
-				// Table neighbours in `expandTermNode` — so a table already on
-				// the base graph (almost always the case) is shared instead of
-				// duplicated, mirroring the real `Sql-[SQL]->Table` edge Neo4j
-				// Browser itself shows expanding a Sql node.
-				expansionNodes.push({ id: table.id, kind: 'table', label: table.name ?? '' });
-				expansionEdges.push({ source: sqlEntity.id, target: table.id });
-				newEntities.set(table.id, {
-					id: table.id,
-					kind: 'table',
-					name: table.name ?? '',
-					description: null,
-					viewHref:
-						table.database_id != null && table.schema_id != null
-							? catalogPathFromFocusId(
-									`${table.database_id}|${table.schema_id}|${table.id}`,
-								)
-							: '/data',
-					// Carried through so double-clicking this table in turn can
-					// expand it via `expandTableNode`, same as a Term's/Schema's
-					// own Table neighbours elsewhere in this file.
-					databaseId: table.database_id ?? undefined,
-					databaseName: table.database_name ?? undefined,
-					schemaId: table.schema_id ?? undefined,
-					schemaName: table.schema_name ?? undefined,
+				detailsResponse.data.sql_attributes.forEach((attribute) => {
+					// Reuses the same `attribute:${id}` node id a Term's own
+					// expansion would use for this SqlAttribute (see
+					// `expandTermNode`), so the two share one node instead of
+					// duplicating it.
+					const attributeNodeId = `attribute:${attribute.id}`;
+					expansionNodes.push({
+						id: attributeNodeId,
+						kind: 'sqlAttribute',
+						label: attribute.name ?? '',
+					});
+					// The real direction is `(SqlAttribute)-[:HAS_SQL]->(Sql)` — drawn
+					// from the Sql node regardless, same as every other structural
+					// edge `addExpansion` grafts on.
+					expansionEdges.push({ source: sqlEntity.id, target: attributeNodeId });
+					newEntities.set(attributeNodeId, {
+						id: attributeNodeId,
+						kind: 'sqlAttribute',
+						name: attribute.name ?? '',
+						description: attribute.description,
+						// Falls back to this Sql node's own `viewHref` when the
+						// attribute somehow has no owning Term to link to instead —
+						// same fallback rationale as `expandSqlAttributeNode`'s own
+						// `sql` entity reusing its parent attribute's `viewHref`.
+						viewHref:
+							attribute.term_id != null
+								? `/terms?focus=${encodeURIComponent(attribute.term_id)}`
+								: sqlEntity.viewHref,
+					});
 				});
-			});
+			}
 
-			detailsResponse.data.sql_attributes.forEach((attribute) => {
-				// Reuses the same `attribute:${id}` node id a Term's own
-				// expansion would use for this SqlAttribute (see
-				// `expandTermNode`), so the two share one node instead of
-				// duplicating it.
-				const attributeNodeId = `attribute:${attribute.id}`;
-				expansionNodes.push({
-					id: attributeNodeId,
-					kind: 'sqlAttribute',
-					label: attribute.name ?? '',
-				});
-				// The real direction is `(SqlAttribute)-[:HAS_SQL]->(Sql)` — drawn
-				// from the Sql node regardless, same as every other structural
-				// edge `addExpansion` grafts on.
-				expansionEdges.push({ source: sqlEntity.id, target: attributeNodeId });
-				newEntities.set(attributeNodeId, {
-					id: attributeNodeId,
-					kind: 'sqlAttribute',
-					name: attribute.name ?? '',
-					description: attribute.description,
-					// Falls back to this Sql node's own `viewHref` when the
-					// attribute somehow has no owning Term to link to instead —
-					// same fallback rationale as `expandSqlAttributeNode`'s own
-					// `sql` entity reusing its parent attribute's `viewHref`.
-					viewHref:
-						attribute.term_id != null
-							? `/terms?focus=${encodeURIComponent(attribute.term_id)}`
-							: sqlEntity.viewHref,
-				});
-			});
-		}
+			if (pendingCollapseIdsRef.current.delete(sqlEntity.id)) {
+				return;
+			}
 
-		if (pendingCollapseIdsRef.current.delete(sqlEntity.id)) {
-			return;
-		}
+			activeController.addExpansion(sqlEntity.id, expansionNodes, expansionEdges);
+			mergeExpandedNodes(newEntities);
+		},
+		[mergeExpandedNodes],
+	);
 
-		activeController.addExpansion(sqlEntity.id, expansionNodes, expansionEdges);
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			newEntities.forEach((value, key) => next.set(key, value));
-			return next;
-		});
-	}, []);
-
-	// Reverses `expandSqlNode` — see `collapseTableNode`'s identical shape.
-	const collapseSqlNode = useCallback((sqlId: string) => {
-		const activeController = controllerRef.current;
-		if (activeController == null) return;
-		expandedSqlIdsRef.current.delete(sqlId);
-		const removedNodeIds = activeController.removeExpansion(sqlId);
-		if (removedNodeIds == null) {
-			pendingCollapseIdsRef.current.add(sqlId);
-			return;
-		}
-		if (removedNodeIds.length === 0) return;
-		setExpandedNodesById((previous) => {
-			const next = new Map(previous);
-			removedNodeIds.forEach((id) => next.delete(id));
-			return next;
-		});
-	}, []);
+	// Reverses `expandSqlNode` — see `collapseExpansion`'s shared shape.
+	const collapseSqlNode = useCallback(
+		(sqlId: string) => collapseExpansion(expandedSqlIdsRef, sqlId),
+		[collapseExpansion],
+	);
 
 	const handleSelectNode = useCallback(
 		(nodeId: string | null) => {
@@ -1821,11 +1797,7 @@ export const ExplorationView = () => {
 			}
 
 			controllerRef.current?.addExpansion(originId, expansionNodes, expansionEdges);
-			setExpandedNodesById((previous) => {
-				const next = new Map(previous);
-				newEntities.forEach((value, key) => next.set(key, value));
-				return next;
-			});
+			mergeExpandedNodes(newEntities);
 			setConnectionHopsByEdgeId((previous) => {
 				const next = new Map(previous);
 				next.set(edgeId, hops);
@@ -1853,36 +1825,31 @@ export const ExplorationView = () => {
 				});
 			}
 		},
-		[],
+		[mergeExpandedNodes],
 	);
 
-	// Reverses `expandSemanticConnection` — see `collapseTableNode`'s
-	// identical shape. Also drops this connection's own cached hops (the
-	// next expand re-fetches them fresh).
-	const collapseSemanticConnection = useCallback((edgeId: string) => {
-		const activeController = controllerRef.current;
-		if (activeController == null) return;
-		expandedConnectionIdsRef.current.delete(edgeId);
-		const originId = linkPathOriginId(edgeId);
-		const removedNodeIds = activeController.removeExpansion(originId);
-		if (removedNodeIds == null) {
-			pendingCollapseIdsRef.current.add(originId);
-			return;
-		}
-		if (removedNodeIds.length > 0) {
-			setExpandedNodesById((previous) => {
+	// Reverses `expandSemanticConnection` — see `collapseExpansion`'s
+	// shared shape (here, `edgeId` is what `expandedConnectionIdsRef`
+	// tracks, but `linkPathOriginId(edgeId)` is what the controller's own
+	// graft is keyed by — see `expandSemanticConnection`). Also drops this
+	// connection's own cached hops (the next expand re-fetches them fresh).
+	const collapseSemanticConnection = useCallback(
+		(edgeId: string) => {
+			const resolved = collapseExpansion(
+				expandedConnectionIdsRef,
+				edgeId,
+				linkPathOriginId(edgeId),
+			);
+			if (!resolved) return;
+			setConnectionHopsByEdgeId((previous) => {
+				if (!previous.has(edgeId)) return previous;
 				const next = new Map(previous);
-				removedNodeIds.forEach((id) => next.delete(id));
+				next.delete(edgeId);
 				return next;
 			});
-		}
-		setConnectionHopsByEdgeId((previous) => {
-			if (!previous.has(edgeId)) return previous;
-			const next = new Map(previous);
-			next.delete(edgeId);
-			return next;
-		});
-	}, []);
+		},
+		[collapseExpansion],
+	);
 
 	// Only ever fires for a Semantic-layer (Term↔Term) edge — a Data-layer
 	// (Table↔Table) one is drawn with the click-inert `structural` kind
@@ -1939,12 +1906,11 @@ export const ExplorationView = () => {
 		// `dataGraph`/`semanticGraph` depending on it. These refs otherwise
 		// keep marking nodes as "already expanded" from the layer just left,
 		// so re-expanding the very same node on the freshly-rebuilt (graft-
-		// free) canvas after switching back would silently no-op.
-		expandedTableIdsRef.current.clear();
-		expandedTermIdsRef.current.clear();
-		expandedColumnIdsRef.current.clear();
-		expandedSqlIdsRef.current.clear();
-		expandedConnectionIdsRef.current.clear();
+		// free) canvas after switching back would silently no-op. Iterates
+		// `expandedIdsRefs` (every one of them, together) rather than
+		// `.clear()`-ing each by name, so a future expansion kind's ref
+		// can't be added elsewhere and forgotten here.
+		expandedIdsRefs.current.forEach((expandedIdsRef) => expandedIdsRef.current.clear());
 		setConnectionHopsByEdgeId(new Map());
 		router.replace(
 			layer === ExplorationLayer.Semantic ? '/exploration?view=data' : '/exploration',
@@ -2041,10 +2007,20 @@ export const ExplorationView = () => {
 			) ?? null,
 		[graph.links, selectedSemanticEdgeId],
 	);
-	const semanticEdgeSourceName =
-		graph.nodes.find((node) => node.id === selectedSemanticEdge?.source)?.name ?? '';
-	const semanticEdgeTargetName =
-		graph.nodes.find((node) => node.id === selectedSemanticEdge?.target)?.name ?? '';
+	// Memoized (rather than plain `const`s recomputed every render) since
+	// `graph.nodes` is typically hundreds of nodes and every hover move
+	// re-renders this component via `handleHoverNode`'s `setHoveredNodePosition`
+	// — without this, moving the mouse re-scanned it twice on every single
+	// frame for a value that only actually changes when the graph itself or
+	// the selected connection does.
+	const semanticEdgeSourceName = useMemo(
+		() => graph.nodes.find((node) => node.id === selectedSemanticEdge?.source)?.name ?? '',
+		[graph.nodes, selectedSemanticEdge],
+	);
+	const semanticEdgeTargetName = useMemo(
+		() => graph.nodes.find((node) => node.id === selectedSemanticEdge?.target)?.name ?? '',
+		[graph.nodes, selectedSemanticEdge],
+	);
 	// The `connection`-kind entity `ActiveExpansionCard` shows for a clicked
 	// Semantic-layer edge — reuses that same card/kind (see its own
 	// `ExpansionEntityKind` doc comment) for one consistent card shape
@@ -2084,6 +2060,26 @@ export const ExplorationView = () => {
 			connectionHopsByEdgeId,
 		],
 	);
+
+	// Counts every Data-layer node's `nodeType` in one pass over `graph.nodes`
+	// rather than the bottom-right legend running its own separate
+	// `graph.nodes.filter(...).length` per `TableType` (three full scans) —
+	// same "recomputed on every hover" waste `semanticEdgeSourceName`/
+	// `semanticEdgeTargetName` above had, since this component re-renders on
+	// every `handleHoverNode` call. Only actually used by the Data-layer
+	// legend below, so it skips the scan entirely on the Semantic layer.
+	const dataLayerTableTypeCounts = useMemo(() => {
+		if (layer !== ExplorationLayer.Data) return null;
+		const counts: Record<TableType, number> = {
+			[TableType.BASE_TABLE]: 0,
+			[TableType.VIEW]: 0,
+			[TableType.MATERIALIZED_VIEW]: 0,
+		};
+		graph.nodes.forEach((node) => {
+			if (node.layer === ExplorationLayer.Data) counts[node.nodeType] += 1;
+		});
+		return counts;
+	}, [graph.nodes, layer]);
 
 	const graphBackground =
 		'bg-[radial-gradient(circle,#e4e4e7_1px,transparent_1px)] bg-[size:8px_8px] dark:bg-[radial-gradient(circle,#3f3f46_1px,transparent_1px)]';
@@ -2316,13 +2312,7 @@ export const ExplorationView = () => {
 									kind="table"
 									icon={catalogNodeInfo[item.type].icon}
 									label={item.label}
-									count={
-										graph.nodes.filter(
-											(node) =>
-												node.layer === ExplorationLayer.Data &&
-												node.nodeType === item.type,
-										).length
-									}
+									count={dataLayerTableTypeCounts?.[item.type] ?? 0}
 								/>
 							))}
 						</div>
