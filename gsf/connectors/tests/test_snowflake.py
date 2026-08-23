@@ -111,36 +111,21 @@ def test_distinct_databases_yield_distinct_names() -> None:
 
 def test_metadata_database_overrides_logical_name() -> None:
     database = SnowflakeDatabase(
-        _connection_string("metadata_database=spider2%2Fpatents")
+        _connection_string("metadata_database=custom%2Fmydb")
     )
 
-    assert database.database_name == "spider2/patents"
+    assert database.database_name == "custom/mydb"
     assert database._physical_database == "db"
     assert database._connect_kwargs["database"] == "db"
 
 
 def test_resolve_metadata_path_prefers_logical_database_name(tmp_path: Path) -> None:
     metadata = _write_metadata(
-        tmp_path / "spider2" / "adventureworks" / "metadata.json"
+        tmp_path / "custom" / "adventureworks" / "metadata.json"
     )
 
     resolved = resolve_metadata_path(
-        database_name="spider2/adventureworks",
-        physical_database="ADVENTUREWORKS",
-        datasets_root=tmp_path,
-    )
-
-    assert resolved == metadata
-
-
-def test_resolve_metadata_path_falls_back_to_spider2_slug(tmp_path: Path) -> None:
-    metadata = _write_metadata(
-        tmp_path / "spider2" / "adventureworks" / "metadata.json"
-    )
-
-    resolved = resolve_metadata_path(
-        database_name="ADVENTUREWORKS",
-        physical_database="ADVENTUREWORKS",
+        database_name="custom/adventureworks",
         datasets_root=tmp_path,
     )
 
@@ -160,7 +145,7 @@ def test_load_metadata_allowlist_is_case_normalized(tmp_path: Path) -> None:
 def test_metadata_filters_tables_and_columns(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    metadata = _write_metadata(tmp_path / "spider2" / "db" / "metadata.json")
+    metadata = _write_metadata(tmp_path / "db" / "metadata.json")
     monkeypatch.setenv("DATASETS_DIR", str(tmp_path))
     database = SnowflakeDatabase(_connection_string())
 
@@ -204,7 +189,7 @@ def test_metadata_file_query_param(tmp_path: Path) -> None:
 def test_get_tables_pushes_metadata_filter_into_sql(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    _write_metadata(tmp_path / "spider2" / "db" / "metadata.json")
+    _write_metadata(tmp_path / "db" / "metadata.json")
     monkeypatch.setenv("DATASETS_DIR", str(tmp_path))
     database = SnowflakeDatabase(_connection_string())
     captured: list[str] = []
@@ -241,27 +226,6 @@ def test_query_history_excludes_blank_query_text(monkeypatch: MonkeyPatch) -> No
     database.get_queries()
 
     assert "NULLIF(TRIM(QUERY_TEXT), '') IS NOT NULL" in captured_sql
-
-
-def test_spider2_eval_skips_query_history(monkeypatch: MonkeyPatch) -> None:
-    database = SnowflakeDatabase(_connection_string("spider2_eval=1"))
-
-    def unexpected_execute(sql: str) -> pd.DataFrame:
-        raise AssertionError(f"query history should be skipped, got: {sql}")
-
-    monkeypatch.setattr(database, "execute", unexpected_execute)
-
-    result = database.get_queries()
-
-    assert database._spider2_eval is True
-    assert result.empty
-    assert result.columns.tolist() == ["end_time", "query_text"]
-
-
-def test_non_spider2_database_does_not_skip_query_history() -> None:
-    database = SnowflakeDatabase(_connection_string())
-
-    assert database._spider2_eval is False
 
 
 def test_execute_reuses_one_snowflake_connection(monkeypatch: MonkeyPatch) -> None:

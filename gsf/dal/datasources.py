@@ -265,7 +265,7 @@ WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: col.description,
                          sample_values: col.sample_values}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       sch.name AS schema_name, cols
+       sch.name AS schema_name, tbl.pk AS pk, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -411,6 +411,10 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "description": row.get("description") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
+                # Without this, a table discovered here during SQL repair
+                # (sql_reconstruction's _discover_tables) reaches the prompt
+                # with no primary-key line at all.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )
@@ -541,7 +545,10 @@ RETURN c.id AS id,
        c.description AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
-       EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key
+       EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key,
+       EXISTS {{
+           (:{Labels.COLUMN})-[:{Edges.FOREIGN_KEY}]->(c)
+       }} AS is_foreign_key_target
 ORDER BY c.ordinal_position
 """
 
@@ -620,6 +627,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r.get("description"),
             "ordinal_position": r.get("ordinal_position"),
             "sample_values": r.get("sample_values"),
+            "is_foreign_key_target": bool(r.get("is_foreign_key_target")),
         }
         for r in rows
         if r.get("id") is not None

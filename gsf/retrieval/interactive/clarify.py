@@ -60,13 +60,12 @@ Formulas or conditions whose exact specification is still missing, ranked most-c
 {incomplete_formulas_note}
 
 {sort_direction_note}
-{turns_hint}
 
 STRICT RULES — follow every one of these exactly:
 1. NEVER ask where data is stored. Do not ask about or mention the words 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, history, or scientific tautologies: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
 3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize the results"), prioritize asking the user which specific metrics or fields they want in the output.
-4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If turns remain AND no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
+4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
 6. Suggested format for questions: "As a metric, what does [TERM] measure and what is its exact formula?" Always name the exact term from the ambiguity you are trying to resolve in your question.
 7. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
@@ -131,14 +130,6 @@ def _last_answer_is_stuck(history: list[dict]) -> bool:
     return any(phrase in last_answer for phrase in _STUCK_PHRASES)
 
 
-def _format_resolved_hit(entity: str, hit_text: str) -> str:
-    """Format a VDB hit as a concise KB-style entry for evidence generation."""
-    # hit_text is a ColumnAttribute description; strip the verbose prefix if present
-    # e.g. "ColumnAttribute: Lunar Stage of Term ... lunarstage (char) ..."
-    body = re.sub(r"^ColumnAttribute:[^.]+\.\s*", "", hit_text or "")
-    return f"- {entity}\n  Definition: {body}" if body else f"- {entity}\n  Definition: {hit_text}"
-
-
 def _format_resolved_schema_terms(
     resolved_hits: list[tuple[str, str, float, str]],
 ) -> str:
@@ -150,23 +141,14 @@ def _format_resolved_schema_terms(
     return "\n".join(lines)
 
 
-def _update_vdb_resolved_hits(
+def _cache_resolved_hits(
     session: "InteractiveSessionState",
     resolved_hits: list[tuple[str, str, float, str]],
 ) -> None:
-    """Persist resolved hits to session. Confident hits (score<=0.63) go to evidence."""
+    """Persist resolved hits to session for reuse across this turn (see
+    _cached_resolved_hits' consumers: clarify prompt building and
+    build_grounded_terms_hint in evidence.py)."""
     session._cached_resolved_hits = resolved_hits
-    confident = [(e, t) for e, t, s, *_ in resolved_hits if s <= 0.63]
-    if not confident:
-        return
-    for entity, hit_text in confident:
-        entry = _format_resolved_hit(entity, hit_text)
-        if entry not in session._vdb_resolved_hits:
-            session._vdb_resolved_hits = (
-                session._vdb_resolved_hits + "\n" + entry
-                if session._vdb_resolved_hits
-                else entry
-            )
 
 
 _PRUNE_RESOLVED_PROMPT = """\
@@ -245,11 +227,17 @@ def should_clarify(
             session.db_name,
             session.external_kg,
             session.external_kg_children_map,
+            session._collision_hit_verdicts,
         )
         session._cached_unresolvable = unresolvable
         session._cached_unresolvable_for = session.working_question
         session._cached_vdb_only_norms = vdb_only_norms
-        session._json_shared_notes = json_shared_notes
+        # Accumulate, never replace — a note from an earlier turn (e.g. a
+        # collision resolved before the entity phrasing drifted) must survive
+        # even if this turn's fresh extraction has no collision to report.
+        for note in json_shared_notes:
+            if note not in session._json_shared_notes:
+                session._json_shared_notes.append(note)
         # Always replace with the fresh KB result — never carry stale content forward.
         # An empty result is valid (entities not covered by KB this turn).
         session._grounded_kg = relevant_kg
@@ -329,8 +317,8 @@ def should_clarify(
         # Capture all extracted entities on the very first clarify call (turn 0).
         if not session.initial_extracted_entities:
             session.initial_extracted_entities = sorted(extracted_norms)
-        # Confident VDB resolutions (score <= 0.63) go to evidence generation.
-        _update_vdb_resolved_hits(session, resolved_hits)
+        # Cache resolved hits for reuse this turn (clarify prompt + evidence generation).
+        _cache_resolved_hits(session, resolved_hits)
         # Prune persistent terms that were extracted this turn but are no longer
         # unresolvable — they were resolved via KB coverage or VDB this turn.
         current_unresolvable_names = {e for e, _ in unresolvable}
@@ -415,15 +403,8 @@ def should_clarify(
     else:
         incomplete_formulas_note = "None"
 
-    _PATIENCE = 3
     turns_used = len(session.clarify_history)
     turns_remaining = session.max_clarify_turns - turns_used
-    turns_hint = (
-        f"NOTE: You have {turns_remaining} clarification turns remaining. "
-        "If you have not yet resolved all formulas, thresholds, or ambiguous conditions "
-        "required to write correct SQL, re-examine the question and ASK rather than PROCEED."
-        if turns_remaining > _PATIENCE else ""
-    )
 
     prompt = _CLARIFY_PROMPT.format(
         db_schema=_compact_schema(session.db_schema),
@@ -435,7 +416,6 @@ def should_clarify(
         unresolvable_terms=unresolvable_text,
         incomplete_formulas_note=incomplete_formulas_note,
         sort_direction_note=sort_direction_note,
-        turns_hint=turns_hint,
     )
     response = safe_invoke_text(llm, prompt).strip()
 
@@ -493,13 +473,17 @@ def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
         session.db_name,
         session.external_kg,
         session.external_kg_children_map,
+        session._collision_hit_verdicts,
     )
     session._cached_unresolvable = unresolvable
     session._cached_unresolvable_for = session.working_question
-    session._json_shared_notes = json_shared_notes
+    # Accumulate, never replace — see the sibling call site above.
+    for note in json_shared_notes:
+        if note not in session._json_shared_notes:
+            session._json_shared_notes.append(note)
     session._grounded_kg = relevant_kg
     session._grounded_kg_for = session.working_question
-    _update_vdb_resolved_hits(session, resolved_hits)
+    _cache_resolved_hits(session, resolved_hits)
     if relevant_kg:
         existing = _parse_kg_entries(session.cumulative_grounded_kg)
         for name, text in _parse_kg_entries(relevant_kg).items():

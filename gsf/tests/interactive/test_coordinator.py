@@ -6,8 +6,9 @@ from gsf.retrieval.interactive.coordinator import (
     _apply_debug_seed,
     _apply_follow_up_seed,
     apply_user_answer,
+    step,
 )
-from gsf.retrieval.interactive.types import TurnType
+from gsf.retrieval.interactive.types import SubmitSQLAction, TurnType
 from gsf.retrieval.interactive.state import InteractiveSessionState
 
 
@@ -54,7 +55,37 @@ def test_debug_seed_sets_error():
     sess = _make_session()
     msg = "Your SQL is not executable: column X does not exist\nPlease fix and call submit_sql."
     _apply_debug_seed(sess, msg)
-    assert sess.path_state["error"] == msg
+    # Only the first line after the marker is extracted as the DB error —
+    # the trailing "Please fix..." instruction is not part of it.
+    assert sess.path_state["error"] == "column X does not exist"
+
+
+def test_step_routes_exec_error_through_debug_path():
+    """End-to-end (no live DB/orchestrator): mirrors how eval_bird_interact's
+    _build_debug_message() turns a real submit_sql exec-error response into the
+    orchestrator message, then drives it through the real coordinator.step() to
+    confirm the 'not executable' branch — not the generic 'not correct' hint
+    branch — is what actually runs.
+    """
+    sess = _make_session()
+    sess.path_state["sql_code"] = "SELECT bad_column FROM aliens"  # prior failed attempt
+
+    last_submit_raw = '[exec_err_flg] column "bad_column" does not exist'
+    actual_error = last_submit_raw.split("[exec_err_flg]", 1)[1].strip()
+    orchestrator_message = f"Your SQL is not executable: {actual_error}\nPlease fix and call submit_sql."
+
+    with patch(
+        "gsf.retrieval.interactive.coordinator._run_sql_generation",
+        return_value="SELECT column FROM aliens",
+    ) as mock_gen:
+        action = step(sess, orchestrator_message)
+
+    mock_gen.assert_called_once()
+    assert isinstance(action, SubmitSQLAction)
+    assert action.sql == "SELECT column FROM aliens"
+    # The real DB error was extracted and seeded, not the generic wrong-result hint.
+    assert sess.path_state["error"] == actual_error
+    assert sess.path_state["_resume_from"] == "reconstruct_sql"
 
 
 def test_follow_up_seed_clears_sql_keys():
@@ -72,7 +103,12 @@ def test_apply_user_answer_merges_question():
     sess._pending_question = "Which year?"
     mock_llm = MagicMock()
     mock_llm.invoke.return_value.content = "How many aliens were observed in 2023?"
-    with patch("gsf.retrieval.interactive.coordinator._get_llm", return_value=mock_llm):
+    with (
+        patch("gsf.retrieval.interactive.coordinator._get_llm", return_value=mock_llm),
+        # merge_clarification is called with _get_fast_llm(), not _get_llm() —
+        # both must be mocked or the real (unmocked) LLM client gets used instead.
+        patch("gsf.retrieval.interactive.coordinator._get_fast_llm", return_value=mock_llm),
+    ):
         apply_user_answer(sess, "2023")
     assert sess.working_question == "How many aliens were observed in 2023?"
     assert len(sess.clarify_history) == 1

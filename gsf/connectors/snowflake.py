@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import threading
 from pathlib import Path
 from typing import Any, Optional
@@ -36,12 +35,6 @@ def _quoted_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _slugify(name: str) -> str:
-    """Normalize a database name into a filesystem-safe slug."""
-    slug = re.sub(r"[^a-z0-9]+", "_", name.lower())
-    return slug.strip("_")
-
-
 def _sql_string_list(values: set[str]) -> str:
     """Render uppercase identifiers as a Snowflake ``IN (...)`` list literal."""
     return ", ".join("'" + value.replace("'", "''") + "'" for value in sorted(values))
@@ -58,7 +51,6 @@ def _datasets_root() -> Path:
 def resolve_metadata_path(
     *,
     database_name: str,
-    physical_database: str,
     metadata_file: str | None = None,
     datasets_root: Path | None = None,
 ) -> Path | None:
@@ -67,27 +59,15 @@ def resolve_metadata_path(
     Resolution order:
 
     1. Explicit ``?metadata_file=`` path from the connection string.
-    2. ``<datasets>/<database_name>/metadata.json`` (``database_name`` may be a
-       logical name such as ``spider2/adventureworks``).
-    3. ``<datasets>/spider2/<slug(physical_database)>/metadata.json`` so Spider2
-       Snowflake URLs without ``metadata_database`` still pick up seeded files.
+    2. ``<datasets>/<database_name>/metadata.json``.
     """
     if metadata_file:
         path = Path(metadata_file).expanduser()
         return path if path.is_file() else None
 
     root = datasets_root if datasets_root is not None else _datasets_root()
-    candidates = [
-        root / database_name / "metadata.json",
-        root / "spider2" / _slugify(physical_database) / "metadata.json",
-    ]
-    if database_name != physical_database:
-        candidates.append(root / "spider2" / _slugify(database_name) / "metadata.json")
-
-    for path in candidates:
-        if path.is_file():
-            return path
-    return None
+    path = root / database_name / "metadata.json"
+    return path if path.is_file() else None
 
 
 def load_metadata_allowlist(metadata_path: Path) -> MetadataAllowlist:
@@ -116,12 +96,12 @@ def load_metadata_allowlist(metadata_path: Path) -> MetadataAllowlist:
 
 def _parse_connection_string(
     connection_string: str,
-) -> tuple[dict[str, Any], str, str, str, str | None, bool]:
+) -> tuple[dict[str, Any], str, str, str, str | None]:
     """Parse a Snowflake URL into connector kwargs, warehouse, and names.
 
     Returns
     ``(connect_kwargs, warehouse, physical_database, database_name,
-    metadata_file, spider2_eval)``.
+    metadata_file)``.
 
     Multi-database loading matches SQLite: put one URL per Snowflake database in
     ``CONNECTION_STRINGS`` (different ``?database=``). ``database_name`` defaults
@@ -191,19 +171,12 @@ def _parse_connection_string(
 
     logical_name = metadata_database_from_query(query) or database
     metadata_file = query_param(query, "metadata_file")
-    spider2_eval = (query_param(query, "spider2_eval") or "").casefold() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
     return (
         connect_kwargs,
         warehouse,
         database,
         logical_name,
         metadata_file,
-        spider2_eval,
     )
 
 
@@ -236,7 +209,6 @@ class SnowflakeDatabase(SQLDatabase):
             self._physical_database,
             self._database_name,
             metadata_file,
-            self._spider2_eval,
         ) = _parse_connection_string(connection_string)
         self._connection: Any | None = None
         self._connection_lock = threading.RLock()
@@ -265,7 +237,6 @@ class SnowflakeDatabase(SQLDatabase):
         self._metadata_columns: dict[str, set[str]] | None = None
         self._metadata_path = resolve_metadata_path(
             database_name=self._database_name,
-            physical_database=self._physical_database,
             metadata_file=metadata_file,
         )
         if self._metadata_path is not None:
@@ -430,12 +401,6 @@ class SnowflakeDatabase(SQLDatabase):
 
     def get_queries(self, hours: int = 24) -> pd.DataFrame:
         """Return recent queries from ``INFORMATION_SCHEMA.QUERY_HISTORY``."""
-        if self._spider2_eval:
-            logger.info(
-                "Skipping Snowflake query history for Spider2 eval database %s",
-                self._database_name,
-            )
-            return pd.DataFrame(columns=["end_time", "query_text"])
         try:
             df = self.execute(f"""
                 SELECT

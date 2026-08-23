@@ -142,7 +142,7 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     "1 hop" join path that's actually just an intra-table hop.
 
     Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
-    col_name, table_id, table_name, schema_name}.
+    col_name, table_id, table_name, schema_name, datatype}.
     """
     if not attr_ids:
         return {}
@@ -156,7 +156,7 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     WITH attr, coalesce(definingCol, refCol) AS col
     OPTIONAL MATCH (col)<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
     RETURN attr.id AS attr_id, attr.name AS attr_name,
-           attr.description AS attr_description,
+           attr.description AS attr_description, attr.datatype AS datatype,
            col.id AS col_id, col.name AS col_name,
            tbl.id AS table_id, tbl.name AS table_name, sch.name AS schema_name
     """
@@ -178,6 +178,9 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
             "table_id": row.get("table_id"),
             "table_name": row.get("table_name") or "",
             "schema_name": row.get("schema_name") or "",
+            # Only present on attrs re-ingested since this field was added —
+            # older rows fall back to "" here (rendered as no tag downstream).
+            "datatype": row.get("datatype") or "",
         }
     return result
 

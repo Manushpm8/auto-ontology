@@ -26,7 +26,8 @@ class InteractiveSessionState:
     _cached_unresolvable: Optional[list] = None  # cached per working_question
     _cached_unresolvable_for: Optional[str] = None  # working_question at cache time
     _cached_resolved_hits: Optional[list] = None  # VDB resolved hits for current question
-    _json_shared_notes: list[str] = field(default_factory=list)  # collision groups resolved as "shared JSON column" — injected verbatim into Evidence
+    _json_shared_notes: list[str] = field(default_factory=list)  # collision-resolution notes ("shared column" + "resolved to these distinct columns") — accumulated across turns (never replaced), injected verbatim into Evidence
+    _collision_hit_verdicts: dict = field(default_factory=dict)  # column id -> True/False, persists collision-resolution verdicts across turns so a later collision on the same id (even under different entity-name phrasing) skips re-deriving it
     _cached_vdb_only_norms: set = field(default_factory=set)  # VDB-resolved but KB-uncovered norms
     # KB+VDB disambiguation bookkeeping, accumulated across turns within a phase (see
     # clarify.py) — a normalized term's KB coverage and VDB hit are re-derived fresh
@@ -40,7 +41,6 @@ class InteractiveSessionState:
     _grounded_kg_for: Optional[str] = None  # working_question when _grounded_kg was set
     phase1_grounded_kg: str = ""  # snapshot of cumulative_grounded_kg at Phase 1 PROCEED, carried into Phase 2
     cumulative_grounded_kg: str = ""  # union of all _grounded_kg values seen this phase (never replaced, only grows)
-    _vdb_resolved_hits: str = ""  # KB-formatted confident VDB resolutions (score<=0.63) for evidence
     incomplete_formula_terms: list = field(default_factory=list)  # [(term, what_is_missing)]
     persistent_unresolved: list[str] = field(default_factory=list)  # terms never resolved by KB/VDB; pruned after each answered turn
     resolved_persistent: set[str] = field(default_factory=set)  # terms pruned from persistent; blocked from re-accumulation

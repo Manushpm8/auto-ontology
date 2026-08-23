@@ -93,13 +93,10 @@ def route_sql_validation(state: AgentState) -> str:
 
     else:
         # SQL is valid - check if we should skip intent validation.
-        # NOTE: this used to read a dedicated "reconstruction_count" key that
-        # was never incremented anywhere, so this safety net could never
-        # fire — intent-validation/empty-like/value-repair failures loop
-        # back to reconstruct_sql without ever touching "sql_attempts", so
-        # those cycles could run unbounded. "failed_attempts" IS reliably
-        # appended on every single reconstruct_sql call regardless of which
-        # check sent it there, so it's the correct universal attempt count.
+        # Use "failed_attempts" as the attempt count, not "sql_attempts" —
+        # every reconstruct_sql call appends to failed_attempts regardless of
+        # which check routed it there (intent validation, empty-like result,
+        # value repair, ...), so it's the only universal, reliable counter.
         reconstruction_count = len(state["path_state"].get("failed_attempts") or [])
         if reconstruction_count > 5:
             logger.info(

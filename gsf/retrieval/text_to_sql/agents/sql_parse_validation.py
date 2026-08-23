@@ -158,13 +158,23 @@ def detect_vacuous_group_by(
     row per group — a real pattern seen in practice once reconstruction was
     pushed away from the bare single-table form.
 
+    Also catches the same no-op spelled without ``GROUP BY``/``PARTITION BY``
+    at all: a correlated (or plain) scalar-subquery aggregate whose ``WHERE``
+    filters the table down by its own unique column — e.g. ``(SELECT
+    AVG(s.x) FROM t s WHERE s.pk = rp.pk)``. Filtering to an exact match on a
+    unique column matches at most one row, so the aggregate is exactly as
+    vacuous as ``GROUP BY`` on that column, just spelled differently — seen
+    in practice as the next thing reconstruction tried once the GROUP-BY
+    form got rejected.
+
     Returns ``""`` when nothing looks wrong, including whenever the SQL
-    doesn't contain "group by"/"partition by" at all (checked before any
-    parsing, so the common case costs nothing) or isn't parseable (left to
-    the normal parse validator).
+    doesn't contain "group by"/"partition by"/an aggregate function call at
+    all (checked before any parsing, so the common case costs nothing) or
+    isn't parseable (left to the normal parse validator).
     """
     sql_lower = (sql or "").lower()
-    if "group by" not in sql_lower and "partition by" not in sql_lower:
+    _CLUE_WORDS = ("group by", "partition by", "avg(", "sum(", "count(", "min(", "max(")
+    if not any(kw in sql_lower for kw in _CLUE_WORDS):
         return ""
 
     read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
@@ -200,8 +210,15 @@ def _check_select_block_vacuous(select: exp.Select, database_name: str | None) -
     table_name = table_expr.name
     table_alias = table_expr.alias_or_name
 
-    grouping_cols: set[str] = set()
+    keys = find_table_key_columns(table_name, database_name)
+    unique_cols = {c.lower() for c in (keys["pk"] + keys["unique"])}
+    if not unique_cols:
+        return ""
+
     group = select.args.get("group")
+
+    # 1. GROUP BY / a window function's PARTITION BY on a unique column.
+    grouping_cols: set[str] = set()
     if group is not None:
         for e in group.expressions or []:
             col = e.this if isinstance(e, exp.Ordered) else e
@@ -211,29 +228,53 @@ def _check_select_block_vacuous(select: exp.Select, database_name: str | None) -
         for col in window.args.get("partition_by") or []:
             if isinstance(col, exp.Column):
                 grouping_cols.add(col.name.lower())
-    if not grouping_cols:
-        return ""
-
-    keys = find_table_key_columns(table_name, database_name)
-    unique_cols = {c.lower() for c in (keys["pk"] + keys["unique"])}
     hit = grouping_cols & unique_cols
-    if not hit:
-        return ""
+    if hit:
+        return _vacuous_reason(
+            next(iter(hit)), table_name, table_alias,
+            verb="groups/partitions by",
+            extra="even if it is subsequently joined back to the same table, "
+                  "since the aggregation was already trivial before that join. ",
+        )
 
-    culprit = next(iter(hit))
+    # 2. A WHERE-filtered aggregate with no GROUP BY at all — the same no-op,
+    # spelled as a (typically correlated) scalar subquery instead, e.g.
+    # ``(SELECT AVG(s.x) FROM t s WHERE s.pk = rp.pk)``. Filtering to an
+    # exact match on a unique column matches at most one row, so wrapping it
+    # in AVG/SUM/etc. is exactly as vacuous as GROUP BY on that column.
+    if group is None and select.find(exp.AggFunc) is not None:
+        where_cols: set[str] = set()
+        where = select.args.get("where")
+        if where is not None:
+            for eq in where.find_all(exp.EQ):
+                for side in (eq.left, eq.right):
+                    if isinstance(side, exp.Column):
+                        where_cols.add(side.name.lower())
+        hit = where_cols & unique_cols
+        if hit:
+            return _vacuous_reason(
+                next(iter(hit)), table_name, table_alias,
+                verb='filters by ("WHERE") an equality on',
+                extra="",
+            )
+
+    return ""
+
+
+def _vacuous_reason(
+    culprit: str, table_name: str, table_alias: str, *, verb: str, extra: str
+) -> str:
     return (
-        f'the query groups/partitions by "{culprit}", which is already unique '
+        f'the query {verb} "{culprit}", which is already unique '
         f'per row in "{table_name}" (its primary key or a column confirmed '
         f"unique from the data) — with no JOIN bringing in additional rows in "
-        f"that part of the query, every group/partition has exactly one row, "
+        f"that part of the query, every group/match has exactly one row, "
         f"so any aggregate over it (AVG, SUM, a window function, etc.) is a "
-        f'no-op and does not compute a real "per group" result — even if it '
-        f"is subsequently joined back to the same table, since the "
-        f"aggregation was already trivial before that join. Group/partition "
-        f"by the actual dimension the question is asking to aggregate over "
-        f"instead (e.g. a foreign key or category column shared by multiple "
-        f"rows), or remove the grouping/partitioning if the question wants "
-        f'one row per "{table_alias or table_name}" record.'
+        f'no-op and does not compute a real "per group" result — {extra}'
+        f"Group/aggregate by the actual dimension the question is asking to "
+        f"aggregate over instead (e.g. a foreign key or category column "
+        f"shared by multiple rows), or remove the grouping/aggregation if "
+        f'the question wants one row per "{table_alias or table_name}" record.'
     )
 
 
@@ -339,6 +380,8 @@ class SQLValidationAgent(BaseAgent):
                 "decision": "invalid_sql",
                 "path_state": path_state,
             }
+
+        self.logger.info("SQL passed static checks: parse, degenerate, vacuous-aggregation")
 
         sql_columns = validation_result.get("sql_columns") or []
         custom_analyses_used = []

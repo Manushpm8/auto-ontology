@@ -158,10 +158,9 @@ def _ambiguity_check(
 
 # ── Collision resolution ────────────────────────────────────────────────────
 # When two different entities' best VDB hit lands on the same underlying
-# column, the pipeline used to flag it "unreliable" and drop the formula that
-# depended on it entirely at evidence-gen. Calibrated against real collisions
-# (see conversation/notes): thresholds are deliberately conservative — when in
-# doubt, defer to the LLM call rather than silently auto-assigning.
+# column, decide whether one is a clear winner (auto-assign) or the scores
+# are too close to call (defer to the LLM). Thresholds are deliberately
+# conservative — when in doubt, defer rather than silently auto-assign.
 _COLLISION_WINNER_MARGIN = 0.04  # winner's 1st-hit score must beat the loser's by at least this
 _COLLISION_LOSER_MAX_GAP = 0.08  # loser's own gap (shared hit -> its next-distinct hit) must be under this
 
@@ -213,12 +212,43 @@ def _shared_column_note(entities: list[str], hit: dict, fallback_id: str) -> str
     """Format the "these terms legitimately share one composite column" note
     injected directly into SQL-gen evidence."""
     names = ", ".join(f'"{e}"' for e in entities)
-    col_name = re.sub(r"^ColumnAttribute:\s*", "", str(hit.get("text") or "")).split(".")[0].strip()
+    col_name = _column_name(hit, fallback_id)
     logger.info("Clarify — collision resolved as shared composite column: %s -> %s", entities, col_name)
     return (
-        f"Note: {names} both resolve to the same column ({col_name or fallback_id}) "
+        f"Note: {names} both resolve to the same column ({col_name}) "
         f"— use the correct sub-key/field for each; they are not the same value."
     )
+
+
+def _column_name(hit: dict, fallback_id: str) -> str:
+    """Human-readable column name from a hit's text, e.g. 'Wage Details'."""
+    return (
+        re.sub(r"^ColumnAttribute:\s*", "", str(hit.get("text") or "")).split(".")[0].strip()
+        or fallback_id
+    )
+
+
+def _distinct_columns_note(pairs: list[tuple[str, dict, str]]) -> str:
+    """Format a "these terms resolve to these (different) columns, confirmed by
+    disambiguation" note for entities that collided but were resolved to
+    distinct columns (score-margin auto-resolve or disambiguation LLM split).
+
+    Plain factual mapping, deliberately not phrased as a warning — that's
+    reserved for :func:`_shared_column_note`'s same-column case, where the
+    risk (conflating two different values) is real. Here the two terms were
+    already determined to mean different things; the note just saves SQL-gen
+    from re-deriving via its own, independent VDB search a resolution that
+    plain vector search was already shown to get ambiguous once.
+
+    *pairs* is a list of (entity, hit, fallback_id) — one entry per resolved
+    entity, kept together as a single note when they came from the same
+    collision so the mapping reads as one fact rather than scattered lines.
+    """
+    mappings = "; ".join(
+        f'"{entity}" resolves to {_column_name(hit, fallback_id)}'
+        for entity, hit, fallback_id in pairs
+    )
+    return f"Note (confirmed by disambiguation, not plain vector search): {mappings}."
 
 
 def _entity_ranked_hits(
@@ -247,7 +277,7 @@ def _entity_ranked_hits(
 
 _COLLISION_LLM_PROMPT = """\
 Two or more terms extracted from a question both resolved, via vector search, to the \
-SAME database column — that's almost certainly wrong for at least one of them. Decide \
+SAME database column, which indicated potentially at least one of them is wrong. Decide \
 which column each term actually refers to.
 
 Question: {question}
@@ -313,14 +343,28 @@ def _resolve_collisions(
     semantic_retriever: object,
     db_name: str | None,
     kb_covered_norms: set[str] | None = None,
+    hit_verdicts: dict[str, bool] | None = None,
 ) -> list[str]:
     """Resolve entities whose best VDB hit collides with another entity's, in place.
 
     Mutates *best_hit_per_entity* so every entity ends up mapped to a distinct
     column, or is explicitly confirmed as legitimately sharing one (the JSON
-    case). Returns "shared JSON column" notes to inject directly into SQL-gen
-    evidence (bypassing evidence-gen's LLM, which isn't reliable about
-    preserving instructions passed through it).
+    case). Returns notes to inject directly into SQL-gen evidence (bypassing
+    evidence-gen's LLM, which isn't reliable about preserving instructions
+    passed through it) — both "shared column" notes (JSON case) and "resolved
+    to these distinct columns" notes, so SQL-gen's own independent VDB search
+    doesn't have to re-derive (and risk re-getting-wrong) a resolution that
+    plain vector search was already shown to be ambiguous about once.
+
+    *hit_verdicts* (mutated in place, keyed by column id) persists across
+    calls — pass ``session._collision_hit_verdicts`` to make decisions durable
+    across turns. Once a column id has a verdict (True = trust as a
+    legitimate multi-entity target, False = don't), a later collision on the
+    *same* id skips straight to that verdict instead of re-deriving it — no
+    repeat LLM call, and immune to entity-name drift across turns (e.g.
+    "prevailing wage" vs "prevailing_wage level" colliding on the same id in
+    different turns), since the cache key is the stable column id, not the
+    entity string.
 
     Resolution order, most confident/cheapest first:
       0. Either colliding entity is already KB-covered (has a formula from
@@ -332,25 +376,29 @@ def _resolve_collisions(
          it to a column risks handing evidence-gen a confident-looking but
          nonsensical mapping (e.g. a computed metric name assigned to an
          unrelated real column) with no disambiguation signal attached.
-      1. Otherwise, shared hit is a JSON column -> assume both terms correctly
+      1. Otherwise, the shared id already has a cached verdict -> apply it
+         directly, no re-derivation, no LLM call.
+      2. Otherwise, shared hit is a JSON column -> assume both terms correctly
          share it (they likely need different sub-keys within it); note it,
-         don't reassign.
-      2. Otherwise, if one term's 1st-hit score beats the other's by >= 0.04
+         don't reassign, cache verdict True.
+      3. Otherwise, if one term's 1st-hit score beats the other's by >= 0.04
          AND the loser's own gap to its next-distinct candidate is < 0.08:
-         auto-assign the loser to that next-distinct candidate.
-      3. Otherwise: ask a fast LLM to pick, given both terms' top candidates.
-      4. If the LLM call fails to parse: drop the lower-confidence entity from
+         auto-assign the loser to that next-distinct candidate; note the
+         distinct-column resolution.
+      4. Otherwise: ask a fast LLM to pick, given both terms' top candidates.
+      5. If the LLM call fails to parse: drop the lower-confidence entity from
          best_hit_per_entity entirely (treat as VDB-unresolved) rather than guess.
     """
-    json_notes: list[str] = []
+    notes: list[str] = []
     kb_covered_norms = kb_covered_norms or set()
+    hit_verdicts = {} if hit_verdicts is None else hit_verdicts
 
     id_to_entities: dict[str, list[str]] = {}
     for entity, hit in best_hit_per_entity.items():
         id_to_entities.setdefault(str(hit.get("id") or ""), []).append(entity)
     collisions = {hid: ents for hid, ents in id_to_entities.items() if len(ents) > 1}
     if not collisions:
-        return json_notes
+        return notes
 
     for shared_id, entities in collisions.items():
         # Step 0: KB-covered entities don't compete for a column at all.
@@ -367,8 +415,34 @@ def _resolve_collisions(
         if len(entities) < 2:
             continue  # no real collision left once KB-covered terms are removed
         shared_hit = best_hit_per_entity[entities[0]]
+
+        # Step 1: a past collision (this turn or an earlier one) already
+        # settled whether this exact column id is safe to trust as shared.
+        cached = hit_verdicts.get(shared_id)
+        if cached is True:
+            logger.info(
+                "Clarify — collision on %r skipped (cached trusted verdict): %s",
+                shared_id, entities,
+            )
+            notes.append(_shared_column_note(entities, shared_hit, shared_id))
+            continue
+        if cached is False:
+            # Same bypass as Step 0's KB-covered exclusion: this id's fate is
+            # already known, so don't run any collision machinery on it again
+            # — no fresh score lookups, no heuristic, no LLM. Just drop these
+            # entities as unresolved, same as the LLM-parse-failure fail-safe.
+            logger.info(
+                "Clarify — collision on %r skipped (cached distrust verdict) — "
+                "dropping as unresolved, no re-check: %s", shared_id, entities,
+            )
+            for e in entities:
+                best_hit_per_entity.pop(e, None)
+            continue
+
+        # cached is always None here — True/False both returned above already.
         if _is_composite_hit(shared_hit):
-            json_notes.append(_shared_column_note(entities, shared_hit, shared_id))
+            hit_verdicts[shared_id] = True
+            notes.append(_shared_column_note(entities, shared_hit, shared_id))
             continue
 
         # Fresh per-entity queries — see _entity_ranked_hits for why col_hits can't be reused.
@@ -401,10 +475,15 @@ def _resolve_collisions(
                     loser, next_distinct.get("id"), float(next_distinct["score"]),
                 )
                 best_hit_per_entity[loser] = next_distinct
+                notes.append(_distinct_columns_note([
+                    (winner, shared_hit, shared_id),
+                    (loser, next_distinct, str(next_distinct.get("id") or "")),
+                ]))
             else:
                 needs_llm.append(loser)
 
         if not needs_llm:
+            hit_verdicts[shared_id] = False
             continue
 
         entity_candidates = {e: fresh_hits[e][:3] for e in [winner, *needs_llm]}
@@ -416,6 +495,7 @@ def _resolve_collisions(
             for loser in needs_llm:
                 logger.warning("Clarify — collision unresolved for %r; dropping VDB hit", loser)
                 best_hit_per_entity.pop(loser, None)
+            hit_verdicts[shared_id] = False
             continue
 
         by_id = {str(h.get("id")): h for hits in entity_candidates.values() for h in hits}
@@ -426,20 +506,39 @@ def _resolve_collisions(
                 best_hit_per_entity[entity] = by_id[chosen_id]
         logger.info("Clarify — collision LLM-resolved: %s", decision)
 
-        # Retroactive check: the LLM may itself have assigned the same id to
-        # multiple entities (deciding they genuinely share a column) rather than
-        # picking distinct ones. That's a new, unvalidated collision — apply the
-        # same composite-column safety net as the original shared_id, instead of
-        # silently accepting it as if it were a plain single-value mapping.
+        # The LLM may itself decide two entities genuinely share a column (assign
+        # them the same id) rather than picking distinct ones. We don't second-guess
+        # that decision — it's trusted as-is, same as every other id it chose. The
+        # only thing we add on top: if that shared id is detectably composite,
+        # attach the "use distinct sub-keys" note so evidence-gen doesn't treat it
+        # as one plain value for both terms. If it's not detectably composite, we
+        # still accept the LLM's answer — we just don't have a note to add.
         new_id_to_entities: dict[str, list[str]] = {}
         for entity, chosen_id in decision.items():
             if chosen_id.upper() != "NONE" and chosen_id in by_id:
                 new_id_to_entities.setdefault(chosen_id, []).append(entity)
+
+        # Entities the LLM split onto distinct ids: note the mapping, and mark
+        # the original shared_id as distrusted (this LLM call is the strongest
+        # evidence we have that shared_id itself isn't a shared target) — unless
+        # the LLM converged entities right back onto shared_id itself, in which
+        # case it's confirmed trusted, not distrusted. Checked by id, not just
+        # "did any convergence happen anywhere" — convergence onto a *different*
+        # id says nothing about shared_id's own trustworthiness.
+        converged_entities = {e for ents in new_id_to_entities.values() if len(ents) >= 2 for e in ents}
+        split_pairs = [
+            (entity, by_id[chosen_id], chosen_id)
+            for entity, chosen_id in decision.items()
+            if chosen_id.upper() != "NONE" and chosen_id in by_id and entity not in converged_entities
+        ]
+        if split_pairs:
+            notes.append(_distinct_columns_note(split_pairs))
+        hit_verdicts[shared_id] = len(new_id_to_entities.get(shared_id, [])) >= 2
+
         for new_id, ents in new_id_to_entities.items():
             # Same Step-0 exclusion as the pre-LLM collision above: a KB-covered
-            # entity doesn't need a column identity at all, so it shouldn't be
-            # able to trigger (or be caught up in) this composite-column check
-            # just because the LLM also happened to assign it the same id.
+            # entity doesn't need a column identity at all, regardless of what
+            # the LLM assigned it.
             kb_covered_here = [
                 e for e in ents if (_normalize_entity(e) or e.lower().strip()) in kb_covered_norms
             ]
@@ -452,18 +551,11 @@ def _resolve_collisions(
             ents = [e for e in ents if e not in kb_covered_here]
             if len(ents) < 2:
                 continue
+            hit_verdicts[new_id] = True
             if _is_composite_hit(by_id[new_id]):
-                json_notes.append(_shared_column_note(ents, by_id[new_id], new_id))
-            else:
-                logger.warning(
-                    "Clarify — LLM converged %s onto a single non-composite column %r; "
-                    "treating as unresolved rather than trusting a suspicious shared assignment",
-                    ents, new_id,
-                )
-                for e in ents:
-                    best_hit_per_entity.pop(e, None)
+                notes.append(_shared_column_note(ents, by_id[new_id], new_id))
 
-    return json_notes
+    return notes
 
 
 def _find_unresolvable_entities(
@@ -472,6 +564,7 @@ def _find_unresolvable_entities(
     db_name: str | None,
     formatted_kg: str = "",
     children_map: dict[str, list[str]] | None = None,
+    hit_verdicts: dict[str, bool] | None = None,
 ) -> tuple[
     list[tuple[str, str | None]],
     list[tuple[str, str, float, str]],
@@ -589,10 +682,27 @@ def _find_unresolvable_entities(
         logger.info("Clarify — KB covers: %s", kb_covered_norms or "none")
 
     # Resolve any entities that collided on the same best hit, in place.
+    entities_before_resolution = set(best_hit_per_entity.keys())
     json_notes = _resolve_collisions(
         question, relevant_kg_text, best_hit_per_entity, semantic_retriever, db_name,
-        kb_covered_norms,
+        kb_covered_norms, hit_verdicts,
     )
+
+    # Reconcile needs_kb_rescue against what collision resolution actually did —
+    # it was computed before _resolve_collisions ran, so on its own it doesn't
+    # know an entity got cleanly resolved (and would wrongly keep it excluded
+    # from resolved_hits below / stuck in the final unresolvable list), nor that
+    # an entity got dropped (and would wrongly be treated as resolved with no
+    # hit, silently vanishing from both resolved_hits and unresolvable instead
+    # of surfacing as something that may still need a clarifying question).
+    for entity in entities_before_resolution | set(best_hit_per_entity.keys()):
+        norm = _normalize_entity(entity) or entity.lower().strip()
+        if entity in best_hit_per_entity:
+            needs_kb_rescue.discard(norm)  # now cleanly resolved — no longer ambiguous/uncovered
+        else:
+            needs_kb_rescue.add(norm)  # collision resolution dropped it — treat as unresolved
+            # (KB-covered drops are still correctly excluded downstream via
+            # final_unresolvable_norms = needs_kb_rescue - kb_covered_norms)
 
     # Build resolved_hits from entities cleanly covered at VDB (unambiguous, within
     # threshold, and post-collision-resolution). Use the pipeline's enriched candidates

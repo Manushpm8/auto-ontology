@@ -247,7 +247,11 @@ def _resolve_via_vdb(
     - name-only query (top 3): catches cases where description is noisy or absent
 
     Candidates on the FK column's own table are excluded — a FK never
-    references a column on the table it lives on.
+    references a column on the table it lives on. Candidates whose owning
+    column is known (profiled) to be non-unique are also excluded — a
+    non-unique column can't validly serve as the referenced key. Hits with
+    no ``is_unique`` metadata (embedded before this field was added) are
+    kept rather than excluded.
 
     The hit's ``metadata["id"]`` is the ColumnAttribute Neo4j UUID directly —
     no additional graph lookup is required.
@@ -280,6 +284,12 @@ def _resolve_via_vdb(
             if (hit.get("metadata") or {}).get("table_id")
             and (hit.get("metadata") or {}).get("table_id") != source_table_id
         ]
+
+    merged = [
+        hit
+        for hit in merged
+        if (hit.get("metadata") or {}).get("is_unique") is not False
+    ]
 
     if not merged:
         return None

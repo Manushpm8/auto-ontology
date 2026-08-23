@@ -57,15 +57,13 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 
 
-def _format_known_columns(
+def _collect_known_columns(
     primary_attribute: dict | None,
     attribute_join_paths: list[dict] | None,
-) -> str:
-    """Render a short, repair-focused reminder of already-resolved column
-    names, so reconstruction doesn't have to re-guess casing/existence from
-    the error message alone (e.g. "exch_spot" vs "EXCH_SPOT" when the real
-    column is "quote_depth_snapshot"). Terse by design — this is a repair
-    prompt, not the first-pass generation prompt.
+) -> tuple[list[str], list[str]]:
+    """Shared line-collection for known columns/join keys, used by both the
+    repair prompt and the (more hedged) classification prompt renderers
+    below. See ``_format_known_columns`` for the column/hop line format.
     """
     entries = list(attribute_join_paths or [])
     if primary_attribute:
@@ -83,7 +81,11 @@ def _format_known_columns(
             if key not in seen_columns:
                 seen_columns.add(key)
                 label = entry.get("attr_name") or col_name
-                column_lines.append(f"  {label}: {table_name}.{col_name}")
+                # datatype is only populated for attrs (re-)ingested since
+                # this field was added — older rows just omit the tag.
+                datatype = entry.get("datatype")
+                tag = f" ({datatype})" if datatype else ""
+                column_lines.append(f"  {label}: {table_name}.{col_name}{tag}")
 
         # Multi-hop entries also carry the exact join key on each side of
         # every hop (e.g. treatmentbasics.encref = encounters.enckey) — this
@@ -103,6 +105,20 @@ def _format_known_columns(
             seen_hops.add(hop_key)
             hop_lines.append(f"  {src_table}.{src_col} = {tgt_table}.{tgt_col}")
 
+    return column_lines, hop_lines
+
+
+def _format_known_columns(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict] | None,
+) -> str:
+    """Render a short, repair-focused reminder of already-resolved column
+    names, so reconstruction doesn't have to re-guess casing/existence from
+    the error message alone (e.g. "exch_spot" vs "EXCH_SPOT" when the real
+    column is "quote_depth_snapshot"). Terse by design — this is a repair
+    prompt, not the first-pass generation prompt.
+    """
+    column_lines, hop_lines = _collect_known_columns(primary_attribute, attribute_join_paths)
     if not column_lines and not hop_lines:
         return ""
 
@@ -117,6 +133,51 @@ def _format_known_columns(
             "\nKNOWN JOIN KEYS (already resolved — use these exact join "
             "conditions, do not guess FK column names):\n" + "\n".join(hop_lines)
         )
+
+    return "\n".join(sections) + "\n\n"
+
+
+def _format_known_columns_for_classification(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict] | None,
+) -> str:
+    """Render the same known-columns data for the error CLASSIFIER prompt,
+    with deliberately hedged framing.
+
+    Unlike the repair prompt's "already resolved, use these exact names"
+    (appropriate there — it's just telling the LLM what names to write), this
+    context feeds a root-cause judgment call: is the data missing, or is the
+    SQL just wrong? The anchor/join-path resolution that produces this data
+    is itself a best-effort LLM+graph process that has been wrong before
+    (see candidates_preparation.py's anchor-selection fallback path and its
+    "relevance filter has repeatedly proven unreliable" note) — so this must
+    NOT be framed as ground truth, or the classifier could be biased toward
+    "fixable" even when the resolution itself picked the wrong table/column
+    and a real missing_data rediscovery is needed.
+    """
+    column_lines, hop_lines = _collect_known_columns(primary_attribute, attribute_join_paths)
+    if not column_lines and not hop_lines:
+        return ""
+
+    sections = []
+    if column_lines:
+        sections.append(
+            "\nColumns resolved by an earlier step (may be "
+            "incomplete). The datatype is in parentheses "
+            "where known):\n" + "\n".join(column_lines)
+        )
+    if hop_lines:
+        sections.append(
+            "\nJoin keys tentatively resolved by an earlier step (same "
+            "caveat):\n" + "\n".join(hop_lines)
+        )
+    sections.append(
+        "\nIf the error concerns one of the above, prefer 'fixable' unless "
+        "you have a specific reason to believe this resolution itself is "
+        "wrong (e.g. it points at a table/column that doesn't plausibly "
+        "answer the question), in which case 'missing_data' is still "
+        "correct."
+    )
 
     return "\n".join(sections) + "\n\n"
 
@@ -194,7 +255,7 @@ Question the user asked:
 
 Tables available:
 {table_summary}
-
+{known_columns_section}
 Error / previous attempt:
 {error_context}
 
@@ -203,7 +264,7 @@ Classify the ROOT CAUSE (not the symptom):
 the question — even a perfect SQL rewrite would fail because the right \
 tables/columns are absent. Provide 2-4 semantic search queries to find \
 the missing concepts in our ontology database (focus on entity names and \
-relationships, NOT SQL syntax).
+relationships, NOT SQL synimtax).
 - fixable: the SQL can be corrected using the SAME tables (syntax error, \
 wrong column reference, wrong aggregation, bad logic, etc.). Leave \
 search_queries empty."""
@@ -244,17 +305,29 @@ class SQLReconstructionAgent(BaseAgent):
     ) -> ErrorAnalysis:
         """Ask the LLM to classify the error and suggest search queries."""
         llm = state["llm"]
+        path_state = state["path_state"]
 
-        if ext_err := state["path_state"].get("error"):
+        if ext_err := path_state.get("error"):
             error_context = f"External feedback: {ext_err}\n\n{error_context}"
 
         table_summary = (
             ", ".join(t.get("name", "?") for t in existing_tables) or "(none)"
         )
 
+        # Cheap, no extra LLM/DB call — same data _format_known_columns() uses
+        # for the repair prompt, just rendered with hedged framing here since
+        # this feeds a root-cause judgment call rather than a "what to write"
+        # instruction. See _format_known_columns_for_classification's
+        # docstring for why the framing differs.
+        known_columns_section = _format_known_columns_for_classification(
+            path_state.get("primary_attribute"),
+            path_state.get("attribute_join_paths"),
+        )
+
         prompt = _ANALYSIS_PROMPT_TEMPLATE.format(
             question=question,
             table_summary=table_summary,
+            known_columns_section=known_columns_section,
             error_context=error_context,
         )
 
@@ -477,13 +550,6 @@ class SQLReconstructionAgent(BaseAgent):
         known_columns_section = _format_known_columns(
             path_state.get("primary_attribute"),
             path_state.get("attribute_join_paths"),
-        )
-        # TEMP DEBUG — remove once we've confirmed whether this section is
-        # populated and what it contains during reconstruction retries.
-        self.logger.info(
-            "known_columns_section (%d chars): %r",
-            len(known_columns_section),
-            known_columns_section,
         )
 
         evidence_section = ""

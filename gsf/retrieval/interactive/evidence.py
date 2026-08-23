@@ -151,7 +151,8 @@ def generate_evidence(question: str, grounded_kg: str, resolved_terms_section: s
     # bare "Term = number" line.
     _MAX_EVIDENCE_LINE_CHARS = 600
     _CONTINUATION = re.compile(r"^\s+(AND|OR)\b", re.IGNORECASE)
-    _AGG_ONLY = re.compile(r"^\s*[\w][\w\s/()-]*\s*=\s*(STDDEV|AVG|COUNT|SUM|MIN|MAX)\s*\(", re.IGNORECASE)
+    # A scope-less "Term = COUNT(x)" line is valid, KB-derived evidence and must
+    # pass — do not add a bare-aggregate exclusion here.
     # Join AND/OR continuation lines onto the preceding valid formula line before filtering,
     # so multi-condition expressions like "A = x AND y IN (...)" survive even if the LLM
     # wraps the second clause onto a new line.
@@ -162,11 +163,10 @@ def generate_evidence(question: str, grounded_kg: str, resolved_terms_section: s
         else:
             joined_lines.append(line)
     valid_lines = [
-        l for l in joined_lines
-        if l.strip()
-        and not l.lstrip().startswith("#")
-        and len(l) <= _MAX_EVIDENCE_LINE_CHARS
-        and not _AGG_ONLY.match(l)
+        ln for ln in joined_lines
+        if ln.strip()
+        and not ln.lstrip().startswith("#")
+        and len(ln) <= _MAX_EVIDENCE_LINE_CHARS
     ]
     if not valid_lines:
         logger.warning("SQL gen — Evidence generation returned prose, discarding: %s", response[:100])

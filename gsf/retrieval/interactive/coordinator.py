@@ -125,6 +125,11 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     session._ever_kb_covered_norms = set()
     session._ever_vdb_hit_norms = {}
     session._ever_term_to_kb_entry = {}
+    # Same reasoning for collision-resolution notes: unlike _collision_hit_verdicts
+    # (keyed by stable column id — a schema fact, still valid across phases),
+    # these are injected verbatim into Evidence and reference Phase 1's specific
+    # entities/columns, which are usually irrelevant to Phase 2's question.
+    session._json_shared_notes = []
 
     # Reset clarify state for Phase 2; clarification questions are not allowed.
     session.working_question = follow_up_q if follow_up_q else session.working_question
@@ -376,7 +381,7 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
         session._pending_question = None
     answer_lower = answer.lower()
     user_could_not_answer = any(phrase in answer_lower for phrase in _STUCK_PHRASES)
-    if not user_could_not_answer:
+    if not user_could_not_answer and session.clarify_history:
         last_turn = session.clarify_history[-1]
         relevant_kg = session._grounded_kg or ""
 

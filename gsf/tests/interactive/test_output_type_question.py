@@ -34,17 +34,24 @@ from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-# These point into the separate BIRD-Interact benchmark checkout (not part of
-# this repo); override via env vars if that checkout lives elsewhere,
-# otherwise the values below (this machine's layout) are used as the default.
+# These point into the separate BIRD-Interact FULL benchmark checkout (not
+# part of this repo, and not produced by any seed script) — there is no
+# machine-independent default, so both env vars are required.
 
-_FULL_DATASET = Path(os.environ.get(
-    "BIRD_INTERACT_FULL_DATA",
-    "/Users/ariellegeva/Desktop/BIRD-Interact/bird-interact-full/bird_interact_data_with_gt.jsonl",
-))
-_FULL_DB_ROOT = Path(os.environ.get(
-    "BIRD_INTERACT_FULL_DB_ROOT", "/Users/ariellegeva/Desktop/BIRD-Interact/bird-interact-full"
-))
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(
+            f"{name} is not set. This test needs a local BIRD-Interact FULL "
+            f"checkout; set {name} to the appropriate path before running, e.g.:\n"
+            f"  export {name}=/path/to/BIRD-Interact/bird-interact-full"
+        )
+    return value
+
+
+_FULL_DATASET = Path(_require_env("BIRD_INTERACT_FULL_DATA"))
+_FULL_DB_ROOT = Path(_require_env("BIRD_INTERACT_FULL_DB_ROOT"))
 
 
 def _load_instances() -> dict[str, dict]:

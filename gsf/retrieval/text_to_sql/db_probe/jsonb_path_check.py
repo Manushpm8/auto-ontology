@@ -121,14 +121,29 @@ def find_jsonb_path_mismatches(
     executor: ProbeExecutor,
     dialect: Optional[str],
     sql: str,
+    known_types: Optional[dict[tuple[str, str], str]] = None,
 ) -> list[dict[str, Any]]:
-    """Return JSONB key paths that don't exist in the live database.
+    """Return JSONB key paths that don't exist in the live database, or that
+    were used on a column known not to be JSONB at all.
+
+    ``known_types`` is an optional ``{(table_name.lower(), col_name.lower()):
+    data_type}`` map (e.g. from ``path_state["relevant_tables"]``, already
+    fetched for the generation prompt — no extra DB/graph round-trip). It's
+    used only as a fallback: when the live probe can't confirm real keys for
+    a path (``jsonb_object_keys`` errors or returns nothing, e.g. because the
+    column isn't a JSON type), that case was previously silently skipped as
+    "not resolvable." If ``known_types`` says the column's real type isn't
+    JSON-like, that silence is instead surfaced as its own mismatch kind
+    (``"wrong_type"`` set) — the model used ``->``/``->>`` on a column that
+    was never a JSONB column, not merely a wrong key.
 
     Each entry: ``{"table", "column", "container", "used_key",
-    "available_keys"}`` (``container`` is ``None`` for a flat ``col ->>
-    'key'``). Empty list means every checked path resolved, or none of the
-    paths in the SQL were checkable (unsupported dialect/shape, probe budget
-    exhausted, etc.) — never treated as "everything is fine" beyond that.
+    "available_keys"}`` for a real key mismatch, or ``{"table", "column",
+    "container", "used_key", "wrong_type": <data_type>}`` for the
+    non-JSONB-column case. Empty list means every checked path resolved, or
+    none of the paths in the SQL were checkable (unsupported dialect/shape,
+    probe budget exhausted, etc.) — never treated as "everything is fine"
+    beyond that.
     """
     if _sqlglot_dialect(dialect) != "postgres":
         return []
@@ -170,6 +185,24 @@ def find_jsonb_path_mismatches(
                 owning_table = node.name
                 break
         if available is None:  # column not resolvable, never an object, or probe failed
+            # Fallback: if we independently know this column's real type and
+            # it's not JSON-like, the probe's silence just means "correctly
+            # errored on a non-JSON column" — surface that as its own
+            # mismatch kind instead of dropping it.
+            if known_types is not None:
+                for node in candidates:
+                    known_type = known_types.get((node.name.lower(), col.name.lower()))
+                    if known_type and "json" not in known_type.lower():
+                        mismatches.append(
+                            {
+                                "table": node.name,
+                                "column": col.name,
+                                "container": container,
+                                "used_key": key,
+                                "wrong_type": known_type,
+                            }
+                        )
+                        break
             continue
 
         if key not in available:
@@ -204,35 +237,64 @@ def find_jsonb_path_mismatches(
 
 def build_jsonb_path_repair_error(mismatches: list[dict[str, Any]]) -> str:
     """Render mismatches into a targeted reconstruction instruction."""
-    lines = []
-    for m in mismatches:
-        path = (
-            f"{m['column']}->'{m['container']}'->>'{m['used_key']}'"
-            if m["container"]
-            else f"{m['column']}->>'{m['used_key']}'"
-        )
-        available_preview = ", ".join(m["available_keys"][:20])
-        line = (
-            f"- {m['table']}.{path}: this key does not exist and returns NULL "
-            f"for every row. Actual keys available there: [{available_preview}]."
-        )
-        siblings = m.get("sibling_containers")
-        if siblings:
-            sibling_preview = ", ".join(siblings[:20])
-            line += (
-                f" Other top-level sections in {m['column']}: [{sibling_preview}] — "
-                "the key you want may live under one of these instead."
+    key_mismatches = [m for m in mismatches if "wrong_type" not in m]
+    type_mismatches = [m for m in mismatches if "wrong_type" in m]
+    sections = []
+
+    if key_mismatches:
+        lines = []
+        for m in key_mismatches:
+            path = (
+                f"{m['column']}->'{m['container']}'->>'{m['used_key']}'"
+                if m["container"]
+                else f"{m['column']}->>'{m['used_key']}'"
             )
-        lines.append(line)
-    body = "\n".join(lines)
-    return (
-        "One or more JSONB key paths in the generated SQL do not exist in the "
-        "database, so they return NULL for every row instead of erroring:\n"
-        f"{body}\n\n"
-        "Rewrite the SQL using the correct container/key name from the actual "
-        "keys listed above. Change ONLY the mismatched JSONB path(s); keep all "
-        "joins, columns, grouping, and other filters exactly as they are."
-    )
+            available_preview = ", ".join(m["available_keys"][:20])
+            line = (
+                f"- {m['table']}.{path}: this key does not exist and returns NULL "
+                f"for every row. Actual keys available there: [{available_preview}]."
+            )
+            siblings = m.get("sibling_containers")
+            if siblings:
+                sibling_preview = ", ".join(siblings[:20])
+                line += (
+                    f" Other top-level sections in {m['column']}: [{sibling_preview}] — "
+                    "the key you want may live under one of these instead."
+                )
+            lines.append(line)
+        sections.append(
+            "One or more JSONB key paths in the generated SQL do not exist in the "
+            "database, so they return NULL for every row instead of erroring:\n"
+            + "\n".join(lines)
+            + "\n\nRewrite the SQL using the correct container/key name from the actual "
+            "keys listed above. Change ONLY the mismatched JSONB path(s); keep all "
+            "joins, columns, grouping, and other filters exactly as they are."
+        )
+
+    if type_mismatches:
+        lines = []
+        for m in type_mismatches:
+            path = (
+                f"{m['column']}->'{m['container']}'->>'{m['used_key']}'"
+                if m["container"]
+                else f"{m['column']}->>'{m['used_key']}'"
+            )
+            lines.append(
+                f"- {m['table']}.{path}: {m['table']}.{m['column']} is a "
+                f"{m['wrong_type']} column, not JSONB — this is not a wrong key, "
+                "the ->/->> operators don't apply to this column at all."
+            )
+        sections.append(
+            "One or more JSONB navigation operators were used on a column that "
+            "isn't JSONB-typed:\n"
+            + "\n".join(lines)
+            + "\n\nRewrite the SQL to reference the column directly (no ->/->> "
+            "operators) instead of treating it as JSONB. Change ONLY the "
+            "affected reference(s); keep all joins, columns, grouping, and "
+            "other filters exactly as they are."
+        )
+
+    return "\n\n".join(sections)
 
 
 __all__ = [

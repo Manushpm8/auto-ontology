@@ -50,8 +50,26 @@ class JsonbPathCheckAgent(BaseAgent):
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
 
+        # Cheap, already-fetched — no extra DB/graph round-trip. Lets the
+        # check distinguish "wrong key" from "not a JSON column at all" when
+        # the live probe itself can't tell (see db_probe/jsonb_path_check.py).
+        known_types: dict[tuple[str, str], str] = {}
+        for table in relevant_tables:
+            table_name = table.get("name")
+            if not table_name:
+                continue
+            for col in table.get("columns") or []:
+                if not isinstance(col, dict):
+                    continue
+                col_name = col.get("name")
+                data_type = col.get("data_type")
+                if col_name and data_type:
+                    known_types[(table_name.lower(), col_name.lower())] = data_type
+
         with ProbeExecutor(connector) as executor:
-            mismatches = find_jsonb_path_mismatches(executor, dialect, sql_code)
+            mismatches = find_jsonb_path_mismatches(
+                executor, dialect, sql_code, known_types=known_types
+            )
 
         if not mismatches:
             return {"decision": "valid_sql", "path_state": path_state}

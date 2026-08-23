@@ -40,9 +40,11 @@ def test_ground_returns_llm_output_when_relevant():
 def test_ground_passes_question_and_kg_to_prompt():
     llm = _make_llm("- some fact")
     ground_external_knowledge("What is churn?", "- churn rate: % of lost customers", llm)
-    call_args = llm.invoke.call_args[0][0]
-    assert "What is churn?" in call_args
-    assert "churn rate" in call_args
+    # safe_invoke_text wraps the prompt as [HumanMessage(content=prompt)], not a raw string.
+    messages = llm.invoke.call_args[0][0]
+    prompt_text = messages[0].content
+    assert "What is churn?" in prompt_text
+    assert "churn rate" in prompt_text
 
 
 # ── wiring: _run_sql_generation injects grounded_kg into custom_prompts ───────

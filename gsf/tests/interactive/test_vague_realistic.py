@@ -21,20 +21,26 @@ from pathlib import Path
 # ── Path setup ────────────────────────────────────────────────────────────────
 # GSF_DIR is computed relative to this file so it works from any checkout of
 # this repo. USERSIM_DIR / FULL_DATA / DB_ROOT point into the separate
-# BIRD-Interact benchmark checkout (not part of this repo); override via env
-# vars if that checkout lives elsewhere, otherwise the values below (this
-# machine's layout) are used as the default.
-GSF_DIR     = Path(__file__).resolve().parents[3]
-USERSIM_DIR = Path(os.environ.get(
-    "BIRD_INTERACT_USERSIM_DIR", "/Users/ariellegeva/Desktop/BIRD-Interact/usersim-guard"
-))
-FULL_DATA   = Path(os.environ.get(
-    "BIRD_INTERACT_FULL_DATA",
-    "/Users/ariellegeva/Desktop/BIRD-Interact/bird-interact-full/bird_interact_data_with_gt.jsonl",
-))
-DB_ROOT     = Path(os.environ.get(
-    "BIRD_INTERACT_FULL_DB_ROOT", "/Users/ariellegeva/Desktop/BIRD-Interact/bird-interact-full"
-))
+# BIRD-Interact FULL benchmark checkout (not part of this repo, and not
+# produced by any seed script) — there is no machine-independent default, so
+# all three env vars are required.
+GSF_DIR = Path(__file__).resolve().parents[3]
+
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(
+            f"{name} is not set. This test needs a local BIRD-Interact FULL "
+            f"checkout; set {name} to the appropriate path before running, e.g.:\n"
+            f"  export {name}=/path/to/BIRD-Interact/..."
+        )
+    return value
+
+
+USERSIM_DIR = Path(_require_env("BIRD_INTERACT_FULL_USERSIM_DIR"))
+FULL_DATA   = Path(_require_env("BIRD_INTERACT_FULL_DATA"))
+DB_ROOT     = Path(_require_env("BIRD_INTERACT_FULL_DB_ROOT"))
 
 sys.path.insert(0, str(USERSIM_DIR))
 sys.path.insert(0, str(GSF_DIR))

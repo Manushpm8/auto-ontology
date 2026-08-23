@@ -217,6 +217,7 @@ class CandidatePreparationAgent(BaseAgent):
                     "col_name": anchor_ctx["col_name"],
                     "table_name": anchor_ctx["table_name"],
                     "schema_name": anchor_ctx["schema_name"],
+                    "datatype": anchor_ctx.get("datatype") or "",
                 }
 
                 dest_items = [
@@ -241,6 +242,7 @@ class CandidatePreparationAgent(BaseAgent):
                                 "col_name": dest_ctx["col_name"],
                                 "table_name": dest_ctx["table_name"],
                                 "schema_name": dest_ctx["schema_name"],
+                                "datatype": dest_ctx.get("datatype") or "",
                                 "path": join_path,
                             }
                         )
@@ -257,10 +259,10 @@ class CandidatePreparationAgent(BaseAgent):
                 # those siblings (and the hub itself) separately so the
                 # relevance filter doesn't drop a structurally-connected
                 # table it has no other way to recognize. Scoped to the
-                # anchor's own outgoing FKs only. These also get forced back
-                # into relevant_tables below (§5b) — the relevance filter has
-                # repeatedly proven unreliable at acting on this info even
-                # when it's shown it, so we no longer just advise it.
+                # anchor's own outgoing FKs only. These are also force-kept
+                # in relevant_tables below (§5b) rather than merely shown to
+                # the relevance filter, since it's unreliable at preserving
+                # structurally-connected tables even when given this info.
                 anchor_table_id = anchor_ctx.get("table_id")
                 if anchor_table_id:
                     hub_sibling_hops, hub_sibling_truncated = find_anchor_hub_siblings(
@@ -468,11 +470,9 @@ class CandidatePreparationAgent(BaseAgent):
         )
 
         # --- 5b. Deterministic bridge-table reconciliation ---
-        # The relevance filter has repeatedly proven unreliable at preserving
-        # join-chain bridge tables even when its prompt shows it the exact
-        # connection (logged join_paths_section vs. removed-tables mismatch
-        # observed across multiple runs) — so force these back in by code
-        # rather than continue relying on it noticing. Two sources:
+        # The relevance filter is unreliable at preserving join-chain bridge
+        # tables even when its prompt shows it the exact connection, so force
+        # these back in by code instead of relying on it. Two sources:
         #   (a) the anchor's hub + capped siblings, already computed above
         #       and collected into forced_table_ids;
         #   (b) any bridge table needed to connect pairs of tables the
@@ -497,11 +497,10 @@ class CandidatePreparationAgent(BaseAgent):
                 else "",
             )
         # A bridge table with no join hops reaching SQL-gen is a table the
-        # model can see but not connect — it previously had to guess the
-        # join condition itself (which produced a fabricated join between
-        # two unrelated PK columns on virtual_idol_13). Surface the real
-        # FK chain the same way attribute_join_paths already does for
-        # verified semantic joins.
+        # model can see but not connect — without the real FK chain, it has
+        # to guess the join condition and can fabricate one between unrelated
+        # columns. Surface the real FK chain the same way attribute_join_paths
+        # already does for verified semantic joins.
         if bridge_paths:
             attribute_join_paths.extend({"path": hops} for hops in bridge_paths)
             self.logger.info(
