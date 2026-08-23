@@ -1911,6 +1911,15 @@ export const ExplorationView = () => {
 		// `.clear()`-ing each by name, so a future expansion kind's ref
 		// can't be added elsewhere and forgotten here.
 		expandedIdsRefs.current.forEach((expandedIdsRef) => expandedIdsRef.current.clear());
+		// Also drops any id flagged mid-flight (collapsed before its own
+		// `expandXNode` fetch resolved — see `collapseExpansion`) on the
+		// layer just left. Left uncleared, a stale entry here would silently
+		// swallow a *later*, unrelated `expandXNode` call for the same id
+		// after switching back to this layer and re-expanding it — its own
+		// pending-cancel guard would find this leftover entry and bail
+		// without grafting anything, even though nothing is actually pending
+		// anymore.
+		pendingCollapseIdsRef.current.clear();
 		setConnectionHopsByEdgeId(new Map());
 		router.replace(
 			layer === ExplorationLayer.Semantic ? '/exploration?view=data' : '/exploration',
