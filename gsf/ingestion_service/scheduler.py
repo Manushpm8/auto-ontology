@@ -36,6 +36,7 @@ class IntervalScheduler:
         self._stop = asyncio.Event()
         self._trigger = asyncio.Event()
         self._abort = asyncio.Event()
+        self._running = False
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> bool:
@@ -81,6 +82,11 @@ class IntervalScheduler:
         """Whether the pass currently running was asked to stop."""
         return self._abort.is_set()
 
+    @property
+    def running(self) -> bool:
+        """Whether a pass is executing right now, as opposed to idling between ticks."""
+        return self._running
+
     async def _run_once(self) -> None:
         """Perform one pass of the job. Implemented by subclasses."""
         raise NotImplementedError
@@ -88,10 +94,13 @@ class IntervalScheduler:
     async def _run_pass(self) -> None:
         """Run one pass with a fresh abort flag, surviving unhandled errors."""
         self._abort.clear()
+        self._running = True
         try:
             await self._run_once()
         except Exception:
             logger.exception("%s: unhandled error; will retry on next tick", self.name)
+        finally:
+            self._running = False
 
     async def _wait_for_next(self, next_run: datetime) -> None:
         """Sleep until ``next_run``, returning early on stop or trigger."""

@@ -20,7 +20,10 @@ import asyncio
 import logging
 from datetime import timedelta
 
-from gsf.ingestion_service.config import is_semantic_compilation_enabled
+from gsf.ingestion_service.config import (
+    is_semantic_compilation_enabled,
+    record_semantic_compilation_success,
+)
 from gsf.ingestion_service.connections import resolve_database_names
 from gsf.ingestion_service.scheduler import IntervalScheduler
 from gsf.semantic.compile import run_semantic_compilation
@@ -86,4 +89,5 @@ class SemanticScheduler(IntervalScheduler):
                 )
             except Exception:
                 logger.exception("semantic: failed for database %s", database_name)
+        record_semantic_compilation_success()
         logger.info("semantic: finished")

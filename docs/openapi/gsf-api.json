@@ -7589,9 +7589,24 @@
           "calculated": {
             "title": "Calculated",
             "type": "boolean"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
           }
         },
-        "required": ["calculated"],
+        "required": ["calculated", "running", "last_success_at"],
         "title": "SemanticStatusResponse",
         "type": "object"
       },

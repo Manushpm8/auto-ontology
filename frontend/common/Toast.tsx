@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/common/Button';
+import { Spinner } from '@/common/Spinner';
 import { Size, ButtonTheme } from '@/enums/button';
 
 type ToastVariant = 'error' | 'success' | 'info' | 'pending';
@@ -62,12 +63,7 @@ const VariantIcon = ({ variant }: { variant: ToastVariant }) => {
 		);
 	}
 	if (variant === 'pending') {
-		return (
-			<svg {...stroke} className={`${className} animate-spin`}>
-				<circle cx="12" cy="12" r="10" opacity="0.25" />
-				<path d="M22 12a10 10 0 0 0-10-10" />
-			</svg>
-		);
+		return <Spinner className={className} />;
 	}
 	return (
 		<svg {...stroke}>

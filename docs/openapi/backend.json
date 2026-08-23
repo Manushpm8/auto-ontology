@@ -2146,10 +2146,27 @@
           "calculated": {
             "title": "Calculated",
             "type": "boolean"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
           }
         },
         "required": [
-          "calculated"
+          "calculated",
+          "running",
+          "last_success_at"
         ],
         "title": "SemanticStatusResponse",
         "type": "object"
@@ -5187,7 +5204,7 @@
     },
     "/api/semantic-compilation/status": {
       "get": {
-        "description": "Report whether the semantic layer has been calculated (any Term exists).",
+        "description": "Report whether the semantic layer has been calculated (any Term exists),\nwhether the ingestion service is compiling it right now, and when the last\npass completed.",
         "operationId": "semantic_status_api_semantic_compilation_status_get",
         "responses": {
           "200": {

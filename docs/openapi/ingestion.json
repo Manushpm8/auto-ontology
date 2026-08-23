@@ -14,6 +14,21 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "SemanticRunningResponse": {
+        "additionalProperties": true,
+        "description": "``{\"running\": bool}`` \u2014 the ingestion service's own status endpoint.",
+        "properties": {
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "running"
+        ],
+        "title": "SemanticRunningResponse",
+        "type": "object"
+      },
       "StatusResponse": {
         "additionalProperties": true,
         "description": "``{\"status\": \"ok\"}`` or ``{\"status\": \"accepted\"}`` for async triggers.",
@@ -241,6 +256,25 @@
           }
         },
         "summary": "Semantic Reset"
+      }
+    },
+    "/semantic/status": {
+      "get": {
+        "description": "Report whether a semantic compilation pass is executing right now.",
+        "operationId": "semantic_status_semantic_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticRunningResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Semantic Status"
       }
     },
     "/semantic/stop": {

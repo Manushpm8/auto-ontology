@@ -14,7 +14,7 @@ from gsf.ingestion_service.ingest import (
     trigger_ingest,
     trigger_reset_semantic,
 )
-from gsf.server.responses import StatusResponse
+from gsf.server.responses import SemanticRunningResponse, StatusResponse
 
 router = APIRouter()
 
@@ -85,6 +85,13 @@ async def semantic_compile(request: Request) -> dict[str, str]:
     if not scheduler.start():
         scheduler.trigger()
     return {"status": "accepted"}
+
+
+@router.get("/semantic/status", response_model=SemanticRunningResponse)
+async def semantic_status(request: Request) -> dict[str, bool]:
+    """Report whether a semantic compilation pass is executing right now."""
+    scheduler = request.app.state.semantic_scheduler
+    return {"running": scheduler.running}
 
 
 @router.post("/semantic/stop", status_code=202, response_model=StatusResponse)

@@ -84,6 +84,7 @@ __all__ = [
     "PqlAnalysisResponse",
     "SchemasPayload",
     "SemanticExplorationGraphResponse",
+    "SemanticRunningResponse",
     "SemanticStatusResponse",
     "SqlAttributeListResponse",
     "SqlAttributePageResponse",
@@ -162,6 +163,14 @@ class HealthResponse(_Payload):
 
 class SemanticStatusResponse(_Payload):
     calculated: bool
+    running: bool
+    last_success_at: str | None
+
+
+class SemanticRunningResponse(_Payload):
+    """``{"running": bool}`` — the ingestion service's own status endpoint."""
+
+    running: bool
 
 
 class ChatCancelResponse(_Payload):

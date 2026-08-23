@@ -4,9 +4,12 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { semanticCompilationApi } from '@/api/settings';
+import { formatDate } from '@/common/date';
+import { Icon, IconName } from '@/common/icons';
 import { ConfirmModal } from '@/common/modal';
+import { Spinner } from '@/common/Spinner';
 import { Toast } from '@/common/Toast';
 import { Toggle } from '@/common/Toggle';
 
@@ -18,6 +21,24 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 	const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
+	// Assume "ready" until told otherwise — nothing has started a run yet, so
+	// there is nothing to be running.
+	const [running, setRunning] = useState(false);
+	const [lastSuccessAt, setLastSuccessAt] = useState<string | null>(null);
+
+	// No push channel from the ingestion service, and no polling either — this
+	// reads the state once, on mount. To see a run that started elsewhere (the
+	// 24h schedule, the startup run, another admin's trigger) finish, reload
+	// the page.
+	useEffect(() => {
+		semanticCompilationApi
+			.getStatus()
+			.then((result) => {
+				setRunning(result.running);
+				setLastSuccessAt(result.last_success_at);
+			})
+			.catch(() => {});
+	}, []);
 
 	const handleToggle = async () => {
 		if (saving) return;
@@ -67,6 +88,34 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 					connected database on startup and once every 24 hours. Enabling it also triggers
 					a compilation run immediately.
 				</p>
+
+				<div className="mb-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+					<div className="flex flex-col">
+						<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+							{running
+								? 'Semantic compilation is running'
+								: 'Semantic compilation is ready'}
+						</span>
+						<span className="text-xs text-zinc-500">
+							Last semantic compilation:{' '}
+							{lastSuccessAt
+								? formatDate(lastSuccessAt, 'MMM DD YYYY, HH:mm Z')
+								: '—'}
+						</span>
+					</div>
+					{running ? (
+						<span title="Semantic compilation is running">
+							<Spinner className="h-4 w-4 shrink-0 text-[#76b900]" />
+						</span>
+					) : (
+						<span
+							className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#76b900]/15 text-[#76b900]"
+							title="Semantic compilation is ready"
+						>
+							<Icon name={IconName.Check} className="h-3 w-3" />
+						</span>
+					)}
+				</div>
 
 				<div className="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 					<div className="flex flex-col">

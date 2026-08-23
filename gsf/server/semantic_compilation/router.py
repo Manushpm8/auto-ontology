@@ -17,7 +17,12 @@ import logging
 from fastapi import APIRouter
 
 from gsf.dal.terms import semantic_layer_calculated
-from gsf.server.ingestion.proxy import trigger_semantic_compile, trigger_semantic_reset
+from gsf.ingestion_service.config import get_semantic_compilation_last_success
+from gsf.server.ingestion.proxy import (
+    is_semantic_compilation_running,
+    trigger_semantic_compile,
+    trigger_semantic_reset,
+)
 from gsf.server.responses import SemanticStatusResponse, StatusResponse
 
 logger = logging.getLogger(__name__)
@@ -48,6 +53,12 @@ async def reset() -> dict[str, str]:
 
 
 @router.get("/semantic-compilation/status", response_model=SemanticStatusResponse)
-def semantic_status() -> dict[str, bool]:
-    """Report whether the semantic layer has been calculated (any Term exists)."""
-    return {"calculated": semantic_layer_calculated()}
+def semantic_status() -> dict[str, bool | str | None]:
+    """Report whether the semantic layer has been calculated (any Term exists),
+    whether the ingestion service is compiling it right now, and when the last
+    pass completed."""
+    return {
+        "calculated": semantic_layer_calculated(),
+        "running": is_semantic_compilation_running(),
+        "last_success_at": get_semantic_compilation_last_success(),
+    }
