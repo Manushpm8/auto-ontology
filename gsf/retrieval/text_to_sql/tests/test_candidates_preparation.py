@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import threading
-from typing import Any, cast
+from typing import cast
 
 from gsf.retrieval.text_to_sql.agents import candidates_preparation
 from gsf.retrieval.text_to_sql.agents.candidates_preparation import (
