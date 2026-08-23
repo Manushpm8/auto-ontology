@@ -626,6 +626,16 @@ export type GraphController = {
 	getCamera: () => ReturnType<Sigma<GraphNodeAttributes, GraphEdgeAttributes>['getCamera']>;
 	refresh: () => void;
 	/**
+	 * Re-derives the frozen graph-to-viewport mapping (see `setCustomBBox`
+	 * below) from every node's *current* position — including any node
+	 * dragged/pinned outside the last-frozen box — then re-renders. Plain
+	 * `refresh()` above only reprocesses/re-renders against whatever box is
+	 * already frozen; it never touches that box itself, so it can't bring a
+	 * node dragged past it back into frame. This is what `ZoomControls`'
+	 * "reset view" actually needs to recover one.
+	 */
+	resetExtent: () => void;
+	/**
 	 * Pans/zooms the camera to bring the given node into view when it's
 	 * currently off-screen (a no-op when it's already visible) — the same
 	 * "only move the camera when it actually needs to" behavior
@@ -1748,6 +1758,14 @@ export const GraphCanvas = ({
 		onControllerChange({
 			getCamera: () => renderer.getCamera(),
 			refresh: () => renderer.refresh(),
+			resetExtent: () => {
+				// Deliberately `renderer.getBBox()` (the live extent over *every*
+				// node) rather than `computeStableBBox()` above, which excludes
+				// pinned nodes on purpose — here a dragged/pinned node going
+				// off-frame is exactly the case this exists to recover from.
+				renderer.setCustomBBox(renderer.getBBox());
+				renderer.refresh();
+			},
 			focusNode: (nodeId) => focusExpansionIfOffscreen([nodeId]),
 			addExpansion,
 			removeExpansion,

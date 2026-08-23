@@ -44,9 +44,11 @@ export const ZoomControls = ({ controller }: ZoomControlsProps) => {
 
 	const resetView = () => {
 		if (controller == null) return;
-		// Re-derive the graph's extent before fitting, since the physics
-		// simulation keeps spreading nodes out well past their initial layout.
-		controller.refresh();
+		// Re-derives the graph's frozen extent from every node's current
+		// position (see `resetExtent`'s own comment in `GraphCanvas.tsx`)
+		// before fitting, so a node dragged past the last-frozen box —
+		// which `refresh()` alone can't recover — comes back into frame too.
+		controller.resetExtent();
 		void controller.getCamera().animatedReset({ duration: 200 });
 	};
 
