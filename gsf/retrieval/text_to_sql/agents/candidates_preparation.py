@@ -46,6 +46,7 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables_from_candidates,
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
+from gsf.retrieval.text_to_sql.formatters_util import qualify_table
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
@@ -65,10 +66,11 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 
 def _qualified_name(t: dict) -> str:
     """Build a database/schema-qualified table name for deduplication."""
-    database = t.get("database_name", "")
-    schema = t.get("schema_name", "")
-    name = t.get("name", "")
-    return ".".join(part for part in (database, schema, name) if part)
+    return qualify_table(
+        t.get("database_name", ""),
+        t.get("schema_name", ""),
+        t.get("name", ""),
+    )
 
 
 logger = logging.getLogger(__name__)
