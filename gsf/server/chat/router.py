@@ -336,10 +336,16 @@ def _build_charts_event(slot: _Slot, answer: dict[str, Any]) -> dict[str, Any] |
         except Exception:  # noqa: BLE001 — charts are best-effort
             logger.exception("Chart generation failed")
 
+    if slot.cancelled.is_set():
+        return None
+
     built = build_result_message(sql_response_from_db, charts)
     if built is None:
         return None
     content, sql_response = built
+
+    if slot.cancelled.is_set():
+        return None
 
     try:
         persist_result_message(
@@ -419,7 +425,7 @@ def _pump(slot: _Slot) -> None:
             persist_event(event)
             with slot.buffer_lock:
                 slot.buffer.append(event)
-            if event.get("type") == "result":
+            if event.get("type") == "result" and not slot.cancelled.is_set():
                 try:
                     charts_event = _build_charts_event(slot, event.get("answer") or {})
                 except Exception:  # noqa: BLE001 — the chart step must not break the run

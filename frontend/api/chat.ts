@@ -26,12 +26,6 @@ const getResponseErrorMessage = async (res: Response): Promise<string> => {
 export type ChatEventCallbacks = {
 	onStep: (event: StepEvent) => void;
 	onResult: (event: ResultEvent) => void;
-	/**
-	 * Message 2 — fires only when the run had an executed result to show.
-	 * The backend has already generated and persisted this (chart or
-	 * fallback table) by the time it reaches the wire, so this is purely
-	 * "render what the server decided", never a second round trip.
-	 */
 	onCharts?: (event: ChartsEvent) => void;
 	onError: (event: ErrorEvent) => void;
 	onDone?: () => void;

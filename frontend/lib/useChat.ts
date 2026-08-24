@@ -226,11 +226,13 @@ export const useChat = () => {
 						return cut === prev.length ? prev : prev.slice(0, cut);
 					});
 					appendSqlAnswerMessage(event.answer);
-					activeRunConvIdRef.current = null;
-					resumeControllerRef.current = null;
 					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 
 					if (!event.answer.sql_response_from_db) {
+						if (resumeControllerRef.current === controller) {
+							activeRunConvIdRef.current = null;
+							resumeControllerRef.current = null;
+						}
 						setIsLoading(false);
 						return;
 					}
@@ -249,28 +251,38 @@ export const useChat = () => {
 						);
 						setIsLoading(false);
 					}
+					if (resumeControllerRef.current === controller) {
+						activeRunConvIdRef.current = null;
+						resumeControllerRef.current = null;
+					}
 				},
 
 				onError(event) {
-					activeRunConvIdRef.current = null;
+					if (resumeControllerRef.current === controller) {
+						activeRunConvIdRef.current = null;
+						resumeControllerRef.current = null;
+					}
 					if (!sawActivity) {
 						// The watch connection itself failed before we ever confirmed
 						// a run was in progress — likely a network blip while probing
 						// an idle conversation. Stay silent rather than injecting an
 						// error bubble for something that may never have been running.
-						resumeControllerRef.current = null;
+						return;
+					}
+					if (requestId !== requestIdRef.current) {
 						return;
 					}
 					const message = event.message.trim() || GENERIC_ANSWER_ERROR;
 					appendAssistantMessage(message);
 					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 					setIsLoading(false);
-					resumeControllerRef.current = null;
 				},
 
 				onDone() {
-					activeRunConvIdRef.current = null;
-					resumeControllerRef.current = null;
+					if (resumeControllerRef.current === controller) {
+						activeRunConvIdRef.current = null;
+						resumeControllerRef.current = null;
+					}
 					if (sawActivity) {
 						// Safety net: normally `onResult` (no executed result) or
 						// `onCharts` already wrapped this up. Only matters if the
