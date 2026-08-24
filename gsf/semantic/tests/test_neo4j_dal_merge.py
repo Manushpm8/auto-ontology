@@ -39,7 +39,9 @@ def test_store_column_sample_values_skips_empty(mock_conn: MagicMock) -> None:
 
 
 @patch("gsf.dal.datasources.graph")
-def test_store_column_sample_values_writes_native_list(mock_conn: MagicMock) -> None:
+def test_store_column_sample_values_writes_json(mock_conn: MagicMock) -> None:
+    import json
+
     mock_conn.return_value = MagicMock()
     neo4j_datasources.store_column_sample_values("table-1", {"amount": [10, 20, 30]})
     call = mock_conn.return_value.query_write.call_args
@@ -48,7 +50,7 @@ def test_store_column_sample_values_writes_native_list(mock_conn: MagicMock) -> 
     entries = params["entries"]
     assert len(entries) == 1
     assert entries[0]["column_name"] == "amount"
-    assert entries[0]["sample_values"] == ["10", "20", "30"]
+    assert json.loads(entries[0]["sample_values"]) == [10, 20, 30]
 
 
 @patch("gsf.dal.datasources.graph")
