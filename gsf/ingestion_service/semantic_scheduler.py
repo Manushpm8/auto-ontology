@@ -60,6 +60,7 @@ class SemanticScheduler(IntervalScheduler):
             return
 
         logger.info("semantic: starting (%d database(s))", len(databases))
+        any_failed = False
         for index, database_name in enumerate(databases):
             # Checked per database rather than once per pass, so a stop request
             # or a disable ends the run at the next boundary instead of after
@@ -88,6 +89,13 @@ class SemanticScheduler(IntervalScheduler):
                     tables_processed,
                 )
             except Exception:
+                any_failed = True
                 logger.exception("semantic: failed for database %s", database_name)
-        record_semantic_compilation_success()
-        logger.info("semantic: finished")
+
+        if any_failed:
+            logger.info(
+                "semantic: finished with failures; not recording last-success timestamp"
+            )
+        else:
+            record_semantic_compilation_success()
+            logger.info("semantic: finished")

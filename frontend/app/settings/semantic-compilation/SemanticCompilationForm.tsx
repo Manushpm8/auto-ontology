@@ -12,6 +12,7 @@ import { ConfirmModal } from '@/common/modal';
 import { Spinner } from '@/common/Spinner';
 import { Toast } from '@/common/Toast';
 import { Toggle } from '@/common/Toggle';
+import { ToastVariant } from '@/enums/toast';
 
 export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: boolean }) => {
 	// Seeded from the server (see page.tsx) so the correct state renders on first
@@ -21,15 +22,8 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 	const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
-	// Assume "ready" until told otherwise — nothing has started a run yet, so
-	// there is nothing to be running.
 	const [running, setRunning] = useState(false);
 	const [lastSuccessAt, setLastSuccessAt] = useState<string | null>(null);
-
-	// No push channel from the ingestion service, and no polling either — this
-	// reads the state once, on mount. To see a run that started elsewhere (the
-	// 24h schedule, the startup run, another admin's trigger) finish, reload
-	// the page.
 	useEffect(() => {
 		semanticCompilationApi
 			.getStatus()
@@ -169,13 +163,13 @@ export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: bo
 			<Toast
 				open={error !== null}
 				message={error ?? ''}
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setError(null)}
 			/>
 			<Toast
 				open={message !== null}
 				message={message ?? ''}
-				variant="success"
+				variant={ToastVariant.Success}
 				onClose={() => setMessage(null)}
 			/>
 		</div>
