@@ -5,9 +5,10 @@
 """``check_readiness`` — whether this deployment can answer questions yet.
 
 Hand-written rather than generated, because the answer is not any one endpoint.
-A deployment can only answer a question when the semantic layer has been
-compiled *and* a live database connection exists to run the SQL against, and
-those two facts come from unrelated routes. Neither is sufficient alone.
+A deployment can only answer a question when a catalog has been ingested, a live
+database connection exists to run the SQL against, *and* the semantic layer has
+been compiled to resolve the question with. Those three facts come from
+unrelated routes, and no one of them is sufficient alone.
 
 The combination is worth a tool of its own because its failure is silent. A
 compiled glossary over no connection reads perfectly: ``search_terms`` returns
@@ -42,7 +43,10 @@ class Readiness(BaseModel):
     """What this deployment can currently do."""
 
     ready: bool = Field(
-        description="True when a question can be both understood and executed."
+        description=(
+            "True when a question can be understood, executed, and has data to "
+            "run against."
+        )
     )
     semantic_layer_built: bool = Field(
         default=False,
@@ -51,6 +55,10 @@ class Readiness(BaseModel):
     can_execute_sql: bool = Field(
         default=False,
         description="Whether a live database connection exists to run SQL against.",
+    )
+    catalog_present: bool = Field(
+        default=False,
+        description="Whether any database has been ingested for questions to reach.",
     )
     databases: list[str] = Field(
         default_factory=list,
@@ -135,16 +143,32 @@ def _summarise(status: Any, connections: Any, databases: Any) -> Readiness:
                 "connection in the GSF UI."
             )
 
-    names = [
-        str(entry.get("name"))
-        for entry in ((databases or {}).get("data") or [])
-        if entry.get("name")
-    ]
+    if databases is None:
+        blockers.append(
+            f"Could not read the catalog ({DATABASES_PATH} was unreadable), so "
+            "it is unknown whether any data has been ingested."
+        )
+        names: list[str] = []
+    else:
+        names = [
+            str(entry.get("name"))
+            for entry in (databases.get("data") or [])
+            if entry.get("name")
+        ]
+        if not names:
+            blockers.append(
+                "No database has been ingested, so there is nothing for a "
+                "question to reach. A connection can exist before its catalog "
+                "does: ingestion runs after the connection is saved, and an "
+                "unfinished or failed ingest leaves the catalog empty. Check "
+                "the ingestion service, or re-save the connection in the GSF UI."
+            )
 
     return Readiness(
         ready=not blockers,
         semantic_layer_built=built,
         can_execute_sql=can_execute,
+        catalog_present=bool(names),
         databases=names,
         blockers=blockers,
     )
@@ -157,9 +181,9 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
         name="check_readiness",
         description=(
             "Report whether this GSF deployment can answer questions at all: "
-            "whether the semantic layer has been compiled, and whether a live "
-            "database connection exists to run SQL against. Both are "
-            "required.\n\n"
+            "whether a catalog has been ingested, whether a live database "
+            "connection exists to run SQL against, and whether the semantic "
+            "layer has been compiled. All three are required.\n\n"
             "Use it before the first question against an unfamiliar "
             "deployment, and whenever ask_data returns an empty answer. It is "
             "three cheap reads, and it separates 'this deployment is not set "

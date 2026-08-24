@@ -92,6 +92,7 @@ def test_a_configured_deployment_is_ready() -> None:
     assert result.ready is True
     assert result.semantic_layer_built is True
     assert result.can_execute_sql is True
+    assert result.catalog_present is True
     assert result.databases == ["dw"]
     assert result.blockers == []
 
@@ -143,11 +144,24 @@ def test_a_transport_error_degrades_too() -> None:
     )
 
 
-def test_a_missing_catalog_still_yields_a_verdict() -> None:
+def test_an_empty_catalog_is_not_ready() -> None:
+    """A connection can be saved and compiled over before its ingest lands."""
     result = _check(_routed(databases={"data": [], "count": 0}))
 
-    assert result.ready is True
+    assert result.ready is False
+    assert result.catalog_present is False
     assert result.databases == []
+    assert any("No database has been ingested" in b for b in result.blockers)
+
+
+def test_an_unreadable_catalog_degrades_instead_of_passing() -> None:
+    # Silence here used to read as "fine": an unreadable catalog left the
+    # verdict ready, because only two of the three probes could block.
+    result = _check(_routed(databases=503))
+
+    assert result.ready is False
+    assert result.catalog_present is False
+    assert any("Could not read the catalog" in b for b in result.blockers)
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
