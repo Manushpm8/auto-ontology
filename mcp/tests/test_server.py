@@ -60,10 +60,10 @@ def _tools() -> list[Any]:
     return asyncio.run(run())
 
 
-def test_publishes_exactly_the_curated_tools_plus_chat() -> None:
+def test_publishes_exactly_the_curated_tools_plus_the_handwritten_ones() -> None:
     names = {tool.name for tool in _tools()}
 
-    assert names == {spec.name for spec in CURATED} | {"ask_data"}
+    assert names == {spec.name for spec in CURATED} | {"ask_data", "check_readiness"}
 
 
 def test_every_tool_carries_a_description() -> None:
@@ -147,6 +147,7 @@ def test_instructions_point_at_the_primary_tool() -> None:
     # so a host that shows only this still knows where to start.
     assert "ask_data" in INSTRUCTIONS
     assert "check_answerable" in INSTRUCTIONS
+    assert "check_readiness" in INSTRUCTIONS
 
 
 def _sent_headers(

@@ -140,6 +140,7 @@ underlying databases.
 | --- | --- |
 | `ask_data` | **The primary tool.** Ask a question in plain language; get the answer, the SQL GSF ran, and the rows. |
 | `check_answerable` | Grade whether the semantic layer covers a question's entities. Cheap pre-flight before `ask_data`. |
+| `check_readiness` | Whether this deployment can answer anything at all: semantic layer compiled, and a connection to execute SQL. |
 | `search_terms` | Search the business glossary. |
 | `get_term` | One term: description, synonyms, related terms. |
 | `get_term_columns` | The physical columns a term maps to. |
@@ -151,7 +152,6 @@ underlying databases.
 | `list_columns` | A table's columns, with curated descriptions. |
 | `describe_table` | A table's columns, related terms, and calculations together. |
 | `list_example_queries` | Curated example analyses — good few-shot context. |
-| `get_semantic_layer_status` | Whether the semantic layer has been compiled. |
 
 The server also advertises **instructions** at handshake describing how the
 tools sequence, which spares the model from inferring it — left to itself it
@@ -172,6 +172,25 @@ It returns the answer, SQL, and rows as separate fields rather than the markdown
 the web UI receives, so a calling agent can use the SQL without parsing prose.
 Results are capped at 100 rows, with `row_count` and `truncated` reporting what
 was withheld.
+
+### About `check_readiness`
+
+Answering a question needs two independent things: a compiled semantic layer to
+resolve the question against, and a live database connection to run the SQL on.
+Having one without the other is the deployment's most misleading state, because
+it looks entirely healthy — the glossary reads, terms resolve, columns and
+calculations come back — and every question still fails.
+
+It fails expensively and vaguely. `ask_data` generates SQL it cannot execute,
+retries, and eventually returns an empty answer after minutes of model calls,
+which is indistinguishable from a question that was simply not understood. The
+two have nothing in common: one is fixed in the GSF UI, the other by rewording.
+
+`check_readiness` is three reads that tell those apart up front, and it reports
+every blocker at once rather than one per round trip. Note that `databases` can
+be non-empty while `can_execute_sql` is false — the catalog outlives the
+connection it was ingested from, so a named database is not evidence that
+anything can be queried.
 
 ## Configuration
 
@@ -265,8 +284,16 @@ guard. Unset the token so callers authenticate themselves, or set
 `GSF_MCP_ALLOW_SHARED_TOKEN=1` if one identity for everyone is genuinely intended.
 
 **"GSF cannot answer right now"** — usually the semantic layer was never
-compiled. Confirm with `get_semantic_layer_status`. It also appears when a
+compiled. Confirm with `check_readiness`. It also appears when a
 `conversation_id` already has a turn in flight.
+
+**`ask_data` returned an empty answer, with no SQL and no error** — the run
+completed but retrieval found nothing to build a query from. Call
+`check_readiness` first: most often no database connection is configured, so no
+question can succeed no matter how it is phrased. If the deployment is ready,
+the question's vocabulary is the problem — `search_terms` for the nouns in it,
+since a concept named differently in the glossary, or a metric with no
+calculation defined, both land here.
 
 **Client shows no tools** — check the client's MCP logs. The server logs to
 stderr, since stdout carries the protocol itself on stdio.

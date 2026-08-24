@@ -44,8 +44,12 @@ class ToolSpec:
 
 
 # Ordered roughly as an agent would work: understand the vocabulary, then the
-# physical shape, then ask. ``ask_data`` is not here — it streams, so it is
-# hand-written in ``chat.py`` rather than generated.
+# physical shape, then ask. Two tools are not here because neither maps to a
+# single request/response operation: ``ask_data`` streams (``chat.py``), and
+# ``check_readiness`` folds three endpoints into one verdict
+# (``readiness.py``). The latter is why no ``get_semantic_layer_status`` entry
+# remains: it reported one of those three facts, and a compiled layer on its
+# own never meant a question could be answered.
 CURATED: tuple[ToolSpec, ...] = (
     ToolSpec(
         method="GET",
@@ -162,16 +166,6 @@ CURATED: tuple[ToolSpec, ...] = (
             "question, without running the full agent. A cheap pre-flight: "
             "use it to decide whether GSF can answer something before paying "
             "for ask_data, which is far slower and more expensive."
-        ),
-    ),
-    ToolSpec(
-        method="GET",
-        path="/api/semantic-compilation/status",
-        name="get_semantic_layer_status",
-        description=(
-            "Report whether the semantic layer has been compiled. Nothing can "
-            "be asked of the data until it has, so check this if ask_data "
-            "reports the layer is missing."
         ),
     ),
 )

@@ -18,7 +18,7 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_headers
 from mcp.types import Icon
 
-from gsf_mcp import chat
+from gsf_mcp import chat, readiness
 from gsf_mcp.config import ConfigError, Settings
 from gsf_mcp.tools import (
     apply_description,
@@ -61,6 +61,12 @@ check your assumptions after. A productive sequence is usually:
    cheaper than `ask_data` and tells you whether the semantic layer covers the
    entities involved.
 3. `ask_data` to get the answer.
+
+`check_readiness` answers a different question: whether this deployment can
+answer anything at all. A deployment with no database connection reads normally
+and still fails every question, so reach for it before a first question here, or
+when `ask_data` comes back empty — an empty answer is far more often a deployment
+that is not set up than a question that was misunderstood.
 
 `list_databases`, `list_schemas`, `list_tables`, `list_columns`, and
 `describe_table` walk the physical catalog when you need the shape of the data
@@ -230,6 +236,7 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
     )
 
     chat.register(mcp, settings, client)
+    readiness.register(mcp, settings, client)
 
     logger.info(
         "GSF MCP server built against %s (spec: %s)",
