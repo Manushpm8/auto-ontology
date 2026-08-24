@@ -66,6 +66,7 @@ __all__ = [
     "TermListItem",
     "TermSummary",
     "TermTable",
+    "ValueSearchResult",
     "Zone",
     "ZoneChip",
     "ZoneItem",
@@ -544,3 +545,10 @@ class EntityCoverageResult(ApiModel):
     coverage: float
     candidates: list[EntityCoverageCandidate] = Field(default_factory=list)
     uncovered_entities: list[str] | None = None
+
+
+class ValueSearchResult(ApiModel):
+    """One physical field and its matching value exactly as stored."""
+
+    field: str | None = None
+    value: Any | None = None

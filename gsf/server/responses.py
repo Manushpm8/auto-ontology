@@ -47,6 +47,7 @@ from gsf.server.models import (
     TermCountEntry,
     TermDetail,
     TermListItem,
+    ValueSearchResult,
     Zone,
     ZoneChip,
 )
@@ -100,6 +101,7 @@ __all__ = [
     "TermDetailResponse",
     "TermResponse",
     "TermsPageResponse",
+    "ValueSearchResponse",
     "ZoneListResponse",
     "ZoneResponse",
 ]
@@ -284,3 +286,4 @@ SsoFederationResponse = DataResponse[SsoFederationState]
 
 # Metadata
 EntityCoverageResponse = DataResponse[EntityCoverageResult]
+ValueSearchResponse = DataResponse[ValueSearchResult]

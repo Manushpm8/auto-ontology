@@ -22,6 +22,7 @@ from gsf.retrieval.entity_coverage.state import (
     DEFAULT_MAX_DISTANCE,
     EntityCoveragePayload,
 )
+from gsf.retrieval import value_search
 from gsf.server.chat.settings_dal import fetch_acronyms, fetch_custom_prompts
 from gsf.connectors.registry import get_connectors
 from gsf.utils.retriever import (
@@ -38,6 +39,45 @@ _run_lock = threading.Lock()
 
 class PredictionFlowError(RuntimeError):
     """The prediction flow could not produce a result for the question."""
+
+
+class ValueSearchError(RuntimeError):
+    """The value-search request is invalid for the configured databases."""
+
+
+class ValueSearchUnavailableError(RuntimeError):
+    """Value search could not reach a required backend."""
+
+
+def find_column_value(
+    *,
+    value: str,
+    description: str,
+    database_name: str | None = None,
+) -> dict:
+    """Resolve one described value without invoking an LLM."""
+    with _run_lock:
+        connectors = get_connectors()
+        if not connectors:
+            raise ValueSearchUnavailableError("No database connection is configured.")
+        try:
+            retriever = get_semantic_objects_retriever()
+            return value_search.find_column_value(
+                retriever=retriever,
+                connectors=connectors,
+                value=value,
+                description=description,
+                database_name=database_name,
+            )
+        except ValueError as exc:
+            raise ValueSearchError(str(exc)) from exc
+        except RuntimeError as exc:
+            raise ValueSearchUnavailableError(str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Find-column-value request failed")
+            raise ValueSearchUnavailableError(
+                "Column value search is temporarily unavailable."
+            ) from exc
 
 
 def _build_coverage_payload(
