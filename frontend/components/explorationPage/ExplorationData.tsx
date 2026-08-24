@@ -22,6 +22,7 @@ import type {
 	ExplorationLink,
 } from '@/types/exploration';
 import { ZonesRow } from '@/common/SinglePageComposer';
+import { parseSampleValues } from '@/lib/data/sample-values';
 
 /** Build the data-layer graph (Tables/Views + their relationships) from the server DTO. */
 export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph => {
@@ -58,8 +59,13 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 			foreignKeys: (link.foreign_keys ?? []).map((fk) => ({
 				sourceColumn: fk.source_column,
 				targetColumn: fk.target_column,
-				sourceSampleValues: fk.source_sample_values,
-				targetSampleValues: fk.target_sample_values,
+				// `fk.source_sample_values`/`target_sample_values` come straight off
+				// the Column node unparsed (see `DataGraphForeignKeyDto`'s own
+				// comment) — a JSON string when profiling wrote them, a real array
+				// when a catalog PATCH did. Normalized here so every consumer of
+				// `ExplorationForeignKey` gets a plain string array or `null`.
+				sourceSampleValues: parseSampleValues(fk.source_sample_values),
+				targetSampleValues: parseSampleValues(fk.target_sample_values),
 			})),
 			relationshipTypes: link.relationship_types ?? [],
 		}));

@@ -38,7 +38,13 @@ export type ExplorationDataNode = {
 
 export type ExplorationNode = ExplorationTermNode | ExplorationDataNode;
 
-/** One FK column pair joining two tables in an `ExplorationLink`. */
+/**
+ * One FK column pair joining two tables in an `ExplorationLink`. Unlike
+ * `DataGraphForeignKeyDto` above, these two are always already normalized
+ * via `parseSampleValues` (see `buildDataGraph`) — every other type in this
+ * file that carries sample values gets the same plain-array-or-`null`
+ * guarantee straight from the client's own DTOs.
+ */
 export type ExplorationForeignKey = {
 	sourceColumn: string;
 	targetColumn: string;
@@ -153,12 +159,20 @@ export type ExplorationLinkPathDto = {
 	hops: ExplorationLinkPathHopDto[];
 };
 
-/** Server DTO for one FK column pair joining two tables in a `DataGraphEdgeDto`. */
+/**
+ * Server DTO for one FK column pair joining two tables in a
+ * `DataGraphEdgeDto`. Unlike every other `sample_values` field in the API,
+ * these two come straight off the Column node unparsed (see
+ * `ForeignKeyRef` in `gsf/server/models.py`) — profiling stores them as a
+ * JSON string, a catalog PATCH stores a real array, so either shape can
+ * land here. Normalize with `parseSampleValues` (`@/lib/data/sample-values`)
+ * before treating them as a plain string array.
+ */
 export type DataGraphForeignKeyDto = {
 	source_column: string;
 	target_column: string;
-	source_sample_values: string[] | null;
-	target_sample_values: string[] | null;
+	source_sample_values: string[] | string | null;
+	target_sample_values: string[] | string | null;
 };
 
 /** Server DTO for a data-layer Exploration edge (Table ↔ Table). */
