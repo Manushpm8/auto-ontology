@@ -39,6 +39,7 @@ from gsf.utils.llm_invoke import (
 )
 from gsf.utils.model_config import resolve
 from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sql_dialects import get_sqlglot_dialect
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
 
@@ -48,10 +49,6 @@ _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
 _EMBED_MODEL = resolve("EMBED", "MODEL")
 _NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
 _WORKERS = 2
-_SQLGLOT_DIALECTS = {
-    "postgresql": "postgres",
-    "postgres": "postgres",
-}
 
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
@@ -393,7 +390,10 @@ def _sample_match_sql(
         )
         .limit(len(samples))
     )
-    dialect_name = _SQLGLOT_DIALECTS.get((dialect or "").lower(), dialect or None)
+    dialect_name = get_sqlglot_dialect(
+        dialect,
+        preserve_unknown=True,
+    )
     try:
         return query.sql(dialect=dialect_name, identify=True)
     except ValueError:

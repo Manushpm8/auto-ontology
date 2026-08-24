@@ -34,19 +34,9 @@ from gsf.retrieval.data_access.graph_schemas import (
     fetch_all_schema_ids,
     get_schemas_by_ids,
 )
+from gsf.utils.sql_dialects import get_sqlglot_dialect
 
 logger = logging.getLogger(__name__)
-
-# sqlglot dialect names differ slightly from our connector dialect strings.
-_SQLGLOT_DIALECTS = {
-    "sqlite": "sqlite",
-    "postgres": "postgres",
-    "postgresql": "postgres",
-    "snowflake": "snowflake",
-    "duckdb": "duckdb",
-    "mysql": "mysql",
-    "heavydb": "postgres",
-}
 
 
 def _unwrap_projection(e: exp.Expression) -> exp.Expression:
@@ -85,7 +75,7 @@ def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
     if not sql or not sql.strip():
         return "the generated SQL is empty"
 
-    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
+    read = get_sqlglot_dialect(dialect)
     try:
         parsed = sqlglot.parse_one(sql, read=read)
     except Exception:

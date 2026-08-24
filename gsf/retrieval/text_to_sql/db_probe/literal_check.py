@@ -30,6 +30,7 @@ from sqlglot import exp
 
 from gsf.retrieval.text_to_sql.db_probe.config import DB_PROBE_LOW_CARD_THRESHOLD
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
+from gsf.utils.sql_dialects import get_sqlglot_dialect
 
 logger = logging.getLogger(__name__)
 
@@ -45,20 +46,6 @@ def _first_value(row: dict) -> Any:
 # near-miss (difflib ratio, 0..1). Below this we treat the value as legitimately
 # absent and do not repair.
 _CLOSE_MATCH_CUTOFF = 0.6
-
-_SQLGLOT_DIALECTS = {
-    "postgresql": "postgres",
-    "postgres": "postgres",
-    "sqlite": "sqlite",
-    "duckdb": "duckdb",
-    "snowflake": "snowflake",
-    "mysql": "mysql",
-    "bigquery": "bigquery",
-}
-
-
-def _sqlglot_dialect(dialect: Optional[str]) -> Optional[str]:
-    return _SQLGLOT_DIALECTS.get((dialect or "").lower())
 
 
 def _norm(value: Any) -> str:
@@ -141,10 +128,10 @@ def _fetch_distinct(
     ``None`` when the column isn't in this table, the probe fails, or the column
     is high-cardinality (so we never judge a free-text/name column).
     """
-    d = _sqlglot_dialect(dialect)
+    selected_dialect = get_sqlglot_dialect(dialect)
     # Bare column (drop table qualifier) so it works regardless of alias scoping.
-    col_ref = exp.column(col.this).sql(dialect=d)
-    table_ref = table_node.sql(dialect=d)
+    col_ref = exp.column(col.this).sql(dialect=selected_dialect)
+    table_ref = table_node.sql(dialect=selected_dialect)
     threshold = DB_PROBE_LOW_CARD_THRESHOLD
     sql = (
         f"SELECT DISTINCT {col_ref} AS value FROM {table_ref} "
@@ -171,7 +158,7 @@ def find_literal_mismatches(
     has no close real counterpart and the empty result is legitimate).
     """
     try:
-        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+        tree = sqlglot.parse_one(sql, read=get_sqlglot_dialect(dialect))
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
         logger.info("literal_check: could not parse SQL (%s)", exc)
         return []
