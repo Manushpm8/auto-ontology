@@ -935,12 +935,12 @@
       "post": {
         "tags": ["chat"],
         "summary": "Ask a question and stream the answer back as Server-Sent Events.",
-        "description": "Ask a question and stream the answer back as Server-Sent Events.\n\nStep 1 of a chat turn: SQL plus the formatted answer. Charts are a separate\nsecond request (`POST /api/chat/visualize`) the client makes once this\ncompletes, so the answer never waits on an extra LLM round trip. Passing\n`conversation_id` persists the turn and additionally requires\n`conversation: ['write']`; it answers 409 while that conversation already has\na run in flight. Omitting it runs the question statelessly.",
+        "description": "Ask a question and stream the answer back as Server-Sent Events.\n\nFastAPI emits the SQL plus the formatted answer first (`result`), then —\nwhen that answer has an executed result — generates and persists the\nchart/table bubble itself and streams it back as its own `charts` event\nbefore the stream closes. No second request needed from this route or the\nbrowser. Passing `conversation_id` persists the turn and additionally\nrequires `conversation: ['write']`; the route answers 409 while that\nconversation already has a run in flight. Omitting it runs the question\nstatelessly, with no history and no chart step.",
         "operationId": "post_api_chat_completions",
         "x-gsf-upstream": "/api/chat/completions",
         "requestBody": {
           "required": true,
-          "description": "Step 1 of a chat turn: SQL plus a formatted answer. Charts are a separate `POST /api/chat/visualize` call. Reuse one `conversation_id` for follow-up turns; an unknown UUID creates a conversation, while an ID owned by another user returns 404.",
+          "description": "SQL plus a formatted answer, streamed as SSE. When the answer has an executed result, the backend also generates and persists a chart (or fallback table) and streams it back on this same connection as its own `charts` event — no follow-up call needed. Reuse one `conversation_id` for follow-up turns; an unknown UUID creates a conversation, while an ID owned by another user returns 404. Omitting `conversation_id` runs the question statelessly, with no history and no chart step.",
           "content": {
             "application/json": {
               "schema": {
@@ -1039,84 +1039,6 @@
           }
         ],
         "x-gsf-source": "frontend/app/api/chat/completions/route.ts",
-        "x-gsf-permissions": {
-          "chat": ["use"]
-        },
-        "x-gsf-proxied": false
-      }
-    },
-    "/api/chat/visualize": {
-      "post": {
-        "tags": ["chat"],
-        "summary": "Pick charts for an executed SQL result — step 2 of a chat turn.",
-        "description": "Pick charts for an executed SQL result — step 2 of a chat turn.\n\nSame permission as the chat completions route: every chat user may trigger\nthis, not just admins.\n\nUnlike the completions route, this one never creates a conversation: by the\ntime step 2 runs, step 1 (or `POST /api/conversations`) has already created\nit. Falling back to create-on-missing here would leave an orphan\nconversation — just the chart/table bubble, with no question or Message 1\nahead of it — whenever this is called with an id that never got that far\n(e.g. a standalone API caller skipping the completions step).",
-        "operationId": "post_api_chat_visualize",
-        "x-gsf-upstream": "/api/chat/visualize",
-        "requestBody": {
-          "required": false,
-          "description": "Step 2 of chat: the SQL and its already-executed result from step 1. A missing or unparseable body is tolerated — it degrades to `{ \"charts\": null }` rather than erroring, because the chart is a nice-to-have.",
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "question": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "sql": {
-                    "default": "",
-                    "type": "string"
-                  },
-                  "result": {
-                    "description": "The executed SQL result — the `sql_response_from_db` from the step 1 answer. Either a one-item list holding a JSON-records string, or a list of row objects."
-                  },
-                  "conversation_id": {
-                    "description": "When given and owned by the caller, the result and any chart are appended to that conversation as an assistant message. Ignored by the backend; consumed by this handler only.",
-                    "type": "string",
-                    "format": "uuid",
-                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                  }
-                },
-                "required": ["question", "result"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChartsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "No authenticated caller could be resolved"
-          },
-          "403": {
-            "description": "The caller lacks the required permission"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiToken": []
-          }
-        ],
-        "x-gsf-source": "frontend/app/api/chat/visualize/route.ts",
         "x-gsf-permissions": {
           "chat": ["use"]
         },
@@ -5700,30 +5622,6 @@
           }
         },
         "title": "Body_import_model_api_model_import_post",
-        "type": "object"
-      },
-      "ChartsResponse": {
-        "additionalProperties": true,
-        "description": "``charts`` is null when the model declined to propose a chart.",
-        "properties": {
-          "charts": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Charts"
-          }
-        },
-        "required": ["charts"],
-        "title": "ChartsResponse",
         "type": "object"
       },
       "ChatCancelResponse": {

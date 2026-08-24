@@ -19,32 +19,6 @@
         "title": "Body_import_model_api_model_import_post",
         "type": "object"
       },
-      "ChartsResponse": {
-        "additionalProperties": true,
-        "description": "``charts`` is null when the model declined to propose a chart.",
-        "properties": {
-          "charts": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Charts"
-          }
-        },
-        "required": [
-          "charts"
-        ],
-        "title": "ChartsResponse",
-        "type": "object"
-      },
       "ChatCancelResponse": {
         "additionalProperties": true,
         "properties": {
@@ -72,7 +46,7 @@
                 "type": "null"
               }
             ],
-            "description": "Stable thread UUID. When supplied through the authenticated gateway, prior completed turns are loaded and the new turn is persisted.",
+            "description": "Stable thread UUID. When supplied, prior completed turns for it are loaded and the new turn \u2014 including the chart/table bubble, once ready \u2014 is persisted to it. An unknown UUID creates the conversation; one owned by another user is rejected with 404. Omitting it runs the question statelessly, with no history and no chart step.",
             "title": "Conversation Id"
           },
           "prediction": {
@@ -3383,30 +3357,6 @@
         "title": "ValidationError",
         "type": "object"
       },
-      "VisualizeRequest": {
-        "description": "Payload for the second step: chart generation.\n\nSent by the client once it already has the SQL and its executed result\nfrom step 1 (``ChatRequest`` / ``/chat/completions``).",
-        "properties": {
-          "question": {
-            "minLength": 1,
-            "title": "Question",
-            "type": "string"
-          },
-          "result": {
-            "description": "The executed SQL result, i.e. the `sql_response_from_db` from the step 1 answer \u2014 either a one-item list containing a JSON-records string, or a list of row dicts.",
-            "title": "Result"
-          },
-          "sql": {
-            "default": "",
-            "title": "Sql",
-            "type": "string"
-          }
-        },
-        "required": [
-          "question"
-        ],
-        "title": "VisualizeRequest",
-        "type": "object"
-      },
       "Zone": {
         "additionalProperties": true,
         "description": "A zone with its catalog data items.\n\n``items`` is absent on the list endpoint, a list of ``ZoneItem`` on the\ndetail/update endpoints, and a plain list of the ids that were linked on\ncreate.",
@@ -3745,7 +3695,7 @@
     },
     "/api/chat/completions": {
       "post": {
-        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nStep 1 of a chat turn: the SQL and the formatted answer. Charts are a\nseparate second call to ``POST /chat/visualize`` so the answer never waits on\nan extra LLM round trip.\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. Passing ``conversation_id``\npersists the turn and claims that conversation's single run slot \u2014 a second\nconcurrent request for the same conversation also gets 409. Omitting it runs\nthe question statelessly with a fresh key, so one-shot callers never collide.",
+        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nEmits the SQL and formatted answer as a ``result`` event, then \u2014 if that\nanswer has an executed result \u2014 generates and persists the chart/table\nbubble itself and streams it back as a ``charts`` event before the stream\ncloses with ``[DONE]``. Callers that only care about the text/SQL answer\ncan still stop reading after ``result``; the chart step and its\npersistence happen server-side regardless of whether anyone keeps\nlistening (see ``_build_charts_event``).\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. ``conversation_id`` persists the\nturn and claims that conversation's single run slot \u2014 a second concurrent\nrequest for the same conversation gets 409 too. Omitting ``conversation_id``\nruns the question statelessly: no history, no persisted turn, and no chart\nstep (``_build_charts_event`` needs a conversation to save into).",
         "operationId": "chat_completions_api_chat_completions_post",
         "requestBody": {
           "content": {
@@ -3780,48 +3730,6 @@
           }
         },
         "summary": "Chat Completions",
-        "tags": [
-          "chat"
-        ]
-      }
-    },
-    "/api/chat/visualize": {
-      "post": {
-        "description": "Second step: recommend a chart for an already-executed SQL result.\n\nRuns outside the ``WarmPool`` subprocess \u2014 unlike the main agent\npipeline, this is one or two short LLM calls with no DB/retriever\ndependency, so it doesn't need process-level cancellation isolation.\nThe blocking LLM calls are offloaded to a thread so they don't block\nthe event loop.",
-        "operationId": "chat_visualize_api_chat_visualize_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VisualizeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChartsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Chat Visualize",
         "tags": [
           "chat"
         ]
