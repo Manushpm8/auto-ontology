@@ -16,18 +16,12 @@ from gsf.dal.datasources import (
     store_column_uniqueness,
 )
 from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
-from gsf.semantic.constants import SQL_ATTR_SOURCE_TABLE
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
-from gsf.semantic.sql_attribute_extractor import extract_sql_attributes
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
-from gsf.server.sql_attributes.service import (
-    SqlAttributeNameConflict,
-    create_sql_attribute,
-)
 
 if TYPE_CHECKING:
     from nemo_retriever.tabular_data.sql_database import SQLDatabase
@@ -88,47 +82,6 @@ def _terms_with_assignments(
         if assignments:
             persisted.append((term, assignments))
     return persisted
-
-
-def _extract_sql_attributes_for_table(
-    table: dict,
-    columns: list[dict],
-    schema_name: str | None,
-    term_id: str,
-    term_name: str,
-    database_name: str,
-) -> list[str]:
-    """Run LLM extraction + persistence for one term's columns. Returns created attr names."""
-    term = {
-        "name": term_name,
-        "description": table.get("description", ""),
-    }
-
-    proposals = extract_sql_attributes(table, columns, schema_name, term, database_name)
-    created_names: list[str] = []
-
-    for proposal in proposals:
-        try:
-            row = create_sql_attribute(
-                name=proposal.name,
-                description=proposal.description,
-                expression=proposal.expression,
-                term_id=term_id,
-                connector=database_name,
-                source=SQL_ATTR_SOURCE_TABLE,
-            )
-            created_names.append(row["name"])
-            logger.info("  Created SqlAttribute %r", proposal.name)
-        except SqlAttributeNameConflict:
-            logger.debug("SqlAttribute %r already exists — skipping", proposal.name)
-        except Exception:
-            logger.warning(
-                "  Failed to persist SqlAttribute %r",
-                proposal.name,
-                exc_info=True,
-            )
-
-    return created_names
 
 
 def _resolve_connector(database_name: str | None) -> "SQLDatabase | None":
@@ -403,7 +356,7 @@ def process_table(
             len(all_fk_names),
         )
 
-        # Fetch persisted terms — used for embedding and SQL attribute extraction
+        # Fetch persisted terms — used for embedding.
         try:
             terms, attrs = fetch_terms_and_attributes_for_table(table_id)
             for attr in attrs:
@@ -420,23 +373,9 @@ def process_table(
             except Exception:
                 logger.warning("[%s] inline embed failed", table_name)
 
-    # --- LLM: propose SqlAttributes (outside the lock — Term writes are complete) ---
-    result_sql_attr_names: list[str] = []
-    if database_name is not None and terms:
-        try:
-            with _step(table_name, "Extracting SQL attributes"):
-                result_sql_attr_names = _extract_sql_attrs_for_terms(
-                    table, ctx, terms, attrs_by_term, database_name
-                )
-        except Exception:
-            logger.warning(
-                "[%s] SqlAttribute extraction failed", table_name, exc_info=True
-            )
-
     return ProcessTableResult(
         term_names=result_term_names,
         attr_names=result_attr_names,
-        sql_attr_names=result_sql_attr_names,
     )
 
 
@@ -494,38 +433,3 @@ def _commit_terms(
                 description=spec.description,
             )
             result_attr_names.append(spec.display_name)
-
-
-def _extract_sql_attrs_for_terms(
-    table: dict[str, Any],
-    ctx: dict[str, Any],
-    terms: list,
-    attrs_by_term: dict[str, list[dict]],
-    database_name: str,
-) -> list[str]:
-    """Propose SqlAttributes for each Term with at least two mapped columns."""
-    col_by_name = {c["name"]: c for c in ctx.get("columns", [])}
-    schema_name = table.get("schema_name")
-    names: list[str] = []
-
-    for term in terms:
-        term_name_str = term.get("name")
-        term_col_names = [
-            a["source_column"]
-            for a in attrs_by_term.get(term_name_str, [])
-            if a.get("source_column")
-        ]
-        filtered_cols = [col_by_name[n] for n in term_col_names if n in col_by_name]
-        if len(filtered_cols) < 2:
-            continue
-        names.extend(
-            _extract_sql_attributes_for_table(
-                table,
-                filtered_cols,
-                schema_name,
-                term.get("id"),
-                term_name_str,
-                database_name,
-            )
-        )
-    return names
