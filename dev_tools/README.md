@@ -73,7 +73,7 @@ cd frontend && pnpm install && pnpm dev
 
 # terminal 2 — FastAPI
 uv sync
-uv run uvicorn gsf.server.main:app --reload --host 127.0.0.1 --port 3001 --app-dir .
+uv run uvicorn --factory gsf.server.__main__:create_app --reload --host 127.0.0.1 --port 3001 --app-dir .
 ```
 
 ### `--ds` workflow
@@ -87,7 +87,7 @@ bash ./dev_tools/setup_env.sh --ds
 
 # then, on the host:
 uv sync
-uv run uvicorn gsf.server.main:app --reload --host 127.0.0.1 --port 3001 --app-dir .
+uv run uvicorn --factory gsf.server.__main__:create_app --reload --host 127.0.0.1 --port 3001 --app-dir .
 ```
 
 > Linux note: `host.docker.internal` works out-of-the-box on Docker Desktop (macOS / Windows). On native Linux Docker you may need to add `--add-host=host.docker.internal:host-gateway` or bind the backend to `0.0.0.0` and use the docker bridge IP.

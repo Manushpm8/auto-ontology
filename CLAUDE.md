@@ -23,7 +23,7 @@ Backend command runs from the repo root:
 
 | Command | Description |
 |---|---|
-| `uv run uvicorn gsf.server.main:app --reload --host 127.0.0.1 --port 3001 --app-dir .` | Start FastAPI on :3001 |
+| `uv run uvicorn --factory gsf.server.__main__:create_app --reload --host 127.0.0.1 --port 3001 --app-dir .` | Start FastAPI on :3001 |
 
 To install dependencies:
 - Frontend: `pnpm install` from `/frontend`
@@ -51,4 +51,4 @@ To install dependencies:
 ## Git
 
 - Commit messages: concise imperative style, no `Co-Authored-By` trailers.
-- Branch from `main`. Current working branch: `fix/architecture`.
+- Branch from `main`.

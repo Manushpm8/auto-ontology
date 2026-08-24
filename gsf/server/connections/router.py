@@ -156,11 +156,13 @@ def delete_connection(
         )
     ),
 ) -> dict:
-    """Remove a connection, returning the deleted row.
+    """Remove a connection and tear down everything ingested from it.
 
-    404 when no connection carries that ``database_name``. Data already ingested
-    from the connection is not removed here — reset it through the ingestion
-    service's ``POST /ingest/delete``.
+    404 when no connection carries that ``database_name``. Destructive: the
+    service also fires the ingestion service's ``POST /ingest/delete``, which
+    removes the ``Database`` node and its whole catalog subgraph from Neo4j,
+    together with every data and semantic row for that database in pgvector.
+    There is no detach-only call.
     """
     try:
         row = service.delete_connection(database_name)

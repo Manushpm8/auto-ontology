@@ -5106,7 +5106,7 @@
     },
     "/api/connections/{database_name}": {
       "delete": {
-        "description": "Remove a connection, returning the deleted row.\n\n404 when no connection carries that ``database_name``. Data already ingested\nfrom the connection is not removed here \u2014 reset it through the ingestion\nservice's ``POST /ingest/delete``.",
+        "description": "Remove a connection and tear down everything ingested from it.\n\n404 when no connection carries that ``database_name``. Destructive: the\nservice also fires the ingestion service's ``POST /ingest/delete``, which\nremoves the ``Database`` node and its whole catalog subgraph from Neo4j,\ntogether with every data and semantic row for that database in pgvector.\nThere is no detach-only call.",
         "operationId": "delete_connection_api_connections__database_name__delete",
         "parameters": [
           {
