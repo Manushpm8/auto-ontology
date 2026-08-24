@@ -5,29 +5,19 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { UndirectedGraph } from 'graphology';
 import Sigma from 'sigma';
 import type { EdgeDisplayData, MouseCoords, NodeDisplayData } from 'sigma/types';
 import { forceSimulation, forceManyBody, forceLink, forceCollide, forceX, forceY } from 'd3-force';
 import type { SimulationNodeDatum, SimulationLinkDatum } from 'd3-force';
-import { createNodeImageProgram } from '@sigma/node-image';
 import { createNodeBorderProgram } from '@sigma/node-border';
-import { createNodeCompoundProgram } from 'sigma/rendering';
+import { createNodeCompoundProgram, NodeCircleProgram } from 'sigma/rendering';
 import type {
 	NodeHoverDrawingFunction,
 	NodeLabelDrawingFunction,
 	NodeProgramType,
 } from 'sigma/rendering';
 
-import SnowflakeSvg from '@/common/icons/svg/snowflake.svg';
-import TermsSvg from '@/common/icons/svg/terms.svg';
-import SchemaSvg from '@/common/icons/svg/schema.svg';
-import ColumnSvg from '@/common/icons/svg/column.svg';
-import KeySvg from '@/common/icons/svg/key.svg';
-import ChartLineSvg from '@/common/icons/svg/chart-line.svg';
-import ChartBarSvg from '@/common/icons/svg/chart-bar.svg';
-import CodeBracketSvg from '@/common/icons/svg/code-bracket.svg';
 import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationGraph } from '@/types/exploration';
 import { NODE_TYPE_ACCENT_COLOR } from './nodeTypeColors';
@@ -38,11 +28,6 @@ export type HoveredNode = {
 	x: number;
 	y: number;
 };
-
-// Rendered well above the on-screen icon size (see NODE_ICON_PADDING below) so
-// the underlying vector art stays crisp once the WebGL texture atlas scales it
-// up to fill the largest node radii.
-const ICON_RASTER_SIZE = 128;
 
 // A node's border reuses its own icon accent color (rather than a single
 // neutral outline for every kind) so the ring reads as "this node's own
@@ -59,57 +44,39 @@ const NODE_TYPE_BORDER_COLOR = NODE_TYPE_ACCENT_COLOR;
 // same crisp thickness on a small Column node and a large hub Table alike.
 const NODE_BORDER_WIDTH = 2;
 
-// `encodeURI` (unlike `encodeURIComponent`) leaves `#` unescaped, since it's
-// a valid — if here unintended — URI fragment delimiter. Every accent color
-// in `nodeTypeColors.ts` is a `#rrggbb` hex literal, so encoding the whole
-// data URI with `encodeURI` truncated it at the icon's own `stroke="#..."`
-// attribute: everything from that `#` onward became a URL fragment instead
-// of image data, leaving a malformed (closing-tag-less) SVG that rendered
-// as a bare disc with no glyph. Only the markup itself is percent-encoded
-// (not the `data:image/svg+xml;utf-8,` prefix, whose own `:`/`;`/`,` need
-// to stay literal) so every character the SVG's attributes/text can contain
-// — `#`, `<`, `"`, etc. — round-trips intact.
-const buildIcon = (svgMarkup: string, color: string) =>
-	`data:image/svg+xml;utf-8,${encodeURIComponent(svgMarkup.replaceAll('currentColor', color))}`;
-
-// Leaves the node's `color` visible as a ring around the icon, mirroring the
-// previous Cytoscape look (small fixed icon centered on a larger colored shape).
-const NODE_ICON_PADDING = 0.58;
-
-// Built once at module scope: @sigma/node-image caches its texture atlas on
-// the returned class itself, so re-creating it on every mount/remount (e.g.
-// when toggling between the semantic and data layers) would otherwise
-// re-register and re-rasterize the same icons each time.
-const NodeIconProgram = createNodeImageProgram({ padding: NODE_ICON_PADDING });
-
 // A single, unfilled ring read off each node's own `borderColor` attribute.
 // With no `fill: true` entry, `@sigma/node-border`'s shader leaves
 // everything inside the ring untouched — so compounding it *after*
-// `NodeIconProgram` below only draws a thin accent stroke around the
-// already-drawn disc+icon, rather than replacing it.
+// `NodeCircleProgram` below only draws a thin accent stroke around the
+// already-drawn disc, rather than replacing it.
 const NodeBorderProgram = createNodeBorderProgram({
 	borders: [
 		{ size: { value: NODE_BORDER_WIDTH, mode: 'pixels' }, color: { attribute: 'borderColor' } },
 	],
 });
 
-// One compound program so both draws still happen under the single `image`
+// One compound program so both draws still happen under the single `circle`
 // node type every node already carries — no per-node type juggling needed
-// elsewhere (reducers, `addExpansion`, hover program overrides, etc).
-const NodeIconBorderProgram = createNodeCompoundProgram([NodeIconProgram, NodeBorderProgram]);
+// elsewhere (reducers, `addExpansion`, hover program overrides, etc). Nodes
+// used to also carry a per-kind SVG icon (via `@sigma/node-image`) baked
+// into this same disc — dropped so a kind's icon only ever appears once, in
+// `ActiveExpansionCard`'s own header, rather than duplicated on every node
+// on the canvas too.
+const NodeCircleBorderProgram = createNodeCompoundProgram([NodeCircleProgram, NodeBorderProgram]);
 
 // Sigma always redraws whichever node is currently under the mouse a
 // second time, on its own WebGL layer stacked *above* the one captions are
 // drawn on — purely so a hovered node visually sits in front of any
-// overlapping siblings. For a plain circle program that second draw is
-// invisible (same shape, same spot), but our image program's copy is a
-// fully opaque disc + icon that ends up blotting out whatever caption
-// `drawNodeLabel` drew underneath it, in the exact place users look right
-// when they mouse over a node. Bringing hovered/active nodes to the front
-// is already handled by the `zIndex` reducer output below (sorted within
-// the *normal* node layer), so this second draw is redundant for us —
-// swapping in a program that renders nothing keeps the caption visible
-// under the cursor instead of losing it.
+// overlapping siblings. For Sigma's own default label placement (beside the
+// node) that second draw doesn't matter, but `drawNodeLabel` below instead
+// draws each caption centered *inside* its own node's circle (à la Neo4j
+// Browser) — so redrawing that same opaque disc a second time, on a layer
+// above the one the caption was just drawn on, blots it right back out, in
+// the exact place users look right when they mouse over a node. Bringing
+// hovered/active nodes to the front is already handled by the `zIndex`
+// reducer output below (sorted within the *normal* node layer), so this
+// second draw is redundant for us — swapping in a program that renders
+// nothing keeps the caption visible under the cursor instead of losing it.
 class NoopNodeProgram {
 	drawLabel: NodeLabelDrawingFunction | undefined;
 
@@ -197,15 +164,13 @@ const withAlpha = (hex: string, alpha: number) => {
 	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
-// `@sigma/node-image` derives a dimmed node's final on-screen alpha as
-// `max(iconAlpha, backgroundAlpha)` rather than actually multiplying them
-// together (see its fragment shader), so passing a translucent `rgba(...)`
-// for the background `color` — the approach that works fine for edges below
-// — doesn't reliably fade the disc, and never fades the (always
-// fully-opaque) icon pixels at all. Pre-mixing toward the canvas background
-// as a *flat, fully-opaque* color instead sidesteps that shader entirely:
-// nothing has to blend at draw time, so dimmed nodes end up looking like an
-// honest faded copy of the active ones rather than blending toward white.
+// Sigma's own node programs read a plain (non-`rgba`) hex `color` attribute,
+// so a dimmed node needs its own pre-mixed hex color rather than a
+// translucent `rgba(...)` layered over whatever's behind it — the approach
+// that works fine for edges below, which really are drawn as translucent
+// strokes over one another. Pre-mixing toward the canvas background as a
+// *flat, fully-opaque* color instead means dimmed nodes end up looking like
+// an honest faded copy of the active ones rather than blending toward white.
 const mixTowardColor = (hex: string, target: string, opacity: number) => {
 	const [r1, g1, b1] = hexToRgb(hex);
 	const [r2, g2, b2] = hexToRgb(target);
@@ -217,11 +182,11 @@ const mixTowardColor = (hex: string, target: string, opacity: number) => {
 };
 
 // How much of the original color survives in a dimmed node — applied
-// uniformly to both the background disc and the icon fill so a dimmed node
-// reads as the exact same node, just faded, instead of the icon staying
-// fully saturated while only the background around it lightens. Kept low so
-// active/connected nodes (drawn at full color) stand out clearly against the
-// dimmed ones rather than reading as a similar, only-slightly-lighter hue.
+// uniformly to both the disc and its border (see
+// `NODE_TYPE_BORDER_COLOR_DIMMED_LIGHT`/`_DARK` below) so a dimmed node
+// reads as the exact same node, just faded. Kept low so active/connected
+// nodes (drawn at full color) stand out clearly against the dimmed ones
+// rather than reading as a similar, only-slightly-lighter hue.
 const NODE_DIMMED_OPACITY = 0.22;
 
 const NODE_TYPE_COLOR_DIMMED_LIGHT: Record<NodeType, string> = {
@@ -289,136 +254,8 @@ const NODE_TYPE_COLOR_DIMMED_DARK: Record<NodeType, string> = {
 	),
 };
 
-const NODE_TYPE_ICON: Record<NodeType, string> = {
-	term: buildIcon(
-		renderToStaticMarkup(<TermsSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		NODE_TYPE_ACCENT_COLOR.term,
-	),
-	table: buildIcon(
-		renderToStaticMarkup(<SnowflakeSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		NODE_TYPE_ACCENT_COLOR.table,
-	),
-	schema: buildIcon(
-		renderToStaticMarkup(<SchemaSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		NODE_TYPE_ACCENT_COLOR.schema,
-	),
-	column: buildIcon(
-		renderToStaticMarkup(<ColumnSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		NODE_TYPE_ACCENT_COLOR.column,
-	),
-	columnAttribute: buildIcon(
-		renderToStaticMarkup(<KeySvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		NODE_TYPE_ACCENT_COLOR.columnAttribute,
-	),
-	sqlAttribute: buildIcon(
-		renderToStaticMarkup(<ChartLineSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		NODE_TYPE_ACCENT_COLOR.sqlAttribute,
-	),
-	sql: buildIcon(
-		renderToStaticMarkup(<CodeBracketSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		NODE_TYPE_ACCENT_COLOR.sql,
-	),
-	customAnalysis: buildIcon(
-		renderToStaticMarkup(<ChartBarSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		NODE_TYPE_ACCENT_COLOR.customAnalysis,
-	),
-};
-const NODE_TYPE_ICON_DIMMED_LIGHT: Record<NodeType, string> = {
-	term: buildIcon(
-		renderToStaticMarkup(<TermsSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.term, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
-	),
-	table: buildIcon(
-		renderToStaticMarkup(<SnowflakeSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.table, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
-	),
-	schema: buildIcon(
-		renderToStaticMarkup(<SchemaSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.schema, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
-	),
-	column: buildIcon(
-		renderToStaticMarkup(<ColumnSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.column, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
-	),
-	columnAttribute: buildIcon(
-		renderToStaticMarkup(<KeySvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(
-			NODE_TYPE_ACCENT_COLOR.columnAttribute,
-			CANVAS_BACKGROUND_LIGHT,
-			NODE_DIMMED_OPACITY,
-		),
-	),
-	sqlAttribute: buildIcon(
-		renderToStaticMarkup(<ChartLineSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(
-			NODE_TYPE_ACCENT_COLOR.sqlAttribute,
-			CANVAS_BACKGROUND_LIGHT,
-			NODE_DIMMED_OPACITY,
-		),
-	),
-	sql: buildIcon(
-		renderToStaticMarkup(<CodeBracketSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.sql, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
-	),
-	customAnalysis: buildIcon(
-		renderToStaticMarkup(<ChartBarSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(
-			NODE_TYPE_ACCENT_COLOR.customAnalysis,
-			CANVAS_BACKGROUND_LIGHT,
-			NODE_DIMMED_OPACITY,
-		),
-	),
-};
-const NODE_TYPE_ICON_DIMMED_DARK: Record<NodeType, string> = {
-	term: buildIcon(
-		renderToStaticMarkup(<TermsSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.term, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
-	),
-	table: buildIcon(
-		renderToStaticMarkup(<SnowflakeSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.table, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
-	),
-	schema: buildIcon(
-		renderToStaticMarkup(<SchemaSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.schema, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
-	),
-	column: buildIcon(
-		renderToStaticMarkup(<ColumnSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.column, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
-	),
-	columnAttribute: buildIcon(
-		renderToStaticMarkup(<KeySvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(
-			NODE_TYPE_ACCENT_COLOR.columnAttribute,
-			CANVAS_BACKGROUND_DARK,
-			NODE_DIMMED_OPACITY,
-		),
-	),
-	sqlAttribute: buildIcon(
-		renderToStaticMarkup(<ChartLineSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(
-			NODE_TYPE_ACCENT_COLOR.sqlAttribute,
-			CANVAS_BACKGROUND_DARK,
-			NODE_DIMMED_OPACITY,
-		),
-	),
-	sql: buildIcon(
-		renderToStaticMarkup(<CodeBracketSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(NODE_TYPE_ACCENT_COLOR.sql, CANVAS_BACKGROUND_DARK, NODE_DIMMED_OPACITY),
-	),
-	customAnalysis: buildIcon(
-		renderToStaticMarkup(<ChartBarSvg width={ICON_RASTER_SIZE} height={ICON_RASTER_SIZE} />),
-		mixTowardColor(
-			NODE_TYPE_ACCENT_COLOR.customAnalysis,
-			CANVAS_BACKGROUND_DARK,
-			NODE_DIMMED_OPACITY,
-		),
-	),
-};
-
-// Plain hex counterparts of the dimmed icon maps above (`NodeBorderProgram`
-// reads a flat color attribute, not a data-URL texture), faded the same way
-// so a dimmed node's ring fades in step with its disc/icon.
+// Faded the same way as `NODE_TYPE_COLOR_DIMMED_LIGHT`/`_DARK` above so a
+// dimmed node's ring fades in step with its disc.
 const NODE_TYPE_BORDER_COLOR_DIMMED_LIGHT: Record<NodeType, string> = {
 	term: mixTowardColor(NODE_TYPE_BORDER_COLOR.term, CANVAS_BACKGROUND_LIGHT, NODE_DIMMED_OPACITY),
 	table: mixTowardColor(
@@ -493,8 +330,7 @@ const NODE_TYPE_BORDER_COLOR_DIMMED_DARK: Record<NodeType, string> = {
 // desaturated toward gray blends into `bg-zinc-50`) — so each theme gets its
 // own alpha rather than sharing one. Edges are thin strokes rather than
 // filled shapes, so (unlike nodes above) letting them fade via real alpha
-// reads fine and doesn't hit the node-image shader's `max(...)` quirk,
-// which is specific to the image node program.
+// reads fine.
 //
 // Every edge — active/connected/hovered or not, and on both the Terms and
 // Tables layers, since they share this same code — uses this *one* alpha,
@@ -567,10 +403,9 @@ type GraphNodeAttributes = {
 	size: number;
 	label: string;
 	color: string;
-	image: string;
-	type: 'image';
+	type: 'circle';
 	kind: NodeType;
-	/** Read by `NodeBorderProgram` (see `NodeIconBorderProgram` above). */
+	/** Read by `NodeBorderProgram` (see `NodeCircleBorderProgram` above). */
 	borderColor: string;
 };
 
@@ -697,8 +532,7 @@ const buildGraphologyGraph = (
 			size: getNodeSize(kind, node.relationshipCount),
 			label: node.layer === ExplorationLayer.Data ? node.name.toUpperCase() : node.name,
 			color: nodeTypeColor[kind],
-			image: NODE_TYPE_ICON[kind],
-			type: 'image',
+			type: 'circle',
 			kind,
 			borderColor: NODE_TYPE_BORDER_COLOR[kind],
 		});
@@ -918,15 +752,15 @@ export const GraphCanvas = ({
 		// Re-evaluated every frame by the continuously running physics layout
 		// below, so selection/hover state changes surface within one frame
 		// without needing to force a manual re-render.
-		// Sigma's own `NodeDisplayData` type doesn't know about the `image`
-		// attribute `@sigma/node-image` reads off the merged node data at
-		// render time, so the reducer's return type has to be widened past
-		// what `Sigma.Settings['nodeReducer']` declares in order to swap it
-		// per-node below.
+		// Sigma's own `NodeDisplayData` type doesn't know about the
+		// `borderColor` attribute `NodeBorderProgram` reads off the merged
+		// node data at render time, so the reducer's return type has to be
+		// widened past what `Sigma.Settings['nodeReducer']` declares in
+		// order to swap it per-node below.
 		const nodeReducer = (
 			node: string,
 			data: GraphNodeAttributes,
-		): Partial<NodeDisplayData> & Pick<GraphNodeAttributes, 'image' | 'borderColor'> => {
+		): Partial<NodeDisplayData> & Pick<GraphNodeAttributes, 'borderColor'> => {
 			const currentActiveNodeId = activeNodeIdRef.current;
 			const isActive = currentActiveNodeId === node;
 			const isHovered = hoveredNodeIdRef.current === node;
@@ -955,9 +789,6 @@ export const GraphCanvas = ({
 			const nodeTypeColorDimmed = isDark
 				? NODE_TYPE_COLOR_DIMMED_DARK
 				: NODE_TYPE_COLOR_DIMMED_LIGHT;
-			const nodeTypeIconDimmed = isDark
-				? NODE_TYPE_ICON_DIMMED_DARK
-				: NODE_TYPE_ICON_DIMMED_LIGHT;
 			const nodeTypeBorderColorDimmed = isDark
 				? NODE_TYPE_BORDER_COLOR_DIMMED_DARK
 				: NODE_TYPE_BORDER_COLOR_DIMMED_LIGHT;
@@ -965,7 +796,6 @@ export const GraphCanvas = ({
 			return {
 				...data,
 				color: isDimmed ? nodeTypeColorDimmed[data.kind] : data.color,
-				image: isDimmed ? nodeTypeIconDimmed[data.kind] : NODE_TYPE_ICON[data.kind],
 				borderColor: isDimmed
 					? nodeTypeBorderColorDimmed[data.kind]
 					: NODE_TYPE_BORDER_COLOR[data.kind],
@@ -1036,19 +866,19 @@ export const GraphCanvas = ({
 				labelDensity: 100,
 				defaultDrawNodeHover: drawNodeHover,
 				defaultDrawNodeLabel: drawNodeLabel,
-				// @sigma/node-image's program class is typed generically over the
+				// Sigma's own program classes are typed generically over the
 				// default `Attributes` type; our stricter node attributes are a
 				// compatible subtype at runtime, so this cast is safe.
 				nodeProgramClasses: {
-					image: NodeIconBorderProgram as unknown as NodeProgramType<
+					circle: NodeCircleBorderProgram as unknown as NodeProgramType<
 						GraphNodeAttributes,
 						GraphEdgeAttributes
 					>,
 				},
 				// See `NoopNodeProgram`'s own comment above for why hovered nodes
-				// get a do-nothing program here instead of redrawing the icon.
+				// get a do-nothing program here instead of redrawing the disc.
 				nodeHoverProgramClasses: {
-					image: NoopNodeProgram as unknown as NodeProgramType<
+					circle: NoopNodeProgram as unknown as NodeProgramType<
 						GraphNodeAttributes,
 						GraphEdgeAttributes
 					>,
@@ -1418,8 +1248,7 @@ export const GraphCanvas = ({
 					size,
 					label: node.label,
 					color: nodeTypeColor[node.kind],
-					image: NODE_TYPE_ICON[node.kind],
-					type: 'image',
+					type: 'circle',
 					kind: node.kind,
 					borderColor: NODE_TYPE_BORDER_COLOR[node.kind],
 				});

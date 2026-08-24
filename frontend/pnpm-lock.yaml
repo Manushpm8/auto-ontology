@@ -26,9 +26,6 @@ importers:
       '@sigma/node-border':
         specifier: ^3.0.0
         version: 3.0.0(sigma@3.0.3(graphology-types@0.24.8))
-      '@sigma/node-image':
-        specifier: ^3.0.0
-        version: 3.0.0(sigma@3.0.3(graphology-types@0.24.8))
       axios:
         specifier: ^1.16.0
         version: 1.16.0
@@ -2236,11 +2233,6 @@ packages:
     resolution: {integrity: sha512-mE3zUfjvJVuAMhSjiP/zdlkqe0OVTETxd04XHUwof01YqdzTk0OB4ACJIhWrwgsBXl7tTd9lPuKoroafLh8MtQ==}
     peerDependencies:
       sigma: '>=3.0.0-beta.17'
-
-  '@sigma/node-image@3.0.0':
-    resolution: {integrity: sha512-i4WLNPugDY4jgQEZtNSiSVj4HHXOraciXLtlgdygeUxMVEhH8PJ/+Q1vQ9f/SlKFnZQ+7vH3HnsSDW6FD9aP+g==}
-    peerDependencies:
-      sigma: '>=3.0.0-beta.10'
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -7277,10 +7269,6 @@ snapshots:
   '@shikijs/vscode-textmate@10.0.2': {}
 
   '@sigma/node-border@3.0.0(sigma@3.0.3(graphology-types@0.24.8))':
-    dependencies:
-      sigma: 3.0.3(graphology-types@0.24.8)
-
-  '@sigma/node-image@3.0.0(sigma@3.0.3(graphology-types@0.24.8))':
     dependencies:
       sigma: 3.0.3(graphology-types@0.24.8)
 
