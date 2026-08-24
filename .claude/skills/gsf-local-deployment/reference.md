@@ -17,15 +17,15 @@ direct ports when debugging.
 | `GET /api/connections/source` | `true` when `CONNECTION_STRINGS` is set in the env. Unset locally. |
 | `POST /api/connections/test` | Non-mutating. Body `{"connection": {...}}`. Also 422s if the database is already connected. |
 | `POST /api/connections` | 201. Same body. Stores the JSON on the `Database` node and **auto-triggers ingestion**. |
-| `DELETE /api/connections/{database_name}` | Detaches the connection. Leaves the catalog in place. |
+| `DELETE /api/connections/{database_name}` | **Destructive — there is no detach-only call.** `service.delete_connection` ends with `trigger_reset`, i.e. `POST :3002/ingest/delete`, wiping the `Database` node, its whole catalog subgraph, its semantic nodes and its pgvector rows. (The route's own docstring claims the opposite and is stale.) |
 
 ### Semantic compilation — `:3000/api`
 
 | Call | Notes |
 |---|---|
 | `GET /api/semantic-compilation/status` | `{"calculated": bool}` — true when any `Term` exists. |
-| `POST /api/semantic-compilation/trigger` | 202. Scheduler pass. |
-| `POST /api/semantic-compilation/reset` | 202. Wipe and rebuild. |
+| `POST /api/semantic-compilation/trigger` | 202. Scheduler pass. **`:3001` only** — the frontend exposes no such route handler, so `:3000` returns 404. |
+| `POST /api/semantic-compilation/reset` | 202. Wipes and rebuilds **every** database's semantic layer — it takes no `database_name` and passes none on. Use `:3002/semantic/reset?database_name=X` to scope it to one. |
 
 ### Catalog — `:3000/api`
 
@@ -37,7 +37,10 @@ direct ports when debugging.
 | `GET /api/columns/{table_id}` | |
 | `GET /api/health` | On `:3001`. Probes Neo4j **and** Postgres; 503 if either is down. |
 
-`POST /api/sql-attributes` exists; there is **no GET** — a GET returns 405.
+`GET` and `POST /api/sql-attributes` both exist on `:3001` (plus `GET`/`PUT`/
+`PATCH`/`DELETE /{attr_id}`, `POST /validate`, and
+`GET /{attr_id}/description-suggestion`). The frontend proxies only the POST, so
+`GET :3000/api/sql-attributes` returns 405 — read them from `:3001`.
 
 ### Ingestion service — `:3002` (no `/api` prefix)
 
@@ -50,9 +53,9 @@ direct ports when debugging.
 | `POST /semantic/reset?database_name=X` | 202. Deletes X's semantic layer and recompiles. Omit the param to reset **every** database. |
 | `POST /semantic/stop` | 202. Aborts at the next database boundary; the in-flight database finishes first. |
 
-Both `:3000/api/semantic-compilation/trigger` and `:3002/semantic/compile` start
-a pass. The ingestion service owns the scheduler, so `:3002` is the more direct
-route when debugging.
+Both `:3001/api/semantic-compilation/trigger` and `:3002/semantic/compile` start
+a pass — there is no `:3000` equivalent; that path 404s. The ingestion service owns
+the scheduler, so `:3002` is the more direct route when debugging.
 
 ## Connection payloads by type
 
@@ -146,8 +149,9 @@ MATCH (n) UNWIND labels(n) AS l RETURN l, count(*) AS n ORDER BY n DESC;
 // Semantic layer size
 MATCH (t:Term) RETURN count(t);
 
-// A term and the physical columns behind it
-MATCH (c:Column)-[:HAS_ATTRIBUTE]->(:ColumnAttribute)-[:PROPERTY_OF]->(t:Term)
+// A term and the physical columns behind it. Keep SEMANTIC_FK in the union or you
+// silently drop every foreign-key-shaped column (273 links vs 350 on this stack).
+MATCH (c:Column)-[:HAS_ATTRIBUTE|SEMANTIC_FK]->(:ColumnAttribute)-[:PROPERTY_OF]->(t:Term)
 RETURN t.name AS term, collect(DISTINCT c.name)[..4] AS columns ORDER BY term;
 
 // Which table each term was compiled from — the fastest way to spot junk terms

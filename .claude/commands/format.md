@@ -7,9 +7,9 @@ Leave blank to format everything. Pass `client` or `server` to format only that 
 
 Run the appropriate formatters based on $ARGUMENTS:
 
-**Frontend (client)** — run from repo root:
+**Frontend (client)** — run from `frontend/` (there is no root `package.json`; `pnpm format` from the repo root fails with `ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND`):
 ```bash
-pnpm format
+cd frontend && pnpm format
 ```
 
 **Backend (server)** — run from repo root:

@@ -38,7 +38,10 @@ matches your question to terms and tables, writes plausible SQL, and returns an
 empty answer after a full (~2 minute) agent run. Worse, the model reasons
 confidently about tables that no reachable database has.
 
-`check_readiness` (MCP) reports all three at once. **Always start there.**
+`check_readiness` (MCP) is the cheapest first probe, but it only *gates* on 2 and
+3. The catalog fills its informational `databases` list and can never raise a
+blocker, so `ready: true` with `databases: []` still means there is nothing to
+answer over. **Start there — then read `databases`, not just `ready`.**
 
 ## Stack facts (constants)
 
@@ -57,13 +60,24 @@ confidently about tables that no reachable database has.
 5434 mapping exists only on the host. A connection stored with `localhost:5434`
 tests fine from your shell and fails from the GSF container.
 
-Handy shell setup:
+Handy shell setup. Shell state does **not** survive between agent tool calls, so
+put the cypher helper on disk once instead of defining a function you cannot reuse:
 
 ```bash
 REPO=/Users/lfleishman/Projects/GSF
-PW=$(rg -m1 '^NEO4J_PASSWORD=' "$REPO/.env" | cut -d= -f2-)
-PGPW=$(docker exec postgres env | rg -m1 '^POSTGRES_PASSWORD=' | cut -d= -f2-)
-cy() { docker exec neo4j cypher-shell -u neo4j -p "$PW" "$1"; }
+cat > /tmp/cy.sh <<SH
+#!/bin/sh
+PW=\$(grep -m1 '^NEO4J_PASSWORD=' "$REPO/.env" | cut -d= -f2-)
+exec docker exec neo4j cypher-shell -u neo4j -p "\$PW" "\$1"
+SH
+chmod +x /tmp/cy.sh
+```
+
+Every `cy "…"` below means `/tmp/cy.sh "…"`. `$PGPW` is not a persistent variable
+either — read it in the same call that uses it:
+
+```bash
+PGPW=$(docker exec postgres env | grep -m1 '^POSTGRES_PASSWORD=' | cut -d= -f2-)
 ```
 
 ## Where connections actually live
@@ -88,21 +102,30 @@ cy "MATCH (d:Database) RETURN d.name AS db, d.connection IS NOT NULL AS connecte
 
 ## Diagnose an empty or wrong answer
 
-1. **`check_readiness`** (MCP). Believe its `blockers`.
+1. **`check_readiness`** (MCP). Believe its `blockers` — and read `databases`
+   alongside them, since an empty catalog never shows up as a blocker.
 2. **`blockers` mentions no connection** → run the cypher above. A `connected:
    FALSE` row is your answer: attach a connection (below).
-3. **The catalog names a database that isn't in Postgres** → stale metadata that
-   outlived its source. Compare:
+3. **The catalog names a database that no longer exists in its own engine** →
+   stale metadata that outlived its source. **Read the node's `connection.type`
+   first.** GSF also catalogs MySQL, Snowflake, Databricks and HeavyDB, and none
+   of those databases will ever appear in `pg_database` — this stack's `dw` is a
+   MySQL database in the `beaver-mysql` container:
 
 ```bash
-cy "MATCH (d:Database) RETURN d.name"
+cy "MATCH (d:Database) RETURN d.name AS db, d.connection AS connection"
+# then query the engine that node actually points at:
 docker exec postgres psql -U gsf -tAc \
   "SELECT datname FROM pg_database WHERE datistemplate=false;"
+docker exec beaver-mysql sh -c \
+  'mysql -u root -p"$MYSQL_ROOT_PASSWORD" -N -e "SHOW DATABASES;"'
 ```
 
-   A `Database` node with no matching row is orphaned. Delete it (below) — do
-   not leave it alongside a working database, or retrieval keeps matching
-   questions to unreachable tables.
+   A `Database` node with no matching row **in its own engine** is orphaned.
+   Delete it (below) — do not leave it alongside a working database, or retrieval
+   keeps matching questions to unreachable tables. The delete is irreversible, so
+   confirm the engine first; `d.connection IS NULL` means "not connected", never
+   "safe to delete".
 
 4. **`Term` count is 0** → compile the semantic layer (below).
 5. **Terms describe different data than the reachable database** (e.g. academic
@@ -120,7 +143,10 @@ Types: `postgresql`/`postgres`, `mysql`, `snowflake`, `databricks`, `heavydb`
 `host`, `user`, `password`, `database`; `port` defaults per type.
 
 **Test first** — non-mutating, and it catches credential and reachability errors
-before anything is stored:
+before anything is stored. One catch: `/test` runs the already-connected guard
+*before* it builds any connection string, so testing a database that is already
+attached returns `422 A connection for database 'x' already exists` without ever
+contacting it. That 422 is not a credential error.
 
 ```bash
 TOKEN=gsf_…   # mint in the UI
@@ -144,6 +170,13 @@ curl -s -X POST http://localhost:3000/api/connections \
 rm -f /tmp/conn.json   # it holds the password
 ```
 
+**Saving validates nothing.** `POST /api/connections` stores the JSON and fires a
+best-effort ingest that swallows every exception (`gsf/server/ingestion/proxy.py`),
+so a wrong password, an unreachable host or a `localhost:5434` host all return
+**201 Created** and then fail silently — leaving you in exactly the
+connected-but-empty state this skill exists to diagnose. A 201 means "stored",
+never "works". Always `/test` first, then confirm the catalog actually lands.
+
 **Saving a connection auto-triggers ingestion.** Do not call `/ingest`
 afterwards. Watch it land:
 
@@ -154,7 +187,11 @@ cy "MATCH (d:Database)-[:CONTAINS]->(s:Schema) OPTIONAL MATCH (s)-[:CONTAINS]->(
 ```
 
 A 422 on save means a connection for that database name already exists
-(`_database_already_connected`) — delete it first.
+(`_database_already_connected`). Deleting it first is **destructive**: `DELETE
+/api/connections/{database_name}` tears down the catalog subgraph, the semantic
+layer and the pgvector rows along with the connection (see reference.md). Changing
+stored credentials therefore costs a full re-ingest and recompile — there is no
+edit-in-place.
 
 ## Delete a stale database
 
@@ -175,18 +212,24 @@ curl -s -X POST "http://127.0.0.1:3002/semantic/reset?database_name=wwi"  # wipe
 curl -s -X POST http://127.0.0.1:3002/semantic/stop             # abort at next db boundary
 ```
 
-LLM-heavy and slow — budget roughly **a term per table, a few minutes per 30
-tables**. Needs `NVIDIA_API_KEY` / `OPENAI_API_KEY` in the container env. Poll
-progress rather than guessing:
+LLM-heavy and slow — budget **a term per table and 10-15 minutes per 30 tables**
+(measured here: 13m04s for 32 tables). Table visits are only ~60% of the run; FK
+resolution, SqlAttribute suggestion and bridge tables follow the
+`Compilation complete` line. Needs an API key resolvable by
+`gsf/utils/model_config.py`: `REASONING_API_KEY` / `EMBED_API_KEY`, else
+`DEFAULT_MODELS_API_KEY`, else the legacy `NVIDIA_API_KEY`. **`OPENAI_API_KEY` is
+ignored** — nothing in the repo reads it, and an unresolved key raises
+`EnvironmentError` rather than compiling. Poll progress rather than guessing:
 
 ```bash
 cy "MATCH (t:Term) RETURN count(t)"
 curl -s http://localhost:3000/api/semantic-compilation/status -H "x-api-key: $TOKEN"
-# {"calculated": true} when a pass has completed
+# {"calculated": true} as soon as ANY Term exists — it flips mid-pass
 ```
 
-Treat it as done when `calculated` is true **and** the term count has stopped
-moving; the flag can be true from an earlier pass.
+Treat it as done when the term count has stopped moving. `calculated` only reports
+that a Term exists — it flips true after the *first* table of a running pass, and
+stays true from an earlier one.
 
 ## Verify end to end
 
@@ -227,8 +270,10 @@ docker exec postgres psql -U gsf -d wwi -c "<the sql GSF returned>"
 - **`/api/health` on :3001 probes both Neo4j and Postgres** and returns 503 if
   either is down. It says nothing about connections or the semantic layer, so a
   200 here is compatible with a deployment that answers nothing.
-- **`GET /api/sql-attributes` does not exist** — that route is POST-only, and a
-  GET returns 405. Use the MCP's `get_calculation`, or POST.
+- **`GET /api/sql-attributes` 405s on `:3000` but works on `:3001`.** The route
+  exists (`gsf/server/sql_attributes/router.py:54`) and lists every SqlAttribute
+  with its linked Term — the frontend simply doesn't proxy the GET. Read it from
+  `:3001`, or use the MCP's `get_calculation` / `get_term_calculations`.
 - **Don't use `rg -r`** when grepping this repo for facts; `-r` takes a
   replacement argument and silently rewrites matches in the output. It will make
   `x-api-key` read as whatever you passed to `-n`.
