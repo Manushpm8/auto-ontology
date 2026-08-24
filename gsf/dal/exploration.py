@@ -1440,11 +1440,17 @@ def fetch_semantic_link_path(
     nodes onto the graph and highlight the actual path instead of just the
     collapsed label.
 
-    Every Table node the path passes through must fall inside *zone_ids*
-    (mirroring ``term_is_in_scope``'s use elsewhere) — the path is dropped
-    entirely rather than partially shown when one doesn't, since a partial
-    chain that silently skips an out-of-scope hop would misrepresent how
-    the two terms actually connect.
+    Every Table/Column node the path passes through must fall inside
+    *zone_ids* (mirroring ``term_is_in_scope``'s use elsewhere) — the path
+    is dropped entirely rather than partially shown when one doesn't,
+    since a partial chain that silently skips an out-of-scope hop would
+    misrepresent how the two terms actually connect. Checking `Column`
+    nodes here too (not just `Table`) matters because `SEMANTIC_FK`/
+    `HAS_ATTRIBUTE` are traversed undirected (see `find_term_link_path`'s
+    own doc comment) — a path can reach a Column from a ColumnAttribute on
+    *both* sides (e.g. `Attr1 -[HAS_ATTRIBUTE]- Column -[HAS_ATTRIBUTE]-
+    Attr2`) without ever stepping through its own `CONTAINS` edge, so its
+    owning Table never appears as a hop node of its own to catch.
     """
     hops = find_term_link_path(source_term_id, target_term_id)
     if not hops:
@@ -1455,10 +1461,13 @@ def fetch_semantic_link_path(
         table_ids = data_ids_by_zone["table_ids"]
         for hop in hops:
             for side in (hop["source"], hop["target"]):
-                if (
-                    side.get("label") == Labels.TABLE
-                    and side.get("id") not in table_ids
-                ):
+                label = side.get("label")
+                if label == Labels.TABLE and side.get("id") not in table_ids:
+                    return {"hops": []}
+                # `table_id` is already populated on every Column node by
+                # `find_term_link_path`'s own `_enrich_catalog_path_nodes`
+                # call, so this needs no extra Neo4j round trip.
+                if label == Labels.COLUMN and side.get("table_id") not in table_ids:
                     return {"hops": []}
 
     return {

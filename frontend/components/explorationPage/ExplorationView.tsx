@@ -204,12 +204,7 @@ export const ExplorationView = () => {
 	const [dataLoaded, setDataLoaded] = useState(false);
 	const [search, setSearch] = useState('');
 	const [activeNodeId, setActiveNodeId] = useState<string | null>(activeNodeIdFromUrl);
-	// Mirrors `activeNodeId` for the same reason every other ref in this
-	// file mirrors its state — `collapseExpansion` below needs to read it
-	// without taking a dependency on the state value itself, since that
-	// would change its (and every `collapseXNode`'s) identity on every
-	// single selection change, tearing down/rebuilding the whole Sigma
-	// renderer (see `controllerRef`'s own comment for why that's a problem).
+
 	const activeNodeIdRef = useRef<string | null>(activeNodeId);
 	useEffect(() => {
 		activeNodeIdRef.current = activeNodeId;
@@ -442,19 +437,7 @@ export const ExplorationView = () => {
 					removedNodeIds.forEach((removedId) => next.delete(removedId));
 					return next;
 				});
-				// The currently-selected node's own side panel
-				// (`ActiveExpansionCard`/`ActiveTermCard`) reads its entity
-				// straight out of `expandedNodesById` above, so deleting its
-				// entry there already makes the panel disappear — but
-				// `activeNodeId` itself is left pointing at a node no longer
-				// on the graph unless this collapse happened to be *that*
-				// node's own (`handleDoubleClickNode` never deselects before
-				// collapsing). Left dangling, `GraphCanvas`'s own
-				// `removeExpansion` (see its comment there) only nulls its
-				// *local* ref copy to avoid an immediate stale ring, but the
-				// very next unrelated re-render (or a remount, e.g. a layer
-				// switch) re-syncs that ref straight from this still-stale
-				// `activeNodeId` prop, reintroducing it.
+
 				if (
 					activeNodeIdRef.current != null &&
 					removedNodeIds.includes(activeNodeIdRef.current)
@@ -478,25 +461,6 @@ export const ExplorationView = () => {
 		});
 	}, []);
 
-	// Shared guard every `expandXNode`/`expandSemanticConnection` below runs
-	// right before grafting its freshly-fetched nodes/edges on: true when
-	// this in-flight fetch should be dropped instead of applied, for either
-	// of two reasons. First, its own node/connection was double-clicked to
-	// collapse before the fetch resolved — `pendingCollapseIdsRef`'s own
-	// comment explains that race. Second — the race this guard was added
-	// for — the graph itself was torn down and rebuilt from scratch while
-	// the fetch was in flight (e.g. a layer switch via `handleToggleLayer`,
-	// which also clears every `expandedIdsRefs`/`pendingCollapseIdsRef`
-	// entry, letting the very same id be re-expanded on the new layer
-	// before this stale fetch even resolves). `GraphCanvas` swaps
-	// `controllerRef.current` for a fresh controller whenever that
-	// happens, but each `expandXNode` captures its own `activeController`
-	// *before* awaiting, so a stale one still closes over the previous
-	// graphology/simulation/renderer instance, which is dead by the time
-	// the fetch resolves. Calling its `addExpansion` anyway would silently
-	// mutate that orphaned instance instead of the graph actually on
-	// screen — comparing against `controllerRef.current` (rather than a
-	// null check, which a torn-down controller doesn't fail) catches it.
 	const isExpansionStale = useCallback(
 		(pendingId: string, activeController: GraphController) =>
 			pendingCollapseIdsRef.current.delete(pendingId) ||
@@ -1890,14 +1854,6 @@ export const ExplorationView = () => {
 	// other expansion on this graph gives.
 	const handleSelectEdge = useCallback(
 		(edgeId: string) => {
-			// Mirrors `handleSelectNode`'s own `setSelectedSemanticEdgeId(null)`
-			// above — without this, selecting an edge while some node's own
-			// side panel (`ActiveTermCard`/`ActiveDataCard`/`ActiveExpansionCard`)
-			// was still open left both rendered at once: `activeSemanticConnectionEntity`'s
-			// own `ActiveExpansionCard` below is never gated on `activeNode`/
-			// `activeExpansionEntity` being null, and every one of these panels
-			// shares the exact same fixed `absolute right-4 top-20 bottom-28`
-			// slot, so the two would stack directly on top of each other.
 			setActiveNodeId(null);
 			if (expandedConnectionIdsRef.current.has(edgeId)) {
 				collapseSemanticConnection(edgeId);
@@ -1956,15 +1912,7 @@ export const ExplorationView = () => {
 		// without grafting anything, even though nothing is actually pending
 		// anymore.
 		pendingCollapseIdsRef.current.clear();
-		// Same rationale as `expandedIdsRefs` above, for the entities those
-		// expansions grafted on rather than just their ids: `graphNodeIds`
-		// below folds every `expandedNodesById` key into the current
-		// layer's own "focusable" set regardless of which layer originally
-		// grafted it, so a stale entry here left `RelationshipsModal`'s own
-		// "Focus" button enabled for a node the freshly-rebuilt (graft-free)
-		// canvas no longer has — and clicking it would resolve
-		// `activeExpansionEntity` straight out of this same stale map,
-		// popping a side panel for a node that isn't actually on screen.
+
 		setExpandedNodesById(new Map());
 		setConnectionHopsByEdgeId(new Map());
 		router.replace(

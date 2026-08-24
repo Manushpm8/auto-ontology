@@ -59,11 +59,6 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 			foreignKeys: (link.foreign_keys ?? []).map((fk) => ({
 				sourceColumn: fk.source_column,
 				targetColumn: fk.target_column,
-				// `fk.source_sample_values`/`target_sample_values` come straight off
-				// the Column node unparsed (see `DataGraphForeignKeyDto`'s own
-				// comment) — a JSON string when profiling wrote them, a real array
-				// when a catalog PATCH did. Normalized here so every consumer of
-				// `ExplorationForeignKey` gets a plain string array or `null`.
 				sourceSampleValues: parseSampleValues(fk.source_sample_values),
 				targetSampleValues: parseSampleValues(fk.target_sample_values),
 			})),
