@@ -113,93 +113,106 @@ export const SemanticCompilationForm = ({
 					a compilation run immediately.
 				</p>
 
-				{enabled && hasHistory && (
-					<div className="mb-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
-						<div className="flex flex-col">
-							<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-								{running && 'Semantic compilation is running'}
-								{!running && failed && 'Semantic compilation failed'}
-								{!running && !failed && 'Semantic compilation is ready'}
-							</span>
-							<span className="text-xs text-zinc-500">
-								{failed && !running
-									? `Last attempt: ${formatDate(lastFailureAt as string, 'MMM DD YYYY, HH:mm Z')}`
-									: `Last semantic compilation: ${
-											lastSuccessAt
-												? formatDate(lastSuccessAt, 'MMM DD YYYY, HH:mm Z')
-												: '—'
-										}`}
-							</span>
-						</div>
-						{running ? (
-							<span title="Semantic compilation is running">
-								<Spinner className="h-4 w-4 shrink-0 text-[#76b900]" />
-							</span>
-						) : failed ? (
-							<span
-								className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-400"
-								title="Semantic compilation failed"
-							>
-								<Icon name={IconName.Close} className="h-3 w-3" />
-							</span>
-						) : (
-							<span
-								className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#76b900]/15 text-[#76b900]"
-								title="Semantic compilation is ready"
-							>
-								<Icon name={IconName.Check} className="h-3 w-3" />
-							</span>
-						)}
-					</div>
-				)}
-
-				{!enabled && (
+				{!hasDatabases && (
 					<div className="mb-3 flex items-center rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 						<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-							{hasDatabases
-								? 'You can enable the semantic compilation'
-								: 'Please connect any data source'}
+							Please connect any data source
 						</span>
 					</div>
 				)}
 
-				<div className="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
-					<div className="flex flex-col">
-						<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-							Enable semantic compilation
-						</span>
-						<span className="text-xs text-zinc-500">
-							{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
-						</span>
-					</div>
-					<Toggle
-						checked={enabled}
-						aria-label="Enable semantic compilation"
-						disabled={saving}
-						onChange={handleToggle}
-					/>
-				</div>
+				{hasDatabases && (
+					<>
+						{enabled && hasHistory && (
+							<div className="mb-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+								<div className="flex flex-col">
+									<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+										{running && 'Semantic compilation is running'}
+										{!running && failed && 'Semantic compilation failed'}
+										{!running && !failed && 'Semantic compilation is ready'}
+									</span>
+									<span className="text-xs text-zinc-500">
+										{failed && !running
+											? `Last attempt: ${formatDate(lastFailureAt as string, 'MMM DD YYYY, HH:mm Z')}`
+											: `Last semantic compilation: ${
+													lastSuccessAt
+														? formatDate(
+																lastSuccessAt,
+																'MMM DD YYYY, HH:mm Z',
+															)
+														: '—'
+												}`}
+									</span>
+								</div>
+								{running ? (
+									<span title="Semantic compilation is running">
+										<Spinner className="h-4 w-4 shrink-0 text-[#76b900]" />
+									</span>
+								) : failed ? (
+									<span
+										className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-400"
+										title="Semantic compilation failed"
+									>
+										<Icon name={IconName.Close} className="h-3 w-3" />
+									</span>
+								) : (
+									<span
+										className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#76b900]/15 text-[#76b900]"
+										title="Semantic compilation is ready"
+									>
+										<Icon name={IconName.Check} className="h-3 w-3" />
+									</span>
+								)}
+							</div>
+						)}
 
-				{enabled && (
-					<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
-						<div className="flex flex-col">
-							<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-								Reset semantic layer
-							</span>
-							<span className="text-xs text-zinc-500">
-								Deletes the semantic layer for every database, and rebuild it from
-								scratch.
-							</span>
+						{!enabled && (
+							<div className="mb-3 flex items-center rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+								<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+									You can enable the semantic compilation
+								</span>
+							</div>
+						)}
+
+						<div className="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+							<div className="flex flex-col">
+								<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+									Enable semantic compilation
+								</span>
+								<span className="text-xs text-zinc-500">
+									{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
+								</span>
+							</div>
+							<Toggle
+								checked={enabled}
+								aria-label="Enable semantic compilation"
+								disabled={saving}
+								onChange={handleToggle}
+							/>
 						</div>
-						<button
-							type="button"
-							disabled={saving}
-							onClick={() => setConfirmModalOpen(true)}
-							className="cursor-pointer rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"
-						>
-							Reset
-						</button>
-					</div>
+
+						{enabled && (
+							<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+								<div className="flex flex-col">
+									<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+										Reset semantic layer
+									</span>
+									<span className="text-xs text-zinc-500">
+										Deletes the semantic layer for every database, and rebuild
+										it from scratch.
+									</span>
+								</div>
+								<button
+									type="button"
+									disabled={saving}
+									onClick={() => setConfirmModalOpen(true)}
+									className="cursor-pointer rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"
+								>
+									Reset
+								</button>
+							</div>
+						)}
+					</>
 				)}
 			</div>
 
