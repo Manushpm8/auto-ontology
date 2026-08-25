@@ -12,9 +12,11 @@ from typing import TYPE_CHECKING, Any, Iterator
 from gsf.connectors import get_connectors
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.datasources import (
+    store_column_date_formats,
     store_column_sample_values,
     store_column_uniqueness,
 )
+from gsf.semantic.date_format import infer_date_format, is_date_type
 from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
@@ -156,13 +158,16 @@ def calculate_columns_profiling(
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
 
-    Persists to Neo4j Column nodes: ``is_unique`` for every column, and
-    ``sample_values`` for every column except those whose declared type is a
-    date/time/uuid (individual string values longer than 30 chars are dropped).
+    Persists to Neo4j Column nodes: ``is_unique`` for every column,
+    ``date_format`` for columns whose sampled values share one notation —
+    whether declared as a date/time type or as text, since loosely-typed
+    sources such as SQLite store dates as TEXT — and ``sample_values`` for
+    every column except those with a date format or a declared date/time/uuid
+    type (individual string values longer than 30 chars are dropped).
 
-    Returns ``{column_name: {"sample_values": [top-5 values], "is_unique": bool}}``
-    for *all* columns (values unfiltered — includes dates, uuids and long
-    strings).
+    Returns ``{column_name: {"sample_values": [...], "is_unique": bool,
+    "date_format": str | None}}`` for *all* columns (values unfiltered —
+    includes dates, uuids and long strings).
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
@@ -188,6 +193,7 @@ def calculate_columns_profiling(
     profiling: dict[str, dict[str, Any]] = {}
     sample_values: dict[str, list] = {}
     uniqueness: dict[str, bool] = {}
+    date_formats: dict[str, str] = {}
 
     for column in df.columns:
         col_name = str(column)
@@ -233,10 +239,25 @@ def calculate_columns_profiling(
                         merged.append(value)
                 col_values = merged
 
-        uniqueness[col_name] = is_unique
-        profiling[col_name] = {"sample_values": col_values, "is_unique": is_unique}
+        # SQLite (and other loosely-typed sources) declare dates as TEXT, so the
+        # declared type alone misses them: infer from the values as well, which
+        # only yields a format when every sampled value shares one notation.
+        date_format = (
+            infer_date_format(series)
+            if is_date_type(declared_type) or _is_text_sample_type(declared_type)
+            else None
+        )
+        if date_format:
+            date_formats[col_name] = date_format
 
-        if _is_excluded_sample_type(declared_type):
+        uniqueness[col_name] = is_unique
+        profiling[col_name] = {
+            "sample_values": col_values,
+            "is_unique": is_unique,
+            "date_format": date_format,
+        }
+
+        if _is_excluded_sample_type(declared_type) or date_format:
             continue
         filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
         if filtered:
@@ -245,6 +266,7 @@ def calculate_columns_profiling(
     table_id = table["id"]
     store_column_sample_values(table_id, sample_values)
     store_column_uniqueness(table_id, uniqueness)
+    store_column_date_formats(table_id, date_formats)
 
     return profiling
 
@@ -262,8 +284,7 @@ def process_table(
     table_name = table["name"]
 
     # Columns profiling — requires a live connector; skipped when unavailable.
-    # Persists sample_values + is_unique onto Column nodes, and maps each column
-    # to {"sample_values": [...], "is_unique": bool} for FK detection below.
+    # Persists sample_values, is_unique, and date_format onto Column nodes.
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
     if connector is not None:

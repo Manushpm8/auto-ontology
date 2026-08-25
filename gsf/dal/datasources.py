@@ -266,7 +266,8 @@ MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
       -[:{Edges.CONTAINS}]->(tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: {column_description_expr("col")}}}) AS cols
+                         description: {column_description_expr("col")},
+                         date_format: col.date_format}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
        db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
 """
@@ -491,6 +492,7 @@ RETURN c.id AS id,
        {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
+       c.date_format AS date_format,
        EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key,
        EXISTS {{
            (:{Labels.COLUMN})-[:{Edges.FOREIGN_KEY}]->(c)
@@ -618,6 +620,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r.get("description"),
             "ordinal_position": r.get("ordinal_position"),
             "sample_values": r.get("sample_values"),
+            "date_format": r.get("date_format"),
             "is_foreign_key_target": bool(r.get("is_foreign_key_target")),
         }
         for r in rows
@@ -702,6 +705,40 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
              AS iu
         WHERE iu IS NOT NULL
         SET col.is_unique = iu
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:
+    """Write inferred storage notations onto date Column nodes for a table.
+
+    Date columns carry no sample values, so without this a temporal column
+    reaches the generation prompt as a name and a sentence, and the model has
+    to guess whether to compare against ``'1995-03-24'``, ``'950324'`` or
+    ``'24/03/1995'``. The notation is inferred, not declared, so it is stored
+    only where a single reading fits every sampled value.
+
+    Skips silently when *date_formats* is empty.
+    """
+    if not date_formats:
+        return
+    entries = [
+        {"column_name": col, "date_format": str(fmt)}
+        for col, fmt in date_formats.items()
+        if fmt
+    ]
+    if not entries:
+        return
+    graph().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.date_format][0]
+             AS fmt
+        WHERE fmt IS NOT NULL
+        SET col.date_format = fmt
         """,
         {"table_id": table_id, "entries": entries},
     )

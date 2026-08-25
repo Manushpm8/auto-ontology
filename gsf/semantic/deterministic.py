@@ -9,6 +9,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from gsf.semantic.date_format import is_date_type
 from gsf.semantic.models import ColumnAttributeSpec, ColumnDescriptionResult
 from gsf.utils.llm_invoke import (
     get_non_reasoning_llm_client,
@@ -41,19 +42,11 @@ def to_term_name(table_name: str) -> str:
     return "".join(p.capitalize() for p in parts if p)
 
 
-_DATE_TYPE_TOKENS = ("date", "time", "timestamp", "datetime")
+_DATE_FORMAT_MARKER = "date format:"
 
 
 def fk_source_columns(fks: list[dict[str, Any]]) -> set[str]:
     return {fk["source_column"] for fk in fks if fk.get("source_column")}
-
-
-def _is_date_type(data_type: str | None) -> bool:
-    """Whether a declared column type is a date/time type."""
-    if not data_type:
-        return False
-    lowered = data_type.lower()
-    return any(token in lowered for token in _DATE_TYPE_TOKENS)
 
 
 def _get_column_samples(
@@ -66,7 +59,7 @@ def _get_column_samples(
     (to an LLM description prompt, or as a stand-in when no description
     needed to be generated).
     """
-    if _is_date_type(col.get("data_type")):
+    if is_date_type(col.get("data_type")):
         return []
     name = col.get("name", "")
     samples = (columns_profiling_samples.get(name) or {}).get("sample_values") or []
@@ -78,6 +71,42 @@ def _add_samples_suffix(text: str, samples: list[str]) -> str:
     if not samples:
         return text
     return f"{text} — samples: {', '.join(samples)}"
+
+
+def _date_format_clause(
+    col: dict[str, Any],
+    columns_profiling_samples: dict[str, dict[str, Any]],
+) -> str | None:
+    """How a date column stores its values, when a single reading fits them all.
+
+    Dates are held back from sampling because a concrete date carries no
+    business meaning, but that leaves nothing in the prompt saying whether a
+    predicate should compare against ``'1995-03-24'`` or ``'950324'``.
+    """
+    profile = columns_profiling_samples.get(col.get("name", "")) or {}
+    date_format = profile.get("date_format") or col.get("date_format")
+    if not date_format:
+        return None
+    return f"{_DATE_FORMAT_MARKER} {date_format}"
+
+
+def _add_date_format_clause(text: str, clause: str | None) -> str:
+    """Append the notation, idempotently on its own marker."""
+    if not clause or _DATE_FORMAT_MARKER in text:
+        return text
+    return f"{text} — {clause}" if text else clause
+
+
+def _enrich_description(
+    col: dict[str, Any],
+    columns_profiling_samples: dict[str, dict[str, Any]],
+    text: str | None,
+) -> str | None:
+    """Attach date notation (and, for existing descriptions, samples)."""
+    enriched = _add_date_format_clause(
+        text or "", _date_format_clause(col, columns_profiling_samples)
+    )
+    return enriched or None
 
 
 def _describe_column_batch(
@@ -218,15 +247,22 @@ def column_attribute_specs(
     specs = [
         _build_column_attribute_spec(
             col,
-            _add_samples_suffix(
-                col["description"], _get_column_samples(col, profiling)
+            _enrich_description(
+                col,
+                profiling,
+                _add_samples_suffix(
+                    col["description"], _get_column_samples(col, profiling)
+                ),
             ),
         )
         for col in cols_with_description
     ]
     # Columns without a description: keep the LLM description as generated
     specs += [
-        _build_column_attribute_spec(col, llm_descriptions.get(col["name"]))
+        _build_column_attribute_spec(
+            col,
+            _enrich_description(col, profiling, llm_descriptions.get(col["name"])),
+        )
         for col in cols_without_description
     ]
     return specs

@@ -9,11 +9,13 @@ import pandas as pd
 from gsf.semantic.visit_enter import calculate_columns_profiling, process_table
 
 
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
 @patch("gsf.semantic.visit_enter.store_column_uniqueness")
 @patch("gsf.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling_unhashable_values(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
 ) -> None:
     # Postgres array / JSON columns come back as Python lists/dicts, which are
     # unhashable — profiling must not crash on them.
@@ -42,11 +44,13 @@ def test_calculate_columns_profiling_unhashable_values(
     assert result["id"]["is_unique"] is True
 
 
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
 @patch("gsf.semantic.visit_enter.store_column_uniqueness")
 @patch("gsf.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
 ) -> None:
     df = pd.DataFrame(
         {
@@ -89,6 +93,9 @@ def test_calculate_columns_profiling(
     assert result["status"]["is_unique"] is False
     assert result["created_at"]["is_unique"] is True
     assert result["token"]["is_unique"] is False
+    assert result["created_at"]["date_format"] == "YYYY-MM-DD"
+    mock_store_dates.assert_called_once()
+    assert mock_store_dates.call_args[0][1] == {"created_at": "YYYY-MM-DD"}
 
     # Uniqueness persisted for every column.
     uniqueness = mock_store_unique.call_args[0][1]
@@ -106,11 +113,13 @@ def test_calculate_columns_profiling(
     assert stored["status"][0] == "open"
 
 
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
 @patch("gsf.semantic.visit_enter.store_column_uniqueness")
 @patch("gsf.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling_distinct_only_when_under_top_n(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
 ) -> None:
     """DISTINCT probes run only for text columns with fewer than 5 sample values."""
     sample_df = pd.DataFrame(
