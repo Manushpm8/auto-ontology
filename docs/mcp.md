@@ -126,6 +126,26 @@ cost of a build on each start — and needs no checkout at all:
 "args": ["--from", "git+https://github.com/NVIDIA/GSF.git#subdirectory=mcp", "gsf-mcp"]
 ```
 
+A server that is already running and asks callers to sign in (see [Signing in
+with SSO](#signing-in-with-sso)) is configured with its URL instead of a command,
+and with no credentials at all:
+
+```json
+{
+  "mcpServers": {
+    "gsf": {
+      "url": "https://gsf-mcp.example/mcp"
+    }
+  }
+}
+```
+
+The client discovers the server wants authorization and offers to sign in —
+Cursor lists it as needing login. Approving the consent page and signing in with
+the provider leaves the client holding a token it manages itself, so nothing is
+pasted anywhere and every call runs as the person who signed in. Note the `/mcp`
+suffix: that is the endpoint, not the server's root.
+
 Restart the client after editing its config — most read MCP configuration only at
 startup. An editable install picks up code changes on the next server start.
 

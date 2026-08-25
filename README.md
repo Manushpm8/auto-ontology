@@ -250,9 +250,10 @@ such as Cursor and Claude Desktop can query your data directly. It gives an
 agent one tool that answers questions in natural language, plus read-only tools
 for browsing the glossary and catalog behind those answers.
 
-It is an HTTP client of the public API described above — it authenticates with
-an API token and therefore acts as that token's owner, with exactly their
-permissions.
+It is an HTTP client of the public API described above. Given an API token it
+acts as that token's owner, with exactly their permissions. Pointed at an OIDC
+provider instead, it asks each caller to sign in through their browser and every
+call runs as that person — no token to mint, paste, or share.
 
 ```sh
 export GSF_API_URL=https://gsf.example.com
