@@ -17,7 +17,10 @@ import logging
 from fastapi import APIRouter
 
 from gsf.dal.terms import semantic_layer_calculated
-from gsf.ingestion_service.config import get_semantic_compilation_last_success
+from gsf.ingestion_service.history import (
+    get_last_failure_if_most_recent,
+    get_last_successful_run,
+)
 from gsf.server.ingestion.proxy import (
     is_semantic_compilation_running,
     trigger_semantic_compile,
@@ -55,10 +58,19 @@ async def reset() -> dict[str, str]:
 @router.get("/semantic-compilation/status", response_model=SemanticStatusResponse)
 def semantic_status() -> dict[str, bool | str | None]:
     """Report whether the semantic layer has been calculated (any Term exists),
-    whether the ingestion service is compiling it right now, and when the last
-    pass completed."""
+    whether the ingestion service is compiling it right now, when the last
+    pass completed successfully, and when it last failed.
+
+    ``running`` needs the live ingestion process, so it goes through the HTTP
+    proxy and degrades to ``False`` if that's unreachable. ``last_success_at``
+    and ``last_failure_at`` are read straight from the ``semantic_compilation_history``
+    table instead — a temporarily unreachable ingestion service has no bearing
+    on Postgres, so history stays visible even while it's down (see
+    ``gsf/server/ingestion/proxy.py``).
+    """
     return {
         "calculated": semantic_layer_calculated(),
         "running": is_semantic_compilation_running(),
-        "last_success_at": get_semantic_compilation_last_success(),
+        "last_success_at": get_last_successful_run(),
+        "last_failure_at": get_last_failure_if_most_recent(),
     }

@@ -16,15 +16,39 @@
       },
       "SemanticRunningResponse": {
         "additionalProperties": true,
-        "description": "``{\"running\": bool}`` \u2014 the ingestion service's own status endpoint.",
+        "description": "The ingestion service's own status endpoint: whether a compilation pass\nis executing right now, when the last one finished successfully, and when\nit last failed (only set if more recent than the last success).",
         "properties": {
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
           "running": {
             "title": "Running",
             "type": "boolean"
           }
         },
         "required": [
-          "running"
+          "running",
+          "last_success_at",
+          "last_failure_at"
         ],
         "title": "SemanticRunningResponse",
         "type": "object"
@@ -260,7 +284,7 @@
     },
     "/semantic/status": {
       "get": {
-        "description": "Report whether a semantic compilation pass is executing right now.",
+        "description": "Report whether a compilation pass is executing right now, when the last\none finished successfully, and when it last failed (if that's more recent\nthan the last success).\n\nBacked by the ``semantic_compilation_history`` table (see ``history.py``),\nwhich this service owns \u2014 the GSF API server relays this response rather\nthan reading that table itself.",
         "operationId": "semantic_status_semantic_status_get",
         "responses": {
           "200": {

@@ -12,6 +12,15 @@ always one interval after the most recent run — scheduled or manual.
 Every pass re-checks the ``semantic_compilation_enabled`` settings flag and
 no-ops when it is off, so disabling in the UI takes effect on the next run
 (scheduled or triggered) without waiting for a service restart.
+
+Compilation reads the catalog (databases/schemas/tables) that :class:`DataScheduler`
+writes to Neo4j. Both schedulers start their first pass at the same moment on
+service boot, so without coordination this one could race ahead and compile
+against a catalog that isn't there yet — silently producing zero Terms instead
+of an error. Passing the ingest scheduler as *depends_on* closes that race: the
+very first pass waits for the ingest scheduler's first pass to finish (see
+``IntervalScheduler.wait_first_pass``) before touching the catalog. Every pass
+after that returns immediately, since the dependency is long since satisfied.
 """
 
 from __future__ import annotations
@@ -20,11 +29,9 @@ import asyncio
 import logging
 from datetime import timedelta
 
-from gsf.ingestion_service.config import (
-    is_semantic_compilation_enabled,
-    record_semantic_compilation_success,
-)
+from gsf.ingestion_service.config import is_semantic_compilation_enabled
 from gsf.ingestion_service.connections import resolve_database_names
+from gsf.ingestion_service.history import record_run_finish, record_run_start
 from gsf.ingestion_service.scheduler import IntervalScheduler
 from gsf.semantic.compile import run_semantic_compilation
 
@@ -40,8 +47,17 @@ class SemanticScheduler(IntervalScheduler):
 
     name = "semantic"
 
-    def __init__(self, interval: timedelta = SEMANTIC_INTERVAL) -> None:
+    def __init__(
+        self,
+        interval: timedelta = SEMANTIC_INTERVAL,
+        *,
+        depends_on: IntervalScheduler | None = None,
+    ) -> None:
         super().__init__(interval)
+        # The scheduler that writes the catalog this one compiles from — see
+        # the module docstring. Optional so tests/callers that don't care about
+        # the startup race can still construct one on its own.
+        self._depends_on = depends_on
 
     async def _run_once(self) -> None:
         # Re-check the settings flag on every pass so a disable is honored live:
@@ -50,6 +66,16 @@ class SemanticScheduler(IntervalScheduler):
         if not is_semantic_compilation_enabled():
             logger.info("semantic: compilation disabled in settings; skipping run")
             return
+
+        if self._depends_on is not None:
+            if not self._depends_on.first_pass_done:
+                logger.info(
+                    "semantic: waiting for %s's first pass before compiling",
+                    self._depends_on.name,
+                )
+            # No-ops once the dependency has had its first pass — every run
+            # after the very first one returns immediately here.
+            await self._depends_on.wait_first_pass()
 
         databases = resolve_database_names()
         if not databases:
@@ -60,42 +86,45 @@ class SemanticScheduler(IntervalScheduler):
             return
 
         logger.info("semantic: starting (%d database(s))", len(databases))
+        run_id = record_run_start()
         any_failed = False
-        for index, database_name in enumerate(databases):
-            # Checked per database rather than once per pass, so a stop request
-            # or a disable ends the run at the next boundary instead of after
-            # every database. The database in flight always finishes: its work
-            # runs in a thread that cannot be interrupted.
-            if self.aborting:
-                logger.info(
-                    "semantic: stopped on request; %d database(s) not compiled",
-                    len(databases) - index,
-                )
-                return
-            if not is_semantic_compilation_enabled():
-                logger.info(
-                    "semantic: disabled mid-run; %d database(s) not compiled",
-                    len(databases) - index,
-                )
-                return
+        try:
+            for index, database_name in enumerate(databases):
+                # Checked per database rather than once per pass, so a stop
+                # request or a disable ends the run at the next boundary
+                # instead of after every database. The database in flight
+                # always finishes: its work runs in a thread that cannot be
+                # interrupted.
+                if self.aborting:
+                    logger.info(
+                        "semantic: stopped on request; %d database(s) not compiled",
+                        len(databases) - index,
+                    )
+                    any_failed = True
+                    return
+                if not is_semantic_compilation_enabled():
+                    logger.info(
+                        "semantic: disabled mid-run; %d database(s) not compiled",
+                        len(databases) - index,
+                    )
+                    any_failed = True
+                    return
 
-            try:
-                tables_processed = await asyncio.to_thread(
-                    run_semantic_compilation, database_name
-                )
-                logger.info(
-                    "Finished semantic compilation for database %s: %d tables processed",
-                    database_name,
-                    tables_processed,
-                )
-            except Exception:
-                any_failed = True
-                logger.exception("semantic: failed for database %s", database_name)
-
-        if any_failed:
-            logger.info(
-                "semantic: finished with failures; not recording last-success timestamp"
-            )
-        else:
-            record_semantic_compilation_success()
-            logger.info("semantic: finished")
+                try:
+                    tables_processed = await asyncio.to_thread(
+                        run_semantic_compilation, database_name
+                    )
+                    logger.info(
+                        "Finished semantic compilation for database %s: %d tables processed",
+                        database_name,
+                        tables_processed,
+                    )
+                except Exception:
+                    any_failed = True
+                    logger.exception("semantic: failed for database %s", database_name)
+        finally:
+            # Recorded on every exit path — including an abort or a mid-run
+            # disable — so the history table never has a row that started but
+            # never finished.
+            record_run_finish(run_id, succeeded=not any_failed)
+            logger.info("semantic: finished%s", " with failures" if any_failed else "")
