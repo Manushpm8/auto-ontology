@@ -623,7 +623,10 @@ def fetch_tables_from_sql_attributes(
 def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
     """Fetch one SqlAttribute from Neo4j as embedding-ready docs.
 
-    Returns a list of dicts with keys: text, name, label, id.
+    Returns a list of dicts with keys: text, name, label, id, source. The
+    ``source`` (e.g. ``"bridgeTable"``, ``"sql"``) is carried through to the
+    VDB metadata so retrieval hits can distinguish structural bridge-table
+    joins from other SqlAttributes without a second Neo4j round-trip.
     Empty list when the attribute or its Sql node is missing.
     """
     result = graph().query_read(
@@ -643,7 +646,8 @@ def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
                   ', sql: ' + sql.sql_full_query,
             name: attr.name,
             label: labels(attr)[0],
-            id: attr.id
+            id: attr.id,
+            source: coalesce(attr.source, '')
         }}) AS docs
         """,
         {"attr_id": attr_id},
