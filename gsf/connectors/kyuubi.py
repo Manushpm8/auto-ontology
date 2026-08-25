@@ -492,7 +492,13 @@ class KyuubiDatabase(SQLDatabase):
 
     @property
     def dialect(self) -> str:
-        """Kyuubi executes Spark SQL, so the agent should generate Spark SQL."""
+        """Return this engine's sqlglot dialect name.
+
+        Must be a member of ``sqlglot.dialects.DIALECTS`` — callers pass it
+        straight to sqlglot without translation. See ``CONNECTOR_REGISTRY``.
+
+        Kyuubi executes Spark SQL, so the agent should generate Spark SQL.
+        """
         return "spark"
 
     @property

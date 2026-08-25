@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 # does have; see ``HeavyDBDatabase.dialect``, which reports ``"postgres"``.
 # ``test_registry_dialects.py`` enforces this.
 #
-# Note the keys below are connection-string schemes, NOT dialects: ``postgresql``
-# and ``heavydb`` are valid keys but neither is a sqlglot dialect name.
+# Note the keys below are connection-string schemes, NOT dialects: ``postgresql``,
+# ``heavydb`` and ``kyuubi`` are valid keys but none is a sqlglot dialect name.
 CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "postgres": PostgresDatabase,
     "postgresql": PostgresDatabase,
