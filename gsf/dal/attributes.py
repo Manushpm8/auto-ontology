@@ -145,7 +145,8 @@ def fetch_attr_column_contexts(
     """Fetch Column + Table + Schema context for ColumnAttribute IDs.
 
     Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
-    col_name, table_id, table_name, schema_name, database_name, term_name}.
+    col_name, sample_values, table_id, table_name, schema_name, database_name,
+    term_name}.
     """
     if not attr_ids:
         return {}
@@ -159,7 +160,7 @@ def fetch_attr_column_contexts(
     OPTIONAL MATCH (attr)-[:PROPERTY_OF]->(term:Term)
     RETURN attr.id AS attr_id, attr.name AS attr_name,
            attr.description AS attr_description,
-           col.id AS col_id, col.name AS col_name,
+           col.id AS col_id, col.name AS col_name, col.sample_values AS sample_values,
            tbl.id AS table_id, tbl.name AS table_name, sch.name AS schema_name,
            db.name AS database_name, term.name AS term_name
     """
@@ -181,6 +182,7 @@ def fetch_attr_column_contexts(
             "attr_description": row.get("attr_description") or "",
             "col_id": row.get("col_id"),
             "col_name": row.get("col_name") or "",
+            "sample_values": row.get("sample_values"),
             "table_id": row.get("table_id"),
             "table_name": row.get("table_name") or "",
             "schema_name": row.get("schema_name") or "",

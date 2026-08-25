@@ -21,6 +21,7 @@ from gsf.retrieval.text_to_sql.connector_routing import (
 )
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
+from gsf.utils.sample_values import parse_sample_values
 from gsf.utils.sql_dialects import get_sqlglot_dialect
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,20 @@ def _find_column_value(
         str(context["database_name"]),
         connectors,
     )
+    sampled_value = _find_sample_value(context.get("sample_values"), value)
+    if sampled_value is not None:
+        logger.info(
+            "Value search matched a stored column sample "
+            "(database=%s, field=%s, semantic_ms=%d)",
+            selected_database,
+            _qualified_field(context),
+            semantic_ms,
+        )
+        return {
+            "field": _qualified_field(context),
+            "value": sampled_value,
+        }
+
     connector = next(
         connector
         for connector in connectors
@@ -196,6 +211,20 @@ def _search_tokens(value: str) -> list[str]:
     """Return unique normalized tokens suitable for literal LIKE patterns."""
     tokens = [token.casefold() for token in _TOKEN_RE.findall(value)]
     return list(dict.fromkeys(tokens)) or [value.strip().casefold()]
+
+
+def _find_sample_value(raw_samples: Any, value: str) -> str | None:
+    """Return the shortest stored sample containing every requested token."""
+    samples = parse_sample_values(raw_samples) or []
+    tokens = _search_tokens(value)
+    matches = [
+        sample
+        for sample in samples
+        if all(token in sample.casefold() for token in tokens)
+    ]
+    if not matches:
+        return None
+    return min(matches, key=lambda sample: (len(sample), sample.casefold()))
 
 
 def _is_complete_context(context: dict[str, Any] | None) -> bool:

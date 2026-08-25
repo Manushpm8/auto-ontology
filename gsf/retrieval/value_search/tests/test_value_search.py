@@ -13,13 +13,19 @@ import pytest
 from gsf.retrieval.value_search import main
 
 
-def _context(database_name: str = "people_db") -> dict[str, str]:
-    return {
+def _context(
+    database_name: str = "people_db",
+    sample_values: str | None = None,
+) -> dict[str, Any]:
+    context = {
         "database_name": database_name,
         "schema_name": "main",
         "table_name": "people",
         "col_name": "person",
     }
+    if sample_values is not None:
+        context["sample_values"] = sample_values
+    return context
 
 
 def test_lookup_combines_inputs_and_auto_selects_hit_database(
@@ -77,6 +83,40 @@ def test_lookup_combines_inputs_and_auto_selects_hit_database(
         "value": "Alex Shaked Hamelech",
     }
     assert executor.run.call_count == 1
+
+
+def test_lookup_returns_matching_sample_without_database_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        main,
+        "search_semantic_index",
+        lambda *args, **kwargs: [{"id": "attribute-1"}],
+    )
+    monkeypatch.setattr(
+        main,
+        "fetch_attr_column_contexts",
+        lambda ids, database_name: {
+            "attribute-1": _context(
+                sample_values='["Someone Else", "Alex Shaked Hamelech"]'
+            )
+        },
+    )
+    mock_executor = MagicMock()
+    monkeypatch.setattr(main, "ProbeExecutor", mock_executor)
+
+    result = main.find_column_value(
+        retriever=object(),
+        connectors=[MagicMock(database_name="people_db")],
+        value="alex shaked",
+        description="a person",
+    )
+
+    assert result == {
+        "field": "main.people.person",
+        "value": "Alex Shaked Hamelech",
+    }
+    mock_executor.assert_not_called()
 
 
 def test_lookup_filters_semantic_search_to_explicit_database(
