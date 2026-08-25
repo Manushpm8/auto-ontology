@@ -164,8 +164,39 @@ def test_an_unreadable_catalog_degrades_instead_of_passing() -> None:
     assert any("Could not read the catalog" in b for b in result.blockers)
 
 
-@pytest.mark.parametrize("status_code", [401, 403])
-def test_a_rejected_token_is_an_error_not_a_verdict(status_code: int) -> None:
+def test_a_rejected_credential_is_an_error_not_a_verdict() -> None:
     """Reporting "not ready" would send the caller off fixing the wrong thing."""
-    with pytest.raises(ToolError, match="rejected the API token"):
-        _check(_routed(status=status_code))
+    with pytest.raises(ToolError, match="rejected the credentials"):
+        _check(_routed(status=401))
+
+
+def test_connections_a_caller_may_not_read_do_not_make_it_unready() -> None:
+    """Reading connections is admin-only on some deployments.
+
+    A viewer who cannot see them can still ask questions, so the fact goes in
+    unverified and the verdict stands on what could be checked.
+    """
+    result = _check(_routed(connections=403))
+
+    assert result.ready is True
+    assert result.can_execute_sql is None
+    assert result.blockers == []
+    assert any("not permitted to read" in note for note in result.unverified)
+
+
+def test_a_catalog_the_caller_may_not_read_does_not_make_it_unready() -> None:
+    result = _check(_routed(databases=403))
+
+    assert result.ready is True
+    assert result.catalog_present is None
+    assert result.blockers == []
+    assert any(DATABASES_PATH in note for note in result.unverified)
+
+
+def test_a_caller_without_chat_access_is_not_ready() -> None:
+    """Unlike the other two, this permission is the one being asked about."""
+    result = _check(_routed(status=403))
+
+    assert result.ready is False
+    assert result.semantic_layer_built is None
+    assert any("not permitted to use chat" in b for b in result.blockers)

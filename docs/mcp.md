@@ -39,7 +39,9 @@ Which token that is depends on who the server serves. On `stdio` each user's
 client starts its own process, so `GSF_API_TOKEN` is that user's identity. On
 `http` one process may serve many people, so the credential travels with each
 request and the server keeps none — see [Running it
-remotely](#running-it-remotely).
+remotely](#running-it-remotely). An `http` deployment can also run the login
+itself, so nobody mints a token by hand at all: see [Signing in with
+SSO](#signing-in-with-sso).
 
 It also means users install almost nothing. `gsf-mcp` is its own distribution
 (source in [`mcp/`](../mcp/)) depending only on `fastmcp`, `httpx`,
@@ -192,6 +194,15 @@ be non-empty while `can_execute_sql` is false — the catalog outlives the
 connection it was ingested from, so a named database is not evidence that
 anything can be queried.
 
+The three reads do not need the same permission, which matters once callers sign
+in as themselves rather than sharing an admin token. Reading connections is
+admin-only on a default deployment, so a viewer gets a 403 there while chat and
+the catalog read fine. That is not a broken deployment and not a bad token, so
+the fact is reported under `unverified` with the matching field set to null, and
+the verdict stands on what could be checked. A `ready` result alongside an
+`unverified` entry means questions can be asked. Only a 401 — the credential
+itself — fails the tool, because every read would fail the same way.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -205,6 +216,12 @@ anything can be queried.
 | `GSF_MCP_CHAT_TIMEOUT_S` | `900` | Timeout for one `ask_data` run. |
 | `GSF_MCP_ALLOW_SHARED_TOKEN` | unset | Permit one `GSF_API_TOKEN` to serve every `http` caller. See below. |
 | `GSF_OPENAPI_SPEC` | bundled with the package | Override the spec tools are generated from. |
+| `GSF_MCP_OIDC_CONFIG_URL` | unset | Provider discovery document. Enables browser sign-in; `http` only. |
+| `GSF_MCP_OIDC_CLIENT_ID` | unset | This server's client id at that provider. |
+| `GSF_MCP_OIDC_CLIENT_SECRET` | unset | Its client secret. Also derives the key the server signs its own tokens with. |
+| `GSF_MCP_PUBLIC_URL` | unset | Where callers reach *this* server. The redirect URI is built from it. |
+| `GSF_MCP_OIDC_SCOPES` | `openid email profile` | Scopes to request. Must include `openid`. |
+| `GSF_MCP_OIDC_REDIRECT_PATH` | `/auth/callback` | Callback path under `GSF_MCP_PUBLIC_URL`, to match an existing registration. |
 
 ## Running it remotely
 
@@ -237,10 +254,70 @@ caller's token allows, and conversation history belongs to that caller.
 > That combination is legitimate for a single-user deployment or an automation
 > account. It is never what you want for a team.
 
-Per-caller tokens still have to be configured by hand in each client. The MCP
-authorization spec defines OAuth 2.1 for this, which would let clients run the
-login flow themselves and remove the copied tokens; that is the next step, not
-something this implements.
+## Signing in with SSO
+
+Everything above still expects each caller to hold a GSF API token, minted by
+hand and pasted into a client config. Point the server at an OIDC provider
+instead and that step disappears:
+
+```sh
+export GSF_MCP_TRANSPORT=http
+export GSF_MCP_PUBLIC_URL=https://gsf-mcp.example
+export GSF_MCP_OIDC_CONFIG_URL=https://login.example.com/.well-known/openid-configuration
+export GSF_MCP_OIDC_CLIENT_ID=...
+export GSF_MCP_OIDC_CLIENT_SECRET=...
+gsf-mcp
+```
+
+The client now discovers that the server wants authorization, opens a browser,
+and the user signs in with the identity they already have. Nothing is copied
+between systems.
+
+**Register the redirect URI.** The provider must accept
+`$GSF_MCP_PUBLIC_URL/auth/callback`, which is this server's callback and not
+GSF's. Registering only the GSF web app's callback is the common mistake, and it
+fails at the provider with `invalid redirect_uri` before the login can start. Set
+`GSF_MCP_OIDC_REDIRECT_PATH` if the registration cannot be changed and an
+approved path has to be matched instead.
+
+**Use the provider GSF already trusts.** GSF verifies a bearer token against the
+SSO provider configured in its own settings, so signing in against a different
+one produces a token it will reject. Point both at the same issuer.
+
+### What GSF receives
+
+FastMCP does not hand clients their upstream tokens — it issues its own and keeps
+the provider's server-side. So the `Authorization` header arriving on a tool call
+is a *FastMCP* token, which GSF cannot verify: it is not signed by the provider.
+
+The server therefore captures the provider's **id token** during sign-in and
+forwards that instead. An id token is always a JWT verifiable through the
+provider's JWKS and always carries the identity claims GSF resolves an account
+by, whereas access tokens are often opaque or scoped to an audience no third
+party can check. This is also why `openid` is not optional: without it the
+provider returns no id token, every call fails to authenticate, and the sign-in
+that preceded it looked perfectly successful.
+
+Two consequences worth knowing:
+
+- The id token is embedded in the token FastMCP issues, so the client holds it
+  too. That is a narrow widening — the client just proved it controls that
+  identity — but it is a real one.
+- The signing key is derived from `GSF_MCP_OIDC_CLIENT_SECRET`, so sessions
+  survive a restart and replicas accept each other's tokens. Rotating the secret
+  invalidates outstanding sessions, which then simply re-authenticate.
+
+Registered clients are cached under FastMCP's data directory. In a container,
+either mount it or point `FASTMCP_HOME` somewhere writable, or clients
+re-register on every restart.
+
+### One extra click
+
+Before redirecting to the provider, FastMCP shows a consent page naming the
+client that asked. It is deliberate: any client can register itself here, so
+without it a link could silently obtain a token in the user's name. The cost is
+one approval the first time a given client connects — worth keeping, but it does
+mean sign-in is not literally zero interaction.
 
 ## Extending the tool surface
 
@@ -272,8 +349,10 @@ the packaged copy by hand.
 **"GSF_API_TOKEN is required"** — not exported, or the client's `env` block does
 not include it. GUI clients do not inherit your shell.
 
-**"GSF rejected the API token"** — expired, revoked, or its owner lacks chat
-permission. Check with `curl -H "x-api-key: $GSF_API_TOKEN" $GSF_API_URL/api/terms`.
+**"GSF rejected the credentials"** — the token is expired or revoked, the signed-in
+session has lapsed, or the account lacks chat permission. With a token, check it
+with `curl -H "x-api-key: $GSF_API_TOKEN" $GSF_API_URL/api/terms`; with SSO, sign
+in again.
 
 **"No GSF credential on this request"** — an `http` caller sent neither
 `x-api-key` nor `Authorization`. Add the token to that client's headers; the
@@ -303,3 +382,23 @@ disagree. Run `pnpm openapi`, or update `mcp/gsf_mcp/tools.py`.
 
 **"OpenAPI spec not found"** — `GSF_OPENAPI_SPEC` points somewhere wrong, or the
 install is incomplete. Unset it to fall back to the packaged copy.
+
+**"The GSF_MCP_OIDC_* variables need GSF_MCP_TRANSPORT=http"** — sign-in ends in
+a browser redirect back to this server, and `stdio` has no address to redirect
+to. There, the client's own `GSF_API_TOKEN` is the identity.
+
+**"Incomplete OIDC configuration"** — one of the group is unset. Half-configured
+sign-in is refused rather than quietly falling back to hand-minted tokens, which
+would look fine until a caller arrived without one.
+
+**`invalid redirect_uri` from the provider** — `$GSF_MCP_PUBLIC_URL/auth/callback`
+is not registered for this client. Registering GSF's own callback is not enough;
+the MCP server has its own.
+
+**"Signed in, but the provider issued no id token"** — the client registration
+does not grant `openid`, so nothing came back that GSF could verify. Check the
+scopes on the registration, and `GSF_MCP_OIDC_SCOPES` if it was overridden.
+
+**Signed in, but GSF answers 401** — the id token is from a different issuer than
+the SSO provider configured in GSF's own settings, so GSF will not verify it.
+Point both at the same one.

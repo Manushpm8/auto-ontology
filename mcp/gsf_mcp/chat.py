@@ -135,8 +135,10 @@ async def _raise_for_status(response: httpx.Response) -> None:
 
     if response.status_code in (401, 403):
         raise ToolError(
-            "GSF rejected the API token. Check GSF_API_TOKEN is current and "
-            f"its owner has permission to use chat. ({detail})"
+            "GSF rejected the credentials for this question. Check "
+            "GSF_API_TOKEN is current, or sign in again if this deployment "
+            "uses SSO, and that the account may use chat. "
+            f"({detail})"
         )
     if response.status_code == 409:
         # Either the semantic layer was never built, or this conversation

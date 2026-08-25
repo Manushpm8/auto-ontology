@@ -227,7 +227,7 @@ def test_explains_a_rejected_token() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": "invalid token"})
 
-    with pytest.raises(ToolError, match="rejected the API token"):
+    with pytest.raises(ToolError, match="rejected the credentials"):
         _call(_server(handler), {"question": "q"})
 
 

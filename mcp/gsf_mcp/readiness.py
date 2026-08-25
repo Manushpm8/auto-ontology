@@ -39,6 +39,15 @@ CONNECTIONS_PATH = "/api/connections"
 DATABASES_PATH = "/api/datasources/dbs"
 
 
+class _Forbidden:
+    """A probe the caller is authenticated for but not permitted to read."""
+
+    __slots__ = ()
+
+
+FORBIDDEN = _Forbidden()
+
+
 class Readiness(BaseModel):
     """What this deployment can currently do."""
 
@@ -48,17 +57,27 @@ class Readiness(BaseModel):
             "run against."
         )
     )
-    semantic_layer_built: bool = Field(
+    semantic_layer_built: bool | None = Field(
         default=False,
-        description="Whether the glossary of business terms has been compiled.",
+        description=(
+            "Whether the glossary of business terms has been compiled. Null "
+            "when the caller is not permitted to see it."
+        ),
     )
-    can_execute_sql: bool = Field(
+    can_execute_sql: bool | None = Field(
         default=False,
-        description="Whether a live database connection exists to run SQL against.",
+        description=(
+            "Whether a live database connection exists to run SQL against. "
+            "Null when the caller is not permitted to see it, which is normal "
+            "for non-admins: reading connections is often admin-only."
+        ),
     )
-    catalog_present: bool = Field(
+    catalog_present: bool | None = Field(
         default=False,
-        description="Whether any database has been ingested for questions to reach.",
+        description=(
+            "Whether any database has been ingested for questions to reach. "
+            "Null when the caller is not permitted to see it."
+        ),
     )
     databases: list[str] = Field(
         default_factory=list,
@@ -72,6 +91,14 @@ class Readiness(BaseModel):
         default_factory=list,
         description="What stands in the way, and what to do about it. Empty when ready.",
     )
+    unverified: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Facts this caller is not permitted to check. These do not make a "
+            "deployment unready — they are gaps in what can be seen, not in "
+            "what works, so treat a ready verdict alongside them as ready."
+        ),
+    )
 
 
 async def _probe(client: httpx.AsyncClient, path: str) -> Any:
@@ -79,9 +106,15 @@ async def _probe(client: httpx.AsyncClient, path: str) -> Any:
 
     A readiness check that dies on its first bad response is not much of a
     readiness check, so an unreadable endpoint degrades to an unknown that the
-    caller is told about. Rejected credentials are the exception: every probe
-    would fail the same way, and reporting "not ready" for what is really a bad
-    token would send the caller off fixing the wrong thing.
+    caller is told about.
+
+    The two rejections mean different things and cannot share a fate. A 401 is
+    the credential itself: every probe would fail the same way, and reporting
+    "not ready" for what is really a stale token would send the caller off
+    fixing the wrong thing. A 403 is this caller against this route, and the
+    three probes do not need the same permission — a viewer may run chat and
+    browse the catalog while only admins read connections. Refusing to answer
+    at all there would deny a caller the verdict over a fact they never needed.
     """
     try:
         response = await client.get(path)
@@ -89,12 +122,15 @@ async def _probe(client: httpx.AsyncClient, path: str) -> Any:
         logger.warning("Readiness probe %s failed: %s", path, exc)
         return None
 
-    if response.status_code in (401, 403):
+    if response.status_code == 401:
         raise ToolError(
-            "GSF rejected the API token while checking readiness. Check "
-            "GSF_API_TOKEN is current and its owner has permission to read "
-            f"the catalog. (HTTP {response.status_code})"
+            "GSF rejected the credentials while checking readiness. Check "
+            "GSF_API_TOKEN is current, or sign in again if this deployment "
+            "uses SSO. (HTTP 401)"
         )
+    if response.status_code == 403:
+        logger.info("Readiness probe %s is not permitted for this caller", path)
+        return FORBIDDEN
     if response.status_code != 200:
         logger.warning(
             "Readiness probe %s returned HTTP %d", path, response.status_code
@@ -108,10 +144,24 @@ async def _probe(client: httpx.AsyncClient, path: str) -> Any:
 
 
 def _summarise(status: Any, connections: Any, databases: Any) -> Readiness:
-    """Fold the three probes into one verdict."""
-    blockers: list[str] = []
+    """Fold the three probes into one verdict.
 
-    if status is None:
+    A forbidden probe is recorded as unverified rather than as a blocker, so a
+    caller who cannot read connections still gets a usable verdict instead of a
+    deployment being called broken on the strength of what they cannot see.
+    """
+    blockers: list[str] = []
+    unverified: list[str] = []
+
+    if status is FORBIDDEN:
+        blockers.append(
+            "This account is not permitted to use chat on this deployment "
+            f"({STATUS_PATH} returned 403), so it cannot ask questions here "
+            "regardless of how the deployment is set up. Ask an administrator "
+            "for chat access."
+        )
+        built: bool | None = None
+    elif status is None:
         blockers.append(
             "Could not read whether the semantic layer is compiled "
             f"({STATUS_PATH} was unreadable). GSF may be starting up or "
@@ -127,7 +177,15 @@ def _summarise(status: Any, connections: Any, databases: Any) -> Readiness:
                 "UI; nothing can be asked of the data until it finishes."
             )
 
-    if connections is None:
+    if connections is FORBIDDEN:
+        unverified.append(
+            "Whether a live database connection exists could not be checked: "
+            f"this account is not permitted to read {CONNECTIONS_PATH}, which "
+            "is often admin-only. Questions can still be asked; if one comes "
+            "back empty, a missing connection is a likely cause."
+        )
+        can_execute: bool | None = None
+    elif connections is None:
         blockers.append(
             f"Could not read the configured connections ({CONNECTIONS_PATH} was "
             "unreadable), so it is unknown whether SQL can execute."
@@ -143,18 +201,28 @@ def _summarise(status: Any, connections: Any, databases: Any) -> Readiness:
                 "connection in the GSF UI."
             )
 
-    if databases is None:
+    if databases is FORBIDDEN:
+        unverified.append(
+            "Whether any database has been ingested could not be checked: this "
+            f"account is not permitted to read {DATABASES_PATH}. Questions can "
+            "still be asked."
+        )
+        names: list[str] = []
+        catalog_present: bool | None = None
+    elif databases is None:
         blockers.append(
             f"Could not read the catalog ({DATABASES_PATH} was unreadable), so "
             "it is unknown whether any data has been ingested."
         )
-        names: list[str] = []
+        names = []
+        catalog_present = False
     else:
         names = [
             str(entry.get("name"))
             for entry in (databases.get("data") or [])
             if entry.get("name")
         ]
+        catalog_present = bool(names)
         if not names:
             blockers.append(
                 "No database has been ingested, so there is nothing for a "
@@ -168,9 +236,10 @@ def _summarise(status: Any, connections: Any, databases: Any) -> Readiness:
         ready=not blockers,
         semantic_layer_built=built,
         can_execute_sql=can_execute,
-        catalog_present=bool(names),
+        catalog_present=catalog_present,
         databases=names,
         blockers=blockers,
+        unverified=unverified,
     )
 
 
@@ -188,7 +257,10 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
             "deployment, and whenever ask_data returns an empty answer. It is "
             "three cheap reads, and it separates 'this deployment is not set "
             "up' from 'the question was not understood' — which otherwise look "
-            "identical and are fixed in completely different places."
+            "identical and are fixed in completely different places.\n\n"
+            "Facts the signed-in account may not read come back under "
+            "'unverified' rather than as blockers, so a ready verdict with "
+            "unverified entries still means questions can be asked."
         ),
     )
     async def check_readiness() -> Readiness:
@@ -207,6 +279,7 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
 __all__ = [
     "CONNECTIONS_PATH",
     "DATABASES_PATH",
+    "FORBIDDEN",
     "STATUS_PATH",
     "Readiness",
     "register",
