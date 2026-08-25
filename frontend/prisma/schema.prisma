@@ -75,7 +75,11 @@ model SemanticCompilationHistory {
   id          BigInt    @id @default(autoincrement())
   started_at  DateTime  @db.Timestamptz
   finished_at DateTime? @db.Timestamptz
-  succeeded   Boolean?
+  // One of "succeeded" / "failed" / "aborted" — never null. Inserted as
+  // "aborted" (a pessimistic default) before the pass starts any work, so a
+  // hard-killed process still reads as "aborted" rather than leaving this
+  // ambiguous forever. See gsf/ingestion_service/history.py.
+  succeeded   String    @default("aborted")
 
   @@map("semantic_compilation_history")
   @@schema("public")
