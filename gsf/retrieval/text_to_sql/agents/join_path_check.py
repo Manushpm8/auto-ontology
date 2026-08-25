@@ -15,6 +15,16 @@ validation only checks the SQL parses, and ``validate_intent`` reasons over
 the same join-path data the generator had, so it shares the same blind spot
 when that data is what led the model astray in the first place.
 
+Also runs ``find_case_dirty_join_mismatches``: same graph, opposite failure
+shape — not a fabricated join, but a *correct* join with an extra, unverified
+equality predicate tacked on that silently rejects real matches purely
+because the extra column disagrees in casing/whitespace between the two
+tables. Unlike a fabricated join, the fix is never to drop the extra
+predicate (it may be doing real disambiguation work) — only to normalize it,
+and only once the probe has confirmed every rejected row agrees once
+normalized. Both checks share this node/flag since they're two sides of the
+same "trust but verify JOIN predicates against the graph" idea.
+
 Gated by ``DB_PROBE_JOIN_PATH_CHECK`` since, when the graph has no edge for a
 predicate at all, this falls back to a live value-overlap probe (a couple of
 extra DB round-trips). Runs at most ``_MAX_REPAIR_ATTEMPTS`` times per
@@ -35,8 +45,11 @@ from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.retrieval.text_to_sql.db_probe.join_path_check import (
+    build_case_dirty_join_repair_error,
     build_join_path_repair_error,
+    find_case_dirty_join_mismatches,
     find_join_path_mismatches,
+    try_self_apply_wrong_column_fixes,
 )
 from gsf.retrieval.text_to_sql.state import AgentState
 
@@ -70,56 +83,116 @@ class JoinPathCheckAgent(BaseAgent):
             mismatches = find_join_path_mismatches(
                 executor, dialect, sql_code, database_name
             )
+            case_dirty = find_case_dirty_join_mismatches(
+                executor, dialect, sql_code, database_name
+            )
 
-        if not mismatches:
+        if not mismatches and not case_dirty:
+            return {"decision": "valid_sql", "path_state": path_state}
+
+        # Self-apply "wrong_column" mismatches by patching the predicate in
+        # place — same two tables/aliases, just the wrong column on one or
+        # both sides, so it's a safe local edit (see
+        # try_self_apply_wrong_column_fixes for why "missing_bridge" and
+        # "unverified" are deliberately excluded — no fixed graph edge to
+        # inject a whole new JOIN clause from, or no fix to apply at all).
+        # Not counted against join_path_repair_attempts below: a fully
+        # self-applied fix isn't a reconstruction round spent.
+        sql_code, mismatches = try_self_apply_wrong_column_fixes(
+            mismatches, sql_code, dialect
+        )
+        if sql_code != _get_sql_code(path_state):
+            response = path_state.get("sql_generation_result")
+            if response is not None:
+                path_state["sql_generation_result"] = response.model_copy(
+                    update={"sql_code": sql_code}
+                )
+            else:
+                path_state["sql_code"] = sql_code
+            self.logger.info(
+                "[%s] Join path check — self-applied wrong_column fix(es), "
+                "%d join(s) still need reconstruction",
+                path_state.get("task_id", "?"),
+                len(mismatches),
+            )
+
+        if not mismatches and not case_dirty:
             return {"decision": "valid_sql", "path_state": path_state}
 
         path_state["join_path_repair_attempts"] = attempts + 1
+        error_sections: list[str] = []
+        # Vacuously true when there are no fabricated-join mismatches at all;
+        # narrowed below when there are — case_dirty never narrows it, since
+        # both branches of this check hand reconstruction an already-known
+        # fix, so error_known_fixable only turns false when something here
+        # couldn't be resolved from the graph/probe alone.
+        known_fixable = True
 
-        repairable = [m for m in mismatches if m["verdict"] != "unverified"]
-        if repairable:
-            # We already know the exact fix from the graph (either the real
-            # column pair, or the bridge table(s) plus the join keys through
-            # them) — merge it in ourselves rather than making reconstruction
-            # re-discover it via its own LLM-driven search.
-            new_hops = [m["hops"] for m in repairable]
-            attribute_join_paths = list(path_state.get("attribute_join_paths") or [])
-            attribute_join_paths.extend({"path": hops} for hops in new_hops)
-            path_state["attribute_join_paths"] = attribute_join_paths
+        if mismatches:
+            repairable = [m for m in mismatches if m["verdict"] != "unverified"]
+            if repairable:
+                # We already know the exact fix from the graph (either the
+                # real column pair, or the bridge table(s) plus the join keys
+                # through them) — merge it in ourselves rather than making
+                # reconstruction re-discover it via its own LLM-driven search.
+                new_hops = [m["hops"] for m in repairable]
+                attribute_join_paths = list(
+                    path_state.get("attribute_join_paths") or []
+                )
+                attribute_join_paths.extend({"path": hops} for hops in new_hops)
+                path_state["attribute_join_paths"] = attribute_join_paths
 
-            known_names = {(t.get("name") or "").lower() for t in relevant_tables}
-            missing_names = {
-                name
-                for m in repairable
-                for name in m["bridge_tables"]
-                if name.lower() not in known_names
-            }
-            self._merge_missing_bridge_tables(
-                path_state, relevant_tables, repairable, missing_names, database_name
+                known_names = {(t.get("name") or "").lower() for t in relevant_tables}
+                missing_names = {
+                    name
+                    for m in repairable
+                    for name in m["bridge_tables"]
+                    if name.lower() not in known_names
+                }
+                self._merge_missing_bridge_tables(
+                    path_state,
+                    relevant_tables,
+                    repairable,
+                    missing_names,
+                    database_name,
+                )
+
+            self.logger.info(
+                "[%s] Join path check — routing to reconstruction to fix %d join(s): %s",
+                path_state.get("task_id", "?"),
+                len(mismatches),
+                [
+                    f"{m['table_a']}.{m['col_a']} = {m['table_b']}.{m['col_b']} "
+                    f"({m['verdict']})"
+                    for m in mismatches
+                ],
             )
+            error_sections.append(build_join_path_repair_error(mismatches))
+            # "unverified" mismatches have no known repair — leave
+            # known_fixable false so reconstruction's normal LLM
+            # error-classification (and its own VDB table-discovery
+            # fallback) gets a chance to find something this check couldn't.
+            known_fixable = known_fixable and len(repairable) == len(mismatches)
 
-        self.logger.info(
-            "Join path check — routing to reconstruction to fix %d join(s): %s",
-            len(mismatches),
-            [
-                f"{m['table_a']}.{m['col_a']} = {m['table_b']}.{m['col_b']} "
-                f"({m['verdict']})"
-                for m in mismatches
-            ],
-        )
-        path_state["error"] = build_join_path_repair_error(mismatches)
-        if repairable and len(repairable) == len(mismatches):
-            # Every mismatch has a known, already-merged-in fix — this can
-            # never be a missing_data situation from reconstruction's own
-            # point of view (see sql_reconstruction.py's error_known_fixable
-            # handling): the tables/join keys it would otherwise have to go
-            # searching for are already sitting in relevant_tables and
-            # attribute_join_paths by the time it runs.
+        if case_dirty:
+            self.logger.info(
+                "[%s] Join path check — routing to reconstruction to normalize %d "
+                "case-dirty join predicate(s): %s",
+                path_state.get("task_id", "?"),
+                len(case_dirty),
+                [
+                    f"{m['table_a']}/{m['table_b']} extra={m['extra_columns']} "
+                    f"({m['rejected_rows']} row(s) rejected, casing-only)"
+                    for m in case_dirty
+                ],
+            )
+            error_sections.append(build_case_dirty_join_repair_error(case_dirty))
+            # Always a concretely-known fix (normalize the named predicate) —
+            # doesn't narrow known_fixable.
+
+        path_state["error"] = "\n\n".join(error_sections)
+        if known_fixable:
             path_state["error_known_fixable"] = True
-        # else: at least one "unverified" mismatch with no known repair —
-        # leave error_known_fixable unset so reconstruction's normal LLM
-        # error-classification (and its own VDB table-discovery fallback)
-        # gets a chance to find something this check couldn't.
 
         return {"decision": "invalid_sql", "path_state": path_state}
 

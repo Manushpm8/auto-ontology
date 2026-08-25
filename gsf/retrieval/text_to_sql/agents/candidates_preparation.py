@@ -181,6 +181,18 @@ class CandidatePreparationAgent(BaseAgent):
 
         custom_analyses_str = self._build_custom_analyses_str(relevant_queries)
 
+        # Extra-table retrieval only needs the question + entities — independent
+        # of the anchor-column LLM/join-path work below. Kick it off in the
+        # background so the two multi-second steps overlap instead of stacking.
+        extra_pool = ThreadPoolExecutor(max_workers=1)
+        extra_future = extra_pool.submit(
+            self._retrieve_additional_tables,
+            state.get("data_retriever"),
+            question,
+            path_state.get("entities") or [],
+            target_db,
+        )
+
         # --- 2. Enrich ColumnAttributes with Neo4j context and build join paths ---
         primary_attribute: dict | None = None
         attribute_join_paths: list[dict] = []
@@ -309,33 +321,14 @@ class CandidatePreparationAgent(BaseAgent):
             "Tables from candidates: %s", [t["name"] for t in relevant_tables]
         )
 
-        additional_tables = []
-        search_queries = [question] + path_state.get("entities", [])
-        # k_per_query = max(1, 5 // len(search_queries))  # old fixed budget, commented 2026-08-13 — revert if raised budget causes noise
-        k_per_query = max(1, 10 // len(search_queries))
+        additional_tables: list[dict] = []
+        try:
+            additional_tables = extra_future.result()
+        except Exception:
+            self.logger.warning("Additional table retrieval failed", exc_info=True)
+        finally:
+            extra_pool.shutdown()
 
-        def _fetch_tables_for_query(query: str) -> list[dict]:
-            return get_relevant_tables(
-                state["data_retriever"],
-                query,
-                k=k_per_query,
-                database_name=target_db,
-            )
-
-        with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
-            futures = {
-                pool.submit(_fetch_tables_for_query, q): q for q in search_queries
-            }
-            for future in as_completed(futures):
-                query = futures[future]
-                try:
-                    additional_tables.extend(future.result())
-                except Exception:
-                    self.logger.warning(
-                        "Table retrieval failed for query: %s", query, exc_info=True
-                    )
-        # additional_tables = dedupe_merge_relevant_tables(additional_tables)[:10]  # old cap, commented 2026-08-13
-        additional_tables = dedupe_merge_relevant_tables(additional_tables)[:20]
         seen_qnames: set[str] = set()
         deduped_tables: list[dict] = []
         for t in relevant_tables + additional_tables:
@@ -543,6 +536,46 @@ class CandidatePreparationAgent(BaseAgent):
                 "term_synonyms": term_synonyms,
             }
         }
+
+    def _retrieve_additional_tables(
+        self,
+        retriever: Any,
+        question: str,
+        entities: list[str],
+        target_db: str | None,
+    ) -> list[dict]:
+        """Embed the question and entities and search for extra Table hits.
+
+        Independent of the anchor-column LLM/join-path work in ``execute`` —
+        intended to run in a background thread in parallel with it.
+        """
+        search_queries = [question] + list(entities)
+        # k_per_query = max(1, 5 // len(search_queries))  # old fixed budget, commented 2026-08-13 — revert if raised budget causes noise
+        k_per_query = max(1, 10 // len(search_queries))
+
+        def _fetch_tables_for_query(query: str) -> list[dict]:
+            return get_relevant_tables(
+                retriever,
+                query,
+                k=k_per_query,
+                database_name=target_db,
+            )
+
+        additional_tables: list[dict] = []
+        with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
+            futures = {
+                pool.submit(_fetch_tables_for_query, q): q for q in search_queries
+            }
+            for future in as_completed(futures):
+                query = futures[future]
+                try:
+                    additional_tables.extend(future.result())
+                except Exception:
+                    self.logger.warning(
+                        "Table retrieval failed for query: %s", query, exc_info=True
+                    )
+        # additional_tables = dedupe_merge_relevant_tables(additional_tables)[:10]  # old cap, commented 2026-08-13
+        return dedupe_merge_relevant_tables(additional_tables)[:20]
 
     def _filter_custom_analyses_by_relevance(
         self,

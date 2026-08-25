@@ -62,6 +62,16 @@ def _question_without_evidence(question: str) -> str:
     return parts[0].strip()
 
 
+def question_without_evidence(question: str) -> str:
+    """Public wrapper for ``_question_without_evidence``.
+
+    Lets callers that re-surface the Evidence body in their own dedicated
+    section (see sql_reconstruction.py) strip it out of the raw question
+    text first, so it isn't shown twice in the same prompt.
+    """
+    return _question_without_evidence(question)
+
+
 def _time_like_hints(evidence: str, question: str) -> list[str]:
     col_match = _LIKE_M_SS.search(evidence)
     if not col_match:
@@ -184,4 +194,8 @@ def build_evidence_hints_block(question: str) -> str:
     return "## Evidence-derived rules\n" + "\n".join(hints)
 
 
-__all__ = ["extract_evidence", "build_evidence_hints_block"]
+__all__ = [
+    "extract_evidence",
+    "build_evidence_hints_block",
+    "question_without_evidence",
+]

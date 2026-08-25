@@ -15,7 +15,9 @@ import re
 
 from langchain_core.messages import HumanMessage
 
-from gsf.retrieval.entity_coverage.graph import create_graph as _create_entity_coverage_graph
+from gsf.retrieval.entity_coverage.graph import (
+    create_graph as _create_entity_coverage_graph,
+)
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from gsf.utils.llm_invoke import get_llm_client, safe_invoke_text_nr
@@ -29,19 +31,54 @@ logger = logging.getLogger(__name__)
 # Main uses DEFAULT_MAX_DISTANCE=0.75; we keep 0.65 until we have benchmarks to compare.
 CLARIFY_MAX_DISTANCE: float = 0.65
 
+# Max gap between an entity's best and second-best VDB hit for the pair to
+# count as a genuine tie. Without this, an entity with a confident best hit
+# (e.g. 0.10) and a barely-qualifying second hit (e.g. 0.64) was flagged
+# "ambiguous" just as readily as a real coin-flip (e.g. 0.30 vs 0.32) — both
+# independently clearing CLARIFY_MAX_DISTANCE says nothing about whether
+# they're actually close to *each other*. Requiring the gap to be small too
+# keeps ambiguity flagging scoped to real near-ties.
+_AMBIGUITY_MAX_GAP: float = 0.25
+
 # Compiled entity-coverage LangGraph — shared across calls, compiled once at import.
 _ec_app = _create_entity_coverage_graph().compile()
 
-_FILLER = frozenset([
-    # SQL aggregation / math
-    "average", "median", "mean", "count", "total", "sum", "min", "max",
-    "number", "value", "measure", "metric", "level", "score", "ratio",
-    "rate", "index", "indicator", "standard", "deviation", "percentage",
-    "column",
-    # Schema-structural words — stripping these improves VDB matching
-    # e.g. "condition name" → "condition", "signal type" → "signal"
-    "name", "type", "id", "key", "code", "label", "category",
-])
+_FILLER = frozenset(
+    [
+        # SQL aggregation / math
+        "average",
+        "median",
+        "mean",
+        "count",
+        "total",
+        "sum",
+        "min",
+        "max",
+        "number",
+        "value",
+        "measure",
+        "metric",
+        "level",
+        "score",
+        "ratio",
+        "rate",
+        "index",
+        "indicator",
+        "standard",
+        "deviation",
+        "percentage",
+        "column",
+        # Schema-structural words — stripping these improves VDB matching
+        # e.g. "condition name" → "condition", "signal type" → "signal"
+        "name",
+        "type",
+        "id",
+        "key",
+        "code",
+        "label",
+        "category",
+    ]
+)
 
 # Structural connectives — always stripped from anywhere in the phrase,
 # never counted toward the filler threshold (unlike _FILLER words).
@@ -75,10 +112,20 @@ def _normalize_entity(entity: str) -> str:
 # substring coincidence (e.g. "id" → "idle power"). The new extraction prompt also
 # instructs the LLM to omit these, but a runtime guard is kept as a safety net.
 # Compound entities like "customer id" are multi-token and pass through normally.
-_GENERIC_STANDALONE = frozenset({
-    "id", "ids", "key", "keys", "value", "values",
-    "code", "codes", "type", "types",
-})
+_GENERIC_STANDALONE = frozenset(
+    {
+        "id",
+        "ids",
+        "key",
+        "keys",
+        "value",
+        "values",
+        "code",
+        "codes",
+        "type",
+        "types",
+    }
+)
 
 
 def _run_entity_coverage_pipeline(
@@ -94,7 +141,9 @@ def _run_entity_coverage_pipeline(
     try:
         llm = get_llm_client()
     except Exception as exc:
-        logger.error("Clarify — could not init reasoning LLM for entity coverage: %s", exc)
+        logger.error(
+            "Clarify — could not init reasoning LLM for entity coverage: %s", exc
+        )
         return {}
 
     path_state: dict = {
@@ -130,8 +179,11 @@ def _ambiguity_check(
     """Return entity strings whose column-attribute hits are ambiguous.
 
     An entity is ambiguous when it retrieved 2+ column-attribute hits that both
-    fall within CLARIFY_MAX_DISTANCE, meaning the VDB cannot single out one column.
-    These are demoted to unresolvable even if CoverageGradeAgent counted them covered.
+    fall within CLARIFY_MAX_DISTANCE (meaning the VDB cannot single out one
+    column) AND whose scores sit within _AMBIGUITY_MAX_GAP of each other
+    (meaning they're genuinely competing, not just two hits that separately
+    happened to qualify). These are demoted to unresolvable even if
+    CoverageGradeAgent counted them covered.
     """
     hits: list[dict] = path_state.get("retrieved_column_attributes") or []
     # Group best score and second-best score per query_entity.
@@ -144,16 +196,55 @@ def _ambiguity_check(
         score = float(score)
         if score > CLARIFY_MAX_DISTANCE:
             continue
-        for entity in (hit.get("query_entities") or ([hit["query_entity"]] if hit.get("query_entity") else [])):
+        for entity in hit.get("query_entities") or (
+            [hit["query_entity"]] if hit.get("query_entity") else []
+        ):
             if entity not in best or score < best[entity]:
                 second[entity] = best.get(entity, float("inf"))
                 best[entity] = score
             elif entity not in second or score < second[entity]:
                 second[entity] = score
-    ambiguous = {e for e, s in second.items() if s <= CLARIFY_MAX_DISTANCE}
+    ambiguous = {
+        e
+        for e, s in second.items()
+        if s <= CLARIFY_MAX_DISTANCE and (s - best[e]) < _AMBIGUITY_MAX_GAP
+    }
     if ambiguous:
         logger.info("Clarify — ambiguous entities (2+ close VDB hits): %s", ambiguous)
     return ambiguous
+
+
+_AMBIGUOUS_HITS_TOP_K = 5  # candidates kept per ambiguous entity — enough for the
+# resolver LLM to see every real contender without a prompt bloated by noise hits.
+
+
+def _collect_ambiguous_hits(
+    semantic_retriever: object,
+    db_name: str | None,
+    ambiguous_entities: set[str],
+) -> dict[str, list[dict]]:
+    """Fresh, per-entity top-_AMBIGUOUS_HITS_TOP_K column-attribute candidates
+    for each ambiguous entity, re-queried directly against the VDB.
+
+    Deliberately does NOT reuse `_ambiguity_check`'s already-collected
+    `retrieved_column_attributes` (as this used to) or apply
+    CLARIFY_MAX_DISTANCE: both `_run_entity_coverage_pipeline` and
+    `_ambiguity_check` cap hits at that distance, but the *correct*
+    disambiguating candidate can legitimately score just past it — e.g.
+    "Counsel For" at 0.671 vs. the 0.65 cutoff, for a question asking about
+    "attorney" representation, while two wrong same-table candidates both
+    scored under it. Filtering it out before the resolver ever sees it isn't
+    a resolution failure, it's a candidate-completeness one — confirmed by
+    running the same query directly and finding the right answer sitting at
+    rank 3, just outside the cutoff. This is the last, no-more-chances
+    decision point (see resolve_pending_ambiguities), so it's worth the extra
+    VDB call per ambiguous entity (rare) to see a wider net than detection
+    needed.
+    """
+    return {
+        e: _entity_ranked_hits(e, semantic_retriever, db_name, k=_AMBIGUOUS_HITS_TOP_K)
+        for e in ambiguous_entities
+    }
 
 
 # ── Collision resolution ────────────────────────────────────────────────────
@@ -161,8 +252,12 @@ def _ambiguity_check(
 # column, decide whether one is a clear winner (auto-assign) or the scores
 # are too close to call (defer to the LLM). Thresholds are deliberately
 # conservative — when in doubt, defer rather than silently auto-assign.
-_COLLISION_WINNER_MARGIN = 0.04  # winner's 1st-hit score must beat the loser's by at least this
-_COLLISION_LOSER_MAX_GAP = 0.08  # loser's own gap (shared hit -> its next-distinct hit) must be under this
+_COLLISION_WINNER_MARGIN = (
+    0.04  # winner's 1st-hit score must beat the loser's by at least this
+)
+_COLLISION_LOSER_MAX_GAP = (
+    0.08  # loser's own gap (shared hit -> its next-distinct hit) must be under this
+)
 
 _COMPOSITE_HIT_RE = re.compile(r"\b(json|jsonb|structured)\b", re.IGNORECASE)
 # "jsonb" needs its own alternative, not just "json": `\bjson\b` requires a word
@@ -213,7 +308,11 @@ def _shared_column_note(entities: list[str], hit: dict, fallback_id: str) -> str
     injected directly into SQL-gen evidence."""
     names = ", ".join(f'"{e}"' for e in entities)
     col_name = _column_name(hit, fallback_id)
-    logger.info("Clarify — collision resolved as shared composite column: %s -> %s", entities, col_name)
+    logger.info(
+        "Clarify — collision resolved as shared composite column: %s -> %s",
+        entities,
+        col_name,
+    )
     return (
         f"Note: {names} both resolve to the same column ({col_name}) "
         f"— use the correct sub-key/field for each; they are not the same value."
@@ -223,7 +322,9 @@ def _shared_column_note(entities: list[str], hit: dict, fallback_id: str) -> str
 def _column_name(hit: dict, fallback_id: str) -> str:
     """Human-readable column name from a hit's text, e.g. 'Wage Details'."""
     return (
-        re.sub(r"^ColumnAttribute:\s*", "", str(hit.get("text") or "")).split(".")[0].strip()
+        re.sub(r"^ColumnAttribute:\s*", "", str(hit.get("text") or ""))
+        .split(".")[0]
+        .strip()
         or fallback_id
     )
 
@@ -266,11 +367,16 @@ def _entity_ranked_hits(
     """
     try:
         hits = search_semantic_index(
-            semantic_retriever, entity, label_filter=[LABEL_COLUMN_ATTRIBUTE],
-            per_label_k=k, database_name=db_name,
+            semantic_retriever,
+            entity,
+            label_filter=[LABEL_COLUMN_ATTRIBUTE],
+            per_label_k=k,
+            database_name=db_name,
         )
     except Exception:
-        logger.warning("Clarify — collision re-query failed for %r", entity, exc_info=True)
+        logger.warning(
+            "Clarify — collision re-query failed for %r", entity, exc_info=True
+        )
         return []
     return sorted(hits, key=lambda h: float(h.get("score") or float("inf")))
 
@@ -296,6 +402,160 @@ the first-listed one. If a term genuinely doesn't match any candidate shown, out
 """
 
 
+# ── Ambiguous-entity resolution ─────────────────────────────────────────────
+# Same call shape as collision resolution above (short list of candidates per
+# term -> a fast LLM picks the id) but a different trigger and a different
+# moment in the pipeline: collision resolution runs mid-dialogue, on two
+# entities sharing one hit, while there may still be turns left to ask about
+# it. This runs exactly once, at the decision to proceed to SQL generation —
+# the last point before the question is final and no further clarifying
+# question is possible — on entities where one term has 2+ column-attribute
+# hits close enough to compete (_ambiguity_check). It replaces the vague
+# "choose whichever fits, not both" disambiguation note (clarify.py) with an
+# actual decision where it can confidently make one.
+
+_AMBIGUITY_RESOLUTION_PROMPT = """\
+A term extracted from the question matched 2+ database columns with close enough vector-search \
+scores that neither could be confidently picked as the match based on score alone. \
+Using all context below, decide which candidate column each term refers to. \
+
+Question: {question}
+
+Terms and their close-scoring candidate columns (best match first):
+{candidates_block}
+
+Potentially relevant knowledge: {relevant_kg}
+
+For each term, output exactly one line:
+<term>: <chosen candidate id>
+
+Pick the candidate id that best fits what the term means in the context of this specific \
+question — it does not have to be the first-listed one, or the one whose name most literally \
+matches the term's wording. If a term has no likely matches, output:\
+<term>: NONE
+"""
+
+
+# Same derivation as evidence.py's _MAX_EVIDENCE_LINE_CHARS: comfortably above
+# the longest real column description in the dataset, so full definitions
+# (including "Sample values: ..." tails _is_composite_hit relies on) reach the
+# LLM intact instead of being cut off mid-description like the 150-char
+# truncation collision resolution uses for its much shorter use case.
+_CANDIDATE_HIT_MAX_CHARS = 600
+
+
+def _format_candidate_hit(hit: dict) -> str:
+    """One candidate line: id, data type (if known), and its full description."""
+    data_type = hit.get("data_type") or hit.get("type")
+    type_tag = f" [{data_type}]" if data_type else ""
+    text = str(hit.get("text") or "")[:_CANDIDATE_HIT_MAX_CHARS]
+    return f"  id={hit.get('id')}{type_tag}: {text}"
+
+
+_CHOSEN_ID_PREFIX_RE = re.compile(r"^\s*id\s*=\s*", re.IGNORECASE)
+
+
+def _clean_chosen_id(chosen: str) -> str:
+    """Normalize a resolver LLM's raw answer for a term into a bare candidate id.
+
+    The prompts ask for a bare id (`<term>: <id>`), but the LLM sometimes
+    echoes the `id=` prefix from the candidate list itself (`<term>: id=<id>`)
+    despite that — observed live, not hypothetical (see exchange_traded_funds_10
+    run). Stripping it here is more reliable than depending on prompt wording
+    alone to prevent the drift; a whole batch of otherwise-correct answers
+    shouldn't be discarded over one stray prefix.
+    """
+    chosen = _CHOSEN_ID_PREFIX_RE.sub("", chosen.strip())
+    return chosen.strip().strip("'\"")
+
+
+def resolve_ambiguous_entities(
+    question: str,
+    relevant_kg: str,
+    entity_candidates: dict[str, list[dict]],
+) -> dict[str, str] | None:
+    """Ask a fast LLM to pick the correct candidate id for each ambiguous entity.
+
+    Same fail-safe contract as :func:`_llm_disambiguate_collision`: returns
+    ``None`` (never a guess) on any parse failure or missing entity, so the
+    caller can fall back to leaving the ambiguity unresolved rather than
+    silently injecting a possibly-wrong mapping.
+    """
+    blocks = []
+    for entity, hits in entity_candidates.items():
+        lines = "\n".join(_format_candidate_hit(h) for h in hits)
+        blocks.append(f'"{entity}":\n{lines}')
+    prompt = _AMBIGUITY_RESOLUTION_PROMPT.format(
+        question=question,
+        relevant_kg=relevant_kg or "(none)",
+        candidates_block="\n\n".join(blocks),
+    )
+    try:
+        response = safe_invoke_text_nr(prompt).strip()
+    except Exception:
+        logger.warning("Clarify — ambiguity-resolution LLM call failed", exc_info=True)
+        return None
+
+    valid_ids = {str(h.get("id")) for hits in entity_candidates.values() for h in hits}
+    result: dict[str, str] = {}
+    for line in response.splitlines():
+        if ":" not in line:
+            continue
+        term, _, chosen = line.partition(":")
+        term = term.strip().strip('"')
+        chosen = _clean_chosen_id(chosen)
+        if term in entity_candidates and (
+            chosen in valid_ids or chosen.upper() == "NONE"
+        ):
+            result[term] = chosen
+    if len(result) != len(entity_candidates):
+        logger.warning(
+            "Clarify — ambiguity-resolution LLM response incomplete/unparseable: %r",
+            response[:300],
+        )
+        return None
+    return result
+
+
+def resolve_pending_ambiguities(
+    question: str,
+    relevant_kg: str,
+    ambiguous_hits: dict[str, list[dict]],
+) -> list[str]:
+    """Resolve every still-open ambiguous entity in *ambiguous_hits* and return
+    evidence notes for the ones it could confidently decide.
+
+    Called exactly once, at the decision to proceed to SQL generation (see
+    coordinator.py) — *ambiguous_hits* holds whichever entities the last
+    `_ambiguity_check` (against the final working_question) flagged; see
+    `session._last_ambiguous_hits`'s docstring for why it's reset each turn
+    rather than accumulated. Entities the LLM can't confidently resolve are
+    simply skipped (no note) rather than guessed — the existing "choose
+    whichever fits" disambiguation note (clarify.py) still applies as a
+    fallback for those, unchanged.
+    """
+    if not ambiguous_hits:
+        return []
+    decision = resolve_ambiguous_entities(question, relevant_kg, ambiguous_hits)
+    if decision is None:
+        logger.warning(
+            "Clarify — ambiguity resolution unresolved for all of: %s",
+            sorted(ambiguous_hits),
+        )
+        return []
+    by_id = {str(h.get("id")): h for hits in ambiguous_hits.values() for h in hits}
+    notes = []
+    for entity, chosen_id in decision.items():
+        if chosen_id.upper() == "NONE" or chosen_id not in by_id:
+            continue
+        col_name = _column_name(by_id[chosen_id], chosen_id)
+        notes.append(
+            f'"{entity}" means {col_name}. Do not substitute a different column name.'
+        )
+    logger.info("Clarify — ambiguity resolution decided: %s", decision)
+    return notes
+
+
 def _llm_disambiguate_collision(
     question: str,
     relevant_kg: str,
@@ -309,10 +569,14 @@ def _llm_disambiguate_collision(
     """
     blocks = []
     for entity, hits in entity_candidates.items():
-        lines = "\n".join(f"  id={h.get('id')}: {str(h.get('text') or '')[:150]}" for h in hits)
+        lines = "\n".join(
+            f"  id={h.get('id')}: {str(h.get('text') or '')[:150]}" for h in hits
+        )
         blocks.append(f'"{entity}":\n{lines}')
     prompt = _COLLISION_LLM_PROMPT.format(
-        question=question, relevant_kg=relevant_kg or "(none)", candidates_block="\n\n".join(blocks)
+        question=question,
+        relevant_kg=relevant_kg or "(none)",
+        candidates_block="\n\n".join(blocks),
     )
     try:
         response = safe_invoke_text_nr(prompt).strip()
@@ -327,11 +591,16 @@ def _llm_disambiguate_collision(
             continue
         term, _, chosen = line.partition(":")
         term = term.strip().strip('"')
-        chosen = chosen.strip()
-        if term in entity_candidates and (chosen in valid_ids or chosen.upper() == "NONE"):
+        chosen = _clean_chosen_id(chosen)
+        if term in entity_candidates and (
+            chosen in valid_ids or chosen.upper() == "NONE"
+        ):
             result[term] = chosen
     if len(result) != len(entity_candidates):
-        logger.warning("Clarify — collision LLM response incomplete/unparseable: %r", response[:300])
+        logger.warning(
+            "Clarify — collision LLM response incomplete/unparseable: %r",
+            response[:300],
+        )
         return None
     return result
 
@@ -403,12 +672,16 @@ def _resolve_collisions(
     for shared_id, entities in collisions.items():
         # Step 0: KB-covered entities don't compete for a column at all.
         kb_covered_here = [
-            e for e in entities if (_normalize_entity(e) or e.lower().strip()) in kb_covered_norms
+            e
+            for e in entities
+            if (_normalize_entity(e) or e.lower().strip()) in kb_covered_norms
         ]
         for e in kb_covered_here:
             logger.info(
                 "Clarify — collision: %r is already KB-covered (has a formula), "
-                "dropping its VDB column claim to %r instead of resolving it", e, shared_id,
+                "dropping its VDB column claim to %r instead of resolving it",
+                e,
+                shared_id,
             )
             best_hit_per_entity.pop(e, None)
         entities = [e for e in entities if e not in kb_covered_here]
@@ -422,7 +695,8 @@ def _resolve_collisions(
         if cached is True:
             logger.info(
                 "Clarify — collision on %r skipped (cached trusted verdict): %s",
-                shared_id, entities,
+                shared_id,
+                entities,
             )
             notes.append(_shared_column_note(entities, shared_hit, shared_id))
             continue
@@ -433,7 +707,9 @@ def _resolve_collisions(
             # entities as unresolved, same as the LLM-parse-failure fail-safe.
             logger.info(
                 "Clarify — collision on %r skipped (cached distrust verdict) — "
-                "dropping as unresolved, no re-check: %s", shared_id, entities,
+                "dropping as unresolved, no re-check: %s",
+                shared_id,
+                entities,
             )
             for e in entities:
                 best_hit_per_entity.pop(e, None)
@@ -446,11 +722,19 @@ def _resolve_collisions(
             continue
 
         # Fresh per-entity queries — see _entity_ranked_hits for why col_hits can't be reused.
-        fresh_hits = {e: _entity_ranked_hits(e, semantic_retriever, db_name) for e in entities}
+        fresh_hits = {
+            e: _entity_ranked_hits(e, semantic_retriever, db_name) for e in entities
+        }
 
         def _score_for_shared(e: str) -> float:
-            hit = next((h for h in fresh_hits[e] if str(h.get("id") or "") == shared_id), None)
-            return float(hit["score"]) if hit else float(best_hit_per_entity[e].get("score") or float("inf"))
+            hit = next(
+                (h for h in fresh_hits[e] if str(h.get("id") or "") == shared_id), None
+            )
+            return (
+                float(hit["score"])
+                if hit
+                else float(best_hit_per_entity[e].get("score") or float("inf"))
+            )
 
         ranked = sorted(entities, key=_score_for_shared)
         winner = ranked[0]
@@ -460,25 +744,35 @@ def _resolve_collisions(
         for loser in ranked[1:]:
             loser_score = _score_for_shared(loser)
             next_distinct = next(
-                (h for h in fresh_hits[loser] if str(h.get("id") or "") != shared_id), None
+                (h for h in fresh_hits[loser] if str(h.get("id") or "") != shared_id),
+                None,
             )
             margin_ok = (loser_score - winner_score) >= _COLLISION_WINNER_MARGIN
             gap_ok = (
                 next_distinct is not None
-                and (float(next_distinct["score"]) - loser_score) < _COLLISION_LOSER_MAX_GAP
+                and (float(next_distinct["score"]) - loser_score)
+                < _COLLISION_LOSER_MAX_GAP
             )
             if margin_ok and gap_ok:
                 logger.info(
                     "Clarify — collision auto-resolved: %r kept %r (%.3f); "
                     "%r reassigned to %r (%.3f)",
-                    winner, shared_id, winner_score,
-                    loser, next_distinct.get("id"), float(next_distinct["score"]),
+                    winner,
+                    shared_id,
+                    winner_score,
+                    loser,
+                    next_distinct.get("id"),
+                    float(next_distinct["score"]),
                 )
                 best_hit_per_entity[loser] = next_distinct
-                notes.append(_distinct_columns_note([
-                    (winner, shared_hit, shared_id),
-                    (loser, next_distinct, str(next_distinct.get("id") or "")),
-                ]))
+                notes.append(
+                    _distinct_columns_note(
+                        [
+                            (winner, shared_hit, shared_id),
+                            (loser, next_distinct, str(next_distinct.get("id") or "")),
+                        ]
+                    )
+                )
             else:
                 needs_llm.append(loser)
 
@@ -487,18 +781,24 @@ def _resolve_collisions(
             continue
 
         entity_candidates = {e: fresh_hits[e][:3] for e in [winner, *needs_llm]}
-        decision = _llm_disambiguate_collision(question, relevant_kg_text, entity_candidates)
+        decision = _llm_disambiguate_collision(
+            question, relevant_kg_text, entity_candidates
+        )
         if decision is None:
             # Fail safe: don't guess. Drop the lower-confidence entities so they
             # fall through the normal "VDB-unresolved" path instead of silently
             # keeping a possibly-wrong shared mapping.
             for loser in needs_llm:
-                logger.warning("Clarify — collision unresolved for %r; dropping VDB hit", loser)
+                logger.warning(
+                    "Clarify — collision unresolved for %r; dropping VDB hit", loser
+                )
                 best_hit_per_entity.pop(loser, None)
             hit_verdicts[shared_id] = False
             continue
 
-        by_id = {str(h.get("id")): h for hits in entity_candidates.values() for h in hits}
+        by_id = {
+            str(h.get("id")): h for hits in entity_candidates.values() for h in hits
+        }
         for entity, chosen_id in decision.items():
             if chosen_id.upper() == "NONE" or chosen_id not in by_id:
                 best_hit_per_entity.pop(entity, None)
@@ -525,11 +825,15 @@ def _resolve_collisions(
         # case it's confirmed trusted, not distrusted. Checked by id, not just
         # "did any convergence happen anywhere" — convergence onto a *different*
         # id says nothing about shared_id's own trustworthiness.
-        converged_entities = {e for ents in new_id_to_entities.values() if len(ents) >= 2 for e in ents}
+        converged_entities = {
+            e for ents in new_id_to_entities.values() if len(ents) >= 2 for e in ents
+        }
         split_pairs = [
             (entity, by_id[chosen_id], chosen_id)
             for entity, chosen_id in decision.items()
-            if chosen_id.upper() != "NONE" and chosen_id in by_id and entity not in converged_entities
+            if chosen_id.upper() != "NONE"
+            and chosen_id in by_id
+            and entity not in converged_entities
         ]
         if split_pairs:
             notes.append(_distinct_columns_note(split_pairs))
@@ -540,12 +844,16 @@ def _resolve_collisions(
             # entity doesn't need a column identity at all, regardless of what
             # the LLM assigned it.
             kb_covered_here = [
-                e for e in ents if (_normalize_entity(e) or e.lower().strip()) in kb_covered_norms
+                e
+                for e in ents
+                if (_normalize_entity(e) or e.lower().strip()) in kb_covered_norms
             ]
             for e in kb_covered_here:
                 logger.info(
                     "Clarify — collision (post-LLM): %r is already KB-covered, "
-                    "dropping its VDB column claim to %r instead of resolving it", e, new_id,
+                    "dropping its VDB column claim to %r instead of resolving it",
+                    e,
+                    new_id,
                 )
                 best_hit_per_entity.pop(e, None)
             ents = [e for e in ents if e not in kb_covered_here]
@@ -565,6 +873,7 @@ def _find_unresolvable_entities(
     formatted_kg: str = "",
     children_map: dict[str, list[str]] | None = None,
     hit_verdicts: dict[str, bool] | None = None,
+    ambiguous_hits_out: dict[str, list[dict]] | None = None,
 ) -> tuple[
     list[tuple[str, str | None]],
     list[tuple[str, str, float, str]],
@@ -599,7 +908,21 @@ def _find_unresolvable_entities(
     to the original natural-language terms that matched it (for cumulative_grounded_kg).
     json_shared_notes are "these terms share a JSON column, use distinct sub-keys" notes
     to inject verbatim into SQL-gen evidence — see _resolve_collisions.
+
+    When *ambiguous_hits_out* is given, it is reset to exactly this turn's
+    ambiguous entities and their candidate hits (Step 2) — not merged with
+    whatever it held before. Deliberately last-call-wins, not accumulated
+    across turns like the KB/VDB "_ever_*" bookkeeping elsewhere in this
+    module: an entity ambiguous mid-dialogue may no longer even appear in a
+    later, re-phrased working_question, and re-flagging it from stale hits
+    would resolve a tie against a question that's no longer the one being
+    asked. Callers pass a dict that survives across calls only so the very
+    last call's result (this function is re-run every turn on the latest
+    working_question) is what's left in it by the time resolve_pending_ambiguities
+    reads it, right before SQL generation — see coordinator.py.
     """
+    if ambiguous_hits_out is not None:
+        ambiguous_hits_out.clear()
     if semantic_retriever is None:
         return [], [], "", set(), {}, set(), []
 
@@ -622,7 +945,9 @@ def _find_unresolvable_entities(
     # Drop entities whose normalized form is a strict substring of another in the batch.
     # e.g. "condition" ⊂ "atmospheric conditions" → drop; "signal dynamics" ⊄ "signal quality" → keep both
     all_norms = set(norm_to_original.keys())
-    search_norms = {e for e in all_norms if not any(e != o and e in o for o in all_norms)}
+    search_norms = {
+        e for e in all_norms if not any(e != o and e in o for o in all_norms)
+    }
     logger.info("Clarify — extracted entities (normalized): %s", sorted(search_norms))
 
     # Strip generic standalone tokens — the prompt already excludes them but LLMs
@@ -633,7 +958,28 @@ def _find_unresolvable_entities(
     search_norms -= generic_skipped
 
     # --- Step 2: ambiguity check on column-attribute hits ---
+    # _ambiguity_check operates on ec_path_state's raw, pre-normalization entity
+    # strings (e.g. "Price-to-Book (P/B) ratio"), but everything else in this
+    # function — search_norms, needs_kb_rescue, resolved_hits — keys off the
+    # normalized form (_normalize_entity strips filler words like "ratio",
+    # "return"; here that's "price-to-book (p/b)"). Left unnormalized, an
+    # ambiguous entity with a filler word in it never matches anything in the
+    # rest of the pipeline's string space (e.g. `ambiguous_entities &
+    # search_norms` in needs_kb_rescue below silently comes up empty for it).
+    # Normalize before handing off to the resolver so it operates in the same
+    # string space as everything else it might overlap with (KB coverage,
+    # collision resolution).
     ambiguous_entities = _ambiguity_check(ec_path_state)
+    if ambiguous_entities and ambiguous_hits_out is not None:
+        normalized_ambiguous = {
+            _normalize_entity(e) or e.lower().strip() for e in ambiguous_entities
+        }
+        # ambiguous_hits_out was already reset to empty above — this populates
+        # it fresh with exactly this call's ambiguous entities, nothing carried
+        # over from an earlier turn's (possibly stale) working_question.
+        ambiguous_hits_out.update(
+            _collect_ambiguous_hits(semantic_retriever, db_name, normalized_ambiguous)
+        )
 
     # Build VDB-uncovered set: entities the pipeline marked uncovered + ambiguous ones.
     vdb_uncovered: set[str] = set(ec_path_state.get("uncovered_entities") or [])
@@ -660,8 +1006,12 @@ def _find_unresolvable_entities(
         score = hit.get("score")
         if score is None or float(score) > CLARIFY_MAX_DISTANCE:
             continue
-        for entity in (hit.get("query_entities") or ([hit["query_entity"]] if hit.get("query_entity") else [])):
-            if entity not in best_hit_per_entity or float(score) < float(best_hit_per_entity[entity].get("score", float("inf"))):
+        for entity in hit.get("query_entities") or (
+            [hit["query_entity"]] if hit.get("query_entity") else []
+        ):
+            if entity not in best_hit_per_entity or float(score) < float(
+                best_hit_per_entity[entity].get("score", float("inf"))
+            ):
                 best_hit_per_entity[entity] = hit
 
     # --- Step 3: KB check on ALL extracted entities ---
@@ -674,18 +1024,29 @@ def _find_unresolvable_entities(
     kb_covered_norms: set[str] = set()
     if formatted_kg and search_norms:
         kb_entities = [norm_to_original.get(norm, norm) for norm in search_norms]
-        orig_lower_to_norm = {norm_to_original.get(n, n).lower(): n for n in search_norms}
-        covered_originals, relevant_kg_text, entry_to_original_terms = _filter_covered_by_external_knowledge(
-            kb_entities, formatted_kg, question, children_map
+        orig_lower_to_norm = {
+            norm_to_original.get(n, n).lower(): n for n in search_norms
+        }
+        covered_originals, relevant_kg_text, entry_to_original_terms = (
+            _filter_covered_by_external_knowledge(
+                kb_entities, formatted_kg, question, children_map
+            )
         )
-        kb_covered_norms = {orig_lower_to_norm.get(orig, orig) for orig in covered_originals}
+        kb_covered_norms = {
+            orig_lower_to_norm.get(orig, orig) for orig in covered_originals
+        }
         logger.info("Clarify — KB covers: %s", kb_covered_norms or "none")
 
     # Resolve any entities that collided on the same best hit, in place.
     entities_before_resolution = set(best_hit_per_entity.keys())
     json_notes = _resolve_collisions(
-        question, relevant_kg_text, best_hit_per_entity, semantic_retriever, db_name,
-        kb_covered_norms, hit_verdicts,
+        question,
+        relevant_kg_text,
+        best_hit_per_entity,
+        semantic_retriever,
+        db_name,
+        kb_covered_norms,
+        hit_verdicts,
     )
 
     # Reconcile needs_kb_rescue against what collision resolution actually did —
@@ -698,9 +1059,13 @@ def _find_unresolvable_entities(
     for entity in entities_before_resolution | set(best_hit_per_entity.keys()):
         norm = _normalize_entity(entity) or entity.lower().strip()
         if entity in best_hit_per_entity:
-            needs_kb_rescue.discard(norm)  # now cleanly resolved — no longer ambiguous/uncovered
+            needs_kb_rescue.discard(
+                norm
+            )  # now cleanly resolved — no longer ambiguous/uncovered
         else:
-            needs_kb_rescue.add(norm)  # collision resolution dropped it — treat as unresolved
+            needs_kb_rescue.add(
+                norm
+            )  # collision resolution dropped it — treat as unresolved
             # (KB-covered drops are still correctly excluded downstream via
             # final_unresolvable_norms = needs_kb_rescue - kb_covered_norms)
 
@@ -715,7 +1080,11 @@ def _find_unresolvable_entities(
             candidate = candidates_by_id.get(str(hit.get("id") or ""))
             if candidate and candidate.get("attribute"):
                 term = candidate.get("term") or ""
-                hit_text = f'{candidate["attribute"]} ({term})' if term else candidate["attribute"]
+                hit_text = (
+                    f"{candidate['attribute']} ({term})"
+                    if term
+                    else candidate["attribute"]
+                )
             else:
                 hit_text = hit.get("text") or ""
             resolved_hits.append(
@@ -735,12 +1104,20 @@ def _find_unresolvable_entities(
         (norm, None) for norm in final_unresolvable_norms
     ]
 
-    logger.info("Clarify — unresolvable after VDB+KB: %s", [e for e, _ in unresolvable] or "none")
+    logger.info(
+        "Clarify — unresolvable after VDB+KB: %s",
+        [e for e, _ in unresolvable] or "none",
+    )
     logger.info(
         "Clarify — resolved by VDB: %s",
         [(e, f"{s:.3f}") for e, _, s, *_ in resolved_hits] or "none",
     )
     return (
-        unresolvable, resolved_hits, relevant_kg_text, all_norms,
-        entry_to_original_terms, vdb_only_norms, json_notes,
+        unresolvable,
+        resolved_hits,
+        relevant_kg_text,
+        all_norms,
+        entry_to_original_terms,
+        vdb_only_norms,
+        json_notes,
     )

@@ -15,7 +15,10 @@ from typing import Optional, TYPE_CHECKING
 from gsf.utils.llm_invoke import safe_invoke_text
 
 from .entity_resolution import (
-    _find_unresolvable_entities, _normalize_entity, _FILLER, _CONNECTIVES,
+    _find_unresolvable_entities,
+    _normalize_entity,
+    _FILLER,
+    _CONNECTIVES,
 )
 from .kg_coverage import _parse_kg_entries, _compact_schema
 
@@ -26,12 +29,19 @@ logger = logging.getLogger(__name__)
 
 # Regex for detecting calculation-context queries.
 # Covers: calculate/calculated/calculation, compute/computed/computation, derive/derived/derivation.
-_CALC_TRIGGER = re.compile(r'\b(calculat|comput|deriv)', re.IGNORECASE)
+_CALC_TRIGGER = re.compile(r"\b(calculat|comput|deriv)", re.IGNORECASE)
 
-_STUCK_PHRASES = frozenset([
-    "out of scope", "not certain", "uncertain","cannot answer",
-    "can't answer", "unable to answer", "not able to answer",
-])
+_STUCK_PHRASES = frozenset(
+    [
+        "out of scope",
+        "not certain",
+        "uncertain",
+        "cannot answer",
+        "can't answer",
+        "unable to answer",
+        "not able to answer",
+    ]
+)
 
 _CLARIFY_PROMPT = """\
 You are deciding whether to ask the user a clarification question before writing SQL.
@@ -64,7 +74,7 @@ Formulas or conditions whose exact specification is still missing, ranked most-c
 STRICT RULES — follow every one of these exactly:
 1. NEVER ask where data is stored. Do not ask about or mention the words 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, history, or scientific tautologies: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
-3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize the results"), prioritize asking the user which specific metrics or fields they want in the output.
+3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results"), prioritize asking the user which specific metrics or fields they want in the output.
 4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
 6. Suggested format for questions: "As a metric, what does [TERM] measure and what is its exact formula?" Always name the exact term from the ambiguity you are trying to resolve in your question.
@@ -103,11 +113,13 @@ _SORT_DIRECTION = re.compile(
 )
 
 _DEFAULT_SORT_HINT = (
-    "DefaultSort: when results include a computed score or metric and the question "
-    "does not suggest ascending order, prefer ORDER BY the primary output metric DESC. "
-    "The primary metric is the one most central to the query — typically the one used "
-    "in a filter condition or explicitly requested as the main output value. "
-    "If no single metric is clearly primary, do not add an ORDER BY."
+    "DefaultSort: identify the primary output metric — the one most central to the "
+    "query, typically the one used in a filter condition or explicitly requested as "
+    "the main output value. If that primary metric is itself a computed score or "
+    "metric (not a categorical dimension like a name, tier, or group/bucket label) "
+    "and the question does not suggest ascending order, prefer ORDER BY that metric "
+    "DESC. If no single metric is clearly primary, or the primary output is a "
+    "categorical dimension rather than a computed value, do not add an ORDER BY."
 )
 
 
@@ -203,6 +215,7 @@ def should_clarify(
     llm,
 ) -> tuple[bool, Optional[str]]:
     """Return (True, question) to ask, or (False, None) to proceed to SQL."""
+
     def _fmt_turn(h: dict) -> str:
         a = h["a"]
         stuck = any(phrase in a.lower() for phrase in _STUCK_PHRASES)
@@ -212,15 +225,23 @@ def should_clarify(
     history_text = "\n".join(_fmt_turn(h) for h in session.clarify_history) or "None"
 
     unanswered = [
-        h["q"] for h in session.clarify_history
+        h["q"]
+        for h in session.clarify_history
         if any(phrase in h["a"].lower() for phrase in _STUCK_PHRASES)
     ]
-    unanswered_topics_text = "\n".join(f"- {q}" for q in unanswered) if unanswered else "None"
+    unanswered_topics_text = (
+        "\n".join(f"- {q}" for q in unanswered) if unanswered else "None"
+    )
 
     if session._cached_unresolvable_for != session.working_question:
         (
-            unresolvable, resolved_hits, relevant_kg, extracted_norms,
-            entry_to_original_terms, vdb_only_norms, json_shared_notes,
+            unresolvable,
+            resolved_hits,
+            relevant_kg,
+            extracted_norms,
+            entry_to_original_terms,
+            vdb_only_norms,
+            json_shared_notes,
         ) = _find_unresolvable_entities(
             session.working_question,
             session.semantic_retriever,
@@ -228,6 +249,7 @@ def should_clarify(
             session.external_kg,
             session.external_kg_children_map,
             session._collision_hit_verdicts,
+            session._last_ambiguous_hits,
         )
         session._cached_unresolvable = unresolvable
         session._cached_unresolvable_for = session.working_question
@@ -253,7 +275,11 @@ def should_clarify(
                     matched_from = entry_to_original_terms.get(name, [])
                     if matched_from:
                         first_nl = text.index("\n") if "\n" in text else len(text)
-                        text = text[:first_nl] + f"\n# matched from: {', '.join(matched_from)}" + text[first_nl:]
+                        text = (
+                            text[:first_nl]
+                            + f"\n# matched from: {', '.join(matched_from)}"
+                            + text[first_nl:]
+                        )
                     session.cumulative_grounded_kg = (
                         session.cumulative_grounded_kg + "\n" + text
                         if session.cumulative_grounded_kg
@@ -274,8 +300,12 @@ def should_clarify(
         kb_entries_parsed = _parse_kg_entries(relevant_kg)
         for entry_name, matched_terms in entry_to_original_terms.items():
             entry_text = next(
-                (v for k, v in kb_entries_parsed.items()
-                 if k.startswith(entry_name) or entry_name.startswith(k)), ""
+                (
+                    v
+                    for k, v in kb_entries_parsed.items()
+                    if k.startswith(entry_name) or entry_name.startswith(k)
+                ),
+                "",
             )
             if not entry_text:
                 continue
@@ -292,7 +322,8 @@ def should_clarify(
         kb_covered_hits = [
             (norm, col_text, score)
             for norm, (col_text, score) in session._ever_vdb_hit_norms.items()
-            if norm in session._ever_kb_covered_norms and score < _KB_VDB_DISAMBIG_THRESHOLD
+            if norm in session._ever_kb_covered_norms
+            and score < _KB_VDB_DISAMBIG_THRESHOLD
         ]
         for norm, col_text, score in kb_covered_hits:
             entry_name, kb_text = session._ever_term_to_kb_entry.get(norm, ("", ""))
@@ -311,7 +342,8 @@ def should_clarify(
             session.cumulative_grounded_kg += note
             logger.info(
                 "Clarify — KB+VDB disambiguation note added for KB entry %r (VDB score=%.3f)",
-                entry_name, score,
+                entry_name,
+                score,
             )
 
         # Capture all extracted entities on the very first clarify call (turn 0).
@@ -324,7 +356,10 @@ def should_clarify(
         current_unresolvable_names = {e for e, _ in unresolvable}
         resolved_by_kb_or_vdb = extracted_norms - current_unresolvable_names
         if resolved_by_kb_or_vdb:
-            logger.info("Clarify — persistent terms resolved by KB/VDB: %s", resolved_by_kb_or_vdb)
+            logger.info(
+                "Clarify — persistent terms resolved by KB/VDB: %s",
+                resolved_by_kb_or_vdb,
+            )
         session.persistent_unresolved = [
             t for t in session.persistent_unresolved if t not in resolved_by_kb_or_vdb
         ]
@@ -336,9 +371,11 @@ def should_clarify(
                 session.persistent_unresolved.append(name)
                 existing.add(name)
     else:
-        logger.info("Clarify — reusing cached unresolvable entities (question unchanged)")
+        logger.info(
+            "Clarify — reusing cached unresolvable entities (question unchanged)"
+        )
         resolved_hits = []
-        for entity, hit_text, score, hit_id in (session._cached_resolved_hits or []):
+        for entity, hit_text, score, hit_id in session._cached_resolved_hits or []:
             resolved_hits.append((entity, hit_text, score, hit_id))
     unresolvable = session._cached_unresolvable or []
 
@@ -346,13 +383,19 @@ def should_clarify(
     # out of entity extraction in later turns.
     current_names = [e for e, _ in unresolvable]
     current_set = set(current_names)
-    persistent_extra = [t for t in session.persistent_unresolved if t not in current_set]
+    persistent_extra = [
+        t for t in session.persistent_unresolved if t not in current_set
+    ]
     all_unresolvable = current_names + persistent_extra
-    unresolvable_text = "\n".join(f"- {t}" for t in all_unresolvable) if all_unresolvable else "None"
+    unresolvable_text = (
+        "\n".join(f"- {t}" for t in all_unresolvable) if all_unresolvable else "None"
+    )
 
     resolved_schema_text = _format_resolved_schema_terms(resolved_hits) or "None"
 
-    sort_direction_note = ""  # Sort direction is handled by the default DESC hint at SQL gen time.
+    sort_direction_note = (
+        ""  # Sort direction is handled by the default DESC hint at SQL gen time.
+    )
 
     grounded_kg_for_prompt = session._grounded_kg or "None"
     logger.info(
@@ -364,20 +407,24 @@ def should_clarify(
     # Turn-0 scan: run completeness before any Q&A to surface missing formulas.
     # Fires when KB has content OR when the question implies a calculation and there
     # are VDB-only entities (schema hits with no KB formula).
-    has_calc_vdb = (
-        _CALC_TRIGGER.search(session.working_question)
-        and bool(session._cached_vdb_only_norms)
+    has_calc_vdb = _CALC_TRIGGER.search(session.working_question) and bool(
+        session._cached_vdb_only_norms
     )
-    if not session.clarify_history and not session.incomplete_formula_terms and (
-        session._grounded_kg or has_calc_vdb
+    if (
+        not session.clarify_history
+        and not session.incomplete_formula_terms
+        and (session._grounded_kg or has_calc_vdb)
     ):
         from .completeness import detect_incomplete_formulas
+
         if has_calc_vdb:
             hits_map = {e: t for e, t, *_ in resolved_hits}
             vdb_only = []
             for e in sorted(session._cached_vdb_only_norms):
                 if e in hits_map:
-                    desc = re.sub(r"^ColumnAttribute:[^.]+\.\s*", "", hits_map[e]).rstrip()
+                    desc = re.sub(
+                        r"^ColumnAttribute:[^.]+\.\s*", "", hits_map[e]
+                    ).rstrip()
                     vdb_only.append(f"{e}: {desc}" if desc else e)
                 else:
                     vdb_only.append(e)
@@ -422,7 +469,11 @@ def should_clarify(
     # Guard: override PROCEED if any incomplete term has never been asked about.
     # The decide-LLM may rationalize PROCEED when it can see VDB hints, but a term
     # that hasn't appeared in any past question is genuinely unasked and needs a turn.
-    if not response.upper().startswith("ASK:") and session.incomplete_formula_terms and turns_remaining > 0:
+    if (
+        not response.upper().startswith("ASK:")
+        and session.incomplete_formula_terms
+        and turns_remaining > 0
+    ):
         asked_tokens = {
             re.sub(r"[^\w]", "", tok).lower()
             for h in session.clarify_history
@@ -437,14 +488,21 @@ def should_clarify(
             } - {""}
             if term_tokens and not (term_tokens & asked_tokens):
                 question = _generate_forced_question(term, description, llm)
-                logger.info("Clarify — DECISION override: ASK (never-asked incomplete term %r)", term)
+                logger.info(
+                    "Clarify — DECISION override: ASK (never-asked incomplete term %r)",
+                    term,
+                )
                 return True, question
 
     if response.upper().startswith("ASK:"):
         question = response[4:].strip()
-        logger.info("Clarify — DECISION: ASK  (history len=%d)", len(session.clarify_history))
+        logger.info(
+            "Clarify — DECISION: ASK  (history len=%d)", len(session.clarify_history)
+        )
         return True, question
-    logger.info("Clarify — DECISION: PROCEED  (history len=%d)", len(session.clarify_history))
+    logger.info(
+        "Clarify — DECISION: PROCEED  (history len=%d)", len(session.clarify_history)
+    )
     return False, None
 
 
@@ -465,8 +523,13 @@ def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
         logger.info("Clarify — KB already current for Phase 2 question (cached)")
         return
     (
-        unresolvable, resolved_hits, relevant_kg, _,
-        entry_to_original_terms, _vdb_only, json_shared_notes,
+        unresolvable,
+        resolved_hits,
+        relevant_kg,
+        _,
+        entry_to_original_terms,
+        _vdb_only,
+        json_shared_notes,
     ) = _find_unresolvable_entities(
         session.working_question,
         session.semantic_retriever,
@@ -474,6 +537,7 @@ def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
         session.external_kg,
         session.external_kg_children_map,
         session._collision_hit_verdicts,
+        session._last_ambiguous_hits,
     )
     session._cached_unresolvable = unresolvable
     session._cached_unresolvable_for = session.working_question
@@ -491,7 +555,11 @@ def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
                 matched_from = entry_to_original_terms.get(name, [])
                 if matched_from:
                     first_nl = text.index("\n") if "\n" in text else len(text)
-                    text = text[:first_nl] + f"\n# matched from: {', '.join(matched_from)}" + text[first_nl:]
+                    text = (
+                        text[:first_nl]
+                        + f"\n# matched from: {', '.join(matched_from)}"
+                        + text[first_nl:]
+                    )
                 session.cumulative_grounded_kg = (
                     session.cumulative_grounded_kg + "\n" + text
                     if session.cumulative_grounded_kg

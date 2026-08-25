@@ -42,6 +42,7 @@ from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 from gsf.retrieval.text_to_sql.evidence_hints import (
     build_evidence_hints_block,
     extract_evidence,
+    question_without_evidence,
 )
 from gsf.retrieval.text_to_sql.prompts import format_dual_question_block
 from gsf.retrieval.text_to_sql.state import (
@@ -292,6 +293,26 @@ class SQLReconstructionAgent(BaseAgent):
             return False
         return True
 
+    def _format_attempt_history(
+        self, attempts: list[dict], *, label: str
+    ) -> list[str]:
+        """Render past ``{"sql", "error"}`` attempts as numbered prompt lines."""
+        lines: list[str] = []
+        for i, attempt in enumerate(attempts, 1):
+            if len(attempt["sql"]) > 600 or len(attempt["error"]) > 600:
+                self.logger.info(
+                    "History %s %d truncated for prompt (sql=%d chars, error=%d chars)",
+                    label,
+                    i,
+                    len(attempt["sql"]),
+                    len(attempt["error"]),
+                )
+            lines.append(
+                f"  {label} {i}: {attempt['sql'][:600]}\n"
+                f"  Error: {attempt['error'][:600]}"
+            )
+        return lines
+
     # ------------------------------------------------------------------
     # Error analysis
     # ------------------------------------------------------------------
@@ -436,8 +457,24 @@ class SQLReconstructionAgent(BaseAgent):
         incorrect_response = path_state.get("sql_generation_result")
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
+        # Debug-turn detector: coordinator.py::_apply_debug_seed sets this to
+        # "reconstruct_sql" to jump the graph straight to this node with a
+        # seeded error, and only pops it after the whole graph run finishes —
+        # so it stays true for every reconstruct_sql call within that same
+        # debug turn (including 2nd/3rd retries), not just the first one.
+        # Scopes the evidence re-surfacing below to debug turns only, so
+        # ordinary in-turn self-repair (pre-first-submission) is unaffected.
+        is_debug_turn = path_state.get("_resume_from") == "reconstruct_sql"
+        # On a debug turn, evidence (if any) is re-surfaced in its own
+        # labeled, emphasized section below (raw_evidence_reminder_section)
+        # rather than left buried at the tail of question_block — strip it
+        # here so it isn't shown twice in the same prompt. Left untouched
+        # outside debug turns.
         question_block = format_dual_question_block(
-            original_question, sanitized_question
+            question_without_evidence(original_question)
+            if is_debug_turn
+            else original_question,
+            sanitized_question,
         )
 
         messages = state["messages"]
@@ -527,20 +564,20 @@ class SQLReconstructionAgent(BaseAgent):
             )
 
         history_section = ""
-        if len(failed_attempts) > 1:
-            history_lines = []
-            for i, attempt in enumerate(failed_attempts[:-1], 1):
-                if len(attempt["sql"]) > 600 or len(attempt["error"]) > 600:
-                    self.logger.info(
-                        "History attempt %d truncated for prompt (sql=%d chars, error=%d chars)",
-                        i,
-                        len(attempt["sql"]),
-                        len(attempt["error"]),
-                    )
-                history_lines.append(
-                    f"  Attempt {i}: {attempt['sql'][:600]}\n"
-                    f"  Error: {attempt['error'][:600]}"
-                )
+        # Phase 1's own reconstruction lineage, carried forward read-only by
+        # a debug turn's seed (see coordinator.py::_apply_debug_seed) — kept
+        # under a separate key so it never touches len(failed_attempts),
+        # which the graph's routers use as the reconstruction-budget cap.
+        # Every entry here is already a *past* attempt (none is "the one
+        # currently being reconstructed"), unlike failed_attempts below.
+        phase1_failed_attempts: list[dict] = list(
+            path_state.get("phase1_failed_attempts") or []
+        )
+        history_lines = [
+            *self._format_attempt_history(phase1_failed_attempts, label="Phase 1 attempt"),
+            *self._format_attempt_history(failed_attempts[:-1], label="Attempt"),
+        ]
+        if history_lines:
             history_section = (
                 "\nPREVIOUS FAILED ATTEMPTS (do NOT repeat any of these):\n"
                 + "\n".join(history_lines)
@@ -557,6 +594,27 @@ class SQLReconstructionAgent(BaseAgent):
             evidence_hints = build_evidence_hints_block(original_question)
             if evidence_hints:
                 evidence_section = f"{evidence_hints}\n\n"
+
+        # Re-surface the Evidence body (already resolved during clarification)
+        # in its own labeled section instead of leaving it buried, unmarked,
+        # at the tail of question_block — several observed debug-turn
+        # reconstruction failures used a plausible-but-wrong formula, column,
+        # or threshold even though the correct one was sitting in this exact
+        # text. Debug-turn only (see is_debug_turn above) — question_block
+        # only has evidence stripped out in that same case, so it isn't
+        # duplicated in the prompt there; outside a debug turn this section
+        # stays empty and evidence is left exactly where it always was.
+        raw_evidence_reminder_section = ""
+        raw_evidence = extract_evidence(original_question) if is_debug_turn else None
+        if raw_evidence:
+            raw_evidence_reminder_section = (
+                "\nEVIDENCE (already resolved during clarification — re-check "
+                f"before rewriting):\n{raw_evidence}\n\n"
+                "Verify your corrected SQL's columns, formula, and thresholds "
+                "satisfy this evidence exactly. Do not substitute a different "
+                "formula, column, or value than what's stated here unless it "
+                "directly conflicts with the validation error above.\n\n"
+            )
 
         # Anchor ambiguous-term interpretation across repair attempts: without
         # this, each reconstruction call independently re-derives things like
@@ -587,6 +645,7 @@ class SQLReconstructionAgent(BaseAgent):
             "The following SQL contains an ERROR:\n\n"
             f"```sql\n{sql_code}\n```\n\n"
             f"Validation failed with the following message:\n{error}\n\n"
+            f"{raw_evidence_reminder_section}"
             f"{history_section}"
             f"{prior_interpretation_section}"
             "Please correct the SQL. Do not return the same SQL — "

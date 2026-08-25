@@ -56,6 +56,7 @@ from gsf.dal.attributes import (
     find_column_id_by_table_and_name,
     find_join_path,
     find_shared_hub_bridge,
+    find_table_key_columns,
 )
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.retrieval.text_to_sql.db_probe.literal_check import (
@@ -76,11 +77,31 @@ _OVERLAP_KEEP_THRESHOLD = 0.2
 
 
 def _join_equalities(tree: exp.Expression) -> list[tuple[exp.Column, exp.Column]]:
-    """Column-to-column equality predicates found inside a ``JOIN ... ON`` clause.
+    """Column-to-column equality predicates that express a join, wherever written.
+
+    Two syntactic shapes carry the same join topology as an explicit
+    ``JOIN ... ON``, and are collected here too:
+
+    - a ``WHERE`` clause connecting two tables the old, implicit way
+      (``FROM a, b WHERE a.col = b.col``);
+    - a correlated subquery's ``WHERE`` comparing an outer-query column to an
+      inner-query column (e.g. ``(SELECT ... FROM b WHERE b.col = a.col)`` in
+      the outer query's projection or filter) — this is exactly as capable of
+      encoding a hallucinated relationship as a real ``JOIN``, but was
+      previously invisible to this check entirely.
+
+    ``tree.find_all(exp.Where)`` walks every nesting level, so a correlated
+    subquery's own ``WHERE`` is picked up alongside the top-level one without
+    extra recursion here. Predicates already inside a ``JOIN ... ON`` are not
+    re-found via ``Where`` (``ON`` is a distinct clause), so nothing is
+    double-counted between the two loops below.
 
     Only predicates where *both* sides are bare columns are considered — a
     join condition compares two identity columns, not a column against a
-    literal or an expression (those are filters, not join topology).
+    literal or an expression (those are filters, not join topology). Same-
+    table and unresolvable-alias predicates are filtered out by the caller
+    (see ``find_join_path_mismatches``), so a same-table ``WHERE`` filter
+    (e.g. ``a.status = a.other_col``) is never mistaken for a join here.
     """
     out: list[tuple[exp.Column, exp.Column]] = []
     for join in tree.find_all(exp.Join):
@@ -88,6 +109,12 @@ def _join_equalities(tree: exp.Expression) -> list[tuple[exp.Column, exp.Column]
         if on is None:
             continue
         for eq in on.find_all(exp.EQ):
+            left = _as_column(eq.this)
+            right = _as_column(eq.expression)
+            if left is not None and right is not None:
+                out.append((left, right))
+    for where in tree.find_all(exp.Where):
+        for eq in where.find_all(exp.EQ):
             left = _as_column(eq.this)
             right = _as_column(eq.expression)
             if left is not None and right is not None:
@@ -268,6 +295,19 @@ def find_join_path_mismatches(
         # have a real, ingested FK edge, so no extra probe is needed here.
         hub = find_shared_hub_bridge(col_a_id, col_b_id)
         if hub.get("hub_table") and hub.get("hub_column"):
+            # A direct join between two hub-shared FK columns is only worth
+            # flagging when NEITHER side is itself unique/PK-backed on its
+            # own table. When one side is (e.g. a satellite table's PK is
+            # also its FK to the hub), that column is guaranteed 1:1 with
+            # the hub row, so `A.col = B.col` directly is mathematically
+            # identical to routing `A -> hub <- B` through the bridge — just
+            # without the extra join.
+            keys_a = find_table_key_columns(table_a, database_name)
+            keys_b = find_table_key_columns(table_b, database_name)
+            col_a_is_identity = left.name.lower() in (keys_a["pk"] + keys_a["unique"])
+            col_b_is_identity = right.name.lower() in (keys_b["pk"] + keys_b["unique"])
+            if col_a_is_identity or col_b_is_identity:
+                continue  # direct join is provably equivalent — not a mismatch
             mismatches.append(
                 {
                     "table_a": table_a,
@@ -340,6 +380,100 @@ def find_join_path_mismatches(
     return mismatches
 
 
+def _set_column_name(col: exp.Column, new_name: str) -> None:
+    """Rename *col* in place to *new_name*, leaving it untouched if the name
+    is already correct and preserving whatever quoting the original
+    identifier had (many of these DBs use case-sensitive mixed-case column
+    names like ``"REC_COMP"`` — re-serializing through a fresh, unquoted
+    ``exp.to_identifier`` would silently fold that to lowercase and break
+    the query against Postgres's case-sensitive quoted-identifier rules)."""
+    if col.name == new_name:
+        return
+    quoted = bool(col.this.args.get("quoted")) if col.this else False
+    col.set("this", exp.to_identifier(new_name, quoted=quoted))
+
+
+def try_self_apply_wrong_column_fixes(
+    mismatches: list[dict[str, Any]], sql: str, dialect: Optional[str]
+) -> tuple[str, list[dict[str, Any]]]:
+    """Deterministically fix ``wrong_column`` mismatches by patching the
+    column name(s) on the existing join predicate in place.
+
+    Scoped to ``wrong_column`` only, not ``missing_bridge`` or
+    ``unverified``: a wrong-column fix keeps the same two tables (and the
+    same alias references already in the SQL) and only swaps which column
+    on each side is compared, which is a safe, local AST edit. A
+    ``missing_bridge`` fix has to insert an entirely new JOIN clause (a new
+    table, a new alias, rewritten ON conditions) — real structural surgery,
+    not a local swap, so it's left to reconstruction. ``unverified`` has no
+    known correct column to swap in at all.
+
+    Returns the (possibly rewritten) SQL and the sub-list of mismatches
+    left for reconstruction (untouched ``wrong_column`` mismatches whose
+    predicate couldn't be relocated, plus every ``missing_bridge``/
+    ``unverified`` mismatch, unchanged).
+    """
+    fixable = {
+        id(m): m
+        for m in mismatches
+        if m["verdict"] == "wrong_column" and m.get("hops")
+    }
+    if not fixable:
+        return sql, mismatches
+
+    try:
+        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+    except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
+        logger.info("join_path_check self-apply: could not parse SQL (%s)", exc)
+        return sql, mismatches
+    if tree is None:
+        return sql, mismatches
+
+    all_nodes, by_key = _table_nodes(tree)
+    if not all_nodes:
+        return sql, mismatches
+
+    applied: set[int] = set()
+    for left, right in _join_equalities(tree):
+        table_left = _resolve_table_name(left, all_nodes, by_key)
+        table_right = _resolve_table_name(right, all_nodes, by_key)
+        if not table_left or not table_right:
+            continue
+        for mid, m in fixable.items():
+            if mid in applied:
+                continue
+            # Match this predicate to the mismatch by the exact written
+            # (table, column) pair on each side — not just the table set —
+            # so a query with two different wrong joins between the same
+            # two tables doesn't accidentally patch the wrong one.
+            written = {
+                (table_left.lower(), left.name.lower()),
+                (table_right.lower(), right.name.lower()),
+            }
+            wanted = {
+                (m["table_a"].lower(), m["col_a"].lower()),
+                (m["table_b"].lower(), m["col_b"].lower()),
+            }
+            if written != wanted:
+                continue
+            hop = m["hops"][0]
+            if table_left.lower() == hop["source_table"].lower():
+                new_left_col, new_right_col = hop["source_column"], hop["target_column"]
+            else:
+                new_left_col, new_right_col = hop["target_column"], hop["source_column"]
+            _set_column_name(left, new_left_col)
+            _set_column_name(right, new_right_col)
+            applied.add(mid)
+            break
+
+    if not applied:
+        return sql, mismatches
+
+    new_sql = tree.sql(dialect=_sqlglot_dialect(dialect))
+    remaining = [m for m in mismatches if id(m) not in applied]
+    return new_sql, remaining
+
+
 def build_join_path_repair_error(mismatches: list[dict[str, Any]]) -> str:
     """Render mismatches into a targeted reconstruction instruction."""
     lines = []
@@ -370,22 +504,273 @@ def build_join_path_repair_error(mismatches: list[dict[str, Any]]) -> str:
             lines.append(
                 f"- You joined {written}, but no relationship between these "
                 f"columns could be verified and their actual values barely "
-                f"overlap. This join is very likely wrong — find the correct "
-                f"way to connect these tables, adding any table needed."
+                f"overlap. This join is very likely wrong. Before looking for "
+                f"a way to connect these two tables, first check whether the "
+                f"value you need is already available on a table you're "
+                f"already joined to — you may not need this join at all. If "
+                f"it genuinely isn't available anywhere in scope, the value "
+                f"likely comes from a different table entirely, not just a "
+                f"different column pair between these same two tables."
             )
     body = "\n".join(lines)
+    # "unverified" mismatches have no known correct join — the real fix may
+    # be dropping the join and sourcing the value from elsewhere entirely
+    # (see the per-item message above), which the blanket "change only the
+    # join" instruction below would otherwise forbid.
+    has_unverified = any(m["verdict"] == "unverified" for m in mismatches)
+    scope_instruction = (
+        "Rewrite the SQL using the correct join condition(s) above. Change "
+        "ONLY the mismatched join(s); keep all other joins, columns, "
+        "grouping, and filters exactly as they are."
+        if not has_unverified
+        else "Rewrite the SQL to fix the join(s) flagged above. For any "
+        "flagged as unverified, you may need to change which table/column "
+        "supplies that value entirely (including dropping the join and "
+        "reading it from a table already in scope), not just swap the join "
+        "predicate. Leave every other join, column, grouping, and filter "
+        "exactly as they are."
+    )
     return (
         "One or more JOIN conditions in the generated SQL do not match a "
         "real relationship between the tables, so the query silently joins "
         "the wrong rows instead of erroring:\n"
         f"{body}\n\n"
-        "Rewrite the SQL using the correct join condition(s) above. Change "
-        "ONLY the mismatched join(s); keep all other joins, columns, "
-        "grouping, and filters exactly as they are."
+        f"{scope_instruction}"
+    )
+
+
+def _group_join_equalities_by_table_pair(
+    tree: exp.Expression,
+    all_nodes: list[exp.Table],
+    by_key: dict[str, exp.Table],
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Group column-equality join predicates by the (table_a, table_b) they connect.
+
+    Each group entry is ``{"left", "right", "table_left", "table_right"}`` —
+    the raw predicate kept oriented exactly as written, plus its resolved
+    (real, unaliased) table names. Both orientations of the same two tables
+    (``a.col = b.col`` and ``b.col = a.col``) land in one group, keyed by the
+    table names sorted case-insensitively.
+    """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for left, right in _join_equalities(tree):
+        table_left = _resolve_table_name(left, all_nodes, by_key)
+        table_right = _resolve_table_name(right, all_nodes, by_key)
+        if (
+            not table_left
+            or not table_right
+            or table_left.lower() == table_right.lower()
+        ):
+            continue
+        key = tuple(sorted([table_left.lower(), table_right.lower()]))
+        groups.setdefault(key, []).append(
+            {
+                "left": left,
+                "right": right,
+                "table_left": table_left,
+                "table_right": table_right,
+            }
+        )
+    return groups
+
+
+def _is_verified_edge(predicate: dict[str, Any], database_name: Optional[str]) -> bool:
+    """Whether *predicate* is exactly the graph-known relationship between its two tables."""
+    left, right = predicate["left"], predicate["right"]
+    table_left, table_right = predicate["table_left"], predicate["table_right"]
+    col_a_id = find_column_id_by_table_and_name(table_left, left.name, database_name)
+    col_b_id = find_column_id_by_table_and_name(table_right, right.name, database_name)
+    if not col_a_id or not col_b_id:
+        return False
+    hops = find_join_path(col_a_id, col_b_id)
+    if len(hops) != 1:
+        return False
+    hop = hops[0]
+    hop_pair = {
+        (hop["source_table"].lower(), hop["source_column"].lower()),
+        (hop["target_table"].lower(), hop["target_column"].lower()),
+    }
+    written_pair = {
+        (table_left.lower(), left.name.lower()),
+        (table_right.lower(), right.name.lower()),
+    }
+    return hop_pair == written_pair
+
+
+def _oriented_columns(predicate: dict[str, Any], table_a: str) -> tuple[str, str]:
+    """``(a_col, b_col)`` for *predicate*, remapped onto the fixed ``a``/``b`` aliases."""
+    if predicate["table_left"].lower() == table_a.lower():
+        return predicate["left"].name, predicate["right"].name
+    return predicate["right"].name, predicate["left"].name
+
+
+def _count_case_dirty_rejects(
+    executor: ProbeExecutor,
+    dialect: Optional[str],
+    table_a: str,
+    table_b: str,
+    core: list[dict[str, Any]],
+    extra: list[dict[str, Any]],
+) -> Optional[tuple[int, int]]:
+    """``(total_rejects, casing_only_rejects)`` among core-matched rows the extra
+    predicate(s) reject.
+
+    Rather than just comparing row counts with/without the extra predicate
+    (which can't tell "dirty data" apart from "correctly excluding a
+    different real-world row"), this inspects the rejected rows directly:
+    ``casing_only_rejects`` counts how many of them would pass if the extra
+    predicate's columns were compared via ``LOWER(TRIM(...))`` instead of raw
+    equality — i.e. the two sides agree in substance and differ only in
+    casing/whitespace. ``None`` on probe failure.
+    """
+    d = _sqlglot_dialect(dialect)
+    a_ref = exp.table_(table_a).sql(dialect=d)
+    b_ref = exp.table_(table_b).sql(dialect=d)
+
+    def _eq(a_col: str, b_col: str, normalized: bool) -> str:
+        a_ref_col = f"a.{exp.column(a_col).sql(dialect=d)}"
+        b_ref_col = f"b.{exp.column(b_col).sql(dialect=d)}"
+        if normalized:
+            return f"LOWER(TRIM({a_ref_col})) = LOWER(TRIM({b_ref_col}))"
+        return f"{a_ref_col} = {b_ref_col}"
+
+    core_on = " AND ".join(_eq(*_oriented_columns(p, table_a), False) for p in core)
+    extra_raw = " AND ".join(_eq(*_oriented_columns(p, table_a), False) for p in extra)
+    extra_normalized = " AND ".join(
+        _eq(*_oriented_columns(p, table_a), True) for p in extra
+    )
+
+    sql = (
+        f"SELECT "
+        f"COUNT(*) FILTER (WHERE NOT ({extra_raw})) AS total_rejects, "
+        f"COUNT(*) FILTER (WHERE NOT ({extra_raw}) AND ({extra_normalized})) "
+        f"AS casing_only_rejects "
+        f"FROM {a_ref} a JOIN {b_ref} b ON {core_on}"
+    )
+    res = executor.run(sql, purpose="join_case_dirty_rejects")
+    if not res["ok"] or not res["rows"]:
+        return None
+    row = res["rows"][0]
+    try:
+        return int(row.get("total_rejects") or 0), int(
+            row.get("casing_only_rejects") or 0
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def find_case_dirty_join_mismatches(
+    executor: ProbeExecutor,
+    dialect: Optional[str],
+    sql: str,
+    database_name: Optional[str],
+) -> list[dict[str, Any]]:
+    """Return compound joins where an extra predicate rejects real matches
+    purely due to casing/whitespace, not a real difference.
+
+    When a query joins two tables on more than one equality predicate and one
+    of them is the graph-verified relationship, the extra predicate(s) are
+    usually added as defensive "belt and suspenders." That's only safe to
+    remove if it's actually dirty data — an extra predicate can also be doing
+    its job, correctly excluding a genuinely different real-world row that
+    happens to share the verified key. A plain row-count comparison can't
+    tell those apart, so this inspects the *rejected* rows directly: among
+    rows the verified predicate alone matches but the extra predicate
+    rejects, are all of them cases where the extra predicate's columns agree
+    once ``LOWER(TRIM(...))``'d? Only then is it flagged — a real semantic
+    difference (even one rejected row) leaves the check silent.
+
+    Each entry: ``{"table_a", "table_b", "verified_columns", "extra_columns",
+    "rejected_rows", "verdict": "case_dirty_join"}``.
+    """
+    try:
+        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+    except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
+        logger.info("case_dirty_join_check: could not parse SQL (%s)", exc)
+        return []
+    if tree is None:
+        return []
+
+    all_nodes, by_key = _table_nodes(tree)
+    if not all_nodes:
+        return []
+
+    groups = _group_join_equalities_by_table_pair(tree, all_nodes, by_key)
+    mismatches: list[dict[str, Any]] = []
+
+    for predicates in groups.values():
+        if len(predicates) < 2 or not executor.budget_left:
+            continue
+
+        verified = [p for p in predicates if _is_verified_edge(p, database_name)]
+        verified_ids = {id(p) for p in verified}
+        extra = [p for p in predicates if id(p) not in verified_ids]
+        if not verified or not extra:
+            continue  # need a known-good core to test the extra predicate against
+
+        table_a, table_b = predicates[0]["table_left"], predicates[0]["table_right"]
+        counts = _count_case_dirty_rejects(
+            executor, dialect, table_a, table_b, verified, extra
+        )
+        if counts is None:
+            continue  # probe failed
+        total_rejects, casing_only_rejects = counts
+
+        if total_rejects > 0 and total_rejects == casing_only_rejects:
+            # Every rejected row agrees once normalized — a confirmed casing
+            # artifact, not a real difference.
+            mismatches.append(
+                {
+                    "table_a": table_a,
+                    "table_b": table_b,
+                    "verified_columns": [
+                        f"{p['table_left']}.{p['left'].name} = "
+                        f"{p['table_right']}.{p['right'].name}"
+                        for p in verified
+                    ],
+                    "extra_columns": [
+                        f"{p['table_left']}.{p['left'].name} = "
+                        f"{p['table_right']}.{p['right'].name}"
+                        for p in extra
+                    ],
+                    "rejected_rows": total_rejects,
+                    "verdict": "case_dirty_join",
+                }
+            )
+
+    return mismatches
+
+
+def build_case_dirty_join_repair_error(mismatches: list[dict[str, Any]]) -> str:
+    """Render case-dirty-join mismatches into a targeted reconstruction instruction."""
+    lines = []
+    for m in mismatches:
+        core = ", ".join(m["verified_columns"])
+        extra = ", ".join(m["extra_columns"])
+        lines.append(
+            f"- Joining {m['table_a']} to {m['table_b']} on {core} AND {extra} "
+            f"silently rejects {m['rejected_rows']} row(s) that the verified "
+            f"relationship ({core}) alone matches — and in every one of them, "
+            f"{extra} agree once both sides are lower-cased and trimmed. This "
+            f"is dirty data (casing/whitespace), not a real mismatch."
+        )
+    body = "\n".join(lines)
+    return (
+        "One or more JOINs use an extra condition that rejects real matches "
+        "purely due to inconsistent casing/whitespace between the two tables:\n"
+        f"{body}\n\n"
+        "Wrap that condition's columns in LOWER(TRIM(...)) on both sides "
+        "instead of comparing them raw. Do NOT drop the condition — it may "
+        "still be needed to correctly exclude other, genuinely different "
+        "rows. Change ONLY the affected condition; keep all other joins, "
+        "columns, grouping, and filters exactly as they are."
     )
 
 
 __all__ = [
     "find_join_path_mismatches",
     "build_join_path_repair_error",
+    "find_case_dirty_join_mismatches",
+    "build_case_dirty_join_repair_error",
+    "try_self_apply_wrong_column_fixes",
 ]

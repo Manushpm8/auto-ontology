@@ -7,9 +7,12 @@
 Optional variant of the value-repair signal, gated by ``DB_PROBE_PROACTIVE``.
 Unlike the post-execution empty-result check, this runs *before* execution and
 regardless of the (not-yet-known) result, so it also catches wrong literals that
-would return non-empty-but-wrong rows. It costs a few cheap ``DISTINCT`` probes
-on every query that has a categorical equality/IN filter, which is why it is
-opt-in. Runs at most once per request (guarded) to avoid reconstruction loops.
+would return non-empty-but-wrong rows — including a numeric threshold that's
+merely on the wrong scale (e.g. a percent vs. fraction mismatch), which a
+non-empty-but-wrong result would otherwise hide. It costs a few cheap
+``DISTINCT``/``MIN``/``MAX`` probes on every query that has a categorical
+equality/IN filter or a numeric comparison filter, which is why it is opt-in.
+Runs at most once per request (guarded) to avoid reconstruction loops.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.retrieval.text_to_sql.db_probe.literal_check import (
     build_value_repair_error,
     find_literal_mismatches,
+    find_numeric_scale_mismatches,
 )
 from gsf.retrieval.text_to_sql.state import AgentState
 
@@ -51,6 +55,7 @@ class ProactiveValueCheckAgent(BaseAgent):
 
         with ProbeExecutor(connector) as executor:
             mismatches = find_literal_mismatches(executor, dialect, sql_code)
+            mismatches += find_numeric_scale_mismatches(executor, dialect, sql_code)
 
         if not mismatches:
             return {"decision": "valid_sql", "path_state": path_state}
@@ -64,7 +69,8 @@ class ProactiveValueCheckAgent(BaseAgent):
         # sql_reconstruction.py) so it can't be misread as missing_data.
         path_state["error_known_fixable"] = True
         self.logger.info(
-            "Proactive check — routing to reconstruction to fix %d literal(s): %s",
+            "[%s] Proactive check — routing to reconstruction to fix %d literal(s): %s",
+            path_state.get("task_id", "?"),
             len(mismatches),
             [f"{m['table']}.{m['column']}='{m['used']}'" for m in mismatches],
         )

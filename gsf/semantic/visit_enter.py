@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
@@ -47,6 +48,34 @@ _EXCLUDED_SAMPLE_TYPES = ("date", "time", "timestamp", "datetime", "uuid")
 _LOW_CARDINALITY_MAX = 25
 # Declared data-type substrings treated as free/categorical text.
 _TEXT_SAMPLE_TYPES = ("char", "text", "string", "clob", "enum")
+# JSONB nested-key names that mark a sibling value as unit-qualified (e.g.
+# {"value": 45000, "unit": "annual"}). When a container has one of these,
+# every other key in that container is annotated with the unit key's path so
+# the SQL generator sees, right next to the value, that it must not compare
+# two such values without checking the unit matches.
+_UNIT_MARKER_KEYS = ("unit", "units", "uom", "currency", "measure")
+# JSONB nested-key name substrings that plausibly hold a date/timestamp
+# string. Gates which nested keys are worth pulling example values for below
+# — cheap and imprecise by design (a name-based heuristic, not a value-based
+# one), since the alternative (capturing examples for every nested key) would
+# bloat every JSONB column's description with mostly-irrelevant values.
+_DATE_KEY_HINTS = ("date", "_dt", "day", "time", "moment", "schedule", "_on", "_at")
+
+# Shape patterns for free-text values that hold a date/timestamp as a string
+# (a JSONB nested leaf, or a "text"-typed column that was never cast to a
+# real date type — both are common in these benchmark schemas). Matched
+# against the *shape* only (digit widths / separators), never asserting a
+# day/month reading for ambiguous slash-separated forms — that can't be
+# recovered from the shape alone and a wrong guess would be worse than no
+# guess. Order doesn't matter: a value is tested against every pattern and
+# can only ever match one (they're mutually exclusive shapes).
+_DATE_SHAPE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("YYYY-MM-DD", re.compile(r"^\d{4}-\d{2}-\d{2}")),
+    ("YYYY/MM/DD", re.compile(r"^\d{4}/\d{1,2}/\d{1,2}$")),
+    ("DD/MM/YYYY or MM/DD/YYYY (ambiguous)", re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")),
+    ("DD/MM/YY or MM/DD/YY (ambiguous)", re.compile(r"^\d{2}/\d{2}/\d{2}$")),
+    ("Mon DD, YYYY", re.compile(r"^[A-Za-z]{3,9} \d{1,2},? \d{4}$")),
+)
 
 # Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
 # the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
@@ -137,6 +166,29 @@ def _is_text_sample_type(data_type: str | None) -> bool:
     return any(token in lowered for token in _TEXT_SAMPLE_TYPES)
 
 
+def _date_shapes_seen(values: list[str]) -> list[str]:
+    """Distinct recognized date/timestamp shapes among *values*, in first-seen order.
+
+    A value that matches none of :data:`_DATE_SHAPE_PATTERNS` is silently
+    ignored rather than counted as "no date shape" for the whole column —
+    this only exists to catch a column mixing more than one *recognized*
+    shape (e.g. some rows ``YYYY-MM-DD``, others ``YYYY/MM/DD``), which is a
+    real, observed bug: a fixed-format parser silently mis-parses whichever
+    shape it wasn't written for. It intentionally does not try to classify
+    every possible date-like string — an odd one-off format (e.g. a literal
+    "12th Jun." style column) is left to speak for itself via the raw sample
+    values already shown, rather than force a wrong or overly-broad match.
+    """
+    shapes: list[str] = []
+    for value in values:
+        for label, pattern in _DATE_SHAPE_PATTERNS:
+            if pattern.match(value):
+                if label not in shapes:
+                    shapes.append(label)
+                break
+    return shapes
+
+
 def _distinct_values_if_low_cardinality(
     connector: "SQLDatabase",
     qualified: str,
@@ -182,6 +234,13 @@ def calculate_columns_profiling(
     Persists to Neo4j Column nodes: ``is_unique`` for every column, and
     ``sample_values`` for every column except those whose declared type is a
     date/time/uuid (individual string values longer than 30 chars are dropped).
+    A text column whose real values mix more than one recognized date/
+    timestamp shape (e.g. some rows ``YYYY-MM-DD``, others ``YYYY/MM/DD``)
+    gets an explicit mixed-format warning appended, checked against the full
+    sample rather than only the stored top-5 so a rare minority shape isn't
+    missed. JSONB nested keys whose name hints at a date (see
+    ``_DATE_KEY_HINTS``) get the same treatment plus a raw example value when
+    no recognized shape matches at all.
 
     Returns ``{column_name: {"sample_values": [top-5 values], "is_unique": bool}}``
     for *all* columns (values unfiltered — includes dates, uuids and long
@@ -189,6 +248,7 @@ def calculate_columns_profiling(
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
+
     # Quote identifiers so mixed-case table/schema names (e.g. "RiskManagement")
     # are preserved — Postgres folds unquoted names to lowercase.
     def _q(ident: str) -> str:
@@ -267,23 +327,84 @@ def calculate_columns_profiling(
         # and one level of nesting — so the SQL generator sees the actual
         # field paths it needs to write correct ->/->> expressions.
         if "json" in (declared_type or "").lower():
-            json_keys: list[str] = []
+            top_level_keys: list[str] = []
+            containers: dict[str, list[str]] = {}
+            # Example raw values per (container, nested_key) — only collected
+            # for keys whose name hints at a date/timestamp (see
+            # _DATE_KEY_HINTS); every other nested key stays name-only, same
+            # as before. These are never a Column's real "sample_values" (the
+            # column itself is JSONB, not text) — they exist solely to let a
+            # date-shape check run on a nested leaf the way it already can on
+            # a plain text column.
+            nested_date_examples: dict[tuple[str, str], list[str]] = {}
             for raw_val in df[column].dropna():
                 if not isinstance(raw_val, dict):
                     continue
                 for k, v in raw_val.items():
                     if isinstance(v, dict):
-                        for nested_k in v:
-                            entry = f"{k}.{nested_k}"
-                            if entry not in json_keys:
-                                json_keys.append(entry)
-                    elif k not in json_keys:
-                        json_keys.append(k)
+                        nested = containers.setdefault(k, [])
+                        for nested_k, nested_v in v.items():
+                            if nested_k not in nested:
+                                nested.append(nested_k)
+                            is_date_hint = any(
+                                hint in nested_k.lower() for hint in _DATE_KEY_HINTS
+                            )
+                            if nested_v is None or not is_date_hint:
+                                continue
+                            examples = nested_date_examples.setdefault(
+                                (k, nested_k), []
+                            )
+                            str_v = str(nested_v)
+                            if (
+                                len(examples) < 3
+                                and str_v not in examples
+                                and (len(str_v) <= _MAX_SAMPLE_VALUE_LEN)
+                            ):
+                                examples.append(str_v)
+                    elif k not in top_level_keys:
+                        top_level_keys.append(k)
+
+            json_keys: list[str] = []
+            for k, nested_keys in containers.items():
+                unit_key = next(
+                    (nk for nk in nested_keys if nk.lower() in _UNIT_MARKER_KEYS),
+                    None,
+                )
+                for nested_k in nested_keys:
+                    entry = f"{k}.{nested_k}"
+                    if unit_key and nested_k != unit_key:
+                        entry += f" [unit: {k}.{unit_key}]"
+                    examples = nested_date_examples.get((k, nested_k))
+                    if examples:
+                        shapes = _date_shapes_seen(examples)
+                        if len(shapes) > 1:
+                            entry += (
+                                f" [WARNING mixed date formats observed: "
+                                f"{', '.join(shapes)}]"
+                            )
+                        elif shapes:
+                            entry += f" [date format: {shapes[0]}]"
+                        else:
+                            entry += f" [e.g. {examples[0]!r}]"
+                    json_keys.append(entry)
+            json_keys.extend(top_level_keys)
+
             if json_keys:
                 sample_values[col_name] = json_keys[:10]
             continue
 
         filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
+        if _is_text_sample_type(declared_type):
+            # Checked against the full up-to-1000-row sample, not just the
+            # top-5/distinct values kept for display — a minority format can
+            # be entirely absent from the top-5 while still breaking a
+            # fixed-format parser on real rows (observed: a column mostly
+            # 'YYYY-MM-DD' with a rare 'YYYY/MM/DD' minority).
+            shapes = _date_shapes_seen(list(series))
+            if len(shapes) > 1:
+                filtered.append(
+                    f"[WARNING mixed date formats observed: {', '.join(shapes)}]"
+                )
         if filtered:
             sample_values[col_name] = filtered
 

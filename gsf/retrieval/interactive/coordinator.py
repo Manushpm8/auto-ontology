@@ -11,12 +11,29 @@ logger = logging.getLogger(__name__)
 # import time (which requires NVIDIA_API_KEY to be set).
 from concurrent.futures import ThreadPoolExecutor
 
-from .clarify import should_clarify, refresh_grounded_kg, prune_resolved_terms, _STUCK_PHRASES, should_inject_default_sort, _DEFAULT_SORT_HINT, _format_resolved_schema_terms
+from .clarify import (
+    should_clarify,
+    refresh_grounded_kg,
+    prune_resolved_terms,
+    _STUCK_PHRASES,
+    should_inject_default_sort,
+    _DEFAULT_SORT_HINT,
+    _format_resolved_schema_terms,
+)
 from .kg_coverage import expand_kg_with_children
-from .output_type import output_type_enabled, should_skip_output_type_question, OUTPUT_TYPE_QUESTION, SCALAR_HINT
+from .output_type import (
+    output_type_enabled,
+    should_skip_output_type_question,
+    OUTPUT_TYPE_QUESTION,
+    SCALAR_HINT,
+)
 from .conditional_output import conditional_output_enabled, get_conditional_output_hint
 from .completeness import detect_incomplete_formulas
-from .evidence import build_grounded_terms_hint, detect_and_resolve_named_columns, generate_evidence
+from .evidence import (
+    build_grounded_terms_hint,
+    detect_and_resolve_named_columns,
+    generate_evidence,
+)
 from .followup_merge import merge_follow_up_question
 from .grounding import ground_external_knowledge
 from .merge import merge_clarification
@@ -25,6 +42,7 @@ from .state import InteractiveSessionState
 
 
 # ── Message classifier ──────────────────────────────────────────────────────
+
 
 def _classify_message(message: str) -> TurnType:
     if "Your SQL is not executable" in message or "Your SQL is not correct" in message:
@@ -35,6 +53,7 @@ def _classify_message(message: str) -> TurnType:
 
 
 # ── Question extraction ─────────────────────────────────────────────────────
+
 
 def _extract_question_from_initial(message: str) -> str:
     """Extract the user question from the Phase 1 orchestrator message."""
@@ -56,6 +75,7 @@ def _extract_followup_question(message: str) -> str:
 
 # ── Seeds ───────────────────────────────────────────────────────────────────
 
+
 def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
     """Prepare path_state to resume at reconstruct_sql with Bird's error as context."""
     session.path_state["_resume_from"] = "reconstruct_sql"
@@ -75,19 +95,38 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
             "Do NOT modify formula coefficients, formula structure, or aggregation logic — "
             "these were confirmed during clarification. "
             "Address whichever of the following applies, or fix a different issue you identify:\n\n"
-            "1. JOIN PATH (only if the current join path seems semantically wrong):"
-            "You may be joining tables too directly. "
-            "Check whether an intermediate table is required — "
-            "a direct join may need to route through a third table. "
-            "Verify the exact foreign key column names on each side.\n\n"
-            "2. LIMIT / ORDER BY: If the question asks for top-N results, add LIMIT N. "
-            "If an ORDER BY is present, verify it sorts by the column or expression "
-            "the question actually requests.\n\n"
-            "3. JSONB PATH: If accessing a JSONB column, verify the path and key name "
-            "are correct — keys are typically short and abbreviated, and may be nested "
-            "within intermediate objects."
+            "1. COMPOUND FILTER COMPLETENESS: Re-check the evidence and question for "
+            "every condition they imply, not just the primary one. Common drops: an "
+            "IS NOT NULL guard on a column feeding an aggregate or ratio, a "
+            "positivity/non-zero guard on a denominator, a second threshold in a "
+            "compound AND/OR, an exact value or unit filter (e.g. status = 'Completed', "
+            "unit = 'year'). If the evidence lists multiple conditions, verify all of "
+            "them are still present in your SQL.\n\n"
+            "2. OUTPUT GRAIN AND ROW SELECTION: Check whether the question wants one "
+            'row per group or a single aggregate/top-1 row, and whether "most '
+            'recent"/"latest snapshot"/dedup logic is implied — an extra join or an '
+            "extra GROUP BY column can silently fan out or split a group that should "
+            'stay merged. If the question asks for top-N or "the one with the highest '
+            "X,\" add LIMIT N. Judge from the question's phrasing whether unmatched "
+            "primary-entity rows should still appear."
         )
         logger.info("Debug seed: wrong results — injecting targeted benchmark hints")
+    # Preserve Phase 1's reconstruction lineage as read-only prompt context
+    # before wiping "failed_attempts" below — see sql_reconstruction.py's
+    # history_section, which renders "phase1_failed_attempts" alongside this
+    # turn's own attempts so the debug turn's LLM can see e.g. "you already
+    # tried the flattened JSONB key and were told it was wrong" instead of
+    # reconstructing from scratch with no memory of Phase 1's fixes. This is
+    # deliberately a *separate* key from "failed_attempts": the routers in
+    # text_to_sql_graph.py (route_sql_validation, _make_soft_check_router)
+    # gate on len(failed_attempts), so carrying the phase 1 list forward
+    # under that same key would eat into the fresh reconstruction budget the
+    # counter-reset below exists to guarantee. Content and count are tracked
+    # separately on purpose.
+    phase1_failed_attempts = session.path_state.get("failed_attempts")
+    if phase1_failed_attempts:
+        session.path_state["phase1_failed_attempts"] = phase1_failed_attempts
+
     session.path_state["sql_attempts"] = 0
     session.path_state["reconstruction_count"] = 0
     session.path_state["error_analysis_done"] = False
@@ -96,7 +135,22 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
     # turn inherits the attempt count from the PRIOR turn and can skip
     # intent validation almost immediately, cutting off the fresh repair
     # budget this turn is supposed to get.
-    for key in ("repair_attempted", "value_repair_done", "failed_attempts"):
+    #
+    # "jsonb_path_repair_attempted" is JsonbPathCheckAgent's one-shot guard
+    # (see jsonb_path_check.py) — it stays True forever once a path is fixed
+    # once in this phase, so without popping it here the debug turn's
+    # from-scratch reconstruction (which can reintroduce the exact class of
+    # bug the check already fixed, e.g. flattening a nested JSONB key back
+    # out) gets zero path-check coverage instead of the one fresh pass every
+    # other repair guard below already gets. "join_path_repair_attempts" is
+    # the analogous counter for JoinPathCheckAgent — same reasoning.
+    for key in (
+        "repair_attempted",
+        "value_repair_done",
+        "failed_attempts",
+        "jsonb_path_repair_attempted",
+        "join_path_repair_attempts",
+    ):
         session.path_state.pop(key, None)
 
 
@@ -108,10 +162,16 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     # Also clear similar_questions so Phase 1 VDB-retrieved examples don't bleed in —
     # Phase 1 context is injected explicitly via the follow-up instruction block instead.
     for key in (
-        "normalized_question", "sql_code", "sql_generation_result",
-        "error", "sql_attempts", "reconstruction_count",
-        "error_analysis_done", "_resume_from",
-        "final_response", "sql_response_from_db",
+        "normalized_question",
+        "sql_code",
+        "sql_generation_result",
+        "error",
+        "sql_attempts",
+        "reconstruction_count",
+        "error_analysis_done",
+        "_resume_from",
+        "final_response",
+        "sql_response_from_db",
         "similar_questions",
     ):
         session.path_state.pop(key, None)
@@ -146,6 +206,7 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
 
 # ── SQL generation ──────────────────────────────────────────────────────────
 
+
 def _run_sql_generation(session: InteractiveSessionState) -> str:
     """Call GSF and persist the returned path_state back to session."""
     from gsf.retrieval.text_to_sql.main import get_agent_response_with_state
@@ -155,7 +216,9 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     # For normal turns, cumulative_grounded_kg already has everything from clarification.
     extra_kg = ""
     if session._grounded_kg_for != session.working_question:
-        expanded_kg = expand_kg_with_children(session.external_kg, session.external_kg_children_map)
+        expanded_kg = expand_kg_with_children(
+            session.external_kg, session.external_kg_children_map
+        )
         extra_kg = ground_external_knowledge(
             session.working_question, expanded_kg, _get_fast_llm()
         )
@@ -166,7 +229,11 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     # Build Evidence from the union of: Phase 1 carry-over + this-phase KB turns + debug extra.
     # VDB resolved hits are column descriptions, not formulas — the SQL generator
     # rediscovers schema mappings via its own VDB; they only benefit the decide-LLM prompt.
-    combined_kg = "\n".join(filter(None, [session.phase1_grounded_kg, session.cumulative_grounded_kg, extra_kg]))
+    combined_kg = "\n".join(
+        filter(
+            None, [session.phase1_grounded_kg, session.cumulative_grounded_kg, extra_kg]
+        )
+    )
 
     # For Phase 2, rewrite the follow-up into a self-contained question that bakes in
     # column names and conditions from Phase 1 SQL so the SQL generator doesn't have to
@@ -179,7 +246,11 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             p1_question, p1_sql, session.working_question
         )
         session.working_question = merged_q
-        logger.info("[%s] SQL gen — follow-up merged question (p1 sql %d chars)", session.task_id, len(p1_sql))
+        logger.info(
+            "[%s] SQL gen — follow-up merged question (p1 sql %d chars)",
+            session.task_id,
+            len(p1_sql),
+        )
     evidence_question = session.working_question
 
     question = session.working_question
@@ -200,7 +271,22 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         # Injected directly rather than left to evidence-gen's LLM to relay —
         # that step isn't reliable about preserving instructions passed through it.
         evidence = "\n".join(filter(None, [evidence, *session._json_shared_notes]))
-        logger.info("[%s] SQL gen — injected %d shared-JSON-column note(s)", session.task_id, len(session._json_shared_notes))
+        logger.info(
+            "[%s] SQL gen — injected %d shared-JSON-column note(s)",
+            session.task_id,
+            len(session._json_shared_notes),
+        )
+    if session._ambiguity_resolution_notes:
+        # Same reasoning as _json_shared_notes above — injected directly, not
+        # left to evidence-gen's LLM to relay.
+        evidence = "\n".join(
+            filter(None, [evidence, *session._ambiguity_resolution_notes])
+        )
+        logger.info(
+            "[%s] SQL gen — injected %d ambiguity-resolution note(s)",
+            session.task_id,
+            len(session._ambiguity_resolution_notes),
+        )
     if should_inject_default_sort(session.working_question):
         evidence = "\n".join(filter(None, [evidence, _DEFAULT_SORT_HINT]))
         logger.info("[%s] SQL gen — injected default DESC sort hint", session.task_id)
@@ -211,7 +297,9 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         _cond_hint = get_conditional_output_hint(session.working_question)
         if _cond_hint:
             evidence = "\n".join(filter(None, [evidence, _cond_hint]))
-            logger.info("[%s] SQL gen — injected conditional output hint", session.task_id)
+            logger.info(
+                "[%s] SQL gen — injected conditional output hint", session.task_id
+            )
     if evidence:
         question = f"{question}\n\nEvidence: {evidence}"
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence)
@@ -247,6 +335,7 @@ def _get_llm():
     global _llm
     if _llm is None:
         from gsf.retrieval.text_to_sql.main import llm_client
+
         _llm = llm_client
     return _llm
 
@@ -255,11 +344,13 @@ def _get_fast_llm():
     global _fast_llm
     if _fast_llm is None:
         from gsf.retrieval.text_to_sql.main import non_reasoning_llm_client
+
         _fast_llm = non_reasoning_llm_client or _get_llm()
     return _fast_llm
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
+
 
 def create_session(
     session_id: str,
@@ -287,7 +378,7 @@ def create_session(
         data_retriever=data_retriever,
         semantic_retriever=semantic_retriever,
         connectors=connectors,
-        path_state={"target_db": db_name},
+        path_state={"target_db": db_name, "task_id": task_id},
     )
 
 
@@ -370,6 +461,53 @@ def step(
         # KB coverage to update cumulative_grounded_kg for Evidence generation.
         refresh_grounded_kg(session)
 
+    # Decision to proceed (whatever the reason — turn budget exhausted, or
+    # should_clarify judging PROCEED above) — resolve any still-open ambiguous
+    # entities from the final working_question, so the SQL generator gets a real
+    # decision instead of the vague "choose whichever fits" note. Gated on the
+    # proceed decision itself, not on turn count, so it isn't tied to BIRD-Interact's
+    # max_clarify_turns mechanic specifically.
+    #
+    # _ambiguity_resolved guards this to run once per *phase*, not once per
+    # handle_turn call: a DEBUG turn (SQL rejected, "fix it") re-enters this same
+    # function and falls through to _run_sql_generation again after the flag is
+    # already True from the first pass, so it correctly skips re-resolving —
+    # there's nothing turn-loop-specific about the guard itself, it's the same
+    # "already did this, don't repeat" flag as any one-shot-per-phase step.
+    if not session._ambiguity_resolved:
+        session._ambiguity_resolved = True
+        # Collision resolution (clarify._resolve_collisions, runs earlier in the
+        # same _find_unresolvable_entities call this turn — see entity_resolution.py)
+        # may have already settled some of these same entities on its own, more
+        # mature logic (KB-covered exclusion, composite-column handling, LLM
+        # fallback). Its outcome lands in _cached_resolved_hits. Without this
+        # check, both mechanisms could independently decide the same term and,
+        # if they disagree, inject contradicting notes into evidence with no
+        # arbitration between them — whichever landed later in the text would
+        # win by accident. Defer to collision's answer where one already exists.
+        already_resolved = {
+            entity for entity, *_ in session._cached_resolved_hits or []
+        }
+        pending = {
+            e: hits
+            for e, hits in session._last_ambiguous_hits.items()
+            if e not in already_resolved
+        }
+        if pending:
+            from .entity_resolution import resolve_pending_ambiguities
+
+            session._ambiguity_resolution_notes = resolve_pending_ambiguities(
+                session.working_question,
+                session.cumulative_grounded_kg,
+                pending,
+            )
+            if session._ambiguity_resolution_notes:
+                logger.info(
+                    "[%s] SQL gen — resolved %d pending ambiguous entit(y/ies)",
+                    session.task_id,
+                    len(session._ambiguity_resolution_notes),
+                )
+
     sql = _run_sql_generation(session)
     return SubmitSQLAction(sql=sql)
 
@@ -429,8 +567,13 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
         if merged:
             session.working_question = merged
         else:
-            logger.warning("[%s] merge_clarification returned empty; keeping previous question", session.task_id)
-        logger.info("[%s] Merged question: %s", session.task_id, session.working_question)
+            logger.warning(
+                "[%s] merge_clarification returned empty; keeping previous question",
+                session.task_id,
+            )
+        logger.info(
+            "[%s] Merged question: %s", session.task_id, session.working_question
+        )
 
         session.incomplete_formula_terms = gaps
         logger.info("[%s] Incomplete formula terms: %s", session.task_id, gaps)

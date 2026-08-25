@@ -21,14 +21,8 @@ from gsf.retrieval.text_to_sql.agents.candidates_retrieval import (
 from gsf.retrieval.text_to_sql.agents.empty_result_value_repair import (
     EmptyResultValueRepairAgent,
 )
-from gsf.retrieval.text_to_sql.agents.proactive_value_check import (
-    ProactiveValueCheckAgent,
-)
-from gsf.retrieval.text_to_sql.agents.jsonb_path_check import (
-    JsonbPathCheckAgent,
-)
-from gsf.retrieval.text_to_sql.agents.join_path_check import (
-    JoinPathCheckAgent,
+from gsf.retrieval.text_to_sql.agents.combined_precheck import (
+    CombinedPrecheckAgent,
 )
 from gsf.retrieval.entity_coverage.agents.question_extraction import (
     QuestionExtractionAgent,
@@ -305,32 +299,28 @@ def create_graph():
     value_repair_node = _make_node(
         "check_value_repair", agent_wrapper(EmptyResultValueRepairAgent())
     )
-    # Optional proactive (pre-execution) literal check — opt-in via DB_PROBE_PROACTIVE.
-    proactive_enabled = is_db_probe_proactive()
-    logger.info("Text-to-SQL graph: db-probe proactive %s", proactive_enabled)
-    proactive_value_node = (
-        _make_node("precheck_value_repair", agent_wrapper(ProactiveValueCheckAgent()))
-        if proactive_enabled
-        else None
-    )
-    # Optional proactive (pre-execution) join-path check — opt-in via
-    # DB_PROBE_JOIN_PATH_CHECK. Runs before the JSONB check: if the join
-    # topology itself is wrong, fix that first rather than repair a JSONB
-    # path against tables the join is about to be rewritten around.
-    join_path_enabled = is_db_probe_join_path_check()
-    logger.info("Text-to-SQL graph: db-probe join path check %s", join_path_enabled)
-    join_path_node = (
-        _make_node("precheck_join_path", agent_wrapper(JoinPathCheckAgent()))
-        if join_path_enabled
-        else None
-    )
-    # Optional proactive (pre-execution) JSONB key-path check — opt-in via
+    # Optional proactive (pre-execution) checks — literal/value, join-path, and
+    # JSONB key-path — merged into one node (CombinedPrecheckAgent) so a query
+    # failing more than one of them costs a single reconstruction round-trip
+    # instead of one per check. The node is only added if at least one of the
+    # three flags is on; internally, each sub-check still only runs if its own
+    # flag is enabled. Opt-in via DB_PROBE_PROACTIVE, DB_PROBE_JOIN_PATH_CHECK,
     # DB_PROBE_JSONB_PATH_CHECK.
+    proactive_enabled = is_db_probe_proactive()
+    join_path_enabled = is_db_probe_join_path_check()
     jsonb_path_enabled = is_db_probe_jsonb_path_check()
-    logger.info("Text-to-SQL graph: db-probe jsonb path check %s", jsonb_path_enabled)
-    jsonb_path_node = (
-        _make_node("precheck_jsonb_path", agent_wrapper(JsonbPathCheckAgent()))
-        if jsonb_path_enabled
+    logger.info(
+        "Text-to-SQL graph: db-probe proactive=%s join_path=%s jsonb_path=%s",
+        proactive_enabled,
+        join_path_enabled,
+        jsonb_path_enabled,
+    )
+    combined_precheck_enabled = (
+        proactive_enabled or join_path_enabled or jsonb_path_enabled
+    )
+    combined_precheck_node = (
+        _make_node("precheck_combined", agent_wrapper(CombinedPrecheckAgent()))
+        if combined_precheck_enabled
         else None
     )
     construct_sql_not_from_snippets_node = _make_node(
@@ -384,12 +374,8 @@ def create_graph():
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node("check_value_repair", value_repair_node)
-    if proactive_value_node is not None:
-        graph.add_node("precheck_value_repair", proactive_value_node)
-    if join_path_node is not None:
-        graph.add_node("precheck_join_path", join_path_node)
-    if jsonb_path_node is not None:
-        graph.add_node("precheck_jsonb_path", jsonb_path_node)
+    if combined_precheck_node is not None:
+        graph.add_node("precheck_combined", combined_precheck_node)
     graph.add_node(
         "construct_sql_not_from_snippets", construct_sql_not_from_snippets_node
     )
@@ -464,19 +450,14 @@ def create_graph():
     )
 
     # When any pre-execution probe check is enabled, every route that would
-    # otherwise go straight to execution is funnelled through the enabled
-    # checks first, in order: literal check, then JSONB path check.
-    pre_execute_chain = [
-        name
-        for name, node in (
-            ("precheck_value_repair", proactive_value_node),
-            ("precheck_join_path", join_path_node),
-            ("precheck_jsonb_path", jsonb_path_node),
-        )
-        if node is not None
-    ]
+    # otherwise go straight to execution is funnelled through the merged
+    # precheck node first (literal/value, join-path, and JSONB-path checks —
+    # see combined_precheck.py for why they're combined and how their
+    # internal ordering/gating works).
     pre_execute_target = (
-        pre_execute_chain[0] if pre_execute_chain else "execute_sql_query"
+        "precheck_combined"
+        if combined_precheck_node is not None
+        else "execute_sql_query"
     )
 
     # SQL validation → route
@@ -502,17 +483,12 @@ def create_graph():
         },
     )
 
-    for idx, name in enumerate(pre_execute_chain):
-        next_target = (
-            pre_execute_chain[idx + 1]
-            if idx + 1 < len(pre_execute_chain)
-            else "execute_sql_query"
-        )
+    if combined_precheck_node is not None:
         graph.add_conditional_edges(
-            name,
-            _make_soft_check_router(name),
+            "precheck_combined",
+            _make_soft_check_router("precheck_combined"),
             {
-                "valid_sql": next_target,
+                "valid_sql": "execute_sql_query",
                 "invalid_sql": "reconstruct_sql",
             },
         )

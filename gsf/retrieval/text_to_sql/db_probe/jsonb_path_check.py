@@ -235,6 +235,60 @@ def find_jsonb_path_mismatches(
     return mismatches
 
 
+def try_self_apply_fixes(
+    mismatches: list[dict[str, Any]], sql: str
+) -> tuple[str, list[dict[str, Any]]]:
+    """Deterministically fix the one JSONB-mismatch shape that's unambiguous
+    without an LLM: a flattened dotted key (``col ->> 'container.key'``)
+    where ``container`` is a real top-level key of that column. This is a
+    typo, not a domain-knowledge question — the model meant nested access
+    (``col -> 'container' ->> 'key'``) and wrote the dotted flat form
+    instead, so there's exactly one correct rewrite, not several candidates
+    to guess between.
+
+    Every other mismatch shape (genuinely wrong key with no dot, a container
+    that already exists but the sub-key doesn't, `wrong_type`) is left
+    alone — those need picking the right key out of ``available_keys`` or
+    restructuring the query, which is a real judgment call, not something to
+    guess at mechanically. Those still go to reconstruction exactly as
+    before.
+
+    Returns the (possibly rewritten) SQL and the sub-list of mismatches that
+    couldn't be fixed this way, for the caller to route to reconstruction as
+    normal.
+    """
+    remaining: list[dict[str, Any]] = []
+    for m in mismatches:
+        fixed = _self_apply_one(m, sql)
+        if fixed is None:
+            remaining.append(m)
+        else:
+            sql = fixed
+    return sql, remaining
+
+
+def _self_apply_one(mismatch: dict[str, Any], sql: str) -> Optional[str]:
+    """Return the rewritten SQL if *mismatch* is a fixable flattened-dot-key
+    typo, else ``None`` (caller leaves it for reconstruction)."""
+    if "wrong_type" in mismatch or mismatch.get("container") is not None:
+        return None
+    key = mismatch["used_key"]
+    if key.count(".") != 1:
+        return None
+    container, real_key = key.split(".", 1)
+    available = mismatch.get("available_keys") or []
+    matched_container = next(
+        (k for k in available if k.lower() == container.lower()), None
+    )
+    if matched_container is None:
+        return None
+    old = f"->>'{key}'"
+    new = f"->'{matched_container}'->>'{real_key}'"
+    if old not in sql:
+        return None  # exact text not found — bail rather than guess at a partial match
+    return sql.replace(old, new)
+
+
 def build_jsonb_path_repair_error(mismatches: list[dict[str, Any]]) -> str:
     """Render mismatches into a targeted reconstruction instruction."""
     key_mismatches = [m for m in mismatches if "wrong_type" not in m]
@@ -300,4 +354,5 @@ def build_jsonb_path_repair_error(mismatches: list[dict[str, Any]]) -> str:
 __all__ = [
     "find_jsonb_path_mismatches",
     "build_jsonb_path_repair_error",
+    "try_self_apply_fixes",
 ]

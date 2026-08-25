@@ -21,7 +21,7 @@ Design Decisions:
 """
 
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
 
 import sqlglot
 from sqlglot import expressions as exp
@@ -278,6 +278,237 @@ def _vacuous_reason(
     )
 
 
+def _select_scope_table_nodes(
+    select: exp.Select,
+) -> tuple[list[exp.Table], dict[str, exp.Table]]:
+    """Table nodes introduced directly in *select*'s own FROM/JOIN.
+
+    Deliberately does not descend into a derived subquery's own FROM (e.g.
+    ``JOIN (SELECT ...) s``) — that subquery is a separate SELECT block with
+    its own scope, checked independently when :func:`detect_missing_aggregation`
+    visits it via ``find_all(exp.Select)``. Mixing the two would misattribute
+    an inner query's tables to this block's join graph.
+    """
+    nodes: list[exp.Table] = []
+    # exp.From via .find(), not select.args.get("from") — see
+    # _check_select_block_vacuous's comment: sqlglot's internal arg key for
+    # this has changed across versions ("from" vs "from_"); searching by node
+    # type is stable regardless. .find() (not find_all) stays scoped to this
+    # block's own FROM since a nested SELECT lives inside a subquery, not a
+    # sibling of this block's FROM clause.
+    from_clause = select.find(exp.From)
+    if from_clause is not None and isinstance(from_clause.this, exp.Table):
+        nodes.append(from_clause.this)
+    for join in select.args.get("joins") or []:
+        if isinstance(join.this, exp.Table):
+            nodes.append(join.this)
+    by_key: dict[str, exp.Table] = {}
+    for t in nodes:
+        if t.name:
+            by_key.setdefault(t.name.lower(), t)
+        alias = t.alias
+        if alias:
+            by_key[alias.lower()] = t
+    return nodes, by_key
+
+
+def _resolve_column_table(
+    col: exp.Column, by_key: dict[str, exp.Table]
+) -> exp.Table | None:
+    """The table node *col* belongs to, resolved only from its own qualifier.
+
+    Returns ``None`` for an unqualified column in a multi-table join rather
+    than guessing among candidates — misattributing a column to the wrong
+    table here would over- or under-flag, so an ambiguous column is simply
+    left unchecked.
+    """
+    qualifier = (col.table or "").lower()
+    return by_key.get(qualifier) if qualifier else None
+
+
+def _many_side_tables(
+    select: exp.Select,
+    by_key: dict[str, exp.Table],
+    database_name: str | None,
+) -> set[str]:
+    """Lowercased names of tables that are the FK/"many" side of some
+    ``JOIN ... ON`` equality in *select*, determined from PK/unique key
+    metadata rather than guessed. An edge only counts when exactly one side
+    is known unique on its own table and the other is known not to be —
+    when neither or both sides are unique (or key metadata is missing for
+    one), the edge is ambiguous and contributes nothing, to keep this
+    conservative rather than risk flagging a legitimate 1:1 join.
+    """
+    many: set[str] = set()
+    for join in select.args.get("joins") or []:
+        on = join.args.get("on")
+        if on is None:
+            continue
+        for eq in on.find_all(exp.EQ):
+            left, right = eq.left, eq.right
+            if not (isinstance(left, exp.Column) and isinstance(right, exp.Column)):
+                continue
+            table_left = _resolve_column_table(left, by_key)
+            table_right = _resolve_column_table(right, by_key)
+            if table_left is None or table_right is None:
+                continue
+            if table_left.name.lower() == table_right.name.lower():
+                continue  # self-join — not this check's job
+            keys_left = find_table_key_columns(table_left.name, database_name)
+            keys_right = find_table_key_columns(table_right.name, database_name)
+            unique_left = left.name.lower() in (
+                keys_left["pk"] + keys_left["unique"]
+            )
+            unique_right = right.name.lower() in (
+                keys_right["pk"] + keys_right["unique"]
+            )
+            if unique_left and not unique_right:
+                many.add(table_right.name.lower())
+            elif unique_right and not unique_left:
+                many.add(table_left.name.lower())
+    return many
+
+
+def detect_missing_aggregation(
+    sql: str, dialect: str | None, database_name: str | None
+) -> str:
+    """Return a human-readable reason when *sql* groups by one table's key
+    but also selects a *different*, many-side-joined table's column raw,
+    outside any aggregate function.
+
+    Mirror-image failure to :func:`detect_vacuous_group_by`: instead of an
+    aggregate that's a no-op because nothing varies within a group, this is
+    a column that's silently *undefined* within a group because a joined
+    child table can contribute more than one row per group — e.g.
+    ``GROUP BY fan.id`` while also directly selecting
+    ``interactions.watch_hrs`` when a fan can have many interaction rows.
+    Every SQL engine this pipeline targets (Postgres included) accepts this
+    without error whenever it's spelled without an explicit ``GROUP BY`` at
+    all; it's only actually an error when a ``GROUP BY`` is present and the
+    ungrouped column isn't functionally dependent on it — which is exactly
+    the case this checks. It parses and executes fine, silently picking an
+    arbitrary row's value instead of the intended per-group summary.
+
+    Scoped to the narrow, always-true case: a SELECT block with an explicit
+    ``GROUP BY`` on a bare column, at least one ``JOIN ... ON`` in that same
+    block, and a join equality where PK/unique key metadata *confirms* one
+    side is the "many" side relative to the other (ambiguous cardinality is
+    left unflagged — see :func:`_many_side_tables`). Does not attempt the
+    much harder "no GROUP BY at all" case, where the intended output grain
+    isn't recoverable from the SQL's own structure — that needs a separate
+    signal this check doesn't have. Only the SELECT list is inspected, not
+    ORDER BY/HAVING.
+
+    Returns ``""`` when nothing looks wrong, including whenever the SQL has
+    no "group by" at all (checked before parsing) or isn't parseable.
+    """
+    sql_lower = (sql or "").lower()
+    if "group by" not in sql_lower:
+        return ""
+
+    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
+    try:
+        parsed = sqlglot.parse_one(sql, read=read)
+    except Exception:
+        return ""
+    if parsed is None:
+        return ""
+
+    for select in parsed.find_all(exp.Select):
+        reason = _check_select_block_missing_agg(select, database_name)
+        if reason:
+            return reason
+    return ""
+
+
+def _group_expr_covers(col: exp.Column, group_exprs: list[exp.Expression]) -> bool:
+    """True when *col* lives inside a projection subtree that's the same
+    expression (by rendered SQL) as one of the GROUP BY entries — e.g. the
+    same ``CASE WHEN ...`` or ``SPLIT_PART(...)`` call is both selected and
+    grouped by verbatim. GROUP BY on that expression pins one value of it
+    per group, so a raw many-side column inside it is exactly as safe as a
+    bare grouped column — the check just needs to recognize the expression
+    form too, not only ``GROUP BY table.col``.
+
+    Structural match only (the two sides must render to identical SQL); this
+    does not attempt functional-dependency reasoning about two *different*
+    expressions that happen to be equivalent.
+    """
+    if not group_exprs:
+        return False
+    group_sqls = {g.sql() for g in group_exprs}
+    ancestor = col.parent
+    while ancestor is not None:
+        if ancestor.sql() in group_sqls:
+            return True
+        ancestor = ancestor.parent
+    return False
+
+
+def _check_select_block_missing_agg(
+    select: exp.Select, database_name: str | None
+) -> str:
+    """Single-SELECT-block half of :func:`detect_missing_aggregation`."""
+    group = select.args.get("group")
+    if group is None or not select.args.get("joins"):
+        return ""
+
+    all_nodes, by_key = _select_scope_table_nodes(select)
+    if len(all_nodes) < 2:
+        return ""
+
+    grouping_pairs: set[tuple[str, str]] = set()
+    grouping_tables: set[str] = set()
+    group_exprs: list[exp.Expression] = []
+    for e in group.expressions or []:
+        ge = e.this if isinstance(e, exp.Ordered) else e
+        group_exprs.append(ge)
+        if not isinstance(ge, exp.Column):
+            continue
+        table = _resolve_column_table(ge, by_key)
+        if table is None:
+            continue
+        grouping_pairs.add((table.name.lower(), ge.name.lower()))
+        grouping_tables.add(table.name.lower())
+    if not grouping_tables:
+        # GROUP BY on an expression or an unresolvable column — can't
+        # safely establish an anchor, so nothing to check against.
+        return ""
+
+    many_tables = _many_side_tables(select, by_key, database_name) - grouping_tables
+    if not many_tables:
+        return ""
+
+    for proj in select.expressions or []:
+        for col in proj.find_all(exp.Column):
+            if col.find_ancestor(exp.AggFunc) is not None:
+                continue  # aggregated — fine regardless of which table it's from
+            table = _resolve_column_table(col, by_key)
+            if table is None:
+                continue
+            table_name = table.name.lower()
+            if table_name not in many_tables:
+                continue
+            if (table_name, col.name.lower()) in grouping_pairs:
+                continue
+            if _group_expr_covers(col, group_exprs):
+                continue
+            anchor_desc = ", ".join(
+                f'"{t}"' for t in sorted(grouping_tables)
+            )
+            culprit = f"{table.alias_or_name}.{col.name}"
+            return (
+                f'You grouped by {anchor_desc}, but "{table.name}" is joined '
+                f'many-to-one against that key and "{culprit}" is selected raw — '
+                f"it can have more than one value per group. Wrap it in the "
+                f"aggregate that matches what the question asks for that field "
+                f"(e.g. AVG, SUM, MAX), or add it to GROUP BY only if it is truly "
+                f"one value per group. Change only {culprit}; keep every other "
+                f"join, filter, and column exactly as they are."
+            )
+    return ""
+
+
 class SQLValidationAgent(BaseAgent):
     """
     Agent that validates SQL queries before execution.
@@ -381,7 +612,27 @@ class SQLValidationAgent(BaseAgent):
                 "path_state": path_state,
             }
 
-        self.logger.info("SQL passed static checks: parse, degenerate, vacuous-aggregation")
+        missing_agg_reason = detect_missing_aggregation(
+            response.sql_code, degenerate_dialect, path_state.get("target_db")
+        )
+        if missing_agg_reason:
+            self.logger.info("Missing aggregation rejected: %s", missing_agg_reason)
+            path_state["error"] = (
+                f"The generated SQL's GROUP BY is unsafe: {missing_agg_reason}"
+            )
+            # Same rationale as the vacuous-GROUP-BY branch above: deterministic
+            # and self-contained — no missing table/column would fix this, so
+            # skip reconstruction's LLM error-classification call.
+            path_state["error_known_fixable"] = True
+            return {
+                "decision": "invalid_sql",
+                "path_state": path_state,
+            }
+
+        self.logger.info(
+            "SQL passed static checks: parse, degenerate, vacuous-aggregation, "
+            "missing-aggregation"
+        )
 
         sql_columns = validation_result.get("sql_columns") or []
         custom_analyses_used = []

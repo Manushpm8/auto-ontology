@@ -24,6 +24,7 @@ from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.retrieval.text_to_sql.db_probe.jsonb_path_check import (
     build_jsonb_path_repair_error,
     find_jsonb_path_mismatches,
+    try_self_apply_fixes,
 )
 from gsf.retrieval.text_to_sql.state import AgentState
 
@@ -74,7 +75,37 @@ class JsonbPathCheckAgent(BaseAgent):
         if not mismatches:
             return {"decision": "valid_sql", "path_state": path_state}
 
+        # Self-apply the one mismatch shape with a single unambiguous fix (a
+        # flattened dotted key that's really nested access) before falling
+        # back to reconstruction — see try_self_apply_fixes for why only
+        # this shape is safe to fix mechanically. Cuts the reconstruct_sql →
+        # validate_sql_query → execute_sql_query round-trip entirely for the
+        # ~93% of historical firings that are this exact shape (measured
+        # against full_125: 13/14 fixes reconstruction made on its own
+        # matched this pattern anyway).
+        fixed_sql, mismatches = try_self_apply_fixes(mismatches, sql_code)
+        if fixed_sql != sql_code:
+            response = path_state.get("sql_generation_result")
+            if response is not None:
+                path_state["sql_generation_result"] = response.model_copy(
+                    update={"sql_code": fixed_sql}
+                )
+            else:
+                path_state["sql_code"] = fixed_sql
+            sql_code = fixed_sql
+            self.logger.info(
+                "[%s] JSONB path check — self-applied flattened-key fix(es), "
+                "%d path(s) still need reconstruction",
+                path_state.get("task_id", "?"),
+                len(mismatches),
+            )
+
         path_state["jsonb_path_repair_attempted"] = True
+
+        if not mismatches:
+            # Every mismatch was self-applied — nothing left for reconstruction.
+            return {"decision": "valid_sql", "path_state": path_state}
+
         path_state["error"] = build_jsonb_path_repair_error(mismatches)
         # This error was derived from a live probe against the query's own
         # already-joined tables — the fix is always "use the real key/
@@ -83,7 +114,8 @@ class JsonbPathCheckAgent(BaseAgent):
         # (see sql_reconstruction.py) so it can't be misread as missing_data.
         path_state["error_known_fixable"] = True
         self.logger.info(
-            "JSONB path check — routing to reconstruction to fix %d path(s): %s",
+            "[%s] JSONB path check — routing to reconstruction to fix %d path(s): %s",
+            path_state.get("task_id", "?"),
             len(mismatches),
             [
                 f"{m['table']}.{m['column']}->'{m['container']}'->>'{m['used_key']}'"
