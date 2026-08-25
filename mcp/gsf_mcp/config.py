@@ -23,6 +23,14 @@ That last case is the reason the opt-in exists rather than a warning: a shared
 token silently collapses a team into one identity, with one set of permissions
 and one conversation history, and nothing in the protocol would reveal it.
 
+Under ``http`` the caller still has to *have* a credential before it can call,
+which means every user mints a GSF API token by hand first. Setting the
+``GSF_MCP_OIDC_*`` variables removes that step: the server advertises an
+authorization server, the client opens a browser, the user signs in through the
+same SSO provider the GSF deployment trusts, and the id token that comes back is
+forwarded upstream unchanged. GSF verifies it in ``frontend/auth/bearer.ts``
+against that provider's JWKS, so nothing new is needed on the GSF side.
+
 Pointing at a self-hosted GSF or a hosted one still differs only in
 ``GSF_API_URL``.
 """
@@ -62,6 +70,29 @@ class ConfigError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class OidcSettings:
+    """An OIDC provider the server delegates its own sign-in to.
+
+    ``public_url`` is where callers reach *this* server, not where GSF lives; the
+    redirect URI is built from it, so it has to match what the provider has
+    registered for this client.
+
+    ``client_secret`` is required rather than optional. Beyond authenticating at
+    the token endpoint, FastMCP derives the key it signs its own tokens with from
+    it, which is what lets sessions outlive a restart and lets replicas accept
+    each other's tokens. A public client would have to supply that key by another
+    route, which nothing here needs yet.
+    """
+
+    config_url: str
+    client_id: str
+    client_secret: str
+    public_url: str
+    scopes: tuple[str, ...]
+    redirect_path: str
+
+
+@dataclass(frozen=True)
 class Settings:
     """Everything the server needs to start."""
 
@@ -76,6 +107,8 @@ class Settings:
     timeout_s: float
     chat_timeout_s: float
     allow_shared_token: bool = False
+    # Set only when the GSF_MCP_OIDC_* group is configured, which is `http`-only.
+    oidc: OidcSettings | None = None
 
 
 def _positive_float(name: str, default: float) -> float:
@@ -107,6 +140,110 @@ def _port(name: str, default: int) -> int:
     if not 1 <= value <= 65535:
         raise ConfigError(f"{name} must be a valid port, got {value}")
     return value
+
+
+# The provider plus our client identity. `GSF_MCP_PUBLIC_URL` is a property of
+# this server rather than of OIDC, but it joins the same all-or-nothing group
+# because the redirect URI is built from it.
+_OIDC_VARS = (
+    "GSF_MCP_OIDC_CONFIG_URL",
+    "GSF_MCP_OIDC_CLIENT_ID",
+    "GSF_MCP_OIDC_CLIENT_SECRET",
+    "GSF_MCP_PUBLIC_URL",
+)
+
+# Enough to identify the user to GSF, which resolves an account by email. The
+# provider still has to grant them; asking for more than the client is
+# registered for is how a sign-in fails at the provider rather than here.
+DEFAULT_OIDC_SCOPES = ("openid", "email", "profile")
+
+# Without this scope the provider returns no id token, and an id token is the
+# only thing GSF can verify. See gsf_mcp.oidc.
+_REQUIRED_SCOPE = "openid"
+
+# FastMCP's own default. Overridable because provider registrations are often
+# managed centrally: aligning with a path that is already approved is easier
+# than getting a new one added.
+DEFAULT_OIDC_REDIRECT_PATH = "/auth/callback"
+
+
+def _oidc(transport: str, token: str) -> OidcSettings | None:
+    """Read the OIDC group, or ``None`` if it was left alone.
+
+    Partial configuration raises rather than falling back to hand-minted
+    tokens. A server that was meant to offer sign-in and quietly does not looks
+    exactly like one that works, right up until a caller arrives without a
+    credential of its own.
+    """
+
+    values = {name: (os.environ.get(name) or "").strip() for name in _OIDC_VARS}
+    if not any(values.values()):
+        return None
+
+    if transport != "http":
+        raise ConfigError(
+            "The GSF_MCP_OIDC_* variables need GSF_MCP_TRANSPORT=http. Signing "
+            "in ends in a browser redirect back to this server, and stdio has "
+            "no address to redirect to; there, GSF_API_TOKEN is the identity."
+        )
+
+    missing = [name for name in _OIDC_VARS if not values[name]]
+    if missing:
+        raise ConfigError(
+            f"Incomplete OIDC configuration: {', '.join(missing)} "
+            f"{'is' if len(missing) == 1 else 'are'} unset. Set the whole "
+            "group or none of it."
+        )
+
+    if token:
+        # Reachable only with GSF_MCP_ALLOW_SHARED_TOKEN, since the check above
+        # rejects a bare token under http.
+        raise ConfigError(
+            "GSF_API_TOKEN is set alongside the GSF_MCP_OIDC_* variables. Every "
+            "caller would act as that token's owner, so the sign-in they were "
+            "sent through would decide nothing. Unset one of the two."
+        )
+
+    return OidcSettings(
+        config_url=values["GSF_MCP_OIDC_CONFIG_URL"],
+        client_id=values["GSF_MCP_OIDC_CLIENT_ID"],
+        client_secret=values["GSF_MCP_OIDC_CLIENT_SECRET"],
+        public_url=values["GSF_MCP_PUBLIC_URL"].rstrip("/"),
+        scopes=_oidc_scopes(),
+        redirect_path=_oidc_redirect_path(),
+    )
+
+
+def _oidc_redirect_path() -> str:
+    """The path the provider redirects back to, relative to ``public_url``."""
+    raw = (os.environ.get("GSF_MCP_OIDC_REDIRECT_PATH") or "").strip()
+    if not raw:
+        return DEFAULT_OIDC_REDIRECT_PATH
+    if not raw.startswith("/"):
+        raise ConfigError(
+            f"GSF_MCP_OIDC_REDIRECT_PATH must start with '/', got {raw!r}. It is "
+            "a path under GSF_MCP_PUBLIC_URL, not a full URL."
+        )
+    return raw.rstrip("/") or DEFAULT_OIDC_REDIRECT_PATH
+
+
+def _oidc_scopes() -> tuple[str, ...]:
+    """The scopes to request at sign-in, defaulting to a sensible set."""
+    raw = (os.environ.get("GSF_MCP_OIDC_SCOPES") or "").strip()
+    if not raw:
+        return DEFAULT_OIDC_SCOPES
+
+    # Accept either separator: providers document scopes space-separated, but a
+    # comma is the reflex in an env var.
+    scopes = tuple(dict.fromkeys(raw.replace(",", " ").split()))
+    if _REQUIRED_SCOPE not in scopes:
+        raise ConfigError(
+            f"GSF_MCP_OIDC_SCOPES must include {_REQUIRED_SCOPE!r}. Without it "
+            "the provider returns no id token, and an id token is the only "
+            "credential GSF can verify, so every call would fail after an "
+            "apparently successful sign-in."
+        )
+    return scopes
 
 
 def load_settings() -> Settings:
@@ -149,6 +286,8 @@ def load_settings() -> Settings:
             "intended, set GSF_MCP_ALLOW_SHARED_TOKEN=1 to confirm it."
         )
 
+    oidc = _oidc(transport, token)
+
     spec_path = Path(
         (os.environ.get("GSF_OPENAPI_SPEC") or "").strip() or DEFAULT_SPEC_PATH
     )
@@ -175,12 +314,16 @@ def load_settings() -> Settings:
             "GSF_MCP_CHAT_TIMEOUT_S", DEFAULT_CHAT_TIMEOUT_S
         ),
         allow_shared_token=allow_shared_token,
+        oidc=oidc,
     )
 
 
 __all__ = [
     "ConfigError",
+    "DEFAULT_OIDC_REDIRECT_PATH",
+    "DEFAULT_OIDC_SCOPES",
     "DEFAULT_SPEC_PATH",
+    "OidcSettings",
     "Settings",
     "TRANSPORTS",
     "load_settings",

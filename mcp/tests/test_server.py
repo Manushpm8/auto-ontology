@@ -251,6 +251,41 @@ def test_missing_credential_is_an_actionable_error() -> None:
         _sent_headers(CallerAuth(), {"accept": "application/json"})
 
 
+def test_a_signed_in_caller_is_authenticated_by_their_id_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "sso_id_token", lambda: "eyJhbGciOi")
+
+    headers = _sent_headers(CallerAuth(use_sso=True))
+
+    assert headers["authorization"] == "Bearer eyJhbGciOi"
+    assert "x-api-key" not in headers
+
+
+def test_sign_in_outranks_any_header_the_caller_sends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otherwise a caller could sign in as one user and call GSF as another."""
+    monkeypatch.setattr(server, "sso_id_token", lambda: "eyJhbGciOi")
+
+    headers = _sent_headers(
+        CallerAuth("gsf_shared", use_sso=True), {"x-api-key": "gsf_someone_else"}
+    )
+
+    assert headers["authorization"] == "Bearer eyJhbGciOi"
+    assert "x-api-key" not in headers
+
+
+def test_sign_in_without_an_id_token_is_an_actionable_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider that grants no 'openid' scope authenticates nothing to GSF."""
+    monkeypatch.setattr(server, "sso_id_token", lambda: None)
+
+    with pytest.raises(ToolError, match="no id token"):
+        _sent_headers(CallerAuth(use_sso=True))
+
+
 def test_rejects_a_spec_that_is_not_json(tmp_path: Path) -> None:
     bad = tmp_path / "spec.json"
     bad.write_text("{ not json", encoding="utf-8")

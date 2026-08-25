@@ -20,6 +20,7 @@ from mcp.types import Icon
 
 from gsf_mcp import chat, readiness
 from gsf_mcp.config import ConfigError, Settings
+from gsf_mcp.oidc import build_auth, sso_id_token
 from gsf_mcp.tools import (
     apply_description,
     missing_from_spec,
@@ -144,14 +145,19 @@ class CallerAuth(httpx.Auth):
     process-wide identity is the correct one: stdio, and an HTTP deployment that
     explicitly opted into a single shared identity.
 
+    With ``use_sso`` the credential comes from the OIDC sign-in instead of from
+    any header; see :mod:`gsf_mcp.oidc` for why the incoming one is unusable
+    there.
+
     Attaching this as httpx auth rather than at each call site is deliberate: it
     covers the generated tools and the hand-written streaming one through the
     single client they share, so no tool can be added later that forgets to
     authenticate.
     """
 
-    def __init__(self, fallback_token: str = "") -> None:
+    def __init__(self, fallback_token: str = "", use_sso: bool = False) -> None:
         self._fallback = fallback_token
+        self._use_sso = use_sso
 
     def auth_flow(self, request: httpx.Request):  # type: ignore[override]
         header, value = self._credential()
@@ -165,6 +171,21 @@ class CallerAuth(httpx.Auth):
 
     def _credential(self) -> tuple[str, str]:
         """Return the header name and value to authenticate this request with."""
+        if self._use_sso:
+            # Sign-in settles identity before a tool ever runs, so it wins
+            # outright — and it has to, because the Authorization header on this
+            # request is FastMCP's own token, which GSF cannot verify. Honouring
+            # a header here would also let a caller present one identity to the
+            # sign-in and a different one to GSF.
+            id_token = sso_id_token()
+            if id_token:
+                return BEARER_HEADER, f"Bearer {id_token}"
+            raise ToolError(
+                "Signed in, but the provider issued no id token, so there is "
+                "nothing GSF can verify. Confirm the 'openid' scope is granted "
+                "to this server's client registration."
+            )
+
         # `authorization` is excluded from this view by default, on the sound
         # general principle that forwarding it blindly is usually wrong. Here it
         # is precisely what we are after, so ask for it back.
@@ -204,7 +225,7 @@ def build_client(settings: Settings) -> httpx.AsyncClient:
     """
     return httpx.AsyncClient(
         base_url=settings.api_url,
-        auth=CallerAuth(settings.api_token),
+        auth=CallerAuth(settings.api_token, use_sso=settings.oidc is not None),
         timeout=settings.timeout_s,
         # An agent harness may fan out across several tools at once.
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
@@ -233,6 +254,7 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
         instructions=INSTRUCTIONS,
         version=get_version(),
         icons=load_icons(),
+        auth=build_auth(settings),
     )
 
     chat.register(mcp, settings, client)
@@ -244,7 +266,12 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
         settings.spec_path,
     )
     if settings.transport == "http":
-        if settings.api_token:
+        if settings.oidc is not None:
+            logger.info(
+                "Callers sign in through %s; their id token authenticates them to GSF.",
+                settings.oidc.config_url,
+            )
+        elif settings.api_token:
             logger.warning(
                 "Authenticating every caller as the owner of GSF_API_TOKEN "
                 "(GSF_MCP_ALLOW_SHARED_TOKEN is set). Callers do not get their "

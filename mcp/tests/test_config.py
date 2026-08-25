@@ -11,6 +11,8 @@ from pytest import MonkeyPatch
 
 from gsf_mcp.config import (
     DEFAULT_CHAT_TIMEOUT_S,
+    DEFAULT_OIDC_REDIRECT_PATH,
+    DEFAULT_OIDC_SCOPES,
     DEFAULT_PORT,
     DEFAULT_SPEC_PATH,
     DEFAULT_TIMEOUT_S,
@@ -28,7 +30,21 @@ _VARS = (
     "GSF_MCP_TIMEOUT_S",
     "GSF_MCP_CHAT_TIMEOUT_S",
     "GSF_MCP_ALLOW_SHARED_TOKEN",
+    "GSF_MCP_OIDC_CONFIG_URL",
+    "GSF_MCP_OIDC_CLIENT_ID",
+    "GSF_MCP_OIDC_CLIENT_SECRET",
+    "GSF_MCP_OIDC_SCOPES",
+    "GSF_MCP_OIDC_REDIRECT_PATH",
+    "GSF_MCP_PUBLIC_URL",
 )
+
+_OIDC_ENV = {
+    "GSF_MCP_TRANSPORT": "http",
+    "GSF_MCP_OIDC_CONFIG_URL": "https://idp.example/.well-known/openid-configuration",
+    "GSF_MCP_OIDC_CLIENT_ID": "gsf-mcp",
+    "GSF_MCP_OIDC_CLIENT_SECRET": "shh",
+    "GSF_MCP_PUBLIC_URL": "https://mcp.example",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -176,3 +192,134 @@ def test_blank_values_fall_back_to_defaults(monkeypatch: MonkeyPatch) -> None:
 
     assert settings.port == DEFAULT_PORT
     assert settings.timeout_s == DEFAULT_TIMEOUT_S
+
+
+def test_oidc_is_off_unless_configured(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("GSF_API_TOKEN", "gsf_abc")
+
+    assert load_settings().oidc is None
+
+
+def test_reads_the_oidc_group(monkeypatch: MonkeyPatch) -> None:
+    for name, value in _OIDC_ENV.items():
+        monkeypatch.setenv(name, value)
+
+    oidc = load_settings().oidc
+
+    assert oidc is not None
+    assert oidc.config_url == _OIDC_ENV["GSF_MCP_OIDC_CONFIG_URL"]
+    assert oidc.client_id == "gsf-mcp"
+    assert oidc.client_secret == "shh"
+    assert oidc.public_url == "https://mcp.example"
+    assert oidc.scopes == DEFAULT_OIDC_SCOPES
+    assert oidc.redirect_path == DEFAULT_OIDC_REDIRECT_PATH
+
+
+def test_oidc_strips_trailing_slash_from_public_url(monkeypatch: MonkeyPatch) -> None:
+    for name, value in _OIDC_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GSF_MCP_PUBLIC_URL", "https://mcp.example/")
+
+    oidc = load_settings().oidc
+
+    assert oidc is not None
+    assert oidc.public_url == "https://mcp.example"
+
+
+def test_oidc_rejects_stdio(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("GSF_API_TOKEN", "gsf_abc")
+    for name, value in _OIDC_ENV.items():
+        if name != "GSF_MCP_TRANSPORT":
+            monkeypatch.setenv(name, value)
+
+    with pytest.raises(ConfigError, match="GSF_MCP_TRANSPORT=http"):
+        load_settings()
+
+
+@pytest.mark.parametrize(
+    "omitted",
+    [
+        "GSF_MCP_OIDC_CONFIG_URL",
+        "GSF_MCP_OIDC_CLIENT_ID",
+        "GSF_MCP_OIDC_CLIENT_SECRET",
+        "GSF_MCP_PUBLIC_URL",
+    ],
+)
+def test_oidc_rejects_partial_configuration(
+    monkeypatch: MonkeyPatch, omitted: str
+) -> None:
+    # Half-configured sign-in must not quietly degrade to hand-minted tokens.
+    for name, value in _OIDC_ENV.items():
+        if name != omitted:
+            monkeypatch.setenv(name, value)
+
+    with pytest.raises(ConfigError, match=omitted):
+        load_settings()
+
+
+def test_oidc_conflicts_with_a_shared_token(monkeypatch: MonkeyPatch) -> None:
+    # Sign-in decides nothing if one token then speaks for every caller.
+    for name, value in _OIDC_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GSF_API_TOKEN", "gsf_abc")
+    monkeypatch.setenv("GSF_MCP_ALLOW_SHARED_TOKEN", "1")
+
+    with pytest.raises(ConfigError, match="alongside the GSF_MCP_OIDC"):
+        load_settings()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("openid email", ("openid", "email")),
+        ("openid,email,profile", ("openid", "email", "profile")),
+        ("  openid   groups  ", ("openid", "groups")),
+        ("openid email openid", ("openid", "email")),
+    ],
+)
+def test_oidc_scopes_accept_either_separator(
+    monkeypatch: MonkeyPatch, raw: str, expected: tuple[str, ...]
+) -> None:
+    for name, value in _OIDC_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GSF_MCP_OIDC_SCOPES", raw)
+
+    oidc = load_settings().oidc
+
+    assert oidc is not None
+    assert oidc.scopes == expected
+
+
+def test_oidc_scopes_must_include_openid(monkeypatch: MonkeyPatch) -> None:
+    # Drop it and the provider returns no id token, which is the one credential
+    # GSF can verify — a failure that would only surface after a clean sign-in.
+    for name, value in _OIDC_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GSF_MCP_OIDC_SCOPES", "email profile")
+
+    with pytest.raises(ConfigError, match="must include 'openid'"):
+        load_settings()
+
+
+def test_oidc_redirect_path_can_match_an_existing_registration(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    # Provider registrations are often centrally managed, so matching a path
+    # that is already approved beats getting a new one added.
+    for name, value in _OIDC_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GSF_MCP_OIDC_REDIRECT_PATH", "/api/auth/sso/callback/")
+
+    oidc = load_settings().oidc
+
+    assert oidc is not None
+    assert oidc.redirect_path == "/api/auth/sso/callback"
+
+
+def test_oidc_redirect_path_must_be_a_path(monkeypatch: MonkeyPatch) -> None:
+    for name, value in _OIDC_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GSF_MCP_OIDC_REDIRECT_PATH", "https://elsewhere.example/cb")
+
+    with pytest.raises(ConfigError, match="must start with '/'"):
+        load_settings()
