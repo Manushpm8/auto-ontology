@@ -76,6 +76,27 @@ logger = logging.getLogger(__name__)
 _OVERLAP_KEEP_THRESHOLD = 0.2
 
 
+def _find_join_path_either_direction(col_a_id: str, col_b_id: str) -> list[dict]:
+    """``find_join_path``, tried in both column orders.
+
+    ``find_join_path`` walks ``SEMANTIC_FK`` outgoing-only (child FK ->
+    parent attribute — see its docstring), so a real, single-hop edge is
+    only found when the *child* column is passed as the anchor. Every
+    caller here derives ``col_a``/``col_b`` from a written predicate's
+    left/right order, which has nothing to do with which side is the FK
+    child — a real edge written with the parent on the left (e.g.
+    ``parent.id = child.parent_id``) would otherwise come back with 0 hops
+    purely because of how the model happened to order the equality, and
+    fall through to "unverified" even though it's correct. Trying the
+    reverse order costs one extra graph query only when the forward one
+    finds nothing.
+    """
+    hops = find_join_path(col_a_id, col_b_id)
+    if hops:
+        return hops
+    return find_join_path(col_b_id, col_a_id)
+
+
 def _join_equalities(tree: exp.Expression) -> list[tuple[exp.Column, exp.Column]]:
     """Column-to-column equality predicates that express a join, wherever written.
 
@@ -145,12 +166,24 @@ def _value_overlap(
     ``None`` when the probe couldn't run (no connector, budget exhausted,
     query failure) — callers must treat that as "can't confirm", not as a
     verdict either way.
+
+    Identifiers are always quoted: *table_a*/*col_a*/etc. are already the
+    real, correctly-cased names resolved from schema metadata by the
+    caller, and an unquoted reference here would let the engine's own
+    case-folding rules silently rewrite it (e.g. Postgres lowercases an
+    unquoted ``ArtifactsCore`` to ``artifactscore``, which then doesn't
+    exist) — producing a query-execution failure that this function can
+    only see as "probe couldn't run," so the mismatch falls through to
+    "unverified" even when the join is actually correct. Quoting the
+    already-correct case is a no-op for lowercase-only identifiers in every
+    dialect this pipeline targets, so this can't regress a case that works
+    today — it only fixes the mixed-case ones that silently didn't.
     """
     d = _sqlglot_dialect(dialect)
-    a_ref = exp.column(col_a).sql(dialect=d)
-    b_ref = exp.column(col_b).sql(dialect=d)
-    a_table_ref = exp.table_(table_a).sql(dialect=d)
-    b_table_ref = exp.table_(table_b).sql(dialect=d)
+    a_ref = exp.column(col_a, quoted=True).sql(dialect=d)
+    b_ref = exp.column(col_b, quoted=True).sql(dialect=d)
+    a_table_ref = exp.table_(table_a, quoted=True).sql(dialect=d)
+    b_table_ref = exp.table_(table_b, quoted=True).sql(dialect=d)
     sql = (
         f"SELECT "
         f"COUNT(DISTINCT a.{a_ref}) AS total, "
@@ -239,7 +272,7 @@ def find_join_path_mismatches(
         ):
             continue  # neither side is FK-shaped — out of scope for this check
 
-        hops = find_join_path(col_a_id, col_b_id)
+        hops = _find_join_path_either_direction(col_a_id, col_b_id)
 
         if len(hops) == 1:
             hop = hops[0]
@@ -582,7 +615,7 @@ def _is_verified_edge(predicate: dict[str, Any], database_name: Optional[str]) -
     col_b_id = find_column_id_by_table_and_name(table_right, right.name, database_name)
     if not col_a_id or not col_b_id:
         return False
-    hops = find_join_path(col_a_id, col_b_id)
+    hops = _find_join_path_either_direction(col_a_id, col_b_id)
     if len(hops) != 1:
         return False
     hop = hops[0]

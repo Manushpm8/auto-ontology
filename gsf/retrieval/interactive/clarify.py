@@ -113,13 +113,17 @@ _SORT_DIRECTION = re.compile(
 )
 
 _DEFAULT_SORT_HINT = (
-    "DefaultSort: identify the primary output metric — the one most central to the "
-    "query, typically the one used in a filter condition or explicitly requested as "
-    "the main output value. If that primary metric is itself a computed score or "
-    "metric (not a categorical dimension like a name, tier, or group/bucket label) "
-    "and the question does not suggest ascending order, prefer ORDER BY that metric "
-    "DESC. If no single metric is clearly primary, or the primary output is a "
-    "categorical dimension rather than a computed value, do not add an ORDER BY."
+    "DefaultSort: a primary output metric is the metric most central to the query, "
+    "typically the one used in a filter condition or explicitly requested as the "
+    "main output value. Identify if such a metric exists for this Question. If it "
+    "exists and is itself a computed score or metric (not a categorical dimension"
+    "like a name, tier, or group/bucket label), prefer ORDER BY that metric DESC — "
+    "unless the question explicitly suggests ascending order, or the metric is one "
+    "where a lower value is the better or more important result (e.g. a cost, "
+    "error rate, time, or other quantity where smaller is preferable), in which "
+    "case use ASC instead. If no single metric is clearly primary, or the primary "
+    "output is a categorical dimension rather than a computed value, do not add an "
+    "ORDER BY."
 )
 
 

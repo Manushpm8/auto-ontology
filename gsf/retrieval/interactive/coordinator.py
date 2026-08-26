@@ -87,13 +87,10 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
         logger.info("Debug seed: execution error → %s", actual_error[:200])
     else:
         # SQL ran but results didn't match — no execution error detail available.
-        # Inject targeted hints based on observed failure patterns in this benchmark.
+        # Inject targeted hints based on observed failure patterns.
         session.path_state["error"] = (
             "The SQL produced incorrect results. "
-            "Column and field names are likely correct — focus on how tables are joined "
-            "or how JSON objects are traversed, not on renaming. "
-            "Do NOT modify formula coefficients, formula structure, or aggregation logic — "
-            "these were confirmed during clarification. "
+            "Do NOT modify formula coefficients, formula structure or column and field names."
             "Address whichever of the following applies, or fix a different issue you identify:\n\n"
             "1. COMPOUND FILTER COMPLETENESS: Re-check the evidence and question for "
             "every condition they imply, not just the primary one. Common drops: an "
@@ -110,7 +107,7 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
             "X,\" add LIMIT N. Judge from the question's phrasing whether unmatched "
             "primary-entity rows should still appear."
         )
-        logger.info("Debug seed: wrong results — injecting targeted benchmark hints")
+        logger.info("Debug seed: wrong results — injecting targeted hints")
     # Preserve Phase 1's reconstruction lineage as read-only prompt context
     # before wiping "failed_attempts" below — see sql_reconstruction.py's
     # history_section, which renders "phase1_failed_attempts" alongside this

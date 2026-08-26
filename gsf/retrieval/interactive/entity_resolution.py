@@ -982,7 +982,12 @@ def _find_unresolvable_entities(
         )
 
     # Build VDB-uncovered set: entities the pipeline marked uncovered + ambiguous ones.
-    vdb_uncovered: set[str] = set(ec_path_state.get("uncovered_entities") or [])
+    # CoverageGradeAgent nests this under path_state["final_response"], not at the
+    # top level (same place "candidates" lives, read via final_response below) —
+    # reading it off ec_path_state directly silently returned empty every time.
+    vdb_uncovered: set[str] = set(
+        (ec_path_state.get("final_response") or {}).get("uncovered_entities") or []
+    )
     # Normalize uncovered_entities to match our norm keys (pipeline emits raw strings).
     vdb_uncovered_norms: set[str] = set()
     for raw in vdb_uncovered:
