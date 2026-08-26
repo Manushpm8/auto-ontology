@@ -32,7 +32,6 @@ from datetime import timedelta
 from gsf.ingestion_service.config import is_semantic_compilation_enabled
 from gsf.ingestion_service.connections import resolve_database_names
 from gsf.ingestion_service.history import (
-    RUN_ABORTED,
     RUN_FAILED,
     RUN_SUCCEEDED,
     record_run_finish,
@@ -93,11 +92,14 @@ class SemanticScheduler(IntervalScheduler):
 
         logger.info("semantic: starting (%d database(s))", len(databases))
         run_id = record_run_start()
-        # Starts optimistic; only ever downgraded, never upgraded back — an
-        # abort/disable after a real failure must still be recorded as FAILED,
-        # not ABORTED, so a genuine bug isn't masked by the fact that the run
-        # was also stopped.
-        outcome = RUN_SUCCEEDED
+        # Starts optimistic; only ever downgraded, never upgraded back — a
+        # stop/disable after a real failure must still be recorded as FAILED,
+        # not left NULL, so a genuine bug isn't masked by the fact that the
+        # run was also stopped. An explicit stop/disable downgrades to None
+        # instead, which record_run_finish treats as a no-op — see
+        # history.py on why an aborted run leaves the row NULL rather than
+        # storing an "aborted" outcome.
+        outcome: str | None = RUN_SUCCEEDED
         try:
             for index, database_name in enumerate(databases):
                 # Checked per database rather than once per pass, so a stop
@@ -111,7 +113,7 @@ class SemanticScheduler(IntervalScheduler):
                         len(databases) - index,
                     )
                     if outcome != RUN_FAILED:
-                        outcome = RUN_ABORTED
+                        outcome = None
                     return
                 if not is_semantic_compilation_enabled():
                     logger.info(
@@ -119,7 +121,7 @@ class SemanticScheduler(IntervalScheduler):
                         len(databases) - index,
                     )
                     if outcome != RUN_FAILED:
-                        outcome = RUN_ABORTED
+                        outcome = None
                     return
 
                 try:
@@ -135,11 +137,11 @@ class SemanticScheduler(IntervalScheduler):
                     outcome = RUN_FAILED
                     logger.exception("semantic: failed for database %s", database_name)
         finally:
-            # Recorded on every exit path — including an abort or a mid-run
-            # disable — so the history table never has a row that started but
-            # never finished.
+            # A no-op when outcome is None (stop/disable) — see
+            # record_run_finish's docstring on why that leaves the row NULL
+            # rather than recording an "aborted" outcome.
             record_run_finish(run_id, outcome)
             logger.info(
                 "semantic: finished%s",
-                "" if outcome == RUN_SUCCEEDED else f" ({outcome})",
+                "" if outcome == RUN_SUCCEEDED else f" ({outcome or 'aborted'})",
             )
