@@ -65,9 +65,9 @@ def test_date_column_description_states_stored_notation(_mock_desc) -> None:
             "description": "Date the match was played.",
         }
     ]
-    profiling = {"game_date": {"date_format": "YYMMDD", "sample_values": []}}
+    profiling = {"game_date": {"format": "YYMMDD", "sample_values": []}}
     specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
-    assert specs[0].description == ("Date the match was played. — date format: YYMMDD")
+    assert specs[0].description == ("Date the match was played. — format: YYMMDD")
 
 
 @patch(
@@ -76,10 +76,10 @@ def test_date_column_description_states_stored_notation(_mock_desc) -> None:
 )
 def test_llm_date_description_also_gets_the_notation(_mock_desc) -> None:
     columns = [{"name": "game_date", "data_type": "date"}]
-    profiling = {"game_date": {"date_format": "YYYY-MM-DD"}}
+    profiling = {"game_date": {"format": "YYYY-MM-DD"}}
     specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
     assert specs[0].description == (
-        "When the match took place. — date format: YYYY-MM-DD"
+        "When the match took place. — format: YYYY-MM-DD"
     )
 
 

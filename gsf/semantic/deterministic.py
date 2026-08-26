@@ -42,7 +42,7 @@ def to_term_name(table_name: str) -> str:
     return "".join(p.capitalize() for p in parts if p)
 
 
-_DATE_FORMAT_MARKER = "date format:"
+_FORMAT_MARKER = "format:"
 
 
 def fk_source_columns(fks: list[dict[str, Any]]) -> set[str]:
@@ -77,22 +77,21 @@ def _date_format_clause(
     col: dict[str, Any],
     columns_profiling_samples: dict[str, dict[str, Any]],
 ) -> str | None:
-    """How a date column stores its values, when a single reading fits them all.
+    """How stored values are written, when a single notation fits them all.
 
-    Dates are held back from sampling because a concrete date carries no
-    business meaning, but that leaves nothing in the prompt saying whether a
-    predicate should compare against ``'1995-03-24'`` or ``'950324'``.
+    ``format`` is the column's storage notation — currently filled only for
+    dates, but the same property would hold an id or address pattern later.
     """
     profile = columns_profiling_samples.get(col.get("name", "")) or {}
-    date_format = profile.get("date_format") or col.get("date_format")
-    if not date_format:
+    notation = profile.get("format") or col.get("format")
+    if not notation:
         return None
-    return f"{_DATE_FORMAT_MARKER} {date_format}"
+    return f"{_FORMAT_MARKER} {notation}"
 
 
 def _add_date_format_clause(text: str, clause: str | None) -> str:
     """Append the notation, idempotently on its own marker."""
-    if not clause or _DATE_FORMAT_MARKER in text:
+    if not clause or _FORMAT_MARKER in text:
         return text
     return f"{text} — {clause}" if text else clause
 

@@ -85,7 +85,7 @@ def test_store_column_date_formats_writes_notation(mock_conn: MagicMock) -> None
     neo4j_datasources.store_column_date_formats("table-1", {"Match_Date": "YYMMDD"})
     call = mock_conn.return_value.query_write.call_args
     query, params = call[0][0], call[0][1]
-    assert "SET col.date_format = fmt" in query
+    assert "SET col.format = fmt" in query
     assert params["table_id"] == "table-1"
-    entries = {e["column_name"]: e["date_format"] for e in params["entries"]}
+    entries = {e["column_name"]: e["format"] for e in params["entries"]}
     assert entries == {"Match_Date": "YYMMDD"}

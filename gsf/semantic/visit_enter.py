@@ -159,14 +159,14 @@ def calculate_columns_profiling(
     values that the row prefix may have missed.
 
     Persists to Neo4j Column nodes: ``is_unique`` for every column,
-    ``date_format`` for columns whose sampled values share one notation —
+    ``format`` for columns whose sampled values share one notation —
     whether declared as a date/time type or as text, since loosely-typed
     sources such as SQLite store dates as TEXT — and ``sample_values`` for
     every column except those with a date format or a declared date/time/uuid
     type (individual string values longer than 30 chars are dropped).
 
     Returns ``{column_name: {"sample_values": [...], "is_unique": bool,
-    "date_format": str | None}}`` for *all* columns (values unfiltered —
+    "format": str | None}}`` for *all* columns (values unfiltered —
     includes dates, uuids and long strings).
     """
     schema_name = table.get("schema_name")
@@ -254,7 +254,7 @@ def calculate_columns_profiling(
         profiling[col_name] = {
             "sample_values": col_values,
             "is_unique": is_unique,
-            "date_format": date_format,
+            "format": date_format,
         }
 
         if _is_excluded_sample_type(declared_type) or date_format:
@@ -284,7 +284,7 @@ def process_table(
     table_name = table["name"]
 
     # Columns profiling — requires a live connector; skipped when unavailable.
-    # Persists sample_values, is_unique, and date_format onto Column nodes.
+    # Persists sample_values, is_unique, and format onto Column nodes.
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
     if connector is not None:

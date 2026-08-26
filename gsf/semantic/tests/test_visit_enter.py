@@ -93,7 +93,7 @@ def test_calculate_columns_profiling(
     assert result["status"]["is_unique"] is False
     assert result["created_at"]["is_unique"] is True
     assert result["token"]["is_unique"] is False
-    assert result["created_at"]["date_format"] == "YYYY-MM-DD"
+    assert result["created_at"]["format"] == "YYYY-MM-DD"
     mock_store_dates.assert_called_once()
     assert mock_store_dates.call_args[0][1] == {"created_at": "YYYY-MM-DD"}
 

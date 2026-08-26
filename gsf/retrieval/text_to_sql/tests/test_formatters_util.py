@@ -54,10 +54,10 @@ def test_prompt_renders_date_format_when_present() -> None:
                         "name": "Match_Date",
                         "data_type": "text",
                         "description": "Date the match was played.",
-                        "date_format": "YYMMDD",
+                        "format": "YYMMDD",
                     }
                 ],
             }
         ]
     )
-    assert "date format: YYMMDD" in rendered
+    assert "format: YYMMDD" in rendered

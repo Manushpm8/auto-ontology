@@ -124,9 +124,9 @@ def format_tables_for_prompt(
                         col_line += f" - {col_desc}"
                     if sample_values:
                         col_line += f" | sample values: {sample_values}"
-                    date_format = col.get("date_format")
-                    if date_format and "date format:" not in (col_desc or "").lower():
-                        col_line += f" | date format: {date_format}"
+                    notation = col.get("format")
+                    if notation and "format:" not in (col_desc or "").lower():
+                        col_line += f" | format: {notation}"
                     table_parts.append(col_line)
                 elif isinstance(col, str):
                     table_parts.append(f"    - {col}")
