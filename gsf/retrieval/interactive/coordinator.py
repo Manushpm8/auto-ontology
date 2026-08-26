@@ -77,10 +77,10 @@ def _extract_followup_question(message: str) -> str:
 
 
 def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
-    """Prepare path_state to resume at reconstruct_sql with Bird's error as context."""
+    """Prepare path_state to resume at reconstruct_sql with the submit feedback as context."""
     session.path_state["_resume_from"] = "reconstruct_sql"
     if "Your SQL is not executable:" in message:
-        # Extract the actual DB error from Bird's message and inject it for reconstruction.
+        # Extract the actual DB error from the submit feedback and inject it for reconstruction.
         after = message.split("Your SQL is not executable:", 1)[1].strip()
         actual_error = after.split("\n")[0].strip()
         session.path_state["error"] = actual_error
@@ -462,7 +462,7 @@ def step(
     # should_clarify judging PROCEED above) — resolve any still-open ambiguous
     # entities from the final working_question, so the SQL generator gets a real
     # decision instead of the vague "choose whichever fits" note. Gated on the
-    # proceed decision itself, not on turn count, so it isn't tied to BIRD-Interact's
+    # proceed decision itself, not on turn count, so it isn't tied to the
     # max_clarify_turns mechanic specifically.
     #
     # _ambiguity_resolved guards this to run once per *phase*, not once per
@@ -577,7 +577,7 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
 
 
 def apply_submit_result(session: InteractiveSessionState, result: dict) -> None:
-    """Update session with Bird's submit response for future debug seeding."""
+    """Update session with the submit response for future debug seeding."""
     session.latest_feedback = result.get("message", "")
     # Save Phase 1 artifacts only on successful completion so they don't
     # contaminate Phase 1 debug turns with follow-up instruction / cross-phase logic.

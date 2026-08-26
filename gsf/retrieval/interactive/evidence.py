@@ -141,14 +141,7 @@ def generate_evidence(question: str, grounded_kg: str, resolved_terms_section: s
     # formula; some are just a resolved definition with no operator at all).
     # Reject only on length: a genuine condensed evidence line is always
     # short, so a line approaching full KB-definition-paragraph length is
-    # almost certainly restated prose rather than compressed evidence. Cap
-    # derived from the longest real KB "definition" value across every
-    # *_kb.jsonl in the BIRD-Interact full dataset (665 chars, planets_data
-    # id=51) minus a safety margin of 65, giving 600 — comfortably below a
-    # full prose definition, but with a lot of headroom above real evidence
-    # lines (23-191 chars in samples pulled from these logs) so definitions
-    # and multi-clause formulas aren't clipped just for being longer than a
-    # bare "Term = number" line.
+    # almost certainly restated prose rather than compressed evidence.
     _MAX_EVIDENCE_LINE_CHARS = 600
     _CONTINUATION = re.compile(r"^\s+(AND|OR)\b", re.IGNORECASE)
     # A scope-less "Term = COUNT(x)" line is valid, KB-derived evidence and must

@@ -1,5 +1,13 @@
 """
-Realistic user-simulator test for the output-type clarification question.
+Manual analysis script probing the BIRD-Interact user-simulator's answering
+behavior for a single vague output-type clarification question.
+
+This is NOT part of the automated test suite: it makes live LLM calls, has
+no assertions (it prints a summary report), and requires a local BIRD-Interact
+FULL checkout (BIRD_INTERACT_FULL_USERSIM_DIR / BIRD_INTERACT_FULL_DATA /
+BIRD_INTERACT_FULL_DB_ROOT). Run it directly, e.g.:
+
+  python -m dev_tools.evaluation.test_user_answering_capability
 
 Uses the official BIRD-Interact usersim-guard STEP1 + STEP2 pipeline:
   - STEP1: classifier decides labeled / unlabeled / unanswerable
@@ -24,7 +32,7 @@ from pathlib import Path
 # BIRD-Interact FULL benchmark checkout (not part of this repo, and not
 # produced by any seed script) — there is no machine-independent default, so
 # all three env vars are required.
-GSF_DIR = Path(__file__).resolve().parents[3]
+GSF_DIR = Path(__file__).resolve().parents[2]
 
 
 def _require_env(name: str) -> str:

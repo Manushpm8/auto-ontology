@@ -164,7 +164,7 @@ def detect_incomplete_formulas(
         )
 
     response = safe_invoke_text(llm, prompt).strip()
-    logger.info("Completeness — raw response: %s", response[:600])
+    logger.debug("Completeness — raw response: %s", response[:600])
     gaps = _parse_gaps(response)
     logger.info("Completeness — gaps found: %s", gaps)
     return gaps

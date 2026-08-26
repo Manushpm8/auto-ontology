@@ -447,9 +447,7 @@ def try_self_apply_wrong_column_fixes(
     ``unverified`` mismatch, unchanged).
     """
     fixable = {
-        id(m): m
-        for m in mismatches
-        if m["verdict"] == "wrong_column" and m.get("hops")
+        id(m): m for m in mismatches if m["verdict"] == "wrong_column" and m.get("hops")
     }
     if not fixable:
         return sql, mismatches
@@ -503,6 +501,231 @@ def try_self_apply_wrong_column_fixes(
         return sql, mismatches
 
     new_sql = tree.sql(dialect=_sqlglot_dialect(dialect))
+    remaining = [m for m in mismatches if id(m) not in applied]
+    return new_sql, remaining
+
+
+def _hub_bridge_hops(m: dict[str, Any]) -> Optional[tuple[dict, dict]]:
+    """``(hop_a, hop_b)`` when *m* is the narrow, unambiguous shared-hub shape
+    this self-apply targets: exactly one bridge table, reached from each of
+    ``table_a``/``table_b`` by a single hop. ``None`` for anything else
+    (multi-hop chains, or a hop shape this function doesn't recognize) —
+    those are left to reconstruction, same as today.
+    """
+    hops = m.get("hops") or []
+    bridge_tables = m.get("bridge_tables") or []
+    if len(hops) != 2 or len(bridge_tables) != 1:
+        return None
+    hub = bridge_tables[0].lower()
+    hop_a = next(
+        (h for h in hops if h["source_table"].lower() == m["table_a"].lower()), None
+    )
+    hop_b = next(
+        (h for h in hops if h["source_table"].lower() == m["table_b"].lower()), None
+    )
+    if hop_a is None or hop_b is None:
+        return None
+    if hop_a["target_table"].lower() != hub or hop_b["target_table"].lower() != hub:
+        return None
+    return hop_a, hop_b
+
+
+def try_self_apply_missing_bridge_fixes(
+    mismatches: list[dict[str, Any]], sql: str, dialect: Optional[str]
+) -> tuple[str, list[dict[str, Any]]]:
+    """Deterministically fix the narrow, unambiguous subclass of
+    ``missing_bridge`` mismatches: exactly one shared hub table, connected to
+    each side of the fabricated join by a single known hop, where the hub
+    isn't already referenced anywhere else in the query.
+
+    Scoped this narrowly on purpose. Given the two hops, the new JOIN's ON
+    condition is fully determined and there's exactly one safe place to
+    attach it — immediately before the join being fixed, since whichever of
+    the two tables isn't introduced by that join clause is already in scope
+    by then. That makes it a local, mechanical AST edit, the same way
+    :func:`try_self_apply_wrong_column_fixes` is for ``wrong_column``.
+
+    Left to reconstruction (unchanged mismatch, same as if this were never
+    called): multi-hop chains (more than one intermediate table, or a hop
+    shape :func:`_hub_bridge_hops` doesn't recognize — real structural
+    judgment about where/how many joins to insert); WHERE-implicit joins (no
+    ``exp.Join`` node to attach to); and any case where the hub table is
+    already referenced elsewhere in the query (attach-vs-reuse is an
+    alias-management judgment call this local edit can't safely make).
+
+    Note this only makes the join *graph-legal* — bridging two child tables
+    through a shared parent is schema-correct but can still fan out into an
+    unintended many-to-many pairing if both children have multiple rows per
+    parent. Callers should still re-check the result (e.g. the cheap static
+    SQL checks in ``sql_parse_validation.py``) rather than treat a self-
+    applied fix as automatically correct.
+
+    Returns the (possibly rewritten) SQL and the sub-list of mismatches left
+    for reconstruction (untouched ``missing_bridge``/``unverified``
+    mismatches, unchanged).
+    """
+    fixable: dict[int, dict[str, Any]] = {}
+    for m in mismatches:
+        if m["verdict"] != "missing_bridge":
+            continue
+        if _hub_bridge_hops(m) is not None:
+            fixable[id(m)] = m
+    if not fixable:
+        return sql, mismatches
+
+    try:
+        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+    except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
+        logger.info("join_path_check self-apply(bridge): could not parse SQL (%s)", exc)
+        return sql, mismatches
+    if tree is None:
+        return sql, mismatches
+
+    all_nodes, by_key = _table_nodes(tree)
+    if not all_nodes:
+        return sql, mismatches
+
+    existing_names = {t.name.lower() for t in all_nodes if t.name}
+    existing_aliases = set(by_key.keys())
+    d = _sqlglot_dialect(dialect)
+
+    applied: set[int] = set()
+    for join in tree.find_all(exp.Join):
+        on = join.args.get("on")
+        if on is None:
+            continue
+        select = join.find_ancestor(exp.Select)
+        if select is None:
+            continue
+        joins = select.args.get("joins") or []
+        if join not in joins:
+            continue  # already rewritten via an outer EQ in this same ON clause
+
+        for eq in on.find_all(exp.EQ):
+            if not fixable:
+                break
+            left = _as_column(eq.this)
+            right = _as_column(eq.expression)
+            if left is None or right is None:
+                continue
+            table_left = _resolve_table_name(left, all_nodes, by_key)
+            table_right = _resolve_table_name(right, all_nodes, by_key)
+            if not table_left or not table_right:
+                continue
+
+            for mid, m in list(fixable.items()):
+                if mid in applied:
+                    continue
+                written = {
+                    (table_left.lower(), left.name.lower()),
+                    (table_right.lower(), right.name.lower()),
+                }
+                wanted = {
+                    (m["table_a"].lower(), m["col_a"].lower()),
+                    (m["table_b"].lower(), m["col_b"].lower()),
+                }
+                if written != wanted:
+                    continue
+
+                hub_table = m["bridge_tables"][0]
+                if hub_table.lower() in existing_names:
+                    # Hub already referenced elsewhere in the query —
+                    # attach-vs-reuse ambiguity, leave to reconstruction.
+                    continue
+                hop_a, hop_b = _hub_bridge_hops(m)
+                hop_for = {
+                    m["table_a"].lower(): hop_a,
+                    m["table_b"].lower(): hop_b,
+                }
+
+                # This join clause's own table (``join.this``) is the side
+                # that only comes into scope *at* this join — the other side
+                # is necessarily already in scope (either the FROM table or
+                # an earlier join), regardless of which one is "table_a"/
+                # "table_b" in the mismatch or which order they were
+                # written in the predicate. The new hub join must attach to
+                # the already-in-scope side; rewriting which table a join
+                # clause introduces isn't a local edit.
+                introduced_table = (
+                    join.this.name
+                    if isinstance(join.this, exp.Table) and join.this.name
+                    else None
+                )
+                if introduced_table is None:
+                    continue  # not a plain table join (e.g. a subquery) — skip
+                introduced_table = introduced_table.lower()
+                if introduced_table not in (table_left.lower(), table_right.lower()):
+                    continue  # unexpected shape — leave to reconstruction
+
+                if table_left.lower() == introduced_table:
+                    introduced_col, prior_col = left, right
+                    prior_table = table_right
+                else:
+                    introduced_col, prior_col = right, left
+                    prior_table = table_left
+                hop_introduced = hop_for.get(introduced_table)
+                hop_prior = hop_for.get(prior_table.lower())
+                if hop_introduced is None or hop_prior is None:
+                    continue
+
+                base_alias = "".join(ch for ch in hub_table if ch.isalnum())[:3].lower()
+                alias = base_alias or "hub"
+                n = 1
+                while alias in existing_aliases:
+                    n += 1
+                    alias = f"{base_alias or 'hub'}{n}"
+
+                # New join: <prior_table> JOIN <hub> ON <prior>.<hop_prior.source> = <hub>.<hop_prior.target>
+                # — always safe to insert right before the join being fixed,
+                # since prior_table is guaranteed already in scope by then.
+                # Rename prior_col to hop_prior's real FK column *before*
+                # capturing its SQL text — the written predicate may have
+                # had the wrong column on this side too (that's exactly
+                # what made it a mismatch), so the new join must use the
+                # graph-known column, not whatever was originally written.
+                _set_column_name(prior_col, hop_prior["source_column"])
+                prior_col_sql = prior_col.sql(dialect=d)
+                hub_prior_col_sql = exp.column(
+                    hop_prior["target_column"], table=alias
+                ).sql(dialect=d)
+                hub_table_sql = exp.table_(hub_table, alias=alias).sql(dialect=d)
+                try:
+                    new_join = sqlglot.parse_one(
+                        f"SELECT 1 FROM x JOIN {hub_table_sql} "
+                        f"ON {prior_col_sql} = {hub_prior_col_sql}",
+                        read=d,
+                    ).args["joins"][0]
+                except Exception as exc:  # noqa: BLE001
+                    logger.info(
+                        "join_path_check self-apply(bridge): could not build "
+                        "hub join for %s (%s)",
+                        hub_table,
+                        exc,
+                    )
+                    continue
+
+                idx = joins.index(join)
+                joins.insert(idx, new_join)
+                select.set("joins", joins)
+
+                # Rewrite this join's own ON: <hub>.<hop_introduced.target> = <introduced_table>.<hop_introduced.source>
+                # — introduced_table's alias is exactly the one this join
+                # clause defines, so it's already correct; only its column
+                # name and the other side's table/column change.
+                _set_column_name(introduced_col, hop_introduced["source_column"])
+                prior_col.set("table", exp.to_identifier(alias))
+                _set_column_name(prior_col, hop_introduced["target_column"])
+
+                existing_aliases.add(alias)
+                existing_names.add(hub_table.lower())
+                applied.add(mid)
+                del fixable[mid]
+                break
+
+    if not applied:
+        return sql, mismatches
+
+    new_sql = tree.sql(dialect=d)
     remaining = [m for m in mismatches if id(m) not in applied]
     return new_sql, remaining
 
@@ -806,4 +1029,5 @@ __all__ = [
     "find_case_dirty_join_mismatches",
     "build_case_dirty_join_repair_error",
     "try_self_apply_wrong_column_fixes",
+    "try_self_apply_missing_bridge_fixes",
 ]

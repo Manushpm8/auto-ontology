@@ -215,7 +215,6 @@ class EmptyLikeResultCheckAgent(BaseAgent):
             # which indicates a wrong nesting path rather than an empty table.
             if not path_state.get("null_jsonb_retry_attempted"):
                 null_aliases = _null_jsonb_aliases(sql_code, db_result)
-                self.logger.info("Null JSONB check: aliases=%s", null_aliases or "none")
                 if null_aliases:
                     path_state["null_jsonb_retry_attempted"] = True
                     path_state["error"] = _build_null_jsonb_error(null_aliases)
@@ -224,7 +223,6 @@ class EmptyLikeResultCheckAgent(BaseAgent):
                         null_aliases,
                     )
                     return {"decision": "invalid_sql", "path_state": path_state}
-            self.logger.info("SQL result is non-empty — skipping empty LIKE check")
             return {"decision": "valid_sql", "path_state": path_state}
 
         if not _sql_has_like(sql_code):

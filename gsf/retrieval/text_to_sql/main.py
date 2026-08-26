@@ -177,7 +177,7 @@ def stream_agent_response(
         if isinstance(answer, dict) and thoughts_summary:
             answer["thoughts"] = thoughts_summary
         elapsed = time.perf_counter() - t0
-        logger.info("Final answer (%.2fs):\n%s", elapsed, answer)
+        logger.debug("Final answer (%.2fs):\n%s", elapsed, answer)
         yield {"type": "result", "answer": answer}
 
     except Exception as exc:

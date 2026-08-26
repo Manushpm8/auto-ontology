@@ -202,7 +202,7 @@ def prune_resolved_terms(
         terms=term_list,
     )
     response = safe_invoke_text(llm, prompt).strip()
-    logger.info("Clarify — prune_resolved_terms: %s", response[:200])
+    logger.debug("Clarify — prune_resolved_terms raw response: %s", response[:200])
     resolved: set[str] = set()
     for line in response.splitlines():
         if ": RESOLVED" in line.upper():
@@ -375,9 +375,6 @@ def should_clarify(
                 session.persistent_unresolved.append(name)
                 existing.add(name)
     else:
-        logger.info(
-            "Clarify — reusing cached unresolvable entities (question unchanged)"
-        )
         resolved_hits = []
         for entity, hit_text, score, hit_id in session._cached_resolved_hits or []:
             resolved_hits.append((entity, hit_text, score, hit_id))
@@ -402,7 +399,7 @@ def should_clarify(
     )
 
     grounded_kg_for_prompt = session._grounded_kg or "None"
-    logger.info(
+    logger.debug(
         "Clarify — feeding to decide-LLM | relevant_knowledge (%d chars): %r",
         len(grounded_kg_for_prompt),
         grounded_kg_for_prompt[:300],

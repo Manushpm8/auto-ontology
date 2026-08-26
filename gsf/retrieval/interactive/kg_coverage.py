@@ -163,14 +163,14 @@ def _filter_covered_by_external_knowledge(
             time.sleep(2 ** (attempt + 1))
         else:
             logger.error("Clarify — coverage LLM failed after %d attempts; treating all entities as unresolvable", RETRY_MAX_ATTEMPTS)
-    logger.info("Clarify — coverage LLM raw response:\n%s", response)
+    logger.debug("Clarify — coverage LLM raw response:\n%s", response)
 
     kg_entries = _parse_kg_entries(formatted_kg)
 
     # Parse term → claimed entry names from coverage response.
     # Do NOT mark a term as covered yet — only do so after the KB lookup confirms
     # the entry actually exists. The coverage LLM sometimes hallucinates entry names
-    # from its training data (e.g. SNQI when the benchmark has masked it from the KB).
+    # from its training data (e.g. SNQI when it is masked from the KB).
     term_to_entry_names: dict[str, list[str]] = {}
     for line in response.splitlines():
         upper = line.upper()
@@ -266,7 +266,7 @@ def _filter_covered_by_external_knowledge(
 
     relevant_kg_text = "\n".join(relevant_lines)
     logger.info("Clarify — external_kg covers: %s", covered or "none")
-    logger.info("Clarify — relevant_kg_text stored (%d chars): %r", len(relevant_kg_text), relevant_kg_text[:300] if relevant_kg_text else "")
+    logger.debug("Clarify — relevant_kg_text stored (%d chars): %r", len(relevant_kg_text), relevant_kg_text[:300] if relevant_kg_text else "")
     return covered, relevant_kg_text, entry_to_original_terms
 
 

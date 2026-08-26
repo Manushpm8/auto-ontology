@@ -129,6 +129,86 @@ def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
     return ""
 
 
+def quote_known_mixed_case_identifiers(
+    sql: str, relevant_tables: list[dict] | None, dialect: str | None
+) -> str:
+    """Deterministically quote every table/column reference in *sql* that
+    exactly matches a known mixed-case identifier from *relevant_tables*, so
+    Postgres (and any other dialect with the same unquoted-lowercasing rule)
+    doesn't silently fold e.g. ``WeatherAndStructure`` to
+    ``weatherandstructure`` and fail with "relation does not exist".
+
+    The model is shown these exact names in the AVAILABLE TABLES/COLUMNS
+    prompt section and told, via the dialect rules, to quote anything with
+    an uppercase letter — but that instruction competes against its
+    dominant prior from the mostly-lowercase rest of the schema corpus and
+    loses often enough to be worth enforcing deterministically, rather than
+    relying on compliance or on a failed execution + LLM reconstruction
+    round-trip to catch it after the fact (see ``sql_reconstruction.py``,
+    which still exists as a fallback for anything this misses — e.g. an
+    identifier not in ``relevant_tables`` at all).
+
+    Only ever *adds* quoting to an identifier that already exactly matches a
+    known real name — never renames or case-corrects a wrong reference; a
+    near-miss like ``extTempc`` (wrong case, not an exact match to the real
+    ``extTempC``) is left untouched rather than guessed at, since that's a
+    different problem (a genuinely wrong column) this function has no basis
+    to fix.
+
+    No-op (returns *sql* unchanged) when *relevant_tables* is empty, when
+    none of its table/column names contain an uppercase letter (the common
+    case — checked before any parsing), or when *sql* doesn't parse.
+    """
+    if not relevant_tables or not sql or not sql.strip():
+        return sql
+
+    mixed_case_tables: dict[str, str] = {}
+    mixed_case_columns: dict[str, str] = {}
+    for table in relevant_tables:
+        name = table.get("name") if isinstance(table, dict) else None
+        if name and any(ch.isupper() for ch in name):
+            mixed_case_tables[name.lower()] = name
+        columns = table.get("columns") if isinstance(table, dict) else None
+        if isinstance(columns, list):
+            for col in columns:
+                col_name = col.get("name") if isinstance(col, dict) else None
+                if col_name and any(ch.isupper() for ch in col_name):
+                    mixed_case_columns[col_name.lower()] = col_name
+    if not mixed_case_tables and not mixed_case_columns:
+        return sql
+
+    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
+    try:
+        tree = sqlglot.parse_one(sql, read=read)
+    except Exception:
+        return sql
+    if tree is None:
+        return sql
+
+    changed = False
+    for table_node in tree.find_all(exp.Table):
+        ident = table_node.this
+        if not isinstance(ident, exp.Identifier) or ident.args.get("quoted"):
+            continue
+        real = mixed_case_tables.get((ident.this or "").lower())
+        if real and ident.this == real:
+            table_node.set("this", exp.to_identifier(real, quoted=True))
+            changed = True
+
+    for col_node in tree.find_all(exp.Column):
+        ident = col_node.this
+        if not isinstance(ident, exp.Identifier) or ident.args.get("quoted"):
+            continue
+        real = mixed_case_columns.get((ident.this or "").lower())
+        if real and ident.this == real:
+            col_node.set("this", exp.to_identifier(real, quoted=True))
+            changed = True
+
+    if not changed:
+        return sql
+    return tree.sql(dialect=read)
+
+
 def detect_vacuous_group_by(
     sql: str, dialect: str | None, database_name: str | None
 ) -> str:
@@ -211,8 +291,18 @@ def _check_select_block_vacuous(select: exp.Select, database_name: str | None) -
     table_alias = table_expr.alias_or_name
 
     keys = find_table_key_columns(table_name, database_name)
-    unique_cols = {c.lower() for c in (keys["pk"] + keys["unique"])}
-    if not unique_cols:
+    # ``unique`` entries are each independently unique per row, so any single
+    # one of them appearing in the grouping/filter set is already vacuous.
+    # ``pk`` is not: a multi-column (composite) primary key is only unique
+    # as the *combination* of all its columns — grouping by just one member
+    # (e.g. the FK half of a (race, driver, lap) key) still leaves many rows
+    # per group and is a perfectly real aggregation, not a no-op. So ``pk``
+    # only counts as a hit once every one of its columns is covered by the
+    # grouping/filter set (checked separately below), never on a partial
+    # overlap the way ``unique`` is.
+    unique_cols = {c.lower() for c in keys["unique"]}
+    pk_cols = {c.lower() for c in keys["pk"]}
+    if not unique_cols and not pk_cols:
         return ""
 
     group = select.args.get("group")
@@ -231,10 +321,26 @@ def _check_select_block_vacuous(select: exp.Select, database_name: str | None) -
     hit = grouping_cols & unique_cols
     if hit:
         return _vacuous_reason(
-            next(iter(hit)), table_name, table_alias,
+            next(iter(hit)),
+            table_name,
+            table_alias,
             verb="groups/partitions by",
             extra="even if it is subsequently joined back to the same table, "
-                  "since the aggregation was already trivial before that join. ",
+            "since the aggregation was already trivial before that join. ",
+        )
+    if pk_cols and pk_cols <= grouping_cols:
+        pk_verb = (
+            "groups/partitions by the full composite primary key"
+            if len(pk_cols) > 1
+            else "groups/partitions by"
+        )
+        return _vacuous_reason(
+            ", ".join(sorted(pk_cols)),
+            table_name,
+            table_alias,
+            verb=pk_verb,
+            extra="even if it is subsequently joined back to the same table, "
+            "since the aggregation was already trivial before that join. ",
         )
 
     # 2. A WHERE-filtered aggregate with no GROUP BY at all — the same no-op,
@@ -253,8 +359,23 @@ def _check_select_block_vacuous(select: exp.Select, database_name: str | None) -
         hit = where_cols & unique_cols
         if hit:
             return _vacuous_reason(
-                next(iter(hit)), table_name, table_alias,
+                next(iter(hit)),
+                table_name,
+                table_alias,
                 verb='filters by ("WHERE") an equality on',
+                extra="",
+            )
+        if pk_cols and pk_cols <= where_cols:
+            pk_verb = (
+                'filters by ("WHERE") an equality on the full composite primary key'
+                if len(pk_cols) > 1
+                else 'filters by ("WHERE") an equality on'
+            )
+            return _vacuous_reason(
+                ", ".join(sorted(pk_cols)),
+                table_name,
+                table_alias,
+                verb=pk_verb,
                 extra="",
             )
 
@@ -356,9 +477,7 @@ def _many_side_tables(
                 continue  # self-join — not this check's job
             keys_left = find_table_key_columns(table_left.name, database_name)
             keys_right = find_table_key_columns(table_right.name, database_name)
-            unique_left = left.name.lower() in (
-                keys_left["pk"] + keys_left["unique"]
-            )
+            unique_left = left.name.lower() in (keys_left["pk"] + keys_left["unique"])
             unique_right = right.name.lower() in (
                 keys_right["pk"] + keys_right["unique"]
             )
@@ -493,9 +612,7 @@ def _check_select_block_missing_agg(
                 continue
             if _group_expr_covers(col, group_exprs):
                 continue
-            anchor_desc = ", ".join(
-                f'"{t}"' for t in sorted(grouping_tables)
-            )
+            anchor_desc = ", ".join(f'"{t}"' for t in sorted(grouping_tables))
             culprit = f"{table.alias_or_name}.{col.name}"
             return (
                 f'You grouped by {anchor_desc}, but "{table.name}" is joined '
@@ -562,6 +679,25 @@ class SQLValidationAgent(BaseAgent):
         dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
         schemas_ids = fetch_all_schema_ids()
         schemas = get_schemas_by_ids(schemas_ids)
+        degenerate_dialect = dialects[0] if dialects else None
+
+        # Every constructed/reconstructed SQL passes through this node before
+        # execution (see the graph: construct_sql_from_candidates,
+        # construct_sql_not_from_snippets, and reconstruct_sql all route
+        # here), so this is the single choke point to deterministically fix
+        # up unquoted mixed-case identifiers regardless of which path
+        # produced the SQL — see quote_known_mixed_case_identifiers for why
+        # this can't just be left to the prompt/model.
+        quoted_sql = quote_known_mixed_case_identifiers(
+            response.sql_code, path_state.get("relevant_tables"), degenerate_dialect
+        )
+        if quoted_sql != response.sql_code:
+            self.logger.info(
+                "Quoted known mixed-case identifier(s) in the generated SQL "
+                "before validation"
+            )
+            response.sql_code = quoted_sql
+            path_state["sql_generation_result"] = response
 
         validation_result = self._sql_parse_validation(
             schemas, response.sql_code, dialects
@@ -576,7 +712,6 @@ class SQLValidationAgent(BaseAgent):
                 "path_state": path_state,
             }
 
-        degenerate_dialect = dialects[0] if dialects else None
         degenerate_reason = detect_degenerate_sql(response.sql_code, degenerate_dialect)
 
         if degenerate_reason:
@@ -597,7 +732,9 @@ class SQLValidationAgent(BaseAgent):
             response.sql_code, degenerate_dialect, path_state.get("target_db")
         )
         if vacuous_reason:
-            self.logger.info("Vacuous GROUP BY/PARTITION BY rejected: %s", vacuous_reason)
+            self.logger.info(
+                "Vacuous GROUP BY/PARTITION BY rejected: %s", vacuous_reason
+            )
             path_state["error"] = (
                 f"The generated SQL's aggregation is a no-op: {vacuous_reason}"
             )
@@ -628,7 +765,6 @@ class SQLValidationAgent(BaseAgent):
                 "decision": "invalid_sql",
                 "path_state": path_state,
             }
-
         self.logger.info(
             "SQL passed static checks: parse, degenerate, vacuous-aggregation, "
             "missing-aggregation"

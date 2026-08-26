@@ -20,7 +20,7 @@ class InteractiveSessionState:
     phase: InteractivePhase = InteractivePhase.PHASE1_CLARIFY
     phase1_sql: Optional[str] = None
     phase1_question: Optional[str] = None  # working_question at phase1 submit
-    latest_feedback: Optional[str] = None  # message from Bird :6002/submit
+    latest_feedback: Optional[str] = None  # message from the external submit service
     path_state: dict = field(default_factory=dict)  # durable across GSF calls
     _pending_question: Optional[str] = (
         None  # last AskUserAction (for apply_user_answer)

@@ -341,7 +341,7 @@ class CandidatePreparationAgent(BaseAgent):
 
         # NOTE: log message says "capped at 20" but there is no actual [:20] slice
         # anywhere in this path — flagged 2026-08-13, revisit if this matters later.
-        self.logger.info(
+        self.logger.debug(
             "Found %d relevant tables (after dedupe, capped at 20): %s",
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
@@ -456,7 +456,7 @@ class CandidatePreparationAgent(BaseAgent):
             custom_analyses,
             attribute_join_paths,
         )
-        self.logger.info(
+        self.logger.debug(
             "Kept %d relevant tables (after relevance filter): %s",
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
@@ -725,7 +725,7 @@ class CandidatePreparationAgent(BaseAgent):
                     + "\n".join(sorted(chains))
                     + "\n\n"
                 )
-            self.logger.info(
+            self.logger.debug(
                 "Relevance filter join_paths_section: %s",
                 sorted(chains) if chains else "(no cross-table chains found)",
             )
@@ -798,7 +798,7 @@ class CandidatePreparationAgent(BaseAgent):
                 (preserved if a in kept_names and b in kept_names else broken).append(
                     chain
                 )
-            self.logger.info(
+            self.logger.debug(
                 "Relevance filter join-chain outcome — preserved: %s | broken "
                 "(a table on this chain was removed, before §5b reconciliation "
                 "restores it): %s",

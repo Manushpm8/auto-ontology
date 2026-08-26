@@ -7,9 +7,7 @@
 Sibling of ``jsonb_path_check.py``, checking ``JOIN ... ON`` predicates
 against the same ``SEMANTIC_FK`` graph that seeds ``attribute_join_paths``,
 instead of checking JSONB key paths. A hallucinated join between two
-plausible-looking identifier columns (e.g. ``actuation_data.actrecref =
-robot_details.botdetreg`` when the real relationship routes through
-``robot_record``) is syntactically and semantically valid SQL — it executes
+plausible-looking identifier columns is syntactically and semantically valid SQL — it executes
 and returns rows — so nothing else in the pipeline catches it: syntax
 validation only checks the SQL parses, and ``validate_intent`` reasons over
 the same join-path data the generator had, so it shares the same blind spot
@@ -41,6 +39,11 @@ from typing import Any, Dict
 from gsf.dal.attributes import find_table_id_by_name
 from gsf.dal.datasources import fetch_tables_by_ids
 from gsf.retrieval.text_to_sql.agents.empty_like_result_check import _get_sql_code
+from gsf.retrieval.text_to_sql.agents.sql_parse_validation import (
+    detect_degenerate_sql,
+    detect_missing_aggregation,
+    detect_vacuous_group_by,
+)
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
@@ -49,6 +52,7 @@ from gsf.retrieval.text_to_sql.db_probe.join_path_check import (
     build_join_path_repair_error,
     find_case_dirty_join_mismatches,
     find_join_path_mismatches,
+    try_self_apply_missing_bridge_fixes,
     try_self_apply_wrong_column_fixes,
 )
 from gsf.retrieval.text_to_sql.state import AgentState
@@ -102,19 +106,54 @@ class JoinPathCheckAgent(BaseAgent):
             mismatches, sql_code, dialect
         )
         if sql_code != _get_sql_code(path_state):
-            response = path_state.get("sql_generation_result")
-            if response is not None:
-                path_state["sql_generation_result"] = response.model_copy(
-                    update={"sql_code": sql_code}
-                )
-            else:
-                path_state["sql_code"] = sql_code
+            self._write_sql_code(path_state, sql_code)
             self.logger.info(
                 "[%s] Join path check — self-applied wrong_column fix(es), "
                 "%d join(s) still need reconstruction",
                 path_state.get("task_id", "?"),
                 len(mismatches),
             )
+
+        # Also self-apply the narrow, unambiguous subclass of
+        # "missing_bridge" mismatches (see try_self_apply_missing_bridge_fixes
+        # for exactly which shape qualifies). Unlike the wrong_column swap
+        # above, this inserts a brand-new JOIN clause, which is graph-legal
+        # by construction but can still fan out into an unintended
+        # many-to-many pairing if both sides have multiple rows per hub row
+        # — so the result is checked with the same cheap, LLM-free static
+        # checks validate_sql_query already runs (degenerate SQL, vacuous
+        # GROUP BY, missing aggregation) before being accepted. No DB
+        # round-trip, no LLM call. Any mismatch that fails this check (or
+        # doesn't qualify for self-apply at all) falls straight back to the
+        # normal reconstruction path below, exactly as if this had never run.
+        if any(m["verdict"] == "missing_bridge" for m in mismatches):
+            candidate_sql, candidate_mismatches = try_self_apply_missing_bridge_fixes(
+                mismatches, sql_code, dialect
+            )
+            if candidate_sql != sql_code:
+                reason = (
+                    detect_degenerate_sql(candidate_sql, dialect)
+                    or detect_vacuous_group_by(candidate_sql, dialect, database_name)
+                    or detect_missing_aggregation(candidate_sql, dialect, database_name)
+                )
+                if reason:
+                    self.logger.info(
+                        "[%s] Join path check — self-applied bridge fix "
+                        "rejected by post-apply check (%s), leaving it for "
+                        "reconstruction instead",
+                        path_state.get("task_id", "?"),
+                        reason[:150],
+                    )
+                else:
+                    sql_code = candidate_sql
+                    mismatches = candidate_mismatches
+                    self._write_sql_code(path_state, sql_code)
+                    self.logger.info(
+                        "[%s] Join path check — self-applied missing_bridge "
+                        "fix(es), %d join(s) still need reconstruction",
+                        path_state.get("task_id", "?"),
+                        len(mismatches),
+                    )
 
         if not mismatches and not case_dirty:
             return {"decision": "valid_sql", "path_state": path_state}
@@ -197,6 +236,18 @@ class JoinPathCheckAgent(BaseAgent):
         return {"decision": "invalid_sql", "path_state": path_state}
 
     @staticmethod
+    def _write_sql_code(path_state: Dict[str, Any], sql_code: str) -> None:
+        """Store a self-applied *sql_code* back onto whichever field the
+        rest of the pipeline reads it from."""
+        response = path_state.get("sql_generation_result")
+        if response is not None:
+            path_state["sql_generation_result"] = response.model_copy(
+                update={"sql_code": sql_code}
+            )
+        else:
+            path_state["sql_code"] = sql_code
+
+    @staticmethod
     def _merge_missing_bridge_tables(
         path_state: Dict[str, Any],
         relevant_tables: list[dict],
@@ -212,7 +263,7 @@ class JoinPathCheckAgent(BaseAgent):
         # find_join_path's hop dicts carry table *names* only, not ids, so
         # resolve each bridge table name back to an id — scoped to
         # database_name to avoid matching a same-named table in a different
-        # co-resident BIRD database (see find_table_id_by_name).
+        # co-resident database (see find_table_id_by_name).
         ids: list[str] = []
         for name in missing_names:
             table_id = find_table_id_by_name(name, database_name)

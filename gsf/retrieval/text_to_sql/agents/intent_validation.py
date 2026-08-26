@@ -160,9 +160,9 @@ class IntentValidationAgent(BaseAgent):
 
         # Prefer Neo4j-enriched snippets (name/description/sql) from preparation.
         # Fall back to the VDB custom_analyses list when enrichment is absent.
-        # On our BIRD-Interact databases there are no CustomAnalysis nodes, so
-        # this is normally a no-op (ca_section == "") — kept for parity with
-        # any future ingest that does define them.
+        # Most ingested databases have no CustomAnalysis nodes, so this is
+        # normally a no-op (ca_section == "") — kept for parity with any
+        # ingest that does define them.
         ca_str_list = path_state.get("custom_analyses_str") or []
         if ca_str_list:
             ca_section = (

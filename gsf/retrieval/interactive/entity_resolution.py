@@ -11,6 +11,7 @@ orchestration lives in clarify.py.
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 from langchain_core.messages import HumanMessage
@@ -18,6 +19,7 @@ from langchain_core.messages import HumanMessage
 from gsf.retrieval.entity_coverage.graph import (
     create_graph as _create_entity_coverage_graph,
 )
+from gsf.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from gsf.utils.llm_invoke import get_llm_client, safe_invoke_text_nr
@@ -26,10 +28,27 @@ from .kg_coverage import _filter_covered_by_external_knowledge
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_clarify_max_distance() -> float:
+    """Resolve the VDB distance threshold used during clarification.
+
+    CLARIFY_MAX_DISTANCE env var, if set, wins outright (explicit float
+    override). Otherwise INTERACTIVE=true selects the stricter 0.65 threshold
+    tuned for the interactive clarification flow; when INTERACTIVE is unset
+    or false, this falls back to the general DEFAULT_MAX_DISTANCE (0.75).
+    """
+    explicit = os.environ.get("CLARIFY_MAX_DISTANCE", "")
+    if explicit:
+        return float(explicit)
+    if os.environ.get("INTERACTIVE", "").lower() in ("true", "1"):
+        return 0.65
+    return DEFAULT_MAX_DISTANCE
+
+
 # Distance threshold for VDB resolution: entity score must be <= this value with
 # no ambiguous second hit to count as "found in schema". Lower = stricter.
-# Main uses DEFAULT_MAX_DISTANCE=0.75; we keep 0.65 until we have benchmarks to compare.
-CLARIFY_MAX_DISTANCE: float = 0.65
+# See _resolve_clarify_max_distance() for the INTERACTIVE/override logic.
+CLARIFY_MAX_DISTANCE: float = _resolve_clarify_max_distance()
 
 # Max gap between an entity's best and second-best VDB hit for the pair to
 # count as a genuine tie. Without this, an entity with a confident best hit
@@ -1040,7 +1059,9 @@ def _find_unresolvable_entities(
         kb_covered_norms = {
             orig_lower_to_norm.get(orig, orig) for orig in covered_originals
         }
-        logger.info("Clarify — KB covers: %s", kb_covered_norms or "none")
+        # Covered-entry names are already logged inside
+        # _filter_covered_by_external_knowledge ("external_kg covers: ...") —
+        # no need to repeat the same set here.
 
     # Resolve any entities that collided on the same best hit, in place.
     entities_before_resolution = set(best_hit_per_entity.keys())

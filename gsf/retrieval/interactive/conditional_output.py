@@ -10,9 +10,9 @@ targeted, pattern-specific hint into the evidence block so the SQL generator
 emits the correct structure.
 
 Controlled by the INJECT_CONDITIONAL_OUTPUT_HINT env var:
-  - Defaults to enabled when BIRD_INTERACT_FULL=true
-  - Set INJECT_CONDITIONAL_OUTPUT_HINT=false to disable explicitly
-  - Set INJECT_CONDITIONAL_OUTPUT_HINT=true to enable regardless of dataset
+  - Defaults to enabled when INTERACTIVE=true
+  - Set INJECT_CONDITIONAL_OUTPUT_HINT=false/true to disable/enable explicitly
+    regardless of INTERACTIVE
 
 Three pattern families are recognised, each mapping to its own hint:
 
@@ -50,17 +50,16 @@ logger = logging.getLogger(__name__)
 def conditional_output_enabled() -> bool:
     """Return True when the conditional-output hint injection is active.
 
-    INJECT_CONDITIONAL_OUTPUT_HINT=false/0 disables explicitly
-    (overrides BIRD_INTERACT_FULL).
-    INJECT_CONDITIONAL_OUTPUT_HINT=true/1 enables explicitly.
-    Otherwise falls back to BIRD_INTERACT_FULL.
+    INJECT_CONDITIONAL_OUTPUT_HINT=false/0 disables explicitly (overrides
+    INTERACTIVE). INJECT_CONDITIONAL_OUTPUT_HINT=true/1 enables explicitly.
+    Otherwise falls back to INTERACTIVE (defaults off when unset).
     """
     explicit = os.environ.get("INJECT_CONDITIONAL_OUTPUT_HINT", "").lower()
     if explicit in ("false", "0"):
         return False
     if explicit in ("true", "1"):
         return True
-    return os.environ.get("BIRD_INTERACT_FULL", "").lower() in ("true", "1")
+    return os.environ.get("INTERACTIVE", "").lower() in ("true", "1")
 
 
 # ── Per-pattern hint text ─────────────────────────────────────────────────────

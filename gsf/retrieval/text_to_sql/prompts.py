@@ -82,7 +82,7 @@ create_sql_user_prompt = (
     "otherwise do not add LIMIT.\n"
     "- When the question asks for entity IDs, use the primary identifier column — "
     "not a foreign key referencing another table.\n"
-    # Important for BIRD-Interact: rounding before filtering silently excludes boundary rows.
+    # Rounding before filtering silently excludes boundary rows.
     "- Apply ROUND and similar display functions only in SELECT, never in WHERE or HAVING — "
     "always filter on the raw computed value.\n"
     "- Do NOT include comments in the SQL.\n"
@@ -194,7 +194,7 @@ def create_sql_from_candidates_prompt(
     """System prompt for SQL generation from semantic retrieval candidates.
 
     Table naming is gated on the **dialect**, not on ``target_db``: schema-less
-    dialects (SQLite/DuckDB, incl. BIRD) use bare table names, while schema
+    dialects (SQLite/DuckDB) use bare table names, while schema
     dialects (Postgres/Snowflake) keep the ``schema.table`` qualifier. Scoping a
     query to one database (``target_db``) removes only the *database* prefix — the
     schema is still required to resolve the table, so it is never dropped here.

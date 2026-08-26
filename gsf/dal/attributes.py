@@ -200,7 +200,7 @@ def find_column_id_by_table_and_name(
     Case-insensitive on both table and column name, since the SQL came from an
     LLM and may not match the graph's stored casing exactly. When
     *database_name* is given, scopes the match to that database only — the
-    same table/column name can exist in multiple co-resident BIRD databases
+    same table/column name can exist in multiple co-resident databases
     (see :func:`find_unlinked_fk_columns`), and an unscoped match could
     silently resolve to the wrong database's column. Returns ``None`` (not an
     exception) on no match or an ambiguous multi-database match without
@@ -255,7 +255,7 @@ def find_table_id_by_name(
 
     Same database-scoping rationale as :func:`find_column_id_by_table_and_name`
     — an unscoped lookup (e.g. ``datasources.fetch_table_by_name``) risks
-    matching a same-named table in a different co-resident BIRD database.
+    matching a same-named table in a different co-resident database.
     """
     if not table_name:
         return None
@@ -300,7 +300,7 @@ def find_table_key_columns(
 
     Same database-scoping rationale as :func:`find_table_id_by_name` — scope
     to *database_name* when given, since an unscoped lookup risks matching a
-    same-named table in a different co-resident BIRD database. ``pk`` comes
+    same-named table in a different co-resident database. ``pk`` comes
     from the Table node's ``pk`` property (set at ingestion from the DDL);
     ``unique`` comes from ``Column.is_unique`` (set from observed-data
     profiling — see :func:`gsf.dal.datasources.store_column_uniqueness`), so
@@ -376,8 +376,8 @@ def find_unlinked_fk_columns(
 
     When *database_name* is provided, only columns belonging to that database
     are returned. Multiple databases can be co-resident in the same Neo4j
-    graph (e.g. the BIRD benchmark), so scoping keeps each compile pass'
-    FK-resolution isolated to a single database. When omitted, every unlinked
+    graph, so scoping keeps each compile pass' FK-resolution isolated to a
+    single database. When omitted, every unlinked
     FK column in the graph is returned.
     """
     if database_name is not None:

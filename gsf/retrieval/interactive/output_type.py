@@ -4,8 +4,8 @@ Determines whether the output type (scalar vs table) is obvious from the questio
 or ambiguous enough to warrant asking the user before clarification begins.
 
 Controlled by the ASK_OUTPUT_TYPE env var:
-  - Defaults to enabled when BIRD_INTERACT_FULL=true
-  - Set ASK_OUTPUT_TYPE=false to disable explicitly regardless of BIRD_INTERACT_FULL
+  - Defaults to enabled when INTERACTIVE=true
+  - Set ASK_OUTPUT_TYPE=false/true to disable/enable explicitly regardless of INTERACTIVE
 
 Return values of should_skip_output_type_question():
   "scalar"  → output type is obvious; set scalar hint for SQL gen, skip the question
@@ -29,16 +29,16 @@ logger = logging.getLogger(__name__)
 def output_type_enabled() -> bool:
     """Return True when the output-type clarification question is active.
 
-    ASK_OUTPUT_TYPE=false/0 disables explicitly (overrides BIRD_INTERACT_FULL).
+    ASK_OUTPUT_TYPE=false/0 disables explicitly (overrides INTERACTIVE).
     ASK_OUTPUT_TYPE=true/1 enables explicitly.
-    Otherwise falls back to BIRD_INTERACT_FULL.
+    Otherwise falls back to INTERACTIVE (defaults off when unset).
     """
     explicit = os.environ.get("ASK_OUTPUT_TYPE", "").lower()
     if explicit in ("false", "0"):
         return False
     if explicit in ("true", "1"):
         return True
-    return os.environ.get("BIRD_INTERACT_FULL", "").lower() in ("true", "1")
+    return os.environ.get("INTERACTIVE", "").lower() in ("true", "1")
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
