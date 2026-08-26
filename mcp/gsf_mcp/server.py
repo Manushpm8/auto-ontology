@@ -20,6 +20,7 @@ from mcp.types import Icon
 
 from gsf_mcp import chat, readiness
 from gsf_mcp.config import ConfigError, Settings
+from gsf_mcp.gsf_auth import build_gsf_auth, gsf_access_token
 from gsf_mcp.oidc import build_auth, sso_id_token
 from gsf_mcp.tools import (
     apply_description,
@@ -155,9 +156,15 @@ class CallerAuth(httpx.Auth):
     authenticate.
     """
 
-    def __init__(self, fallback_token: str = "", use_sso: bool = False) -> None:
+    def __init__(
+        self,
+        fallback_token: str = "",
+        use_sso: bool = False,
+        use_gsf_token: bool = False,
+    ) -> None:
         self._fallback = fallback_token
         self._use_sso = use_sso
+        self._use_gsf_token = use_gsf_token
 
     def auth_flow(self, request: httpx.Request):  # type: ignore[override]
         header, value = self._credential()
@@ -171,6 +178,17 @@ class CallerAuth(httpx.Auth):
 
     def _credential(self) -> tuple[str, str]:
         """Return the header name and value to authenticate this request with."""
+        if self._use_gsf_token:
+            # GSF issued this token, so it is the one credential we can forward
+            # untouched — no exchange, no id token to unwrap.
+            token = gsf_access_token()
+            if token:
+                return BEARER_HEADER, f"Bearer {token}"
+            raise ToolError(
+                "This request carried no signed-in session. Sign in again "
+                "through the GSF deployment this server is pointed at."
+            )
+
         if self._use_sso:
             # Sign-in settles identity before a tool ever runs, so it wins
             # outright — and it has to, because the Authorization header on this
@@ -225,7 +243,11 @@ def build_client(settings: Settings) -> httpx.AsyncClient:
     """
     return httpx.AsyncClient(
         base_url=settings.api_url,
-        auth=CallerAuth(settings.api_token, use_sso=settings.oidc is not None),
+        auth=CallerAuth(
+            settings.api_token,
+            use_sso=settings.oidc is not None,
+            use_gsf_token=settings.sign_in_with_gsf,
+        ),
         timeout=settings.timeout_s,
         # An agent harness may fan out across several tools at once.
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
@@ -241,6 +263,12 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
     spec = load_spec(settings)
     client = build_client(settings)
 
+    # Two ways to offer sign-in, and the configuration rejects asking for both:
+    # against GSF itself, or against an identity provider directly.
+    auth = (
+        build_gsf_auth(settings) if settings.sign_in_with_gsf else build_auth(settings)
+    )
+
     mcp: FastMCP = FastMCP.from_openapi(
         openapi_spec=spec,
         client=client,
@@ -254,7 +282,7 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
         instructions=INSTRUCTIONS,
         version=get_version(),
         icons=load_icons(),
-        auth=build_auth(settings),
+        auth=auth,
     )
 
     chat.register(mcp, settings, client)
@@ -266,7 +294,13 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
         settings.spec_path,
     )
     if settings.transport == "http":
-        if settings.oidc is not None:
+        if settings.sign_in_with_gsf:
+            logger.info(
+                "Callers sign in against GSF itself (%s); this server holds no "
+                "credentials.",
+                settings.api_url,
+            )
+        elif settings.oidc is not None:
             logger.info(
                 "Callers sign in through %s; their id token authenticates them to GSF.",
                 settings.oidc.config_url,

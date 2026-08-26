@@ -106,9 +106,16 @@ class Settings:
     port: int
     timeout_s: float
     chat_timeout_s: float
+    # Where callers reach this server. Only sign-in needs it — it is what a
+    # client is told to come back to — so it is derived from host and port
+    # unless GSF_MCP_PUBLIC_URL says otherwise.
+    public_url: str = ""
     allow_shared_token: bool = False
     # Set only when the GSF_MCP_OIDC_* group is configured, which is `http`-only.
     oidc: OidcSettings | None = None
+    # GSF itself is the authorization server. `http`-only, and mutually
+    # exclusive with both of the above. See gsf_mcp.gsf_auth.
+    sign_in_with_gsf: bool = False
 
 
 def _positive_float(name: str, default: float) -> float:
@@ -142,14 +149,14 @@ def _port(name: str, default: int) -> int:
     return value
 
 
-# The provider plus our client identity. `GSF_MCP_PUBLIC_URL` is a property of
-# this server rather than of OIDC, but it joins the same all-or-nothing group
-# because the redirect URI is built from it.
+# The provider plus our client identity — all of it or none of it.
+# `GSF_MCP_PUBLIC_URL` is required alongside these but is deliberately not one
+# of them: it describes this server, and the other sign-in mode needs it too, so
+# setting it alone must not read as a half-configured OIDC group.
 _OIDC_VARS = (
     "GSF_MCP_OIDC_CONFIG_URL",
     "GSF_MCP_OIDC_CLIENT_ID",
     "GSF_MCP_OIDC_CLIENT_SECRET",
-    "GSF_MCP_PUBLIC_URL",
 )
 
 # Enough to identify the user to GSF, which resolves an account by email. The
@@ -204,14 +211,80 @@ def _oidc(transport: str, token: str) -> OidcSettings | None:
             "sent through would decide nothing. Unset one of the two."
         )
 
+    public_url = (os.environ.get("GSF_MCP_PUBLIC_URL") or "").strip()
+    if not public_url:
+        # Not derived from host and port here, unlike the GSF sign-in mode: the
+        # redirect URI is built from this and has to match what the provider has
+        # registered, so a guess would fail at the provider with a message that
+        # points nowhere near this setting.
+        raise ConfigError(
+            "GSF_MCP_PUBLIC_URL is required with the GSF_MCP_OIDC_* variables. "
+            "The redirect URI is built from it, so it must match the one "
+            "registered for this client at the provider."
+        )
+
     return OidcSettings(
         config_url=values["GSF_MCP_OIDC_CONFIG_URL"],
         client_id=values["GSF_MCP_OIDC_CLIENT_ID"],
         client_secret=values["GSF_MCP_OIDC_CLIENT_SECRET"],
-        public_url=values["GSF_MCP_PUBLIC_URL"].rstrip("/"),
+        public_url=public_url.rstrip("/"),
         scopes=_oidc_scopes(),
         redirect_path=_oidc_redirect_path(),
     )
+
+
+def _public_url(host: str, port: int) -> str:
+    """Where callers reach this server, for sign-in redirects and metadata."""
+    raw = (os.environ.get("GSF_MCP_PUBLIC_URL") or "").strip()
+    if raw:
+        return raw.rstrip("/")
+
+    # 0.0.0.0 means "every interface", which is a fine thing to bind to and a
+    # useless thing to send a browser to.
+    hostname = "localhost" if host in {"", "0.0.0.0", "::"} else host
+    return f"http://{hostname}:{port}"
+
+
+def _sign_in_with_gsf(transport: str, token: str, oidc: OidcSettings | None) -> bool:
+    """Read ``GSF_MCP_SIGN_IN``, the one variable this mode needs."""
+    raw = (os.environ.get("GSF_MCP_SIGN_IN") or "").strip().lower()
+    if not raw or raw == "off":
+        return False
+
+    if raw != "gsf":
+        raise ConfigError(
+            f"GSF_MCP_SIGN_IN must be 'gsf' or 'off', got {raw!r}. 'gsf' has "
+            "callers sign in against the GSF deployment itself; to delegate to "
+            "an identity provider directly, set the GSF_MCP_OIDC_* group "
+            "instead."
+        )
+
+    if transport != "http":
+        raise ConfigError(
+            "GSF_MCP_SIGN_IN=gsf needs GSF_MCP_TRANSPORT=http. Signing in ends "
+            "in a browser redirect back to this server, and stdio has no "
+            "address to redirect to; there, GSF_API_TOKEN is the identity."
+        )
+
+    if token:
+        # Reachable only with GSF_MCP_ALLOW_SHARED_TOKEN, since a bare token is
+        # already rejected under http.
+        raise ConfigError(
+            "GSF_API_TOKEN is set alongside GSF_MCP_SIGN_IN=gsf. Every caller "
+            "would act as that token's owner, so the sign-in they were sent "
+            "through would decide nothing. Unset one of the two."
+        )
+
+    if oidc is not None:
+        raise ConfigError(
+            "GSF_MCP_SIGN_IN=gsf conflicts with the GSF_MCP_OIDC_* variables: "
+            "both make this server hand out sign-ins, and a caller can only be "
+            "sent to one authorization server. Signing in against GSF needs no "
+            "client id or secret, so unset the OIDC group unless you "
+            "specifically need to bypass GSF."
+        )
+
+    return True
 
 
 def _oidc_redirect_path() -> str:
@@ -300,6 +373,8 @@ def load_settings() -> Settings:
         )
 
     api_url = (os.environ.get("GSF_API_URL") or DEFAULT_API_URL).strip()
+    host = (os.environ.get("GSF_MCP_HOST") or DEFAULT_HOST).strip()
+    port = _port("GSF_MCP_PORT", DEFAULT_PORT)
 
     return Settings(
         # Trailing slashes make httpx base_url joins produce doubled separators.
@@ -307,14 +382,16 @@ def load_settings() -> Settings:
         api_token=token,
         spec_path=spec_path,
         transport=transport,
-        host=(os.environ.get("GSF_MCP_HOST") or DEFAULT_HOST).strip(),
-        port=_port("GSF_MCP_PORT", DEFAULT_PORT),
+        host=host,
+        port=port,
         timeout_s=_positive_float("GSF_MCP_TIMEOUT_S", DEFAULT_TIMEOUT_S),
         chat_timeout_s=_positive_float(
             "GSF_MCP_CHAT_TIMEOUT_S", DEFAULT_CHAT_TIMEOUT_S
         ),
+        public_url=_public_url(host, port),
         allow_shared_token=allow_shared_token,
         oidc=oidc,
+        sign_in_with_gsf=_sign_in_with_gsf(transport, token, oidc),
     )
 
 

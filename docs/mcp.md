@@ -127,8 +127,8 @@ cost of a build on each start — and needs no checkout at all:
 ```
 
 A server that is already running and asks callers to sign in (see [Signing in
-with SSO](#signing-in-with-sso)) is configured with its URL instead of a command,
-and with no credentials at all:
+against GSF](#signing-in-against-gsf)) is configured with its URL instead of a
+command, and with no credentials at all:
 
 ```json
 {
@@ -141,10 +141,10 @@ and with no credentials at all:
 ```
 
 The client discovers the server wants authorization and offers to sign in —
-Cursor lists it as needing login. Approving the consent page and signing in with
-the provider leaves the client holding a token it manages itself, so nothing is
-pasted anywhere and every call runs as the person who signed in. Note the `/mcp`
-suffix: that is the endpoint, not the server's root.
+Cursor lists it as needing login. Signing in leaves the client holding a token it
+manages itself, so nothing is pasted anywhere and every call runs as the person
+who signed in. Note the `/mcp` suffix: that is the endpoint, not the server's
+root.
 
 Restart the client after editing its config — most read MCP configuration only at
 startup. An editable install picks up code changes on the next server start.
@@ -236,10 +236,11 @@ itself — fails the tool, because every read would fail the same way.
 | `GSF_MCP_CHAT_TIMEOUT_S` | `900` | Timeout for one `ask_data` run. |
 | `GSF_MCP_ALLOW_SHARED_TOKEN` | unset | Permit one `GSF_API_TOKEN` to serve every `http` caller. See below. |
 | `GSF_OPENAPI_SPEC` | bundled with the package | Override the spec tools are generated from. |
-| `GSF_MCP_OIDC_CONFIG_URL` | unset | Provider discovery document. Enables browser sign-in; `http` only. |
+| `GSF_MCP_SIGN_IN` | `off` | Set to `gsf` to have callers sign in against GSF itself; `http` only. |
+| `GSF_MCP_OIDC_CONFIG_URL` | unset | Provider discovery document. Delegates sign-in to that provider directly; `http` only. |
 | `GSF_MCP_OIDC_CLIENT_ID` | unset | This server's client id at that provider. |
 | `GSF_MCP_OIDC_CLIENT_SECRET` | unset | Its client secret. Also derives the key the server signs its own tokens with. |
-| `GSF_MCP_PUBLIC_URL` | unset | Where callers reach *this* server. The redirect URI is built from it. |
+| `GSF_MCP_PUBLIC_URL` | derived from host and port | Where callers reach *this* server. Required with `GSF_MCP_OIDC_*`, which builds the redirect URI from it. |
 | `GSF_MCP_OIDC_SCOPES` | `openid email profile` | Scopes to request. Must include `openid`. |
 | `GSF_MCP_OIDC_REDIRECT_PATH` | `/auth/callback` | Callback path under `GSF_MCP_PUBLIC_URL`, to match an existing registration. |
 
@@ -274,11 +275,47 @@ caller's token allows, and conversation history belongs to that caller.
 > That combination is legitimate for a single-user deployment or an automation
 > account. It is never what you want for a team.
 
-## Signing in with SSO
+## Signing in against GSF
 
 Everything above still expects each caller to hold a GSF API token, minted by
-hand and pasted into a client config. Point the server at an OIDC provider
-instead and that step disappears:
+hand and pasted into a client config. This removes that step, and needs one
+variable to do it:
+
+```sh
+GSF_MCP_TRANSPORT=http GSF_MCP_SIGN_IN=gsf GSF_API_URL=https://gsf.example gsf-mcp
+```
+
+A client that connects is told to get authorization from GSF, registers itself,
+and sends the user to GSF's ordinary login page — the same page, and the same SSO
+provider, they would use in a browser. The token it gets back is one GSF issued,
+which this server forwards on every call.
+
+Nothing is configured per deployment because nothing here is deployment-specific:
+this server holds no client id, no client secret, and no redirect URI. Clients
+register themselves through dynamic client registration, which GSF supports, so
+no redirect URI is ever registered by hand — the alternative below needs one
+approved at the provider before anybody can log in.
+
+The registrations and grants live in GSF's database, so replicas share them and a
+restart signs nobody out. Revocation is GSF's too: deleting a grant, banning the
+user, or changing their role takes effect on the next call, because permissions
+are resolved from the account rather than carried in the token.
+
+**The token is opaque**, so this server cannot check it locally — it asks GSF on
+each call. That is a round trip inside the cluster, and it is what makes instant
+revocation work. If GSF cannot be reached the call fails as an error rather than
+as "sign in again", so an outage does not send everyone into a login loop that
+cannot succeed either.
+
+Requires GSF at a version that serves `/.well-known/oauth-authorization-server`;
+pointing this mode at an older deployment fails at discovery, before any browser
+opens.
+
+## Signing in with an identity provider directly
+
+Use this when the deployment must not be the authorization server — for example
+when tokens have to come from a specific corporate provider. It is more to set
+up: a client id, a client secret, and a redirect URI someone has registered.
 
 ```sh
 export GSF_MCP_TRANSPORT=http
@@ -403,6 +440,20 @@ disagree. Run `pnpm openapi`, or update `mcp/gsf_mcp/tools.py`.
 **"OpenAPI spec not found"** — `GSF_OPENAPI_SPEC` points somewhere wrong, or the
 install is incomplete. Unset it to fall back to the packaged copy.
 
+**"This request carried no signed-in session"** — with `GSF_MCP_SIGN_IN=gsf`, the
+grant behind this call is gone: it expired, or it was revoked in GSF. Sign in
+again from the client.
+
+**A client cannot discover how to sign in, with `GSF_MCP_SIGN_IN=gsf`** — check
+that `$GSF_API_URL/.well-known/oauth-authorization-server` returns JSON. A
+redirect to the login page instead means the deployment predates the route, and
+no browser will open.
+
+**"GSF_MCP_SIGN_IN=gsf conflicts with the GSF_MCP_OIDC_* variables"** — both hand
+out sign-ins and a caller can only be sent to one authorization server. Signing
+in against GSF needs no client id or secret, so prefer it unless the tokens
+specifically have to come from the provider.
+
 **"The GSF_MCP_OIDC_* variables need GSF_MCP_TRANSPORT=http"** — sign-in ends in
 a browser redirect back to this server, and `stdio` has no address to redirect
 to. There, the client's own `GSF_API_TOKEN` is the identity.
@@ -410,6 +461,11 @@ to. There, the client's own `GSF_API_TOKEN` is the identity.
 **"Incomplete OIDC configuration"** — one of the group is unset. Half-configured
 sign-in is refused rather than quietly falling back to hand-minted tokens, which
 would look fine until a caller arrived without one.
+
+**"GSF_MCP_PUBLIC_URL is required with the GSF_MCP_OIDC_* variables"** — the
+redirect URI is built from it, so it has to match the registration exactly.
+Unlike `GSF_MCP_SIGN_IN=gsf`, it is not guessed from the bind address: a wrong
+guess fails at the provider, with a message pointing nowhere near this setting.
 
 **`invalid redirect_uri` from the provider** — `$GSF_MCP_PUBLIC_URL/auth/callback`
 is not registered for this client. Registering GSF's own callback is not enough;

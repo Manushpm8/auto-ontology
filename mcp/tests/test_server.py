@@ -311,3 +311,39 @@ def test_refuses_to_start_when_a_curated_endpoint_disappeared(tmp_path: Path) ->
 
     with pytest.raises(ConfigError, match="GET /api/terms"):
         load_spec(_settings(trimmed))
+
+
+def test_a_caller_signed_in_against_gsf_forwards_that_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GSF issued it, so it goes upstream untouched — no exchange, no unwrapping."""
+    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
+
+    headers = _sent_headers(CallerAuth(use_gsf_token=True))
+
+    assert headers["authorization"] == "Bearer gsf-issued"
+    assert "x-api-key" not in headers
+
+
+def test_signing_in_against_gsf_outranks_any_header_the_caller_sends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otherwise a caller could sign in as one user and call GSF as another."""
+    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
+
+    headers = _sent_headers(
+        CallerAuth("gsf_shared", use_gsf_token=True),
+        {"x-api-key": "gsf_someone_else"},
+    )
+
+    assert headers["authorization"] == "Bearer gsf-issued"
+    assert "x-api-key" not in headers
+
+
+def test_a_request_with_no_signed_in_session_is_an_actionable_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "gsf_access_token", lambda: None)
+
+    with pytest.raises(ToolError, match="Sign in again"):
+        _sent_headers(CallerAuth(use_gsf_token=True))

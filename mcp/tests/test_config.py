@@ -36,6 +36,7 @@ _VARS = (
     "GSF_MCP_OIDC_SCOPES",
     "GSF_MCP_OIDC_REDIRECT_PATH",
     "GSF_MCP_PUBLIC_URL",
+    "GSF_MCP_SIGN_IN",
 )
 
 _OIDC_ENV = {
@@ -323,3 +324,75 @@ def test_oidc_redirect_path_must_be_a_path(monkeypatch: MonkeyPatch) -> None:
 
     with pytest.raises(ConfigError, match="must start with '/'"):
         load_settings()
+
+
+def test_signing_in_against_gsf_needs_only_one_variable(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    # The point of this mode: no client id, no secret, no registered redirect.
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("GSF_MCP_SIGN_IN", "gsf")
+
+    settings = load_settings()
+
+    assert settings.sign_in_with_gsf is True
+    assert settings.oidc is None
+
+
+def test_sign_in_defaults_to_off(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+
+    assert load_settings().sign_in_with_gsf is False
+
+
+def test_sign_in_rejects_an_unknown_mode(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("GSF_MCP_SIGN_IN", "google")
+
+    with pytest.raises(ConfigError, match="must be 'gsf' or 'off'"):
+        load_settings()
+
+
+def test_signing_in_against_gsf_needs_http(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("GSF_API_TOKEN", "gsf_token")
+    monkeypatch.setenv("GSF_MCP_SIGN_IN", "gsf")
+
+    with pytest.raises(ConfigError, match="needs GSF_MCP_TRANSPORT=http"):
+        load_settings()
+
+
+def test_signing_in_against_gsf_conflicts_with_a_shared_token(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("GSF_API_TOKEN", "gsf_token")
+    monkeypatch.setenv("GSF_MCP_ALLOW_SHARED_TOKEN", "1")
+    monkeypatch.setenv("GSF_MCP_SIGN_IN", "gsf")
+
+    with pytest.raises(ConfigError, match="would act as that token's owner"):
+        load_settings()
+
+
+def test_signing_in_against_gsf_conflicts_with_oidc(monkeypatch: MonkeyPatch) -> None:
+    # Both hand out sign-ins, and a caller can only be sent to one place.
+    for name, value in _OIDC_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GSF_MCP_SIGN_IN", "gsf")
+
+    with pytest.raises(ConfigError, match="conflicts with the GSF_MCP_OIDC_"):
+        load_settings()
+
+
+def test_public_url_is_derived_when_unset(monkeypatch: MonkeyPatch) -> None:
+    # 0.0.0.0 is the default bind address and no use to a browser.
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("GSF_MCP_PORT", "9999")
+
+    assert load_settings().public_url == "http://localhost:9999"
+
+
+def test_public_url_can_be_set_explicitly(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("GSF_MCP_TRANSPORT", "http")
+    monkeypatch.setenv("GSF_MCP_PUBLIC_URL", "https://mcp.example/")
+
+    assert load_settings().public_url == "https://mcp.example"
