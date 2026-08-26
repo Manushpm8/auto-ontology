@@ -9,6 +9,8 @@ from collections import defaultdict
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
 
+from sqlglot import exp
+
 from gsf.connectors import get_connectors
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.datasources import (
@@ -114,6 +116,24 @@ def _is_text_sample_type(data_type: str | None) -> bool:
     return any(token in lowered for token in _TEXT_SAMPLE_TYPES)
 
 
+def _quoted_identifier(name: str, dialect: str | None) -> str:
+    """Quote a schema, table or column name for *dialect*.
+
+    Names carrying a space or a reserved word have to be quoted or the probe
+    below silently loses the table: ``SELECT * FROM main.Sales Orders`` parses
+    as table ``main.Sales``, raises "no such table", and the caller drops every
+    column of that table from profiling. The quote character is dialect-specific
+    (backticks on MySQL and Spark, double quotes elsewhere), so the naive
+    hard-coded ``"`` would trade a SQLite bug for a MySQL one.
+    """
+    try:
+        return exp.to_identifier(name, quoted=True).sql(dialect=dialect or None)
+    except Exception:
+        # Unknown dialect: fall back to the SQL-standard quote rather than
+        # emitting a bare identifier, since bare is what breaks on spaces.
+        return '"' + name.replace('"', '""') + '"'
+
+
 def _distinct_values_if_low_cardinality(
     connector: "SQLDatabase",
     qualified: str,
@@ -129,7 +149,7 @@ def _distinct_values_if_low_cardinality(
     most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
     huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
     """
-    quoted = '"' + col_name.replace('"', '""') + '"'
+    quoted = _quoted_identifier(col_name, getattr(connector, "dialect", None))
     try:
         df = connector.execute(
             f"SELECT DISTINCT {quoted} FROM {qualified} "
@@ -171,7 +191,13 @@ def calculate_columns_profiling(
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
-    qualified = f"{schema_name}.{table_name}" if schema_name else table_name
+    dialect = getattr(connector, "dialect", None)
+    quoted_table = _quoted_identifier(table_name, dialect)
+    qualified = (
+        f"{_quoted_identifier(schema_name, dialect)}.{quoted_table}"
+        if schema_name
+        else quoted_table
+    )
 
     try:
         df = connector.execute(

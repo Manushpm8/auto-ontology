@@ -6,7 +6,55 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from gsf.semantic.visit_enter import calculate_columns_profiling, process_table
+import pytest
+
+from gsf.semantic.visit_enter import (
+    _quoted_identifier,
+    calculate_columns_profiling,
+    process_table,
+)
+
+
+@pytest.mark.parametrize(
+    ("dialect", "expected"),
+    [
+        ("sqlite", '"Sales Orders"'),
+        ("postgres", '"Sales Orders"'),
+        ("mysql", "`Sales Orders`"),
+        ("spark", "`Sales Orders`"),
+        (None, '"Sales Orders"'),
+        ("not-a-dialect", '"Sales Orders"'),
+    ],
+)
+def test_quoted_identifier_per_dialect(dialect: str | None, expected: str) -> None:
+    # Backticks on MySQL/Spark, double quotes elsewhere; an unknown dialect
+    # still quotes, since a bare identifier is what loses the table.
+    assert _quoted_identifier("Sales Orders", dialect) == expected
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_quotes_name_with_space(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    # Unquoted "main.Sales Orders" parses as table main.Sales, so the probe
+    # raised "no such table" and every column of the table was dropped.
+    df = pd.DataFrame({"OrderDate": ["5/31/18", "6/1/18", "12/4/18"]})
+    connector = MagicMock()
+    connector.dialect = "sqlite"
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "Sales Orders", "schema_name": "main"}
+    columns = [{"name": "OrderDate", "data_type": "TEXT"}]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    sql = connector.execute.call_args_list[0][0][0]
+    assert '"main"."Sales Orders"' in sql
+    assert result["OrderDate"]["format"] == "M/D/YY"
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")
@@ -63,6 +111,7 @@ def test_calculate_columns_profiling(
     # status and token each have <5 distinct sample values, so each gets a
     # DISTINCT probe. Return empty so the sample top-N values are kept as-is.
     connector = MagicMock()
+    connector.dialect = "postgres"
     connector.execute.side_effect = [
         df,
         pd.DataFrame({"status": []}),
@@ -80,7 +129,7 @@ def test_calculate_columns_profiling(
     result = calculate_columns_profiling(table, columns, connector)
 
     sql = connector.execute.call_args_list[0][0][0]
-    assert "public.orders" in sql
+    assert '"public"."orders"' in sql
     assert "LIMIT 1000" in sql
     assert connector.execute.call_count == 3
 
