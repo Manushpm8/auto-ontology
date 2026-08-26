@@ -78,9 +78,7 @@ def test_llm_date_description_also_gets_the_notation(_mock_desc) -> None:
     columns = [{"name": "game_date", "data_type": "date"}]
     profiling = {"game_date": {"format": "YYYY-MM-DD"}}
     specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
-    assert specs[0].description == (
-        "When the match took place. — format: YYYY-MM-DD"
-    )
+    assert specs[0].description == ("When the match took place. — format: YYYY-MM-DD")
 
 
 def test_to_term_name() -> None:
