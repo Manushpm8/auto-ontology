@@ -245,32 +245,9 @@ signed-in user.
 
 ## MCP server
 
-GSF ships an [MCP](https://modelcontextprotocol.io) server, so agent harnesses
-such as Cursor and Claude Desktop can query your data directly. It gives an
-agent one tool that answers questions in natural language, plus read-only tools
-for browsing the glossary and catalog behind those answers.
-
-It is an HTTP client of the public API described above. Given an API token it
-acts as that token's owner, with exactly their permissions. Told to use sign-in
-instead, it asks each caller to log in through their browser — against GSF
-itself, so there is nothing to register or configure — and every call runs as
-that person, with no token to mint, paste, or share.
-
-```sh
-export GSF_API_URL=https://gsf.example.com
-export GSF_API_TOKEN=gsf_...
-
-uvx --from "git+https://github.com/NVIDIA/GSF.git#subdirectory=mcp" gsf-mcp
-```
-
-`gsf-mcp` is a separate, lightweight distribution (source in
-[`mcp/`](./mcp/)): it needs no database drivers or model tooling and
-nothing from `gsf-server`, so users do not have to clone this repo or run the
-backend to use it. The install shortens to `uvx gsf-mcp` once it is published to
-PyPI.
-
-See [`docs/mcp.md`](./docs/mcp.md) for client configuration, the full tool list,
-and deployment notes.
+Agent harnesses such as Cursor and Claude Desktop can query your data through
+GSF's [MCP](https://modelcontextprotocol.io) server. See
+[`mcp/`](./mcp/) to run it and [`docs/mcp.md`](./docs/mcp.md) for the details.
 
 ## License
 

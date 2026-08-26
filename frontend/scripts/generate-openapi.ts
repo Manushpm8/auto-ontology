@@ -53,7 +53,7 @@ const repoRoot = resolve(frontendDir, '..');
 const apiDir = resolve(frontendDir, 'app/api');
 const backendSpecPath = resolve(repoRoot, 'docs/openapi/backend.json');
 const outputPath = resolve(repoRoot, 'docs/openapi/gsf-api.json');
-const packagedSpecPath = resolve(repoRoot, 'mcp/gsf_mcp/gsf-api.json');
+const mcpSpecPath = resolve(repoRoot, 'mcp/gsf_mcp/gsf-api.json');
 
 /** `app/api/terms/[term_id]/route.ts` → `/api/terms/{term_id}`. */
 const routePath = (filePath: string): string => {
@@ -647,7 +647,7 @@ execFileSync('npx', ['prettier', '--write', '--log-level', 'silent', outputPath]
 // ordinary `pip`/`uvx` install, where there is no docs/ directory to read — so a
 // copy ships inside the package. Copied after Prettier so the two are
 // byte-identical; CI diffs both paths, and gsf-mcp's tests compare them.
-copyFileSync(outputPath, packagedSpecPath);
+copyFileSync(outputPath, mcpSpecPath);
 
 const paths = Object.keys(spec.paths as Json).length;
 console.log(`${relative(repoRoot, outputPath)}: ${paths} paths, ${operations.length} operations`);
