@@ -13,6 +13,7 @@ from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
 from gsf.utils.model_config import resolve
+from gsf.utils.sample_values import parse_sample_values
 from gsf.vdb import get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
 
@@ -218,20 +219,15 @@ def embed_all_semantic_nodes(
     return len(with_embeddings)
 
 
-def _format_sample_values(raw: str | list[Any] | None) -> str:
+def _format_sample_values(raw: Any) -> str:
     """Return a ' Sample values: ...' suffix string, or empty string if unavailable."""
-    if not raw:
+    values = parse_sample_values(raw)
+    if not values:
         return ""
-    try:
-        import json
-
-        values = json.loads(raw) if isinstance(raw, str) else list(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
-        if not non_null:
-            return ""
-        return " Sample values: " + ", ".join(non_null) + "."
-    except Exception:
+    non_null = [v for v in values if v is not None and len(v) <= 30]
+    if not non_null:
         return ""
+    return " Sample values: " + ", ".join(non_null) + "."
 
 
 def _build_rows(

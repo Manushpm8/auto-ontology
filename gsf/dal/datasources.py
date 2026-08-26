@@ -16,7 +16,6 @@ Non-Neo4j helpers that call these functions remain in their original locations:
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -658,14 +657,14 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
 
 
 def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
-    """Write sample_values JSON onto Column nodes for a given table.
+    """Write sample_values onto Column nodes for a given table as a native list.
 
     Skips silently when *samples* is empty.
     """
     if not samples:
         return
     entries = [
-        {"column_name": col, "sample_values": json.dumps(vals)}
+        {"column_name": col, "sample_values": [str(v) for v in vals]}
         for col, vals in samples.items()
     ]
     graph().query_write(
@@ -737,6 +736,14 @@ def fetch_tables_and_columns_by_node_ids(
             {"ids": node_ids},
         ),
     )
+    if not columns_df.empty:
+        # `sample_values` may still be a legacy JSON string for columns that
+        # predate the switch to storing a native Neo4j list — normalize before
+        # handing the frame to TabularFetchEmbeddingsOp, which slices it
+        # assuming a real list.
+        columns_df["sample_values"] = columns_df["sample_values"].apply(
+            parse_sample_values
+        )
     tables_df = pd.DataFrame(
         conn.query_read(
             f"""

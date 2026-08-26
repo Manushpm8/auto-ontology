@@ -25,9 +25,28 @@ from gsf.semantic.constants import (
     LABEL_TERM,
     REL_PROPERTY_OF,
 )
+from gsf.utils.sample_values import parse_sample_values
 
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_sample_values_in_place(results: dict) -> None:
+    """Normalize each nested column's ``sample_values`` to ``list[str] | None``.
+
+    The Cypher below returns ``c.sample_values`` as Neo4j stored it, which for
+    a Column that predates the switch to storing a native list may still be a
+    legacy JSON-encoded string (see ``gsf.utils.sample_values``). Callers of
+    ``expand_info`` (SQL-agent prompt formatting) always expect a plain list.
+    """
+    for items in results.values():
+        for item in items or []:
+            for table in item.get("relevant_tables") or []:
+                for column in table.get("columns") or []:
+                    if "sample_values" in column:
+                        column["sample_values"] = parse_sample_values(
+                            column["sample_values"]
+                        )
 
 
 def expand_info(ids_and_labels: list | None) -> dict:
@@ -167,4 +186,5 @@ def expand_info(ids_and_labels: list | None) -> dict:
         if len(result) > 0:
             results = results | result[0]["ids_to_props"]
 
+    _normalize_sample_values_in_place(results)
     return results

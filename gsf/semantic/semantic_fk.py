@@ -225,20 +225,15 @@ def _build_query_text(col: dict[str, Any]) -> str:
     return ", ".join(parts)
 
 
-def _format_sample_values(raw: str | None) -> str:
+def _format_sample_values(raw: Any) -> str:
     """Return a 'sample_values: ...' string, or empty when unavailable."""
-    if not raw:
+    values = parse_sample_values(raw)
+    if not values:
         return ""
-    try:
-        import json
-
-        values = json.loads(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
-        if not non_null:
-            return ""
-        return "sample_values: " + ", ".join(non_null)
-    except Exception:
+    non_null = [v for v in values if v is not None and len(v) <= 30]
+    if not non_null:
         return ""
+    return "sample_values: " + ", ".join(non_null)
 
 
 def _resolve_via_vdb(

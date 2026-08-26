@@ -145,7 +145,7 @@ def build_column_attribute_semantic_rows(
     table_id: str,
     table_name: str,
     is_unique: bool,
-    sample_values: list[str] | str | None,
+    sample_values: list[str] | None,
     schema_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build semantic-layer embed rows for a ColumnAttribute."""

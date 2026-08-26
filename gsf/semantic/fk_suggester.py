@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import json
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -13,6 +12,7 @@ from gsf.utils.llm_invoke import (
     get_non_reasoning_llm_client,
     invoke_with_structured_output,
 )
+from gsf.utils.sample_values import parse_sample_values
 from gsf.semantic.models import FkAndPkResult, PotentialFkResult, PotentialFkSuggestion
 
 logger = logging.getLogger(__name__)
@@ -71,27 +71,13 @@ def _candidate_columns(
     ]
 
 
-def _format_sample_values(raw: str | None) -> str:
+def _format_sample_values(raw: Any) -> str:
     """Return a 'samples: ...' string filtered to ≤30-char non-null values, or empty."""
-    if not raw:
+    values = parse_sample_values(raw)
+    if not values:
         return ""
-    try:
-        values = json.loads(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
-        return ("samples: " + ", ".join(non_null)) if non_null else ""
-    except Exception:
-        return ""
-
-
-def _has_unique_sample_values(raw: str | None) -> bool:
-    """Return True when all non-null sample values are distinct (no repeats)."""
-    if not raw:
-        return False
-    try:
-        str_values = [str(v) for v in json.loads(raw) if v is not None]
-        return len(str_values) > 1 and len(set(str_values)) == len(str_values)
-    except Exception:
-        return False
+    non_null = [v for v in values if v is not None and len(v) <= 30]
+    return ("samples: " + ", ".join(non_null)) if non_null else ""
 
 
 def _format_column_line(col: dict[str, Any], is_unique: bool | None = None) -> str:

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -1206,11 +1205,6 @@ def _import_catalog(
             schema_db_name = schema_db_names.get(schema.id, "")
             for table in schema.tables:
                 for ordinal, column in enumerate(table.columns, start=1):
-                    sample_values_json = (
-                        json.dumps(column.sample_values)
-                        if column.sample_values
-                        else None
-                    )
                     column_parent_table[column.id] = table.id
                     column_meta[column.id] = ColumnCatalogMeta(
                         name=column.name,
@@ -1230,7 +1224,7 @@ def _import_catalog(
                                 "name": column.name,
                                 "description": column.description,
                                 "data_type": column.type,
-                                "sample_values": sample_values_json,
+                                "sample_values": column.sample_values or None,
                                 "is_unique": column.is_unique,
                                 "is_nullable": column.is_nullable,
                                 "ordinal_position": ordinal,
