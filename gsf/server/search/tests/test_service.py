@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for discovery search orchestration."""
+"""Unit tests for global-search orchestration."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ import pytest
 
 from gsf.server.search.service import (
     SearchValidationError,
-    discovery_count,
-    discovery_search,
+    global_search,
+    global_search_count,
     rank_key,
     resolve_object_types,
 )
@@ -68,9 +68,9 @@ def test_rank_key_orders_synonym_after_name_before_description_only() -> None:
 def test_short_query_skips_neo4j_and_returns_empty() -> None:
     with (
         patch("gsf.server.search.service.search_dal.ensure_search_indexes") as ensure,
-        patch("gsf.server.search.service.search_dal.fetch_discovery") as fetch,
+        patch("gsf.server.search.service.search_dal.fetch_global_search") as fetch,
     ):
-        result = discovery_search(
+        result = global_search(
             search_term="a",
             text_match_option="contains",
             objects=None,
@@ -82,8 +82,8 @@ def test_short_query_skips_neo4j_and_returns_empty() -> None:
 
 
 def test_specials_only_query_is_treated_as_empty() -> None:
-    with patch("gsf.server.search.service.search_dal.fetch_discovery") as fetch:
-        result = discovery_count(
+    with patch("gsf.server.search.service.search_dal.fetch_global_search") as fetch:
+        result = global_search_count(
             search_term="**",
             text_match_option="contains",
             objects=None,
@@ -95,7 +95,7 @@ def test_specials_only_query_is_treated_as_empty() -> None:
 
 def test_unsupported_match_option_raises() -> None:
     with pytest.raises(SearchValidationError, match="starts_with"):
-        discovery_search(
+        global_search(
             search_term="revenue",
             text_match_option="starts_with",
             objects=None,
@@ -104,8 +104,8 @@ def test_unsupported_match_option_raises() -> None:
 
 
 @patch("gsf.server.search.service.search_dal.ensure_search_indexes")
-@patch("gsf.server.search.service.search_dal.fetch_discovery")
-def test_discovery_search_normalizes_and_ranks(
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
+def test_global_search_normalizes_and_ranks(
     fetch: MagicMock, _ensure: MagicMock
 ) -> None:
     fetch.return_value = [
@@ -132,7 +132,7 @@ def test_discovery_search_normalizes_and_ranks(
         },
     ]
 
-    result = discovery_search(
+    result = global_search(
         search_term="revenue",
         text_match_option="contains",
         objects=["term", "table"],
@@ -151,8 +151,8 @@ def test_discovery_search_normalizes_and_ranks(
 
 
 @patch("gsf.server.search.service.search_dal.ensure_search_indexes")
-@patch("gsf.server.search.service.search_dal.fetch_discovery")
-def test_discovery_search_keeps_breadcrumb_ids(
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
+def test_global_search_keeps_breadcrumb_ids(
     fetch: MagicMock, _ensure: MagicMock
 ) -> None:
     fetch.return_value = [
@@ -170,7 +170,7 @@ def test_discovery_search_keeps_breadcrumb_ids(
             ],
         },
     ]
-    result = discovery_search(
+    result = global_search(
         search_term="customer",
         text_match_option="contains",
         objects=["column"],
@@ -184,12 +184,12 @@ def test_discovery_search_keeps_breadcrumb_ids(
 
 
 @patch("gsf.server.search.service.search_dal.ensure_search_indexes")
-@patch("gsf.server.search.service.search_dal.count_discovery")
-def test_discovery_count_passes_object_filter(
+@patch("gsf.server.search.service.search_dal.count_global_search")
+def test_global_search_count_passes_object_filter(
     count: MagicMock, _ensure: MagicMock
 ) -> None:
     count.return_value = {"term": 2, "column": 4}
-    result = discovery_count(
+    result = global_search_count(
         search_term="id",
         text_match_option="contains",
         objects=["column"],
@@ -201,8 +201,8 @@ def test_discovery_count_passes_object_filter(
 
 
 @patch("gsf.server.search.service.search_dal.ensure_search_indexes")
-@patch("gsf.server.search.service.search_dal.fetch_discovery")
-def test_discovery_search_keeps_matching_synonyms_only(
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
+def test_global_search_keeps_matching_synonyms_only(
     fetch: MagicMock, _ensure: MagicMock
 ) -> None:
     fetch.return_value = [
@@ -217,7 +217,7 @@ def test_discovery_search_keeps_matching_synonyms_only(
             "synonyms": ["BU", "Org"],
         },
     ]
-    result = discovery_search(
+    result = global_search(
         search_term="BU",
         text_match_option="contains",
         objects=["term"],
@@ -229,7 +229,7 @@ def test_discovery_search_keeps_matching_synonyms_only(
 
 @patch("gsf.server.search.service.search_dal.LIST_LIMIT", 3)
 @patch("gsf.server.search.service.search_dal.ensure_search_indexes")
-@patch("gsf.server.search.service.search_dal.fetch_discovery")
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
 def test_synonym_only_term_survives_list_cap(
     fetch: MagicMock, _ensure: MagicMock
 ) -> None:
@@ -275,7 +275,7 @@ def test_synonym_only_term_survives_list_cap(
             "synonyms": ["Customer"],
         },
     ]
-    result = discovery_search(
+    result = global_search(
         search_term="Customer",
         text_match_option="contains",
         objects=None,

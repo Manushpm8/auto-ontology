@@ -19,8 +19,8 @@ export enum TextMatchOption {
 	Contains = 'contains',
 }
 
-/** Cap on `POST /search/discovery`. Count is uncapped. */
-export const DISCOVERY_LIST_LIMIT = 200;
+/** Cap on `POST /search/globalSearch`. Count is uncapped. */
+export const GLOBAL_SEARCH_LIST_LIMIT = 200;
 
-/** Tab id for the unfiltered discovery list. */
-export const DISCOVERY_ALL_TAB = 'all';
+/** Tab id for the unfiltered global-search list. */
+export const GLOBAL_SEARCH_ALL_TAB = 'all';

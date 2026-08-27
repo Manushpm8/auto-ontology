@@ -10,7 +10,9 @@ import {
 	SEARCH_TYPE_TAB_LABEL,
 	SEARCH_TYPE_TAB_ORDER,
 } from '@/common/globalSearchMeta';
-import { DISCOVERY_ALL_TAB, SearchObjectType } from '@/enums/search';
+import { SkeletonBlock } from '@/common/Skeleton';
+import { GLOBAL_SEARCH_ALL_TAB, SearchObjectType } from '@/enums/search';
+import { SkeletonVariant } from '@/enums/skeleton';
 
 type GlobalSearchTabsProps = {
 	counts: Record<string, number>;
@@ -23,11 +25,25 @@ const tabClass = (selected: boolean) =>
 		? 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#76b900] px-2.5 py-1.5 text-white'
 		: 'inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-zinc-700 shadow-sm ring-1 ring-zinc-200 hover:bg-[#76b900]/10 hover:text-[#4d7a00] dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700 dark:hover:bg-[#76b900]/15';
 
-export const totalDiscoveryCount = (counts: Record<string, number>): number =>
+export const totalGlobalSearchCount = (counts: Record<string, number>): number =>
 	Object.values(counts).reduce((sum, value) => sum + value, 0);
 
+const TAB_SKELETON_WIDTHS = ['w-16', 'w-20', 'w-28', 'w-24', 'w-16', 'w-20'] as const;
+
+export const GlobalSearchTabsSkeleton = () => (
+	<div className="flex flex-wrap gap-2 px-2 pb-2" aria-hidden>
+		{TAB_SKELETON_WIDTHS.map((width, index) => (
+			<SkeletonBlock
+				key={`${width}-${index}`}
+				variant={SkeletonVariant.RECTANGLE}
+				className={`h-8 ${width}`}
+			/>
+		))}
+	</div>
+);
+
 export const GlobalSearchTabs = ({ counts, selected, onSelect }: GlobalSearchTabsProps) => {
-	const allCount = totalDiscoveryCount(counts);
+	const allCount = totalGlobalSearchCount(counts);
 	const typeTabs = SEARCH_TYPE_TAB_ORDER.filter((type) => (counts[type] ?? 0) > 0);
 
 	if (allCount === 0) return null;
@@ -36,14 +52,14 @@ export const GlobalSearchTabs = ({ counts, selected, onSelect }: GlobalSearchTab
 		<div
 			role="tablist"
 			aria-label="Search result types"
-			className="flex gap-2 overflow-x-auto px-2 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+			className="flex flex-wrap gap-2 px-2 pb-2"
 		>
 			<button
 				type="button"
 				role="tab"
-				aria-selected={selected === DISCOVERY_ALL_TAB}
-				onClick={() => onSelect(DISCOVERY_ALL_TAB)}
-				className={tabClass(selected === DISCOVERY_ALL_TAB)}
+				aria-selected={selected === GLOBAL_SEARCH_ALL_TAB}
+				onClick={() => onSelect(GLOBAL_SEARCH_ALL_TAB)}
+				className={tabClass(selected === GLOBAL_SEARCH_ALL_TAB)}
 			>
 				<Icon name={IconName.Exploration} className="h-3.5 w-3.5 shrink-0" />
 				<span className="text-sm font-medium">All</span>

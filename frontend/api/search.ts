@@ -4,62 +4,72 @@
 
 import { requests } from './requests';
 import { TextMatchOption } from '@/enums/search';
-import type { DiscoverySearchItem, DiscoverySearchRequest } from '@/types/search';
+import type { GlobalSearchItem, GlobalSearchRequest } from '@/types/search';
 import type { ResponseWithCount, ResponseWithError } from './types';
 
-type DiscoveryListResponse = ResponseWithError<ResponseWithCount<DiscoverySearchItem[]>>;
-type DiscoveryCountResponse = ResponseWithError<{ data: Record<string, number> }>;
+type GlobalSearchListResponse = ResponseWithError<ResponseWithCount<GlobalSearchItem[]>>;
+type GlobalSearchCountResponse = ResponseWithError<{ data: Record<string, number> }>;
 
-/** Unwrap the list envelope (or a nested `{ data }` copy) into hit rows. */
-export const discoveryItemsFromResponse = (
-	response: DiscoveryListResponse,
-): DiscoverySearchItem[] => {
-	if (response.error) return [];
-	const payload: unknown = response.data;
-	if (Array.isArray(payload)) return payload;
-	if (payload != null && typeof payload === 'object' && 'data' in payload) {
-		const nested = (payload as { data?: unknown }).data;
-		if (Array.isArray(nested)) return nested;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	value != null && typeof value === 'object' && !Array.isArray(value);
+
+const readCountMap = (value: unknown): Record<string, number> => {
+	if (!isRecord(value)) return {};
+	if (isRecord(value.data)) {
+		const nested = readCountMap(value.data);
+		if (Object.keys(nested).length > 0) return nested;
 	}
-	return [];
-};
-
-/** Unwrap `{ data: { type: n } }` from `/search/discovery/count`. */
-export const discoveryCountsFromResponse = (
-	response: DiscoveryCountResponse,
-): Record<string, number> => {
-	if (response.error) return {};
-	const payload: unknown = response.data;
-	if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) return {};
 	const out: Record<string, number> = {};
-	Object.entries(payload as Record<string, unknown>).forEach(([key, value]) => {
-		if (typeof value === 'number') out[key] = value;
+	Object.entries(value).forEach(([key, raw]) => {
+		if (key === 'data' || key === 'count' || key === 'error' || key === 'message') return;
+		if (typeof raw === 'number' && Number.isFinite(raw)) out[key] = raw;
 	});
 	return out;
 };
 
-const withDefaults = (payload: DiscoverySearchRequest): DiscoverySearchRequest => ({
+/** Unwrap the list envelope (or a nested `{ data }` copy) into hit rows. */
+export const globalSearchItemsFromResponse = (
+	response: GlobalSearchListResponse,
+): GlobalSearchItem[] => {
+	if (response.error) return [];
+	const payload: unknown = response.data;
+	if (Array.isArray(payload)) return payload;
+	if (isRecord(payload) && Array.isArray(payload.data)) return payload.data as GlobalSearchItem[];
+	return [];
+};
+
+/** Unwrap `{ data: { type: n } }` from `/search/globalSearchCount`. */
+export const globalSearchCountsFromResponse = (
+	response: GlobalSearchCountResponse,
+): Record<string, number> => {
+	if (response.error) return {};
+	const fromData = readCountMap(response.data);
+	if (Object.keys(fromData).length > 0) return fromData;
+	return readCountMap(response);
+};
+
+const withDefaults = (payload: GlobalSearchRequest): GlobalSearchRequest => ({
 	text_match_option: TextMatchOption.Contains,
 	...payload,
 	filters: { description: true, ...payload.filters },
 });
 
 export const searchApi = {
-	discovery: (
-		payload: DiscoverySearchRequest,
+	globalSearch: (
+		payload: GlobalSearchRequest,
 		abortController?: AbortController,
-	): Promise<DiscoveryListResponse> =>
-		requests.post<ResponseWithCount<DiscoverySearchItem[]>>(
-			'search/discovery',
+	): Promise<GlobalSearchListResponse> =>
+		requests.post<ResponseWithCount<GlobalSearchItem[]>>(
+			'search/globalSearch',
 			withDefaults(payload),
 			abortController,
 		),
-	discoveryCount: (
-		payload: DiscoverySearchRequest,
+	globalSearchCount: (
+		payload: GlobalSearchRequest,
 		abortController?: AbortController,
-	): Promise<DiscoveryCountResponse> =>
+	): Promise<GlobalSearchCountResponse> =>
 		requests.post<{ data: Record<string, number> }>(
-			'search/discovery/count',
+			'search/globalSearchCount',
 			withDefaults(payload),
 			abortController,
 		),

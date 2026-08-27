@@ -4,30 +4,30 @@
 
 import type { SearchObjectType } from '@/enums/search';
 
-export type DiscoveryBreadcrumb = {
+export type GlobalSearchBreadcrumb = {
 	name: string;
 	type: string;
 	id?: string | null;
 };
 
-export type DiscoverySearchItem = {
+export type GlobalSearchItem = {
 	id: string;
 	name: string | null;
 	type: SearchObjectType;
 	description: string | null;
 	certified: boolean | string | null;
 	parent_id: string | null;
-	breadcrumbs: DiscoveryBreadcrumb[];
+	breadcrumbs: GlobalSearchBreadcrumb[];
 	synonyms?: string[];
 };
 
-export type DiscoveryFilters = {
+export type GlobalSearchFilters = {
 	description?: boolean;
 	objects?: SearchObjectType[];
 };
 
-export type DiscoverySearchRequest = {
+export type GlobalSearchRequest = {
 	search_term: string;
 	text_match_option?: string;
-	filters?: DiscoveryFilters;
+	filters?: GlobalSearchFilters;
 };

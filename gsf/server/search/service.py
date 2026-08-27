@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Discovery-search orchestration: validate, query, rank."""
+"""Global-search orchestration: validate, query, rank."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ class SearchValidationError(ValueError):
 
 
 def resolve_object_types(objects: list[str] | None) -> set[str]:
-    """Return the discovery types to search; empty/None means all of them."""
+    """Return the object types to search; empty/None means all of them."""
     allowed = set(search_dal.SEARCH_OBJECT_TYPES)
     if not objects:
         return allowed
@@ -133,7 +133,7 @@ def _lucene_or_empty(search_term: str) -> str | None:
     return lucene or None
 
 
-def discovery_search(
+def global_search(
     *,
     search_term: str,
     text_match_option: str,
@@ -154,7 +154,7 @@ def discovery_search(
     search_dal.ensure_search_indexes()
     stripped = search_term.strip()
     synonym_tokens = search_dal.synonym_word_tokens(stripped)
-    rows = search_dal.fetch_discovery(
+    rows = search_dal.fetch_global_search(
         lucene,
         types,
         include_description=include_description,
@@ -166,7 +166,7 @@ def discovery_search(
     return {"data": items, "count": len(items)}
 
 
-def discovery_count(
+def global_search_count(
     *,
     search_term: str,
     text_match_option: str,
@@ -185,7 +185,7 @@ def discovery_count(
 
     types = resolve_object_types(objects)
     search_dal.ensure_search_indexes()
-    counts = search_dal.count_discovery(
+    counts = search_dal.count_global_search(
         lucene,
         types,
         include_description=include_description,

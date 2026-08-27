@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for discovery Lucene escaping and object-type flags."""
+"""Unit tests for global-search Lucene escaping and object-type flags."""
 
 from __future__ import annotations
 

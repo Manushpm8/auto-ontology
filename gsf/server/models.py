@@ -38,14 +38,14 @@ __all__ = [
     "DataExplorationGraph",
     "DataGraphNode",
     "DatabaseSummary",
-    "DiscoveryBreadcrumb",
-    "DiscoverySearchItem",
     "EntityCoverageCandidate",
     "EntityCoverageResult",
     "ExplorationEdge",
     "ExplorationRelatedNode",
     "ExplorationRelatedNodes",
     "ForeignKeyRef",
+    "GlobalSearchBreadcrumb",
+    "GlobalSearchItem",
     "GraphLink",
     "IdRef",
     "NodeUpdateResult",
@@ -116,15 +116,15 @@ class NodeUpdateResult(ApiModel):
     description_certified: bool | None = None
 
 
-class DiscoveryBreadcrumb(ApiModel):
-    """One hop in a discovery hit's catalog/semantic path."""
+class GlobalSearchBreadcrumb(ApiModel):
+    """One hop in a global-search hit's catalog/semantic path."""
 
     name: str
     type: str
     id: str | None = None
 
 
-class DiscoverySearchItem(ApiModel):
+class GlobalSearchItem(ApiModel):
     """One global-search hit: identity plus optional certified/parent path."""
 
     id: str
@@ -133,7 +133,7 @@ class DiscoverySearchItem(ApiModel):
     description: str | None = None
     certified: bool | str | None = None
     parent_id: str | None = None
-    breadcrumbs: list[DiscoveryBreadcrumb] = Field(default_factory=list)
+    breadcrumbs: list[GlobalSearchBreadcrumb] = Field(default_factory=list)
     synonyms: list[str] = Field(default_factory=list)
 
 

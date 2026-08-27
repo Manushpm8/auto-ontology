@@ -5,36 +5,43 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { discoveryCountsFromResponse, discoveryItemsFromResponse, searchApi } from '@/api/search';
+import {
+	globalSearchCountsFromResponse,
+	globalSearchItemsFromResponse,
+	searchApi,
+} from '@/api/search';
 import { Placeholders } from '@/assets/images/placeholders';
 import { EmptyState } from '@/common/EmptyState';
-import { GlobalSearchResults } from '@/common/GlobalSearchResults';
+import { GlobalSearchResults, GlobalSearchResultsSkeleton } from '@/common/GlobalSearchResults';
 import {
 	GlobalSearchTabs,
+	GlobalSearchTabsSkeleton,
 	isSearchObjectType,
-	totalDiscoveryCount,
+	totalGlobalSearchCount,
 } from '@/common/GlobalSearchTabs';
 import { Modal } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
-import { Spinner } from '@/common/Spinner';
 import { EmptyStateVariant } from '@/enums/emptyState';
-import { DISCOVERY_ALL_TAB, DISCOVERY_LIST_LIMIT, TextMatchOption } from '@/enums/search';
+import { GLOBAL_SEARCH_ALL_TAB, GLOBAL_SEARCH_LIST_LIMIT, TextMatchOption } from '@/enums/search';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import type { DiscoverySearchItem } from '@/types/search';
+import type { GlobalSearchItem } from '@/types/search';
 
 export const GlobalSearch = () => {
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState('');
-	const [selectedTab, setSelectedTab] = useState(DISCOVERY_ALL_TAB);
-	const [items, setItems] = useState<DiscoverySearchItem[]>([]);
+	const [selectedTab, setSelectedTab] = useState(GLOBAL_SEARCH_ALL_TAB);
+	const [items, setItems] = useState<GlobalSearchItem[]>([]);
 	const [counts, setCounts] = useState<Record<string, number>>({});
 	const [resultKey, setResultKey] = useState('');
 	const [countsKey, setCountsKey] = useState('');
 	const debouncedQuery = useDebouncedValue(query, 1000);
 	const trimmedQuery = debouncedQuery.trim();
+	const liveQuery = query.trim();
 	const searching = open && trimmedQuery.length >= 2;
 	const listKey = `${trimmedQuery}::${selectedTab}`;
 	const loading = searching && resultKey !== listKey;
+	const queryChanging = open && liveQuery.length >= 2 && liveQuery !== trimmedQuery;
+	const awaitingSearch = queryChanging || loading;
 	const countsReady = searching && countsKey === trimmedQuery;
 
 	useEffect(() => {
@@ -42,11 +49,11 @@ export const GlobalSearch = () => {
 
 		const abort = new AbortController();
 		const objects =
-			selectedTab !== DISCOVERY_ALL_TAB && isSearchObjectType(selectedTab)
+			selectedTab !== GLOBAL_SEARCH_ALL_TAB && isSearchObjectType(selectedTab)
 				? [selectedTab]
 				: undefined;
 		void searchApi
-			.discovery(
+			.globalSearch(
 				{
 					search_term: trimmedQuery,
 					text_match_option: TextMatchOption.Contains,
@@ -56,7 +63,7 @@ export const GlobalSearch = () => {
 			)
 			.then((response) => {
 				if (abort.signal.aborted) return;
-				setItems(discoveryItemsFromResponse(response));
+				setItems(globalSearchItemsFromResponse(response));
 				setResultKey(`${trimmedQuery}::${selectedTab}`);
 			});
 
@@ -68,7 +75,7 @@ export const GlobalSearch = () => {
 
 		const abort = new AbortController();
 		void searchApi
-			.discoveryCount(
+			.globalSearchCount(
 				{
 					search_term: trimmedQuery,
 					text_match_option: TextMatchOption.Contains,
@@ -78,7 +85,7 @@ export const GlobalSearch = () => {
 			)
 			.then((response) => {
 				if (abort.signal.aborted) return;
-				setCounts(discoveryCountsFromResponse(response));
+				setCounts(globalSearchCountsFromResponse(response));
 				setCountsKey(trimmedQuery);
 			});
 
@@ -87,30 +94,46 @@ export const GlobalSearch = () => {
 
 	const handleQueryChange = (value: string) => {
 		setQuery(value);
-		setSelectedTab(DISCOVERY_ALL_TAB);
+		setSelectedTab(GLOBAL_SEARCH_ALL_TAB);
+		if (value.trim().length < 2) {
+			setItems([]);
+			setCounts({});
+			setResultKey('');
+			setCountsKey('');
+		}
 	};
 
 	const handleClose = () => {
 		setOpen(false);
 		setQuery('');
-		setSelectedTab(DISCOVERY_ALL_TAB);
+		setSelectedTab(GLOBAL_SEARCH_ALL_TAB);
 		setItems([]);
 		setCounts({});
 		setResultKey('');
 		setCountsKey('');
 	};
 
-	const visibleItems = searching && !loading ? items : [];
-	const showEmpty = searching && !loading && visibleItems.length === 0;
-	const showPlaceholder = !searching && !loading;
+	const queryActive = liveQuery.length >= 2;
+	const visibleItems = searching && !awaitingSearch && queryActive ? items : [];
+	const showEmpty = searching && !awaitingSearch && queryActive && visibleItems.length === 0;
+	const showPlaceholder = !queryActive;
+	const itemCounts = visibleItems.reduce<Record<string, number>>((acc, item) => {
+		acc[item.type] = (acc[item.type] ?? 0) + 1;
+		return acc;
+	}, {});
+	const tabCounts = totalGlobalSearchCount(counts) > 0 ? counts : itemCounts;
 	const tabTotal =
-		selectedTab === DISCOVERY_ALL_TAB
-			? totalDiscoveryCount(counts)
-			: (counts[selectedTab] ?? 0);
+		selectedTab === GLOBAL_SEARCH_ALL_TAB
+			? totalGlobalSearchCount(tabCounts)
+			: (tabCounts[selectedTab] ?? 0);
+	const showTabs =
+		queryActive && searching && !queryChanging && totalGlobalSearchCount(tabCounts) > 0;
+	const showTabSkeleton = queryActive && awaitingSearch && !showTabs;
+	const showResultSkeleton = queryActive && awaitingSearch;
 	const showLimitBanner =
 		visibleItems.length > 0 &&
-		(visibleItems.length >= DISCOVERY_LIST_LIMIT ||
-			(countsReady && tabTotal > DISCOVERY_LIST_LIMIT));
+		(visibleItems.length >= GLOBAL_SEARCH_LIST_LIMIT ||
+			(countsReady && tabTotal > GLOBAL_SEARCH_LIST_LIMIT));
 
 	return (
 		<>
@@ -151,13 +174,17 @@ export const GlobalSearch = () => {
 						className="w-full"
 					/>
 				</div>
-				{countsReady ? (
+				{showTabs ? (
 					<div className="shrink-0 border-b border-zinc-100 dark:border-zinc-800">
 						<GlobalSearchTabs
-							counts={counts}
+							counts={tabCounts}
 							selected={selectedTab}
 							onSelect={setSelectedTab}
 						/>
+					</div>
+				) : showTabSkeleton ? (
+					<div className="shrink-0 border-b border-zinc-100 dark:border-zinc-800">
+						<GlobalSearchTabsSkeleton />
 					</div>
 				) : null}
 				{showLimitBanner ? (
@@ -166,12 +193,8 @@ export const GlobalSearch = () => {
 						results
 					</p>
 				) : null}
-				<div className="min-h-0 flex-1 overflow-y-auto">
-					{loading ? (
-						<div className="flex h-full items-center justify-center text-zinc-400">
-							<Spinner className="h-6 w-6" />
-						</div>
-					) : null}
+				<div className="min-h-0 flex-1 overflow-y-auto" aria-busy={showResultSkeleton}>
+					{showResultSkeleton ? <GlobalSearchResultsSkeleton /> : null}
 					{visibleItems.length > 0 ? (
 						<GlobalSearchResults
 							items={visibleItems}

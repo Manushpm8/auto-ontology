@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j fulltext discovery search across catalog and semantic nodes."""
+"""Neo4j fulltext global search across catalog and semantic nodes."""
 
 from __future__ import annotations
 
@@ -343,7 +343,7 @@ def _enrichment_matches() -> str:
         OPTIONAL MATCH (n)-[:{REL_PROPERTY_OF}]->(attr_term:{LABEL_TERM})
             WHERE n:{LABEL_COLUMN_ATTRIBUTE} OR n:{LABEL_SQL_ATTRIBUTE}
         // One parent Term is the product model; collect so a stray extra
-        // PROPERTY_OF edge cannot duplicate the discovery row.
+        // PROPERTY_OF edge cannot duplicate the search row.
         WITH n, col_table, col_schema, col_db, tbl_schema, tbl_db, sch_db,
              head(collect(attr_term)) AS attr_term
         """
@@ -397,7 +397,7 @@ def _parent_id_case() -> str:
         """
 
 
-def fetch_discovery(
+def fetch_global_search(
     lucene: str,
     object_types: set[str],
     *,
@@ -405,7 +405,7 @@ def fetch_discovery(
     synonym_tokens: list[str] | None = None,
     limit: int = LIST_LIMIT,
 ) -> list[dict[str, Any]]:
-    """Return enriched discovery hits for *lucene* plus synonym Terms.
+    """Return enriched global-search hits for *lucene* plus synonym Terms.
 
     Fulltext is capped at *limit* before the synonym UNION, so alias-only
     Terms are not dropped by the name/description list cap. The service
@@ -434,14 +434,14 @@ def fetch_discovery(
     return graph().query_read(query, params)
 
 
-def count_discovery(
+def count_global_search(
     lucene: str,
     object_types: set[str],
     *,
     include_description: bool,
     synonym_tokens: list[str] | None = None,
 ) -> dict[str, int]:
-    """Return hit counts grouped by discovery type (no list cap)."""
+    """Return hit counts grouped by object type (no list cap)."""
     params: dict[str, Any] = {
         "lucene": lucene,
         "synonym_tokens": synonym_tokens or [],
