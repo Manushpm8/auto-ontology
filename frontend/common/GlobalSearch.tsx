@@ -27,6 +27,8 @@ import { GLOBAL_SEARCH_ALL_TAB, GLOBAL_SEARCH_LIST_LIMIT, TextMatchOption } from
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { GlobalSearchItem } from '@/types/search';
 
+const DEFAULT_SEARCH_FILTERS = { description: true } as const;
+
 export const GlobalSearch = () => {
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState('');
@@ -58,7 +60,7 @@ export const GlobalSearch = () => {
 				{
 					search_term: trimmedQuery,
 					text_match_option: TextMatchOption.Contains,
-					filters: { description: true, objects },
+					filters: { ...DEFAULT_SEARCH_FILTERS, objects },
 				},
 				abort,
 			)
@@ -80,7 +82,7 @@ export const GlobalSearch = () => {
 				{
 					search_term: trimmedQuery,
 					text_match_option: TextMatchOption.Contains,
-					filters: { description: true },
+					filters: DEFAULT_SEARCH_FILTERS,
 				},
 				abort,
 			)
@@ -93,25 +95,24 @@ export const GlobalSearch = () => {
 		return () => abort.abort();
 	}, [open, trimmedQuery]);
 
+	const resetResults = () => {
+		setItems([]);
+		setCounts({});
+		setResultKey('');
+		setCountsKey('');
+	};
+
 	const handleQueryChange = (value: string) => {
 		setQuery(value);
 		setSelectedTab(GLOBAL_SEARCH_ALL_TAB);
-		if (value.trim().length < 2) {
-			setItems([]);
-			setCounts({});
-			setResultKey('');
-			setCountsKey('');
-		}
+		if (value.trim().length < 2) resetResults();
 	};
 
 	const handleClose = () => {
 		setOpen(false);
 		setQuery('');
 		setSelectedTab(GLOBAL_SEARCH_ALL_TAB);
-		setItems([]);
-		setCounts({});
-		setResultKey('');
-		setCountsKey('');
+		resetResults();
 	};
 
 	const queryActive = liveQuery.length >= 2;

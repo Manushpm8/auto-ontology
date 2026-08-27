@@ -34,19 +34,6 @@ LIST_LIMIT = 200
 # It is a search filter / count key so the UI can tab tables vs views.
 SEARCH_TYPE_VIEW = "View"
 
-SEARCH_OBJECT_TYPES = (
-    LABEL_TERM,
-    LABEL_COLUMN_ATTRIBUTE,
-    LABEL_SQL_ATTRIBUTE,
-    Labels.CUSTOM_ANALYSIS,
-    LABEL_PQL_ANALYSIS,
-    Labels.DB,
-    Labels.SCHEMA,
-    Labels.TABLE,
-    SEARCH_TYPE_VIEW,
-    Labels.COLUMN,
-)
-
 _SEARCH_INDEX_LABELS = (
     Labels.DB,
     Labels.SCHEMA,
@@ -58,6 +45,8 @@ _SEARCH_INDEX_LABELS = (
     LABEL_SQL_ATTRIBUTE,
     LABEL_PQL_ANALYSIS,
 )
+
+SEARCH_OBJECT_TYPES = (*_SEARCH_INDEX_LABELS, SEARCH_TYPE_VIEW)
 
 # Lucene treats these as operators; strip them like illumex
 # ``filter_special_characters`` so a typed query cannot break the index call.
@@ -160,6 +149,16 @@ def synonym_matches_tokens(synonym: str, tokens: list[str]) -> bool:
     )
 
 
+def _term_is_visible() -> str:
+    """Semantic Term with at least one representing table."""
+    return f"""
+        n.source = $source
+        AND EXISTS {{
+            MATCH (:{Labels.TABLE})-[:{REL_REPRESENTS}]->(n)
+        }}
+    """
+
+
 def _synonym_term_source() -> str:
     """Visible Terms whose stored synonyms contain every search token as a word.
 
@@ -168,13 +167,10 @@ def _synonym_term_source() -> str:
     """
     return f"""
         MATCH (n:{LABEL_TERM})
-        WHERE $allow_term
+        WHERE '{LABEL_TERM}' IN $object_types
           AND size($synonym_tokens) > 0
           AND size(coalesce(n.synonyms, [])) > 0
-          AND n.source = $source
-          AND EXISTS {{
-              MATCH (:{Labels.TABLE})-[:{REL_REPRESENTS}]->(n)
-          }}
+          AND {_term_is_visible()}
           AND ANY(
               syn IN coalesce(n.synonyms, [])
               WHERE ALL(
@@ -211,18 +207,10 @@ def ensure_search_indexes() -> None:
     )
 
 
-def _object_flags(object_types: set[str]) -> dict[str, Any]:
+def _search_params(object_types: set[str]) -> dict[str, Any]:
+    """Shared Cypher params: requested types plus index/view/source constants."""
     return {
-        "allow_term": LABEL_TERM in object_types,
-        "allow_attribute": LABEL_COLUMN_ATTRIBUTE in object_types,
-        "allow_sql_attribute": LABEL_SQL_ATTRIBUTE in object_types,
-        "allow_analysis": Labels.CUSTOM_ANALYSIS in object_types,
-        "allow_pql_analysis": LABEL_PQL_ANALYSIS in object_types,
-        "allow_db": Labels.DB in object_types,
-        "allow_schema": Labels.SCHEMA in object_types,
-        "allow_table": Labels.TABLE in object_types,
-        "allow_view": SEARCH_TYPE_VIEW in object_types,
-        "allow_column": Labels.COLUMN in object_types,
+        "object_types": list(object_types),
         "view_types": list(_VIEW_TYPES),
         "search_labels": list(_SEARCH_INDEX_LABELS),
         "source": SEMANTIC_SOURCE,
@@ -277,29 +265,32 @@ def _list_hit_source(include_description: bool) -> str:
 
 
 def _visibility_where() -> str:
-    """Restrict hits to searchable labels and visible Terms."""
+    """Keep hits whose type is in ``$object_types``, plus Term visibility.
+
+    Plain labels are a straight membership check. Term also needs semantic
+    ``source`` and a representing table. View is not a label — it is a Table
+    whose ``table_type`` is in ``$view_types``.
+    """
+    is_view = "toLower(coalesce(n.table_type, '')) IN $view_types"
+    plain = " OR ".join(
+        f"(n:{lab} AND '{lab}' IN $object_types)"
+        for lab in _SEARCH_INDEX_LABELS
+        if lab not in {Labels.TABLE, LABEL_TERM}
+    )
     return f"""
         WHERE (
-            ($allow_db AND n:{Labels.DB})
-            OR ($allow_schema AND n:{Labels.SCHEMA})
-            OR ($allow_column AND n:{Labels.COLUMN})
-            OR ($allow_analysis AND n:{Labels.CUSTOM_ANALYSIS})
-            OR ($allow_pql_analysis AND n:{LABEL_PQL_ANALYSIS})
-            OR ($allow_attribute AND n:{LABEL_COLUMN_ATTRIBUTE})
-            OR ($allow_sql_attribute AND n:{LABEL_SQL_ATTRIBUTE})
+            {plain}
             OR (
-                $allow_term AND n:{LABEL_TERM} AND n.source = $source
-                AND EXISTS {{
-                    MATCH (:{Labels.TABLE})-[:{REL_REPRESENTS}]->(n)
-                }}
+                n:{LABEL_TERM} AND '{LABEL_TERM}' IN $object_types
+                AND {_term_is_visible()}
             )
             OR (
-                $allow_table AND n:{Labels.TABLE}
-                AND NOT toLower(coalesce(n.table_type, '')) IN $view_types
+                n:{Labels.TABLE} AND '{Labels.TABLE}' IN $object_types
+                AND NOT {is_view}
             )
             OR (
-                $allow_view AND n:{Labels.TABLE}
-                AND toLower(coalesce(n.table_type, '')) IN $view_types
+                n:{Labels.TABLE} AND '{SEARCH_TYPE_VIEW}' IN $object_types
+                AND {is_view}
             )
         )
         """
@@ -352,50 +343,40 @@ def _enrichment_matches() -> str:
         """
 
 
+def _crumb(alias: str, type_label: str) -> str:
+    return (
+        f"CASE WHEN {alias} IS NOT NULL "
+        f"THEN {{id: {alias}.id, name: {alias}.name, type: '{type_label}'}} END"
+    )
+
+
 def _breadcrumbs_case() -> str:
     return f"""
         CASE
             WHEN n:{Labels.COLUMN} THEN [
                 c IN [
-                    CASE WHEN col_db IS NOT NULL
-                        THEN {{id: col_db.id, name: col_db.name, type: '{Labels.DB}'}} END,
-                    CASE WHEN col_schema IS NOT NULL
-                        THEN {{id: col_schema.id, name: col_schema.name, type: '{Labels.SCHEMA}'}} END,
-                    CASE WHEN col_table IS NOT NULL
-                        THEN {{id: col_table.id, name: col_table.name, type: '{Labels.TABLE}'}} END
+                    {_crumb("col_db", Labels.DB)},
+                    {_crumb("col_schema", Labels.SCHEMA)},
+                    {_crumb("col_table", Labels.TABLE)}
                 ] WHERE c IS NOT NULL
             ]
             WHEN n:{Labels.TABLE} THEN [
                 c IN [
-                    CASE WHEN tbl_db IS NOT NULL
-                        THEN {{id: tbl_db.id, name: tbl_db.name, type: '{Labels.DB}'}} END,
-                    CASE WHEN tbl_schema IS NOT NULL
-                        THEN {{id: tbl_schema.id, name: tbl_schema.name, type: '{Labels.SCHEMA}'}} END
+                    {_crumb("tbl_db", Labels.DB)},
+                    {_crumb("tbl_schema", Labels.SCHEMA)}
                 ] WHERE c IS NOT NULL
             ]
             WHEN n:{Labels.SCHEMA} THEN [
                 c IN [
-                    CASE WHEN sch_db IS NOT NULL
-                        THEN {{id: sch_db.id, name: sch_db.name, type: '{Labels.DB}'}} END
+                    {_crumb("sch_db", Labels.DB)}
                 ] WHERE c IS NOT NULL
             ]
             WHEN n:{LABEL_COLUMN_ATTRIBUTE} OR n:{LABEL_SQL_ATTRIBUTE} THEN [
                 c IN [
-                    CASE WHEN attr_term IS NOT NULL
-                        THEN {{id: attr_term.id, name: attr_term.name, type: '{LABEL_TERM}'}} END
+                    {_crumb("attr_term", LABEL_TERM)}
                 ] WHERE c IS NOT NULL
             ]
             ELSE []
-        END
-        """
-
-
-def _parent_id_case() -> str:
-    return f"""
-        CASE
-            WHEN n:{Labels.COLUMN} THEN col_table.id
-            WHEN n:{LABEL_COLUMN_ATTRIBUTE} OR n:{LABEL_SQL_ATTRIBUTE} THEN attr_term.id
-            ELSE null
         END
         """
 
@@ -418,7 +399,7 @@ def fetch_global_search(
         "lucene": lucene,
         "synonym_tokens": synonym_tokens or [],
         "limit": limit,
-        **_object_flags(object_types),
+        **_search_params(object_types),
     }
     query = f"""
         {_list_hit_source(include_description)}
@@ -431,7 +412,6 @@ def fetch_global_search(
             {_canonical_label()} AS label,
             n.table_type AS table_type,
             {_certified_case()} AS certified,
-            {_parent_id_case()} AS parent_id,
             {_breadcrumbs_case()} AS breadcrumbs,
             coalesce(n.synonyms, []) AS synonyms
         """
@@ -449,7 +429,7 @@ def count_global_search(
     params: dict[str, Any] = {
         "lucene": lucene,
         "synonym_tokens": synonym_tokens or [],
-        **_object_flags(object_types),
+        **_search_params(object_types),
     }
     query = f"""
         {_count_hit_source(include_description)}

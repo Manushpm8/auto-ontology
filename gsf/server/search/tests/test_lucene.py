@@ -10,7 +10,7 @@ from gsf.dal.search import (
     SEARCH_OBJECT_TYPES,
     _fulltext_source,
     _list_hit_source,
-    _object_flags,
+    _search_params,
     _synonym_term_source,
     build_lucene_query,
     filter_special_characters,
@@ -39,21 +39,19 @@ def test_build_lucene_query_empty_after_strip() -> None:
     assert build_lucene_query("!!!") == ""
 
 
-def test_object_flags_default_all_true_when_all_types_passed() -> None:
-    flags = _object_flags(set(SEARCH_OBJECT_TYPES))
-    assert flags["allow_term"] is True
-    assert flags["allow_view"] is True
-    assert flags["allow_table"] is True
-    assert "view" in flags["view_types"]
+def test_search_params_pass_requested_types() -> None:
+    params = _search_params(set(SEARCH_OBJECT_TYPES))
+    assert "Term" in params["object_types"]
+    assert "View" in params["object_types"]
+    assert "Table" in params["object_types"]
+    assert "view" in params["view_types"]
+    assert "Term" in params["search_labels"]
 
 
-def test_object_flags_narrows_to_requested_types() -> None:
-    flags = _object_flags({"Term", "Column"})
-    assert flags["allow_term"] is True
-    assert flags["allow_column"] is True
-    assert flags["allow_table"] is False
-    assert flags["allow_view"] is False
-    assert "Term" in flags["search_labels"]
+def test_search_params_narrow_to_requested_types() -> None:
+    params = _search_params({"Term", "Column"})
+    assert set(params["object_types"]) == {"Term", "Column"}
+    assert "Term" in params["search_labels"]
 
 
 def test_search_object_type_uses_graph_labels_and_view_table_type() -> None:
@@ -101,6 +99,16 @@ def test_synonym_term_source_uses_word_boundary_regex() -> None:
     assert "n.synonyms" in source
     assert "(^|[^a-z0-9])" in source
     assert "REPRESENTS" in source
+    assert "'Term' IN $object_types" in source
+
+
+def test_visibility_where_uses_object_types_not_allow_flags() -> None:
+    from gsf.dal.search import _visibility_where
+
+    where = _visibility_where()
+    assert "$allow_" not in where
+    assert "IN $object_types" in where
+    assert "REPRESENTS" in where
 
 
 def test_list_hit_source_unions_synonyms_after_fulltext_limit() -> None:

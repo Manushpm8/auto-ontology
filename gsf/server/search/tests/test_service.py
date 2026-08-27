@@ -187,6 +187,7 @@ def test_global_search_keeps_breadcrumb_ids(
         {"id": "sch-1", "name": "public", "type": "Schema"},
         {"id": "tbl-1", "name": "customers", "type": "Table"},
     ]
+    assert result["data"][0]["parent_id"] == "tbl-1"
 
 
 @patch("gsf.server.search.service.search_dal.ensure_search_indexes")

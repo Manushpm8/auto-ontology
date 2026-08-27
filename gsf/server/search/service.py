@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+
 from gsf.dal import search as search_dal
+from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
 
 MIN_SEARCH_LENGTH = 2
 TEXT_MATCH_CONTAINS = "contains"
+_PARENT_FROM_LAST_CRUMB = {Labels.COLUMN, LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE}
 
 
 class SearchValidationError(ValueError):
@@ -113,6 +117,9 @@ def _normalize_item(
         normalized = _normalize_crumb(crumb)
         if normalized is not None:
             crumbs.append(normalized)
+    parent_id = None
+    if crumbs and row.get("label") in _PARENT_FROM_LAST_CRUMB:
+        parent_id = crumbs[-1].get("id")
     return {
         "id": row.get("id"),
         "name": row.get("name"),
@@ -120,7 +127,7 @@ def _normalize_item(
         "table_type": row.get("table_type"),
         "description": row.get("description"),
         "certified": row.get("certified"),
-        "parent_id": row.get("parent_id"),
+        "parent_id": parent_id,
         "breadcrumbs": crumbs,
         "synonyms": _matching_synonyms(row, synonym_tokens),
     }
@@ -134,6 +141,27 @@ def _lucene_or_empty(search_term: str) -> str | None:
     return lucene or None
 
 
+def _prepare_search(
+    *,
+    search_term: str,
+    text_match_option: str,
+    objects: list[str] | None,
+) -> tuple[str, set[str], str, list[str]] | None:
+    """Validate and expand a query. ``None`` means nothing searchable."""
+    if text_match_option != TEXT_MATCH_CONTAINS:
+        raise SearchValidationError(
+            f"Unsupported text_match_option {text_match_option!r}; "
+            f"only {TEXT_MATCH_CONTAINS!r} is implemented"
+        )
+    lucene = _lucene_or_empty(search_term)
+    if lucene is None:
+        return None
+    types = resolve_object_types(objects)
+    search_dal.ensure_search_indexes()
+    stripped = search_term.strip()
+    return lucene, types, stripped, search_dal.synonym_word_tokens(stripped)
+
+
 def global_search(
     *,
     search_term: str,
@@ -142,19 +170,15 @@ def global_search(
     include_description: bool,
 ) -> dict[str, Any]:
     """Run the list path: fulltext + enrichment, capped and ranked."""
-    if text_match_option != TEXT_MATCH_CONTAINS:
-        raise SearchValidationError(
-            f"Unsupported text_match_option {text_match_option!r}; "
-            f"only {TEXT_MATCH_CONTAINS!r} is implemented"
-        )
-    lucene = _lucene_or_empty(search_term)
-    if lucene is None:
+    prepared = _prepare_search(
+        search_term=search_term,
+        text_match_option=text_match_option,
+        objects=objects,
+    )
+    if prepared is None:
         return {"data": [], "count": 0}
 
-    types = resolve_object_types(objects)
-    search_dal.ensure_search_indexes()
-    stripped = search_term.strip()
-    synonym_tokens = search_dal.synonym_word_tokens(stripped)
+    lucene, types, stripped, synonym_tokens = prepared
     rows = search_dal.fetch_global_search(
         lucene,
         types,
@@ -175,21 +199,19 @@ def global_search_count(
     include_description: bool,
 ) -> dict[str, Any]:
     """Run the count path: same match as list, grouped by type, no cap."""
-    if text_match_option != TEXT_MATCH_CONTAINS:
-        raise SearchValidationError(
-            f"Unsupported text_match_option {text_match_option!r}; "
-            f"only {TEXT_MATCH_CONTAINS!r} is implemented"
-        )
-    lucene = _lucene_or_empty(search_term)
-    if lucene is None:
+    prepared = _prepare_search(
+        search_term=search_term,
+        text_match_option=text_match_option,
+        objects=objects,
+    )
+    if prepared is None:
         return {"data": {}}
 
-    types = resolve_object_types(objects)
-    search_dal.ensure_search_indexes()
+    lucene, types, _stripped, synonym_tokens = prepared
     counts = search_dal.count_global_search(
         lucene,
         types,
         include_description=include_description,
-        synonym_tokens=search_dal.synonym_word_tokens(search_term.strip()),
+        synonym_tokens=synonym_tokens,
     )
     return {"data": counts}
