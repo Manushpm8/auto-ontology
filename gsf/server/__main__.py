@@ -42,6 +42,7 @@ from gsf.server.terms.router import router as terms_router  # noqa: E402
 from gsf.server.model_interchange.router import (  # noqa: E402
     router as model_interchange_router,
 )
+from gsf.server.search.router import router as search_router  # noqa: E402
 
 
 @asynccontextmanager
@@ -50,6 +51,12 @@ async def lifespan(_app: FastAPI):
     # itself is lazy on first use, but eagerly initialising here means the
     # very first chat request doesn't pay a cold start.
     get_pool()
+    try:
+        from gsf.dal.search import ensure_search_indexes
+
+        ensure_search_indexes()
+    except Exception:
+        logger.exception("Failed to ensure global-search fulltext indexes")
     try:
         yield
     finally:
@@ -97,6 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(
         model_interchange_router, prefix="/api", tags=["model-interchange"]
     )
+    app.include_router(search_router, prefix="/api", tags=["search"])
 
     return app
 

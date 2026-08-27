@@ -9,6 +9,7 @@ Each module is the single source of truth for a domain:
   connections     — UI-managed database connection metadata on DB nodes
   reset           — Deleting a database's catalog/semantic nodes and embeddings
   candidates      — Vector-hit graph enrichment at retrieval time
+  search          — Fulltext discovery across catalog and semantic nodes
   users           — Zone-scope helpers for catalog queries. Users and
                     user-to-zone relationships are not stored in Neo4j.
 """

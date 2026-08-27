@@ -30,6 +30,7 @@ from gsf.server.models import (
     CustomAnalysis,
     DataExplorationGraph,
     DatabaseSummary,
+    DiscoverySearchItem,
     EntityCoverageResult,
     ExplorationEdge,
     ExplorationLinkPath,
@@ -77,6 +78,8 @@ __all__ = [
     "DataResponse",
     "DatabaseListResponse",
     "DescriptionSuggestionResponse",
+    "DiscoveryCountResponse",
+    "DiscoverySearchListResponse",
     "EntityCoverageResponse",
     "ExplorationEdgeListResponse",
     "ExplorationRelatedNodesResponse",
@@ -269,6 +272,8 @@ ZoneListResponse = ListResponse[Zone]
 DatabaseListResponse = ListResponse[DatabaseSummary]
 TableListResponse = ListResponse[TableSummary]
 TableColumnsPageResponse = ObjectPageResponse[TableColumns]
+DiscoverySearchListResponse = ListResponse[DiscoverySearchItem]
+DiscoveryCountResponse = DataResponse[dict[str, int]]
 
 # Analyses
 CustomAnalysisResponse = DataResponse[CustomAnalysis]

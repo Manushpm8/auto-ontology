@@ -281,6 +281,27 @@ export const TermsView = () => {
 	const [sqlEditSubmitting, setSqlEditSubmitting] = useState(false);
 	const [sqlEditError, setSqlEditError] = useState<string | null>(null);
 
+	// Attribute deep-links (`?focus=&colAttr=` / `?sqlAttr=`) skip the term
+	// single-page fetch, so the header would otherwise fall back to the term
+	// id. Load the term whenever an attribute page is open.
+	useEffect(() => {
+		if (focusId == null) {
+			setFocusedTermDetail(null);
+			return;
+		}
+		if (colAttrId == null && sqlAttrId == null) return;
+
+		const termId = focusId;
+		let cancelled = false;
+		void termsApi.get(termId).then((res) => {
+			if (cancelled || res.error || res.data == null) return;
+			setFocusedTermDetail(res.data);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [focusId, colAttrId, sqlAttrId]);
+
 	const fetchTermsPage = useCallback(
 		async (skip: number, limit: number) => {
 			const query = debouncedSearchQuery;
@@ -1101,7 +1122,7 @@ export const TermsView = () => {
 	const termCertificationStatus = focusedTerm?.certification ?? CertificationStatus.Pending;
 
 	if (focusId != null && sqlAttrId != null) {
-		const termTitle = focusedTerm?.name ?? focusId;
+		const termTitle = focusedTerm?.name ?? focusedSqlAttr?.term_name ?? focusId;
 		const sqlAttrTitle = focusedSqlAttr?.name ?? sqlAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
@@ -1246,7 +1267,7 @@ export const TermsView = () => {
 	}
 
 	if (focusId != null && colAttrId != null) {
-		const termTitle = focusedTerm?.name ?? focusId;
+		const termTitle = focusedTerm?.name ?? focusedColAttr?.term_name ?? focusId;
 		const colAttrTitle = focusedColAttr?.name ?? colAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">

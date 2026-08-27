@@ -5,27 +5,112 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { discoveryCountsFromResponse, discoveryItemsFromResponse, searchApi } from '@/api/search';
 import { Placeholders } from '@/assets/images/placeholders';
 import { EmptyState } from '@/common/EmptyState';
+import { GlobalSearchResults } from '@/common/GlobalSearchResults';
+import {
+	GlobalSearchTabs,
+	isSearchObjectType,
+	totalDiscoveryCount,
+} from '@/common/GlobalSearchTabs';
 import { Modal } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
+import { Spinner } from '@/common/Spinner';
 import { EmptyStateVariant } from '@/enums/emptyState';
+import { DISCOVERY_ALL_TAB, DISCOVERY_LIST_LIMIT, TextMatchOption } from '@/enums/search';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import type { DiscoverySearchItem } from '@/types/search';
 
 export const GlobalSearch = () => {
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState('');
+	const [selectedTab, setSelectedTab] = useState(DISCOVERY_ALL_TAB);
+	const [items, setItems] = useState<DiscoverySearchItem[]>([]);
+	const [counts, setCounts] = useState<Record<string, number>>({});
+	const [resultKey, setResultKey] = useState('');
+	const [countsKey, setCountsKey] = useState('');
 	const debouncedQuery = useDebouncedValue(query, 1000);
+	const trimmedQuery = debouncedQuery.trim();
+	const searching = open && trimmedQuery.length >= 2;
+	const listKey = `${trimmedQuery}::${selectedTab}`;
+	const loading = searching && resultKey !== listKey;
+	const countsReady = searching && countsKey === trimmedQuery;
 
 	useEffect(() => {
-		if (!open) return;
-		console.log(debouncedQuery);
-	}, [debouncedQuery, open]);
+		if (!open || trimmedQuery.length < 2) return;
+
+		const abort = new AbortController();
+		const objects =
+			selectedTab !== DISCOVERY_ALL_TAB && isSearchObjectType(selectedTab)
+				? [selectedTab]
+				: undefined;
+		void searchApi
+			.discovery(
+				{
+					search_term: trimmedQuery,
+					text_match_option: TextMatchOption.Contains,
+					filters: { description: true, objects },
+				},
+				abort,
+			)
+			.then((response) => {
+				if (abort.signal.aborted) return;
+				setItems(discoveryItemsFromResponse(response));
+				setResultKey(`${trimmedQuery}::${selectedTab}`);
+			});
+
+		return () => abort.abort();
+	}, [open, trimmedQuery, selectedTab]);
+
+	useEffect(() => {
+		if (!open || trimmedQuery.length < 2) return;
+
+		const abort = new AbortController();
+		void searchApi
+			.discoveryCount(
+				{
+					search_term: trimmedQuery,
+					text_match_option: TextMatchOption.Contains,
+					filters: { description: true },
+				},
+				abort,
+			)
+			.then((response) => {
+				if (abort.signal.aborted) return;
+				setCounts(discoveryCountsFromResponse(response));
+				setCountsKey(trimmedQuery);
+			});
+
+		return () => abort.abort();
+	}, [open, trimmedQuery]);
+
+	const handleQueryChange = (value: string) => {
+		setQuery(value);
+		setSelectedTab(DISCOVERY_ALL_TAB);
+	};
 
 	const handleClose = () => {
 		setOpen(false);
 		setQuery('');
+		setSelectedTab(DISCOVERY_ALL_TAB);
+		setItems([]);
+		setCounts({});
+		setResultKey('');
+		setCountsKey('');
 	};
+
+	const visibleItems = searching && !loading ? items : [];
+	const showEmpty = searching && !loading && visibleItems.length === 0;
+	const showPlaceholder = !searching && !loading;
+	const tabTotal =
+		selectedTab === DISCOVERY_ALL_TAB
+			? totalDiscoveryCount(counts)
+			: (counts[selectedTab] ?? 0);
+	const showLimitBanner =
+		visibleItems.length > 0 &&
+		(visibleItems.length >= DISCOVERY_LIST_LIMIT ||
+			(countsReady && tabTotal > DISCOVERY_LIST_LIMIT));
 
 	return (
 		<>
@@ -59,19 +144,48 @@ export const GlobalSearch = () => {
 				<div className="shrink-0 p-2">
 					<SearchInput
 						value={query}
-						onChange={setQuery}
+						onChange={handleQueryChange}
 						placeholder="Search…"
 						aria-label="Search GSF"
 						autoFocus
 						className="w-full"
 					/>
 				</div>
-				<div className="flex min-h-0 flex-1 flex-col">
-					<EmptyState
-						variant={EmptyStateVariant.Borderless}
-						illustration={<Placeholders.NoResults />}
-						title="No Results Match Your Search"
-					/>
+				{countsReady ? (
+					<div className="shrink-0 border-b border-zinc-100 dark:border-zinc-800">
+						<GlobalSearchTabs
+							counts={counts}
+							selected={selectedTab}
+							onSelect={setSelectedTab}
+						/>
+					</div>
+				) : null}
+				{showLimitBanner ? (
+					<p className="shrink-0 px-3 py-2 text-sm text-zinc-500 dark:text-zinc-400">
+						Viewing top 200 results - Try filtering to get a more accurate search
+						results
+					</p>
+				) : null}
+				<div className="min-h-0 flex-1 overflow-y-auto">
+					{loading ? (
+						<div className="flex h-full items-center justify-center text-zinc-400">
+							<Spinner className="h-6 w-6" />
+						</div>
+					) : null}
+					{visibleItems.length > 0 ? (
+						<GlobalSearchResults
+							items={visibleItems}
+							query={trimmedQuery}
+							onNavigate={handleClose}
+						/>
+					) : null}
+					{showEmpty || showPlaceholder ? (
+						<EmptyState
+							variant={EmptyStateVariant.Borderless}
+							illustration={<Placeholders.NoResults />}
+							title="No Results Match Your Search"
+						/>
+					) : null}
 				</div>
 			</Modal>
 		</>

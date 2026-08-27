@@ -4415,6 +4415,118 @@
         "x-gsf-proxied": true
       }
     },
+    "/api/search/discovery": {
+      "post": {
+        "description": "Fulltext discovery across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nthe original term sort first.",
+        "operationId": "post_api_search_discovery",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoverySearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_DiscoverySearchItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Discovery Search",
+        "tags": ["search"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/search/discovery/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/search/discovery/count": {
+      "post": {
+        "description": "Hit counts by discovery type for the same query as ``/search/discovery``.",
+        "operationId": "post_api_search_discovery_count",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoverySearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_dict_str__int__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Discovery Count",
+        "tags": ["search"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/search/discovery/count/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
     "/api/semantic-compilation/reset": {
       "post": {
         "description": "semanticCompilationApi.reset — delete every database's compiled semantic\nlayer. Destructive, so it sits behind `manage` rather than the `read` tier\nthat may view the toggle.",
@@ -7142,6 +7254,21 @@
         "title": "DataResponse[DataExplorationGraph]",
         "type": "object"
       },
+      "DataResponse_dict_str__int__": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Data",
+            "type": "object"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[dict[str, int]]",
+        "type": "object"
+      },
       "DataResponse_dict_str__list_ZoneChip___": {
         "additionalProperties": true,
         "properties": {
@@ -7376,6 +7503,157 @@
         },
         "required": ["data"],
         "title": "DescriptionSuggestionResponse",
+        "type": "object"
+      },
+      "DiscoveryBreadcrumb": {
+        "additionalProperties": true,
+        "description": "One hop in a discovery hit's catalog/semantic path.",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": ["name", "type"],
+        "title": "DiscoveryBreadcrumb",
+        "type": "object"
+      },
+      "DiscoveryFilters": {
+        "properties": {
+          "description": {
+            "default": false,
+            "title": "Description",
+            "type": "boolean"
+          },
+          "objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objects"
+          }
+        },
+        "title": "DiscoveryFilters",
+        "type": "object"
+      },
+      "DiscoverySearchItem": {
+        "additionalProperties": true,
+        "description": "One global-search hit: identity plus optional certified/parent path.",
+        "properties": {
+          "breadcrumbs": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoveryBreadcrumb"
+            },
+            "title": "Breadcrumbs",
+            "type": "array"
+          },
+          "certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certified"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "synonyms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Synonyms",
+            "type": "array"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": ["id", "type"],
+        "title": "DiscoverySearchItem",
+        "type": "object"
+      },
+      "DiscoverySearchRequest": {
+        "properties": {
+          "filters": {
+            "$ref": "#/components/schemas/DiscoveryFilters"
+          },
+          "search_term": {
+            "minLength": 0,
+            "title": "Search Term",
+            "type": "string"
+          },
+          "text_match_option": {
+            "default": "contains",
+            "title": "Text Match Option",
+            "type": "string"
+          }
+        },
+        "required": ["search_term"],
+        "title": "DiscoverySearchRequest",
         "type": "object"
       },
       "EntityCoverageCandidate": {
@@ -7917,6 +8195,25 @@
         },
         "required": ["data", "count"],
         "title": "ListResponse[DatabaseSummary]",
+        "type": "object"
+      },
+      "ListResponse_DiscoverySearchItem_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverySearchItem"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": ["data", "count"],
+        "title": "ListResponse[DiscoverySearchItem]",
         "type": "object"
       },
       "ListResponse_ExplorationEdge_": {
