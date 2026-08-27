@@ -96,12 +96,18 @@ jobs:
         run: |
           cd /tmp
           GSF_API_TOKEN=ci-placeholder /tmp/probe/bin/python - <<'PY'
-          import asyncio, os
+          import asyncio
           from fastmcp import Client
           from gsf_mcp.config import load_settings
           from gsf_mcp.server import build_server
+          from gsf_mcp.tools import CURATED
 
           mcp, client = build_server(load_settings())
+
+          # Derived rather than a literal count: the curated tools exist only if
+          # the wheel carried the spec, which is what this job is guarding, and a
+          # tool added or renamed upstream should not have to be restated here.
+          expected = {spec.name for spec in CURATED} | {"ask_question", "check_readiness"}
 
           async def main() -> None:
               try:
@@ -110,8 +116,7 @@ jobs:
                       icons = session.initialize_result.serverInfo.icons or []
               finally:
                   await client.aclose()
-              assert "ask_data" in names, names
-              assert len(names) == 14, sorted(names)
+              assert names == expected, sorted(names ^ expected)
               # The icon is read from disk too, so it fails the same way.
               assert icons, "the wheel did not carry the icon"
               print(f"ok: {len(names)} tools and an icon from an installed wheel")
