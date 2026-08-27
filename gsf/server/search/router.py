@@ -48,7 +48,7 @@ def _run(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/search/globalSearch", response_model=GlobalSearchListResponse)
+@router.post("/search/global-search", response_model=GlobalSearchListResponse)
 def post_global_search(payload: GlobalSearchRequest) -> dict:
     """Fulltext global search across catalog and semantic nodes.
 
@@ -59,7 +59,7 @@ def post_global_search(payload: GlobalSearchRequest) -> dict:
     return _run(payload, count=False)
 
 
-@router.post("/search/globalSearchCount", response_model=GlobalSearchCountResponse)
+@router.post("/search/global-search/count", response_model=GlobalSearchCountResponse)
 def post_global_search_count(payload: GlobalSearchRequest) -> dict:
-    """Hit counts by type for the same query as ``/search/globalSearch``."""
+    """Hit counts by type for the same query as ``/search/global-search``."""
     return _run(payload, count=True)

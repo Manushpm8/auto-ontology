@@ -4415,10 +4415,10 @@
         "x-gsf-proxied": true
       }
     },
-    "/api/search/globalSearch": {
+    "/api/search/global-search": {
       "post": {
         "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nthe original term sort first.",
-        "operationId": "post_api_search_globalSearch",
+        "operationId": "post_api_search_global_search",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4464,17 +4464,17 @@
             "ApiToken": []
           }
         ],
-        "x-gsf-source": "frontend/app/api/search/globalSearch/route.ts",
+        "x-gsf-source": "frontend/app/api/search/global-search/route.ts",
         "x-gsf-permissions": {
           "catalog": ["read"]
         },
         "x-gsf-proxied": true
       }
     },
-    "/api/search/globalSearchCount": {
+    "/api/search/global-search/count": {
       "post": {
-        "description": "Hit counts by type for the same query as ``/search/globalSearch``.",
-        "operationId": "post_api_search_globalSearchCount",
+        "description": "Hit counts by type for the same query as ``/search/global-search``.",
+        "operationId": "post_api_search_global_search_count",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4520,7 +4520,7 @@
             "ApiToken": []
           }
         ],
-        "x-gsf-source": "frontend/app/api/search/globalSearchCount/route.ts",
+        "x-gsf-source": "frontend/app/api/search/global-search/count/route.ts",
         "x-gsf-permissions": {
           "catalog": ["read"]
         },

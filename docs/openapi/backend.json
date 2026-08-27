@@ -6763,10 +6763,10 @@
         ]
       }
     },
-    "/api/search/globalSearch": {
+    "/api/search/global-search": {
       "post": {
         "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nthe original term sort first.",
-        "operationId": "post_global_search_api_search_globalSearch_post",
+        "operationId": "post_global_search_api_search_global_search_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6805,10 +6805,10 @@
         ]
       }
     },
-    "/api/search/globalSearchCount": {
+    "/api/search/global-search/count": {
       "post": {
-        "description": "Hit counts by type for the same query as ``/search/globalSearch``.",
-        "operationId": "post_global_search_count_api_search_globalSearchCount_post",
+        "description": "Hit counts by type for the same query as ``/search/global-search``.",
+        "operationId": "post_global_search_count_api_search_global_search_count_post",
         "requestBody": {
           "content": {
             "application/json": {

@@ -38,7 +38,7 @@ export const globalSearchItemsFromResponse = (
 	return [];
 };
 
-/** Unwrap `{ data: { type: n } }` from `/search/globalSearchCount`. */
+/** Unwrap `{ data: { type: n } }` from `/search/global-search/count`. */
 export const globalSearchCountsFromResponse = (
 	response: GlobalSearchCountResponse,
 ): Record<string, number> => {
@@ -60,7 +60,7 @@ export const searchApi = {
 		abortController?: AbortController,
 	): Promise<GlobalSearchListResponse> =>
 		requests.post<ResponseWithCount<GlobalSearchItem[]>>(
-			'search/globalSearch',
+			'search/global-search',
 			withDefaults(payload),
 			abortController,
 		),
@@ -69,7 +69,7 @@ export const searchApi = {
 		abortController?: AbortController,
 	): Promise<GlobalSearchCountResponse> =>
 		requests.post<{ data: Record<string, number> }>(
-			'search/globalSearchCount',
+			'search/global-search/count',
 			withDefaults(payload),
 			abortController,
 		),
