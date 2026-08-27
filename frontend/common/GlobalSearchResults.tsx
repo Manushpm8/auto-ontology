@@ -7,7 +7,11 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { CertificationBadge } from '@/common/CertificationBadge';
-import { SEARCH_TYPE_ICON, SEARCH_TYPE_LABEL } from '@/common/globalSearchMeta';
+import {
+	SEARCH_TYPE_ICON,
+	SEARCH_TYPE_LABEL,
+	searchObjectTypeFromHit,
+} from '@/common/globalSearchMeta';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonBlock } from '@/common/Skeleton';
 import { SkeletonVariant } from '@/enums/skeleton';
@@ -24,7 +28,7 @@ const catalogFocusId = (item: GlobalSearchItem): string => {
 };
 
 export const hrefForGlobalSearchItem = (item: GlobalSearchItem): string => {
-	switch (item.type) {
+	switch (searchObjectTypeFromHit(item)) {
 		case SearchObjectType.Term:
 			return `/terms?focus=${encodeURIComponent(item.id)}`;
 		case SearchObjectType.Attribute:
@@ -156,8 +160,9 @@ export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchRe
 			const status = certificationStatus(item.certified);
 			const path = item.breadcrumbs.map((crumb) => crumb.name).join(' / ');
 			const href = hrefForGlobalSearchItem(item);
-			const typeIcon = SEARCH_TYPE_ICON[item.type] ?? IconName.Table;
-			const typeLabel = SEARCH_TYPE_LABEL[item.type] ?? item.type;
+			const kind = searchObjectTypeFromHit(item);
+			const typeIcon = SEARCH_TYPE_ICON[kind] ?? IconName.Table;
+			const typeLabel = SEARCH_TYPE_LABEL[kind] ?? kind;
 
 			return (
 				<li key={`${item.type}:${item.id}`}>

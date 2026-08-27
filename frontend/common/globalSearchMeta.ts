@@ -4,6 +4,22 @@
 
 import { IconName } from '@/common/icons';
 import { SearchObjectType } from '@/enums/search';
+import type { GlobalSearchItem } from '@/types/search';
+
+const VIEW_TABLE_TYPES = new Set(['view', 'materialized view']);
+
+export const isViewTableType = (tableType: string | null | undefined): boolean =>
+	VIEW_TABLE_TYPES.has((tableType ?? '').toLowerCase());
+
+/** UI type for a hit. Graph labels pass through; Table + view table_type → View. */
+export const searchObjectTypeFromHit = (
+	item: Pick<GlobalSearchItem, 'type' | 'table_type'>,
+): SearchObjectType => {
+	if (item.type === SearchObjectType.Table && isViewTableType(item.table_type)) {
+		return SearchObjectType.View;
+	}
+	return item.type;
+};
 
 export const SEARCH_TYPE_LABEL: Record<SearchObjectType, string> = {
 	[SearchObjectType.Term]: 'Term',

@@ -2,17 +2,18 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+/** Graph labels used as search types. `View` is Table + a view table_type. */
 export enum SearchObjectType {
-	Term = 'term',
-	Attribute = 'attribute',
-	SqlAttribute = 'sql_attribute',
-	Analysis = 'analysis',
-	PqlAnalysis = 'pql_analysis',
-	Db = 'db',
-	Schema = 'schema',
-	Table = 'table',
-	View = 'view',
-	Column = 'column',
+	Term = 'Term',
+	Attribute = 'ColumnAttribute',
+	SqlAttribute = 'SqlAttribute',
+	Analysis = 'CustomAnalysis',
+	PqlAnalysis = 'PqlAnalysis',
+	Db = 'Database',
+	Schema = 'Schema',
+	Table = 'Table',
+	View = 'View',
+	Column = 'Column',
 }
 
 export enum TextMatchOption {

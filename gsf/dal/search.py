@@ -30,17 +30,21 @@ NAME_INDEX = "gsf_name_index"
 DESCRIPTION_INDEX = "gsf_description_index"
 LIST_LIMIT = 200
 
+# View is not a Neo4j label (those nodes are ``Table`` + ``table_type``).
+# It is a search filter / count key so the UI can tab tables vs views.
+SEARCH_TYPE_VIEW = "View"
+
 SEARCH_OBJECT_TYPES = (
-    "term",
-    "attribute",
-    "sql_attribute",
-    "analysis",
-    "pql_analysis",
-    "db",
-    "schema",
-    "table",
-    "view",
-    "column",
+    LABEL_TERM,
+    LABEL_COLUMN_ATTRIBUTE,
+    LABEL_SQL_ATTRIBUTE,
+    Labels.CUSTOM_ANALYSIS,
+    LABEL_PQL_ANALYSIS,
+    Labels.DB,
+    Labels.SCHEMA,
+    Labels.TABLE,
+    SEARCH_TYPE_VIEW,
+    Labels.COLUMN,
 )
 
 _SEARCH_INDEX_LABELS = (
@@ -90,8 +94,21 @@ _VIEW_TYPES = (TableTypes.VIEW, TableTypes.MATERIALIZED_VIEW)
 
 
 def is_view_table_type(table_type: str | None) -> bool:
-    """True when a Table node's ``table_type`` should surface as ``view``."""
+    """True when a Table node's ``table_type`` should surface as a view."""
     return (table_type or "").lower() in {item.lower() for item in _VIEW_TYPES}
+
+
+def search_object_type(label: str | None, table_type: str | None = None) -> str | None:
+    """Map a graph label (+ optional ``table_type``) to a search type key.
+
+    Matches the frontend ``searchObjectTypeFromHit`` helper: every key is a
+    Neo4j label except ``View``, which is ``Table`` with a view ``table_type``.
+    """
+    if not label:
+        return None
+    if label == Labels.TABLE and is_view_table_type(table_type):
+        return SEARCH_TYPE_VIEW
+    return label
 
 
 _LABEL_UNION = "|".join(_SEARCH_INDEX_LABELS)
@@ -196,17 +213,18 @@ def ensure_search_indexes() -> None:
 
 def _object_flags(object_types: set[str]) -> dict[str, Any]:
     return {
-        "allow_term": "term" in object_types,
-        "allow_attribute": "attribute" in object_types,
-        "allow_sql_attribute": "sql_attribute" in object_types,
-        "allow_analysis": "analysis" in object_types,
-        "allow_pql_analysis": "pql_analysis" in object_types,
-        "allow_db": "db" in object_types,
-        "allow_schema": "schema" in object_types,
-        "allow_table": "table" in object_types,
-        "allow_view": "view" in object_types,
-        "allow_column": "column" in object_types,
+        "allow_term": LABEL_TERM in object_types,
+        "allow_attribute": LABEL_COLUMN_ATTRIBUTE in object_types,
+        "allow_sql_attribute": LABEL_SQL_ATTRIBUTE in object_types,
+        "allow_analysis": Labels.CUSTOM_ANALYSIS in object_types,
+        "allow_pql_analysis": LABEL_PQL_ANALYSIS in object_types,
+        "allow_db": Labels.DB in object_types,
+        "allow_schema": Labels.SCHEMA in object_types,
+        "allow_table": Labels.TABLE in object_types,
+        "allow_view": SEARCH_TYPE_VIEW in object_types,
+        "allow_column": Labels.COLUMN in object_types,
         "view_types": list(_VIEW_TYPES),
+        "search_labels": list(_SEARCH_INDEX_LABELS),
         "source": SEMANTIC_SOURCE,
     }
 
@@ -287,24 +305,9 @@ def _visibility_where() -> str:
         """
 
 
-def _type_case() -> str:
-    return f"""
-        CASE
-            WHEN n:{LABEL_TERM} THEN 'term'
-            WHEN n:{LABEL_COLUMN_ATTRIBUTE} THEN 'attribute'
-            WHEN n:{LABEL_SQL_ATTRIBUTE} THEN 'sql_attribute'
-            WHEN n:{Labels.CUSTOM_ANALYSIS} THEN 'analysis'
-            WHEN n:{LABEL_PQL_ANALYSIS} THEN 'pql_analysis'
-            WHEN n:{Labels.DB} THEN 'db'
-            WHEN n:{Labels.SCHEMA} THEN 'schema'
-            WHEN n:{Labels.COLUMN} THEN 'column'
-            WHEN n:{Labels.TABLE}
-                AND toLower(coalesce(n.table_type, '')) IN $view_types
-                THEN 'view'
-            WHEN n:{Labels.TABLE} THEN 'table'
-            ELSE head(labels(n))
-        END
-        """
+def _canonical_label() -> str:
+    """Pick the searchable Neo4j label; nodes may carry extra labels."""
+    return "[lab IN labels(n) WHERE lab IN $search_labels][0]"
 
 
 def _certified_case() -> str:
@@ -350,36 +353,36 @@ def _enrichment_matches() -> str:
 
 
 def _breadcrumbs_case() -> str:
-    return """
+    return f"""
         CASE
-            WHEN n:Column THEN [
+            WHEN n:{Labels.COLUMN} THEN [
                 c IN [
                     CASE WHEN col_db IS NOT NULL
-                        THEN {id: col_db.id, name: col_db.name, type: 'db'} END,
+                        THEN {{id: col_db.id, name: col_db.name, type: '{Labels.DB}'}} END,
                     CASE WHEN col_schema IS NOT NULL
-                        THEN {id: col_schema.id, name: col_schema.name, type: 'schema'} END,
+                        THEN {{id: col_schema.id, name: col_schema.name, type: '{Labels.SCHEMA}'}} END,
                     CASE WHEN col_table IS NOT NULL
-                        THEN {id: col_table.id, name: col_table.name, type: 'table'} END
+                        THEN {{id: col_table.id, name: col_table.name, type: '{Labels.TABLE}'}} END
                 ] WHERE c IS NOT NULL
             ]
-            WHEN n:Table THEN [
+            WHEN n:{Labels.TABLE} THEN [
                 c IN [
                     CASE WHEN tbl_db IS NOT NULL
-                        THEN {id: tbl_db.id, name: tbl_db.name, type: 'db'} END,
+                        THEN {{id: tbl_db.id, name: tbl_db.name, type: '{Labels.DB}'}} END,
                     CASE WHEN tbl_schema IS NOT NULL
-                        THEN {id: tbl_schema.id, name: tbl_schema.name, type: 'schema'} END
+                        THEN {{id: tbl_schema.id, name: tbl_schema.name, type: '{Labels.SCHEMA}'}} END
                 ] WHERE c IS NOT NULL
             ]
-            WHEN n:Schema THEN [
+            WHEN n:{Labels.SCHEMA} THEN [
                 c IN [
                     CASE WHEN sch_db IS NOT NULL
-                        THEN {id: sch_db.id, name: sch_db.name, type: 'db'} END
+                        THEN {{id: sch_db.id, name: sch_db.name, type: '{Labels.DB}'}} END
                 ] WHERE c IS NOT NULL
             ]
-            WHEN n:ColumnAttribute OR n:SqlAttribute THEN [
+            WHEN n:{LABEL_COLUMN_ATTRIBUTE} OR n:{LABEL_SQL_ATTRIBUTE} THEN [
                 c IN [
                     CASE WHEN attr_term IS NOT NULL
-                        THEN {id: attr_term.id, name: attr_term.name, type: 'term'} END
+                        THEN {{id: attr_term.id, name: attr_term.name, type: '{LABEL_TERM}'}} END
                 ] WHERE c IS NOT NULL
             ]
             ELSE []
@@ -388,10 +391,10 @@ def _breadcrumbs_case() -> str:
 
 
 def _parent_id_case() -> str:
-    return """
+    return f"""
         CASE
-            WHEN n:Column THEN col_table.id
-            WHEN n:ColumnAttribute OR n:SqlAttribute THEN attr_term.id
+            WHEN n:{Labels.COLUMN} THEN col_table.id
+            WHEN n:{LABEL_COLUMN_ATTRIBUTE} OR n:{LABEL_SQL_ATTRIBUTE} THEN attr_term.id
             ELSE null
         END
         """
@@ -425,7 +428,8 @@ def fetch_global_search(
             n.id AS id,
             n.name AS name,
             n.description AS description,
-            {_type_case()} AS type,
+            {_canonical_label()} AS label,
+            n.table_type AS table_type,
             {_certified_case()} AS certified,
             {_parent_id_case()} AS parent_id,
             {_breadcrumbs_case()} AS breadcrumbs,
@@ -451,8 +455,14 @@ def count_global_search(
         {_count_hit_source(include_description)}
         WITH DISTINCT n
         {_visibility_where()}
-        WITH {_type_case()} AS type
-        RETURN type, count(*) AS count
+        WITH {_canonical_label()} AS label, n.table_type AS table_type
+        RETURN label, table_type, count(*) AS count
         """
     rows = graph().query_read(query, params)
-    return {str(row["type"]): int(row["count"]) for row in rows if row.get("type")}
+    out: dict[str, int] = {}
+    for row in rows:
+        key = search_object_type(row.get("label"), row.get("table_type"))
+        if not key:
+            continue
+        out[key] = out.get(key, 0) + int(row["count"])
+    return out

@@ -116,7 +116,8 @@ def _normalize_item(
     return {
         "id": row.get("id"),
         "name": row.get("name"),
-        "type": row.get("type"),
+        "type": row.get("label"),
+        "table_type": row.get("table_type"),
         "description": row.get("description"),
         "certified": row.get("certified"),
         "parent_id": row.get("parent_id"),

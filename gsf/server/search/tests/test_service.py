@@ -21,9 +21,9 @@ from gsf.server.search.service import (
 
 def test_resolve_object_types_defaults_to_all() -> None:
     types = resolve_object_types(None)
-    assert "term" in types
-    assert "column" in types
-    assert "view" in types
+    assert "Term" in types
+    assert "Column" in types
+    assert "View" in types
 
 
 def test_resolve_object_types_empty_list_is_all() -> None:
@@ -32,7 +32,7 @@ def test_resolve_object_types_empty_list_is_all() -> None:
 
 def test_resolve_object_types_rejects_unknown() -> None:
     with pytest.raises(SearchValidationError, match="metric"):
-        resolve_object_types(["term", "metric"])
+        resolve_object_types(["Term", "metric"])
 
 
 def test_rank_key_prefers_names_containing_the_term_then_shorter() -> None:
@@ -112,19 +112,21 @@ def test_global_search_normalizes_and_ranks(
         {
             "id": "1",
             "name": "zz_revenue",
-            "type": "table",
+            "label": "Table",
+            "table_type": "BASE TABLE",
             "description": None,
             "certified": None,
             "parent_id": None,
             "breadcrumbs": [
-                {"name": "sales", "type": "db"},
-                {"name": None, "type": "schema"},
+                {"name": "sales", "type": "Database"},
+                {"name": None, "type": "Schema"},
             ],
         },
         {
             "id": "2",
             "name": "revenue",
-            "type": "term",
+            "label": "Term",
+            "table_type": None,
             "description": "money",
             "certified": "pending",
             "parent_id": None,
@@ -135,17 +137,20 @@ def test_global_search_normalizes_and_ranks(
     result = global_search(
         search_term="revenue",
         text_match_option="contains",
-        objects=["term", "table"],
+        objects=["Term", "Table"],
         include_description=True,
     )
 
     assert [item["id"] for item in result["data"]] == ["2", "1"]
-    assert result["data"][1]["breadcrumbs"] == [{"name": "sales", "type": "db"}]
+    assert result["data"][1]["breadcrumbs"] == [{"name": "sales", "type": "Database"}]
+    assert result["data"][1]["type"] == "Table"
+    assert result["data"][1]["table_type"] == "BASE TABLE"
+    assert result["data"][0]["type"] == "Term"
     assert result["count"] == 2
     fetch.assert_called_once()
     kwargs = fetch.call_args
     assert kwargs.args[0] == "*revenue*"
-    assert kwargs.args[1] == {"term", "table"}
+    assert kwargs.args[1] == {"Term", "Table"}
     assert kwargs.kwargs["include_description"] is True
     assert kwargs.kwargs["synonym_tokens"] == ["revenue"]
 
@@ -159,27 +164,28 @@ def test_global_search_keeps_breadcrumb_ids(
         {
             "id": "col-1",
             "name": "customer_id",
-            "type": "column",
+            "label": "Column",
+            "table_type": None,
             "description": None,
             "certified": None,
             "parent_id": "tbl-1",
             "breadcrumbs": [
-                {"id": "db-1", "name": "sales", "type": "db"},
-                {"id": "sch-1", "name": "public", "type": "schema"},
-                {"id": "tbl-1", "name": "customers", "type": "table"},
+                {"id": "db-1", "name": "sales", "type": "Database"},
+                {"id": "sch-1", "name": "public", "type": "Schema"},
+                {"id": "tbl-1", "name": "customers", "type": "Table"},
             ],
         },
     ]
     result = global_search(
         search_term="customer",
         text_match_option="contains",
-        objects=["column"],
+        objects=["Column"],
         include_description=True,
     )
     assert result["data"][0]["breadcrumbs"] == [
-        {"id": "db-1", "name": "sales", "type": "db"},
-        {"id": "sch-1", "name": "public", "type": "schema"},
-        {"id": "tbl-1", "name": "customers", "type": "table"},
+        {"id": "db-1", "name": "sales", "type": "Database"},
+        {"id": "sch-1", "name": "public", "type": "Schema"},
+        {"id": "tbl-1", "name": "customers", "type": "Table"},
     ]
 
 
@@ -188,15 +194,15 @@ def test_global_search_keeps_breadcrumb_ids(
 def test_global_search_count_passes_object_filter(
     count: MagicMock, _ensure: MagicMock
 ) -> None:
-    count.return_value = {"term": 2, "column": 4}
+    count.return_value = {"Term": 2, "Column": 4}
     result = global_search_count(
         search_term="id",
         text_match_option="contains",
-        objects=["column"],
+        objects=["Column"],
         include_description=False,
     )
-    assert result == {"data": {"term": 2, "column": 4}}
-    assert count.call_args.args[1] == {"column"}
+    assert result == {"data": {"Term": 2, "Column": 4}}
+    assert count.call_args.args[1] == {"Column"}
     assert count.call_args.kwargs["synonym_tokens"] == ["id"]
 
 
@@ -209,7 +215,8 @@ def test_global_search_keeps_matching_synonyms_only(
         {
             "id": "term-1",
             "name": "Business Unit",
-            "type": "term",
+            "label": "Term",
+            "table_type": None,
             "description": None,
             "certified": "pending",
             "parent_id": None,
@@ -220,11 +227,40 @@ def test_global_search_keeps_matching_synonyms_only(
     result = global_search(
         search_term="BU",
         text_match_option="contains",
-        objects=["term"],
+        objects=["Term"],
         include_description=False,
     )
     assert result["data"][0]["synonyms"] == ["BU"]
     assert fetch.call_args.kwargs["synonym_tokens"] == ["bu"]
+
+
+@patch("gsf.server.search.service.search_dal.ensure_search_indexes")
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
+def test_global_search_keeps_table_label_for_views(
+    fetch: MagicMock, _ensure: MagicMock
+) -> None:
+    fetch.return_value = [
+        {
+            "id": "v-1",
+            "name": "orders_v",
+            "label": "Table",
+            "table_type": "view",
+            "description": None,
+            "certified": None,
+            "parent_id": None,
+            "breadcrumbs": [],
+            "synonyms": [],
+        },
+    ]
+    result = global_search(
+        search_term="orders",
+        text_match_option="contains",
+        objects=["View"],
+        include_description=False,
+    )
+    assert result["data"][0]["type"] == "Table"
+    assert result["data"][0]["table_type"] == "view"
+    assert fetch.call_args.args[1] == {"View"}
 
 
 @patch("gsf.server.search.service.search_dal.LIST_LIMIT", 3)
@@ -237,7 +273,8 @@ def test_synonym_only_term_survives_list_cap(
         {
             "id": "col-1",
             "name": "customer_a",
-            "type": "column",
+            "label": "Column",
+            "table_type": None,
             "description": None,
             "certified": None,
             "parent_id": None,
@@ -247,7 +284,8 @@ def test_synonym_only_term_survives_list_cap(
         {
             "id": "col-2",
             "name": "customer_b",
-            "type": "column",
+            "label": "Column",
+            "table_type": None,
             "description": None,
             "certified": None,
             "parent_id": None,
@@ -257,7 +295,8 @@ def test_synonym_only_term_survives_list_cap(
         {
             "id": "col-3",
             "name": "customer_c",
-            "type": "column",
+            "label": "Column",
+            "table_type": None,
             "description": None,
             "certified": None,
             "parent_id": None,
@@ -267,7 +306,8 @@ def test_synonym_only_term_survives_list_cap(
         {
             "id": "term-syn",
             "name": "Cluster Passport",
-            "type": "term",
+            "label": "Term",
+            "table_type": None,
             "description": None,
             "certified": "pending",
             "parent_id": None,

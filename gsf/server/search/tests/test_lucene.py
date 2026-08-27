@@ -48,11 +48,24 @@ def test_object_flags_default_all_true_when_all_types_passed() -> None:
 
 
 def test_object_flags_narrows_to_requested_types() -> None:
-    flags = _object_flags({"term", "column"})
+    flags = _object_flags({"Term", "Column"})
     assert flags["allow_term"] is True
     assert flags["allow_column"] is True
     assert flags["allow_table"] is False
     assert flags["allow_view"] is False
+    assert "Term" in flags["search_labels"]
+
+
+def test_search_object_type_uses_graph_labels_and_view_table_type() -> None:
+    from gsf.dal.search import SEARCH_TYPE_VIEW, search_object_type
+
+    assert search_object_type("Term") == "Term"
+    assert search_object_type("ColumnAttribute") == "ColumnAttribute"
+    assert search_object_type("CustomAnalysis") == "CustomAnalysis"
+    assert search_object_type("Table", "BASE TABLE") == "Table"
+    assert search_object_type("Table", "view") == SEARCH_TYPE_VIEW
+    assert search_object_type("Table", "materialized view") == SEARCH_TYPE_VIEW
+    assert search_object_type(None) is None
 
 
 def test_fulltext_source_omits_description_index_when_disabled() -> None:
@@ -108,3 +121,11 @@ def test_view_table_types_remap_to_view() -> None:
     assert is_view_table_type("VIEW") is True
     assert is_view_table_type("base table") is False
     assert is_view_table_type(None) is False
+
+
+def test_fetch_query_returns_graph_label_not_invented_type() -> None:
+    from gsf.dal.search import _canonical_label
+
+    label = _canonical_label()
+    assert "labels(n)" in label
+    assert "$search_labels" in label

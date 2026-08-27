@@ -125,11 +125,16 @@ class GlobalSearchBreadcrumb(ApiModel):
 
 
 class GlobalSearchItem(ApiModel):
-    """One global-search hit: identity plus optional certified/parent path."""
+    """One global-search hit: identity plus optional certified/parent path.
+
+    ``type`` is the Neo4j label (``Term``, ``Table``, ``ColumnAttribute``, …).
+    ``table_type`` is set on ``Table`` nodes so the client can tell views apart.
+    """
 
     id: str
     name: str | None = None
     type: str
+    table_type: str | None = None
     description: str | None = None
     certified: bool | str | None = None
     parent_id: str | None = None

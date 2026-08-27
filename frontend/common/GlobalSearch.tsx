@@ -12,6 +12,7 @@ import {
 } from '@/api/search';
 import { Placeholders } from '@/assets/images/placeholders';
 import { EmptyState } from '@/common/EmptyState';
+import { searchObjectTypeFromHit } from '@/common/globalSearchMeta';
 import { GlobalSearchResults, GlobalSearchResultsSkeleton } from '@/common/GlobalSearchResults';
 import {
 	GlobalSearchTabs,
@@ -118,7 +119,8 @@ export const GlobalSearch = () => {
 	const showEmpty = searching && !awaitingSearch && queryActive && visibleItems.length === 0;
 	const showPlaceholder = !queryActive;
 	const itemCounts = visibleItems.reduce<Record<string, number>>((acc, item) => {
-		acc[item.type] = (acc[item.type] ?? 0) + 1;
+		const kind = searchObjectTypeFromHit(item);
+		acc[kind] = (acc[kind] ?? 0) + 1;
 		return acc;
 	}, {});
 	const tabCounts = totalGlobalSearchCount(counts) > 0 ? counts : itemCounts;

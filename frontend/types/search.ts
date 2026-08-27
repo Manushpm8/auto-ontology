@@ -13,7 +13,10 @@ export type GlobalSearchBreadcrumb = {
 export type GlobalSearchItem = {
 	id: string;
 	name: string | null;
+	/** Neo4j label (`Term`, `Table`, `ColumnAttribute`, …). Views stay `Table`. */
 	type: SearchObjectType;
+	/** Present on `Table` nodes; the UI maps view table types to the View tab. */
+	table_type?: string | null;
 	description: string | null;
 	certified: boolean | string | null;
 	parent_id: string | null;
