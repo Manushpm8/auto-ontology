@@ -63,13 +63,14 @@ and authenticate with a GSF API token — see
 
 ## Tools
 
-`ask_data` is the one that answers questions: it runs GSF's text-to-SQL agent and
-returns the answer, the SQL it ran, and the rows. The rest — `search_terms`,
+`ask_question` is the one that answers questions: it runs GSF's text-to-SQL agent
+and returns the answer, the SQL it ran, and the rows. The rest — `search_terms`,
 `describe_table`, `check_answerable` and friends — let an agent learn the
 vocabulary and check its assumptions first.
 
-Every tool reads. Nothing here modifies the glossary, the catalog, or the
-underlying databases.
+Every tool reads, and every tool works through the semantic layer: there is none
+for browsing databases, schemas, or raw columns. Nothing here modifies the
+glossary, the catalog, or the underlying databases.
 
 ## Notes
 

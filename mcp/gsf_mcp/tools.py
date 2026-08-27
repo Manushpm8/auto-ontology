@@ -4,11 +4,18 @@
 
 """The curated tool surface, selected from the public OpenAPI spec.
 
-The spec describes 82 operations. Exposing all of them would be actively
+The spec describes 87 operations. Exposing all of them would be actively
 harmful: agent tool-selection degrades well before that count, and most of the
 surface — SSO providers, token management, custom prompts, compilation control
 — has no business being agent-callable. So this module names an explicit
 allow-list and everything else is excluded.
+
+The allow-list is deliberately about *meaning* rather than storage. Nothing
+here walks the physical catalog database by database: consumers should reach
+the data through the semantic layer, which is the point of GSF, and a tool that
+lists schemas or columns invites an agent to bypass it and reason about raw
+tables instead. ``describe_table`` is the exception, because what it returns is
+the terms and SQL attributes a table participates in.
 
 Two things are deliberately overridden rather than taken from the spec:
 
@@ -43,13 +50,13 @@ class ToolSpec:
     description: str
 
 
-# Ordered roughly as an agent would work: understand the vocabulary, then the
-# physical shape, then ask. Two tools are not here because neither maps to a
-# single request/response operation: ``ask_data`` streams (``chat.py``), and
-# ``check_readiness`` folds three endpoints into one verdict
-# (``readiness.py``). The latter is why no ``get_semantic_layer_status`` entry
-# remains: it reported one of those three facts, and a compiled layer on its
-# own never meant a question could be answered.
+# Ordered roughly as an agent would work: understand the vocabulary, then ask.
+# Two tools are not here because neither maps to a single request/response
+# operation: ``ask_question`` streams (``chat.py``), and ``check_readiness``
+# folds three endpoints into one verdict (``readiness.py``). The latter is why
+# no ``get_semantic_layer_status`` entry remains: it reported one of those three
+# facts, and a compiled layer on its own never meant a question could be
+# answered.
 CURATED: tuple[ToolSpec, ...] = (
     ToolSpec(
         method="GET",
@@ -86,54 +93,21 @@ CURATED: tuple[ToolSpec, ...] = (
     ToolSpec(
         method="GET",
         path="/api/terms/{term_id}/sql-attributes",
-        name="get_term_calculations",
+        name="get_term_sql_attributes",
         description=(
-            "List the calculations defined under a glossary term — SQL "
-            "expressions such as a margin, a ratio, or a rolling total, "
-            "already reviewed for this deployment. Prefer reusing one of "
-            "these over inventing the arithmetic yourself."
+            "List the SQL attributes defined under a glossary term — reviewed "
+            "SQL expressions such as a margin, a ratio, or a rolling total. "
+            "Prefer reusing one of these over inventing the arithmetic "
+            "yourself."
         ),
     ),
     ToolSpec(
         method="GET",
         path="/api/sql-attributes/{attr_id}",
-        name="get_calculation",
+        name="get_sql_attribute",
         description=(
-            "Fetch one calculation: its SQL expression, the term it belongs "
-            "to, and what it is for."
-        ),
-    ),
-    ToolSpec(
-        method="GET",
-        path="/api/datasources/dbs",
-        name="list_databases",
-        description=(
-            "List the databases connected to this GSF deployment. Start here "
-            "when you do not yet know what data exists, or when you need a "
-            "database name to scope a question with ask_data."
-        ),
-    ),
-    ToolSpec(
-        method="GET",
-        path="/api/schemas/{db_id}",
-        name="list_schemas",
-        description="List the schemas inside one connected database.",
-    ),
-    ToolSpec(
-        method="GET",
-        path="/api/tables/{schema_id}",
-        name="list_tables",
-        description="List the tables inside one schema.",
-    ),
-    ToolSpec(
-        method="GET",
-        path="/api/columns/{table_id}",
-        name="list_columns",
-        description=(
-            "List a table's columns, with curated descriptions and sample "
-            "values where they exist. Use describe_table instead when you "
-            "want to understand what the table means rather than just its "
-            "shape."
+            "Fetch one SQL attribute: its expression, the term it belongs to, "
+            "and what it is for."
         ),
     ),
     ToolSpec(
@@ -142,7 +116,7 @@ CURATED: tuple[ToolSpec, ...] = (
         name="describe_table",
         description=(
             "Describe one table in full: its columns, the glossary terms that "
-            "reference it, and the calculations defined over it. The richest "
+            "reference it, and the SQL attributes defined over it. The richest "
             "single view of what a table is for."
         ),
     ),
@@ -165,7 +139,7 @@ CURATED: tuple[ToolSpec, ...] = (
             "Grade how well the semantic layer covers the entities in a "
             "question, without running the full agent. A cheap pre-flight: "
             "use it to decide whether GSF can answer something before paying "
-            "for ask_data, which is far slower and more expensive."
+            "for ask_question, which is far slower and more expensive."
         ),
     ),
 )

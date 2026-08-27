@@ -128,26 +128,29 @@ underlying databases.
 
 | Tool | What it is for |
 | --- | --- |
-| `ask_data` | **The primary tool.** Ask a question in plain language; get the answer, the SQL GSF ran, and the rows. |
-| `check_answerable` | Grade whether the semantic layer covers a question. Cheap pre-flight before `ask_data`. |
+| `ask_question` | **The primary tool.** Ask a question in plain language; get the answer, the SQL GSF ran, and the rows. |
+| `check_answerable` | Grade whether the semantic layer covers a question. Cheap pre-flight before `ask_question`. |
 | `check_readiness` | Whether this deployment can answer anything at all. |
 | `search_terms` | Search the business glossary. |
 | `get_term` | One term: description, synonyms, related terms. |
 | `get_term_columns` | The physical columns a term maps to. |
-| `get_term_calculations` | The SQL attributes defined under a term. |
-| `get_calculation` | One SQL attribute: its expression and purpose. |
+| `get_term_sql_attributes` | The SQL attributes defined under a term. |
+| `get_sql_attribute` | One SQL attribute: its expression and purpose. |
 | `describe_table` | A table's columns, related terms, and SQL attributes together. |
 | `list_example_queries` | Curated example analyses — useful few-shot context. |
-| `list_databases` | Databases connected to this deployment. |
-| `list_schemas` | Schemas in a database. |
-| `list_tables` | Tables in a schema. |
-| `list_columns` | A table's columns, with curated descriptions. |
+
+There is deliberately no tool for browsing databases, schemas, or raw columns.
+Consumers are meant to reach the data through the semantic layer, and a catalog
+browser invites an agent to reason about raw tables instead — so those routes
+stay unpublished even though the API offers them. `describe_table` covers the
+legitimate case, since what it returns is the terms and SQL attributes a table
+participates in.
 
 The server also advertises **instructions** at handshake describing how the tools
 sequence, which spares the model from inferring it — left to itself it tends to
-reach straight for `ask_data`.
+reach straight for `ask_question`.
 
-### About `ask_data`
+### About `ask_question`
 
 It is a call to `POST /api/chat/completions`, the same endpoint the web UI uses,
 which runs the full text-to-SQL agent: many sequential model calls, typically
@@ -259,7 +262,7 @@ hand.
 
 ## Troubleshooting
 
-**`ask_data` returned an empty answer, with no SQL and no error** — the run
+**`ask_question` returned an empty answer, with no SQL and no error** — the run
 completed but retrieval found nothing to build a query from. Call
 `check_readiness` first: most often no database connection is configured, so no
 question can succeed however it is phrased. If the deployment is ready, the

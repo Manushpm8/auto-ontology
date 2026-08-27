@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ask_data`` turns the agent's SSE stream into a structured answer."""
+"""``ask_question`` turns the agent's SSE stream into a structured answer."""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ def _stream(body: str, status: int = 200) -> Callable[[httpx.Request], httpx.Res
 def _call(mcp: FastMCP, arguments: dict[str, Any], progress: Any = None) -> Any:
     async def run() -> Any:
         async with Client(mcp, progress_handler=progress) as client:
-            return await client.call_tool("ask_data", arguments)
+            return await client.call_tool("ask_question", arguments)
 
     return asyncio.run(run())
 
@@ -258,8 +258,8 @@ def test_names_the_knob_when_a_run_times_out() -> None:
 
 
 def test_sends_only_the_question_when_nothing_else_is_given() -> None:
-    # target_db and conversation_id change backend behaviour and permissions;
-    # sending them as nulls is not the same as omitting them.
+    # conversation_id changes backend behaviour and permissions; sending it as
+    # a null is not the same as omitting it.
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -275,7 +275,7 @@ def test_sends_only_the_question_when_nothing_else_is_given() -> None:
     assert captured == {"question": "how many?"}
 
 
-def test_forwards_scoping_options_when_given() -> None:
+def test_forwards_the_conversation_when_given() -> None:
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -290,10 +290,20 @@ def test_forwards_scoping_options_when_given() -> None:
         _server(handler),
         {
             "question": "how many?",
-            "target_db": "sales",
             "conversation_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
         },
     )
 
-    assert captured["target_db"] == "sales"
     assert captured["conversation_id"] == "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+
+
+def test_the_database_cannot_be_pinned_by_a_caller() -> None:
+    # target_db exists on the API for benchmarking. Exposing it would invite an
+    # agent to route around the semantic layer, so the tool has no such
+    # parameter and a caller passing one is rejected rather than silently
+    # ignored.
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("the request should never be sent")
+
+    with pytest.raises(ToolError):
+        _call(_server(handler), {"question": "how many?", "target_db": "sales"})

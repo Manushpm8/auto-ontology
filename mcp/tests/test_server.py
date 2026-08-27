@@ -63,7 +63,10 @@ def _tools() -> list[Any]:
 def test_publishes_exactly_the_curated_tools_plus_the_handwritten_ones() -> None:
     names = {tool.name for tool in _tools()}
 
-    assert names == {spec.name for spec in CURATED} | {"ask_data", "check_readiness"}
+    assert names == {spec.name for spec in CURATED} | {
+        "ask_question",
+        "check_readiness",
+    }
 
 
 def test_every_tool_carries_a_description() -> None:
@@ -84,8 +87,8 @@ def test_generated_descriptions_are_replaced_end_to_end() -> None:
     assert leaked == []
 
 
-def test_ask_data_reports_a_structured_answer() -> None:
-    ask = next(tool for tool in _tools() if tool.name == "ask_data")
+def test_ask_question_reports_a_structured_answer() -> None:
+    ask = next(tool for tool in _tools() if tool.name == "ask_question")
 
     assert ask.outputSchema is not None
     assert set(ask.outputSchema["properties"]) >= {"answer", "sql", "rows"}
@@ -145,7 +148,7 @@ def test_a_missing_icon_does_not_stop_the_server(monkeypatch: Any) -> None:
 def test_instructions_point_at_the_primary_tool() -> None:
     # Sequencing guidance lives here rather than in any one tool description,
     # so a host that shows only this still knows where to start.
-    assert "ask_data" in INSTRUCTIONS
+    assert "ask_question" in INSTRUCTIONS
     assert "check_answerable" in INSTRUCTIONS
     assert "check_readiness" in INSTRUCTIONS
 

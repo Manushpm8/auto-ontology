@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ask_data`` — the text-to-SQL agent as a single MCP tool.
+"""``ask_question`` — the text-to-SQL agent as a single MCP tool.
 
 Hand-written rather than generated, because ``POST /api/chat/completions``
 answers with ``text/event-stream``: the agent emits a step event per graph node
@@ -44,7 +44,7 @@ _SSE_DONE = "[DONE]"
 
 
 class DataAnswer(BaseModel):
-    """Structured result of one ``ask_data`` call."""
+    """Structured result of one ``ask_question`` call."""
 
     answer: str = Field(description="Natural-language answer to the question.")
     sql: str = Field(default="", description="The SQL that produced the rows.")
@@ -148,10 +148,10 @@ async def _raise_for_status(response: httpx.Response) -> None:
 
 
 def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> None:
-    """Attach ``ask_data`` to *mcp*."""
+    """Attach ``ask_question`` to *mcp*."""
 
     @mcp.tool(
-        name="ask_data",
+        name="ask_question",
         description=(
             "Ask a natural-language question about the data connected to this "
             "GSF deployment. GSF resolves the question against its semantic "
@@ -164,26 +164,26 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
             "narrow ones."
         ),
     )
-    async def ask_data(
+    async def ask_question(
         question: str,
         ctx: Context,
-        target_db: str | None = None,
         conversation_id: str | None = None,
     ) -> DataAnswer:
         """Run one text-to-SQL turn and return its structured result.
 
+        The API also accepts ``target_db`` to pin retrieval to one database.
+        It is not exposed here: it exists for benchmarking, the web UI never
+        sends it, and letting the deployment choose is what the semantic layer
+        is for.
+
         Args:
             question: The question, in plain language.
-            target_db: Restrict retrieval and SQL to one connected database,
-                by catalog id or name. Omit to let GSF choose.
             conversation_id: Continue an existing thread, so follow-up
-                questions resolve against earlier turns. Requires the token's
-                owner to hold conversation-write permission, and rejects a
-                second question while the first is still running.
+                questions resolve against earlier turns. Requires the caller
+                to hold conversation-write permission, and rejects a second
+                question while the first is still running.
         """
         body: dict[str, Any] = {"question": question}
-        if target_db:
-            body["target_db"] = target_db
         if conversation_id:
             body["conversation_id"] = conversation_id
 

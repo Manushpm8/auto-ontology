@@ -12,9 +12,9 @@ unrelated routes, and no one of them is sufficient alone.
 
 The combination is worth a tool of its own because its failure is silent. A
 compiled glossary over no connection reads perfectly: ``search_terms`` returns
-terms, ``get_term`` returns columns, ``get_semantic_layer_status`` reports the
-layer as built. Nothing looks wrong until ``ask_data`` spends minutes writing
-SQL it can never execute and returns an empty answer — which is
+terms, ``get_term`` returns columns, and the layer reports itself as built.
+Nothing looks wrong until ``ask_question`` spends minutes writing SQL it can
+never execute and returns an empty answer — which is
 indistinguishable, from the caller's side, from a question that was simply not
 understood. One cheap call up front turns that dead end into a fact.
 """
@@ -254,7 +254,7 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
             "connection exists to run SQL against, and whether the semantic "
             "layer has been compiled. All three are required.\n\n"
             "Use it before the first question against an unfamiliar "
-            "deployment, and whenever ask_data returns an empty answer. It is "
+            "deployment, and whenever ask_question returns an empty answer. It is "
             "three cheap reads, and it separates 'this deployment is not set "
             "up' from 'the question was not understood' — which otherwise look "
             "identical and are fixed in completely different places.\n\n"

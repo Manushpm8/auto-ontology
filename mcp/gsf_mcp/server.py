@@ -50,8 +50,9 @@ structured data. It holds a compiled semantic layer — a glossary of business
 terms mapped onto real database columns and reviewed SQL expressions — over the
 databases this deployment is connected to.
 
-Use `ask_data` for anything that needs an actual answer from the data. It runs
-a full text-to-SQL agent and returns the answer, the SQL it ran, and the rows.
+Use `ask_question` for anything that needs an actual answer from the data. It
+runs a full text-to-SQL agent and returns the answer, the SQL it ran, and the
+rows.
 
 The other tools exist so you can understand the vocabulary before you ask, and
 check your assumptions after. A productive sequence is usually:
@@ -60,21 +61,24 @@ check your assumptions after. A productive sequence is usually:
    differ: "active customer" is a defined term with specific SQL behind it,
    not something to guess at.
 2. `check_answerable` if you are unsure the question is in scope. It is far
-   cheaper than `ask_data` and tells you whether the semantic layer covers the
-   entities involved.
-3. `ask_data` to get the answer.
+   cheaper than `ask_question` and tells you whether the semantic layer covers
+   the entities involved.
+3. `ask_question` to get the answer.
 
 `check_readiness` answers a different question: whether this deployment can
 answer anything at all. A deployment with no database connection reads normally
 and still fails every question, so reach for it before a first question here, or
-when `ask_data` comes back empty — an empty answer is far more often a deployment
-that is not set up than a question that was misunderstood.
+when `ask_question` comes back empty — an empty answer is far more often a
+deployment that is not set up than a question that was misunderstood.
 
-`list_databases`, `list_schemas`, `list_tables`, `list_columns`, and
-`describe_table` walk the physical catalog when you need the shape of the data
-rather than its meaning. `list_example_queries` shows how this data is
-conventionally queried, which is often the fastest way to understand its join
-paths.
+Work through the semantic layer, not around it. `get_term_columns` tells you
+which physical columns a term stands for, `get_term_sql_attributes` and
+`get_sql_attribute` give you expressions that were already reviewed here, and
+`describe_table` says what a table means rather than only its shape. There is
+deliberately no tool for browsing databases, schemas, or raw columns:
+questions are answered against the glossary. `list_example_queries` shows how
+this data is conventionally queried, which is often the fastest way to
+understand its join paths.
 
 Every tool reads. Nothing here modifies the catalog, the glossary, or the
 underlying databases.

@@ -37,6 +37,22 @@ def test_every_curated_operation_exists_in_the_spec() -> None:
     assert missing_from_spec(SPEC) == []
 
 
+def test_nothing_walks_the_physical_catalog() -> None:
+    # Consumers are meant to reach the data through the semantic layer. A tool
+    # that lists databases, schemas, or raw columns invites an agent to reason
+    # about tables directly instead, so these routes stay unpublished even
+    # though the API offers them.
+    physical = (
+        "/api/datasources/dbs",
+        "/api/schemas/",
+        "/api/tables/",
+        "/api/columns/",
+    )
+    published = [spec.name for spec in CURATED if spec.path.startswith(physical)]
+
+    assert published == []
+
+
 def test_no_curated_operation_mutates_state() -> None:
     mutating = [
         f"{spec.method} {spec.path}"
