@@ -69,8 +69,9 @@ create_sql_user_prompt = (
     "- If evidence maps an answer concept to specific columns, preserve that "
     "projection exactly; do not collapse, reshape, or replace those columns "
     "unless the question explicitly asks for a transformed value.\n"
-    "- Time windows: 'last week/month/year' means the most recent "
-    "completed calendar period, not a rolling window.\n"
+    "- Time windows: apply a date/year filter ONLY when the question's data "
+    "request names a period; 'last week/month/year' then means the most "
+    "recent completed calendar period, not a rolling window.\n"
     "- When an ORDER BY clause is included and the question or evidence does not "
     "specify a sort direction, default to DESC.\n"
     "- Infer LIMIT from the question's intent: "
@@ -289,10 +290,10 @@ ORDER BY total_sales DESC;"""
 Output (fill fields in this exact order):
 - thought: briefly explain your approach and state every assumption the
   request or schema doesn't uniquely determine. For each that applies,
-  state the choice AND the reason ("X, because Y"): time window (the
-  boundary for vague/relative phrases), zero/missing values (included,
-  excluded, or coerced to 0; how division guards a zero denominator), and
-  ties (what breaks a tie in a ranking/superlative query).
+  state the choice AND the reason ("X, because Y"): zero/missing values
+  (included, excluded, or coerced to 0; how division guards a zero
+  denominator), and ties (what breaks a tie in a ranking/superlative
+  query).
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
@@ -330,10 +331,10 @@ Otherwise, construct an optimized SQL query to answer the question.
 Output (fill fields in this exact order):
 - thought: briefly explain your approach and state every assumption the
   request or schema doesn't uniquely determine. For each that applies,
-  state the choice AND the reason ("X, because Y"): time window (the
-  boundary for vague/relative phrases), zero/missing values (included,
-  excluded, or coerced to 0; how division guards a zero denominator), and
-  ties (what breaks a tie in a ranking/superlative query).
+  state the choice AND the reason ("X, because Y"): zero/missing values
+  (included, excluded, or coerced to 0; how division guards a zero
+  denominator), and ties (what breaks a tie in a ranking/superlative
+  query).
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
@@ -357,14 +358,20 @@ problems. Minor issues or alternative approaches are
 acceptable.
 
 Check for CRITICAL issues only:
-1. **Seriously Wrong Joins**: Flag only joins that are
-nonsensical or clearly break the question (e.g. joining
-unrelated tables, inventing keys). Alternate but plausible
-join paths that still answer the question are acceptable —
-including a different entity for a filter dimension, a
-different field/role for the same concept, a
-shorter/longer path, or another valid FK chain. Do NOT
-fail for those.
+1. **Semantically Wrong Joins**: Assume every join in the
+query is real — do not question whether the relation exists.
+Flag a join if either (a) it is self-evidently broken
+regardless of any alternative — e.g. a tautological
+condition (`a.x = a.x`), a table joined to itself, or
+columns of clearly unrelated meaning being equated — or
+(b) it reaches a different, wrong entity for the question
+when you can name a specific, better-fitting real
+relationship instead (e.g. a related-but-different table, or
+the wrong field/role for the same concept). Do not flag a
+join just because it looks unfamiliar — alternate but
+plausible join paths (a different entity for a filter
+dimension, a shorter/longer path, another valid FK chain)
+are acceptable.
 2. **Clearly Wrong Aggregations**: Are aggregations
 completely incorrect? (e.g., COUNT when user explicitly
 asks for SUM) (Minor variations are acceptable)
@@ -551,21 +558,19 @@ def create_intent_validation_prompt(
     entities_text: str,
     sql_code: str,
     custom_analyses: str = "",
-    join_paths: str = "",
 ) -> str:
     question_block = format_dual_question_block(original_question, sanitized_question)
     custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
-    join_paths_block = f"\n{join_paths}" if join_paths.strip() else ""
     return f"""User's Question:
 {question_block}
-{custom_analyses_block}{join_paths_block}
+{custom_analyses_block}
 Generated SQL Query:
 ```sql
 {sql_code}
 ```
 
 Check for CRITICAL issues ONLY (be lenient):
-1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible join paths that could still answer it are OK — including different fields/roles for the same concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those. When AUTHORITATIVE JOIN PATHS are listed above, a join that follows one of them is correct by definition — do not flag it.
+1. Every join in this query is already known to be real — do not question whether it exists. Flag it only if either (a) it is self-evidently broken regardless of any alternative (a tautological condition, a table joined to itself, columns of clearly unrelated meaning being equated), or (b) it clearly reaches the wrong entity for the question and you can name a specific, better-fitting real relationship instead. Do not flag a join just because it merely looks unfamiliar (different fields/roles for the same concept, e.g. customer vs supplier delivery city for a region filter, are OK).
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
