@@ -11,13 +11,15 @@ from typing import TYPE_CHECKING, Any
 from gsf.connectors import get_connectors
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.datasources import (
+    store_column_date_formats,
     store_column_sample_values,
     store_column_uniqueness,
 )
 from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
+from gsf.semantic.date_format import infer_date_format, is_date_type
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
-from gsf.semantic.embed import SemanticEmbedder
+from gsf.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
 from gsf.semantic.sql_attribute_extractor import extract_sql_attributes
@@ -231,20 +233,25 @@ def calculate_columns_profiling(
     ``is_unique`` flag (all non-null values distinct) and the 5 most-common
     values.
 
-    Persists to Neo4j Column nodes: ``is_unique`` for every column, and
-    ``sample_values`` for every column except those whose declared type is a
-    date/time/uuid (individual string values longer than 30 chars are dropped).
-    A text column whose real values mix more than one recognized date/
-    timestamp shape (e.g. some rows ``YYYY-MM-DD``, others ``YYYY/MM/DD``)
-    gets an explicit mixed-format warning appended, checked against the full
-    sample rather than only the stored top-5 so a rare minority shape isn't
-    missed. JSONB nested keys whose name hints at a date (see
-    ``_DATE_KEY_HINTS``) get the same treatment plus a raw example value when
-    no recognized shape matches at all.
+    Persists to Neo4j Column nodes: ``is_unique`` for every column,
+    ``format`` for date/time-typed or text columns whose sampled values share
+    one storage notation — resolved by validating every value against
+    strptime candidates (see ``gsf.semantic.date_format``), so it can settle
+    genuinely ambiguous-looking shapes (``13/07/2011`` can only be day-first)
+    rather than merely flag them — and ``sample_values`` for every column
+    except those whose declared type is a date/time/uuid (individual string
+    values longer than 30 chars are dropped). A text column whose real values
+    mix more than one recognized date/timestamp shape (e.g. some rows
+    ``YYYY-MM-DD``, others ``YYYY/MM/DD``) gets an explicit mixed-format
+    warning appended, checked against the full sample rather than only the
+    stored top-5 so a rare minority shape isn't missed. JSONB nested keys
+    whose name hints at a date (see ``_DATE_KEY_HINTS``) get the same
+    treatment plus a raw example value when no recognized shape matches at
+    all.
 
-    Returns ``{column_name: {"sample_values": [top-5 values], "is_unique": bool}}``
-    for *all* columns (values unfiltered — includes dates, uuids and long
-    strings).
+    Returns ``{column_name: {"sample_values": [top-5 values], "is_unique":
+    bool, "format": str | None}}`` for *all* columns (values unfiltered —
+    includes dates, uuids and long strings).
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
@@ -276,6 +283,7 @@ def calculate_columns_profiling(
     profiling: dict[str, dict[str, Any]] = {}
     sample_values: dict[str, list] = {}
     uniqueness: dict[str, bool] = {}
+    date_formats: dict[str, str] = {}
 
     for column in df.columns:
         col_name = str(column)
@@ -314,8 +322,27 @@ def calculate_columns_profiling(
                         merged.append(value)
                 col_values = merged
 
+        # SQLite (and other loosely-typed sources) declare dates as TEXT, so the
+        # declared type alone misses them: infer from the values as well, which
+        # only yields a format when every sampled value shares one notation.
+        # Unlike main's port, this does NOT suppress sample_values below just
+        # because a format was found — samples stay available to FK inference
+        # (semantic_fk.py's SQL-probe fallback reads persisted sample_values),
+        # and date values are short enough that keeping them costs little.
+        date_format = (
+            infer_date_format(series)
+            if is_date_type(declared_type) or _is_text_sample_type(declared_type)
+            else None
+        )
+        if date_format:
+            date_formats[col_name] = date_format
+
         uniqueness[col_name] = is_unique
-        profiling[col_name] = {"sample_values": col_values, "is_unique": is_unique}
+        profiling[col_name] = {
+            "sample_values": col_values,
+            "is_unique": is_unique,
+            "format": date_format,
+        }
 
         if _is_excluded_sample_type(declared_type):
             continue
@@ -337,6 +364,14 @@ def calculate_columns_profiling(
             # date-shape check run on a nested leaf the way it already can on
             # a plain text column.
             nested_date_examples: dict[tuple[str, str], list[str]] = {}
+            # Example raw values per top-level flat key (e.g. 'Tx_Adh' ->
+            # ['High', 'Medium', 'Compliant']). Unlike nested_date_examples
+            # above, this is collected for every flat key, not just
+            # date-hinted ones — a bare key name like 'Tx_Adh' gives the SQL
+            # generator no way to tell it apart from a same-purpose flat
+            # column (e.g. 'med_adh') that already shows its real sample
+            # values; showing the actual values here closes that gap.
+            top_level_examples: dict[str, list[str]] = {}
             for raw_val in df[column].dropna():
                 if not isinstance(raw_val, dict):
                     continue
@@ -361,8 +396,48 @@ def calculate_columns_profiling(
                                 and (len(str_v) <= _MAX_SAMPLE_VALUE_LEN)
                             ):
                                 examples.append(str_v)
-                    elif k not in top_level_keys:
-                        top_level_keys.append(k)
+                    else:
+                        if k not in top_level_keys:
+                            top_level_keys.append(k)
+                        if v is None:
+                            continue
+                        examples = top_level_examples.setdefault(k, [])
+                        str_v = str(v)
+                        if (
+                            len(examples) < _PROFILING_TOP_N
+                            and str_v not in examples
+                            and (len(str_v) <= _MAX_SAMPLE_VALUE_LEN)
+                        ):
+                            examples.append(str_v)
+
+            # embed.py's ColumnAttribute embedding text (_format_sample_values)
+            # drops any individual sample_values entry over
+            # _MAX_EMBEDDED_JSON_SAMPLE_LEN chars WHOLE, not truncated — so an
+            # over-length annotation risks losing the entry, including the
+            # bare key name, from retrieval entirely (this was already true
+            # pre-existing for the WARNING/date-format annotations below,
+            # which had no fallback at all). ``_safe_annotate`` keeps
+            # appending as much annotation as fits, falling back a step at a
+            # time rather than an all-or-nothing choice, so a key's own name
+            # is never lost just because a longer example/format string
+            # didn't fit next to it. The SQL-gen prompt (sql_from_semantic.py)
+            # applies no such filter — it always sees the full, un-capped
+            # entry — so this only trims what retrieval-time embedding sees.
+            # Note this budgets the *formatted* entry (brackets/quotes
+            # included) against _MAX_EMBEDDED_JSON_SAMPLE_LEN (the JSON-only,
+            # 60-char budget), not the raw-value cutoff (_MAX_SAMPLE_VALUE_LEN,
+            # 30 chars) used above when deciding whether a value was worth
+            # collecting as an example candidate at all — those are two
+            # different questions with two different budgets.
+            def _safe_annotate(base: str, *annotations: str) -> str:
+                entry = base
+                for ann in annotations:
+                    candidate = f"{entry} {ann}"
+                    if len(candidate) <= _MAX_EMBEDDED_JSON_SAMPLE_LEN:
+                        entry = candidate
+                    else:
+                        break
+                return entry
 
             json_keys: list[str] = []
             for k, nested_keys in containers.items():
@@ -371,26 +446,67 @@ def calculate_columns_profiling(
                     None,
                 )
                 for nested_k in nested_keys:
-                    entry = f"{k}.{nested_k}"
-                    if unit_key and nested_k != unit_key:
-                        entry += f" [unit: {k}.{unit_key}]"
+                    base = f"{k}.{nested_k}"
+                    unit_ann = (
+                        f"[unit: {k}.{unit_key}]"
+                        if unit_key and nested_k != unit_key
+                        else None
+                    )
                     examples = nested_date_examples.get((k, nested_k))
+                    date_ann = None
                     if examples:
                         shapes = _date_shapes_seen(examples)
                         if len(shapes) > 1:
-                            entry += (
-                                f" [WARNING mixed date formats observed: "
+                            # Try every observed shape first (this is the one
+                            # place fewer items changes the *meaning*, not
+                            # just the detail level — dropping a shape here
+                            # could hide a real mixed-format bug), then fall
+                            # back to just flagging that shapes are mixed
+                            # without enumerating them, before giving up the
+                            # annotation entirely.
+                            full = (
+                                "[WARNING mixed date formats observed: "
                                 f"{', '.join(shapes)}]"
                             )
+                            short = "[WARNING mixed date formats observed]"
+                            date_ann = (
+                                full
+                                if len(f"{base} {full}") <= _MAX_EMBEDDED_JSON_SAMPLE_LEN
+                                else short
+                            )
                         elif shapes:
-                            entry += f" [date format: {shapes[0]}]"
+                            date_ann = f"[date format: {shapes[0]}]"
                         else:
-                            entry += f" [e.g. {examples[0]!r}]"
-                    json_keys.append(entry)
-            json_keys.extend(top_level_keys)
+                            date_ann = f"[e.g. {examples[0]!r}]"
+                    anns = [a for a in (unit_ann, date_ann) if a]
+                    json_keys.append(_safe_annotate(base, *anns))
+            for k in top_level_keys:
+                examples = top_level_examples.get(k)
+                if not examples:
+                    json_keys.append(k)
+                    continue
+                # Greedily fit as many distinct example values as the length
+                # budget allows (1 up to len(examples), all collected up to
+                # _PROFILING_TOP_N) instead of a fixed count — a short key
+                # with short values (e.g. 'Tx_Adh': 'High'/'Low'/'Compliant')
+                # gets more signal than a fixed cap of 1 would give it, while
+                # a long key/value pair still degrades gracefully to fewer
+                # examples, then to the bare key, rather than being dropped.
+                best = k
+                for n in range(1, len(examples) + 1):
+                    candidate = f"{k} [e.g. {', '.join(repr(e) for e in examples[:n])}]"
+                    if len(candidate) <= _MAX_EMBEDDED_JSON_SAMPLE_LEN:
+                        best = candidate
+                    else:
+                        break
+                json_keys.append(best)
 
             if json_keys:
-                sample_values[col_name] = json_keys[:10]
+                # Capped well above the typical real key count (see
+                # mental_health.treatmentoutcomes.txprogmet, which has 11) so
+                # a wide-but-not-huge JSONB column doesn't lose keys to a
+                # cap tuned for a narrower column shape seen elsewhere.
+                sample_values[col_name] = json_keys[:20]
             continue
 
         filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
@@ -411,6 +527,7 @@ def calculate_columns_profiling(
     table_id = table["id"]
     store_column_sample_values(table_id, sample_values)
     store_column_uniqueness(table_id, uniqueness)
+    store_column_date_formats(table_id, date_formats)
 
     return profiling
 
@@ -428,8 +545,9 @@ def process_table(
     table_name = table["name"]
 
     # Columns profiling — requires a live connector; skipped when unavailable.
-    # Persists sample_values + is_unique onto Column nodes, and maps each column
-    # to {"sample_values": [...], "is_unique": bool} for FK detection below.
+    # Persists sample_values, is_unique, and format onto Column nodes, and maps
+    # each column to {"sample_values": [...], "is_unique": bool, "format": str
+    # | None} for FK detection below.
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
     if connector is not None:

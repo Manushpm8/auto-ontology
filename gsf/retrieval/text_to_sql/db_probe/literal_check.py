@@ -368,6 +368,211 @@ def find_numeric_scale_mismatches(
     return mismatches
 
 
+# Postgres integer-family type names — exact match against known column
+# types, not a substring check. Precision matters more here than in the
+# composite-hit heuristics elsewhere in this codebase: a false match would
+# mean flagging (or auto-rewriting) a division that was never a bug.
+_INTEGER_TYPES = frozenset(
+    {
+        "integer",
+        "int",
+        "int2",
+        "int4",
+        "int8",
+        "bigint",
+        "smallint",
+        "serial",
+        "bigserial",
+        "smallserial",
+    }
+)
+
+# Casting an operand to any of these makes that operand non-integer, so a
+# division against it won't truncate regardless of the other side.
+_NON_INTEGER_CAST_TYPES = frozenset(
+    {"numeric", "decimal", "float", "float4", "float8", "double precision", "double", "real", "money"}
+)
+
+
+def _has_non_integer_cast(node: exp.Expression) -> bool:
+    """True if *node*'s own subtree already casts to a non-integer numeric
+    type anywhere (``find_all`` includes *node* itself, so a bare
+    ``col::numeric`` operand is caught too) — safe from truncation
+    regardless of the other side of the division, no matter how deep the
+    cast sits inside this operand."""
+    for cast in node.find_all(exp.Cast):
+        target = cast.to.sql(dialect="postgres").lower()
+        if any(t in target for t in _NON_INTEGER_CAST_TYPES):
+            return True
+    return False
+
+
+def _resolves_to_known_integer(
+    node: exp.Expression,
+    known_types: dict[tuple[str, str], str],
+    all_nodes: list[exp.Table],
+    by_key: dict[str, exp.Table],
+) -> Optional[bool]:
+    """Best-effort: does *node* evaluate to a Postgres integer-family type?
+
+    True/False only when confidently resolvable from ``known_types``;
+    ``None`` ("can't tell") for anything else — callers must never flag on
+    ``None``, the same "never flag on missing information" rule this
+    module follows everywhere else.
+    """
+    if isinstance(node, exp.Count):
+        return True  # COUNT(...) is always bigint in Postgres, regardless of what's counted
+    cols = list(node.find_all(exp.Column))
+    if len(cols) != 1:
+        return None  # no column, or more than one — can't confidently resolve
+    col = cols[0]
+    for t in _candidate_tables(col, all_nodes, by_key):
+        known = known_types.get((t.name.lower(), col.name.lower()))
+        if known:
+            return known.strip().lower() in _INTEGER_TYPES
+    return None
+
+
+def _confident_integer_divisions(
+    tree: exp.Expression, known_types: dict[tuple[str, str], str]
+) -> list[exp.Div]:
+    """Every ``Div`` node in *tree* that divides two Postgres integer-family
+    operands with no cast anywhere in either operand's own subtree.
+
+    Factored out so detection and self-apply share one predicate and can
+    never disagree about what counts as a confident case.
+    """
+    all_nodes, by_key = _table_nodes(tree)
+    if not all_nodes:
+        return []
+    out: list[exp.Div] = []
+    for div in tree.find_all(exp.Div):
+        numerator, denominator = div.this, div.expression
+        if _has_non_integer_cast(numerator) or _has_non_integer_cast(denominator):
+            continue  # one side already explicitly non-integer — safe
+        num_is_int = _resolves_to_known_integer(numerator, known_types, all_nodes, by_key)
+        den_is_int = _resolves_to_known_integer(
+            denominator, known_types, all_nodes, by_key
+        )
+        if num_is_int is False or den_is_int is False:
+            continue  # one side confirmed non-integer — safe regardless of the other
+        if num_is_int is not True and den_is_int is not True:
+            continue  # neither side confidently integer — can't tell, leave it alone
+        out.append(div)
+    return out
+
+
+def find_integer_division_mismatches(
+    dialect: Optional[str],
+    sql: str,
+    known_types: Optional[dict[tuple[str, str], str]] = None,
+) -> list[dict[str, Any]]:
+    """Return ``/`` divisions between two Postgres integer-family operands
+    with no cast anywhere in either operand's own subtree.
+
+    Postgres silently truncates integer/integer division toward zero
+    (``5/2 = 2``, not ``2.5``) — a real, observed bug: ``SUM(x) / COUNT(y)``
+    style ratio/average computations lose their fraction before an outer
+    ``::numeric``/``ROUND(...)`` cast (which only wraps the already-
+    truncated *result*) ever gets a chance to matter.
+
+    Postgres-only, and deliberately so for a *behavioral* reason, not just
+    a syntax one (contrast ``jsonb_path_check.py``'s Postgres-only gate,
+    which is about ``->``/``->>`` syntax not existing elsewhere): several
+    other dialects this pipeline supports don't share this truncation at
+    all — MySQL's ``/`` always promotes to decimal (it has a separate
+    ``DIV`` operator for integer division), and BigQuery/Snowflake's ``/``
+    is always a float/decimal division. Flagging this on those dialects
+    would be a false positive, not just unsupported syntax. The prompt
+    already tells the SQL-generation LLM about this exact Postgres rule
+    (see ``_POSTGRES_DIALECT_RULES`` in prompts.py) — this is the
+    enforcement backstop for when that instruction doesn't get followed,
+    not a replacement for it.
+
+    Only flagged when at least one operand is confidently known (via
+    ``known_types``) to be integer-typed and neither operand's own subtree
+    already casts to a non-integer numeric type. Every other shape
+    (unresolvable columns, multi-column expressions, both sides unknown)
+    is left alone rather than guessed at.
+
+    Each entry: ``{"kind": "integer_division", "numerator", "denominator"}``
+    — the two operands' own SQL text, for the reconstruction message.
+    """
+    if _sqlglot_dialect(dialect) != "postgres":
+        return []
+    known_types = known_types or {}
+    try:
+        tree = sqlglot.parse_one(sql, read="postgres")
+    except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
+        logger.info("integer_division_check: could not parse SQL (%s)", exc)
+        return []
+    if tree is None:
+        return []
+
+    return [
+        {
+            "kind": "integer_division",
+            "numerator": div.this.sql(dialect="postgres"),
+            "denominator": div.expression.sql(dialect="postgres"),
+        }
+        for div in _confident_integer_divisions(tree, known_types)
+    ]
+
+
+def try_self_apply_integer_division_fixes(
+    mismatches: list[dict[str, Any]],
+    sql: str,
+    dialect: Optional[str],
+    known_types: Optional[dict[tuple[str, str], str]] = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Deterministically fix every ``integer_division`` mismatch by casting
+    the numerator to ``numeric`` directly in the AST, then re-serializing
+    once.
+
+    Unlike the JSONB dotted-key case (which has one fixable shape and
+    several ambiguous ones left to reconstruction), this fix has no
+    ambiguous variant: there is exactly one correct rewrite for every
+    mismatch this module detects (cast either operand — the numerator is
+    chosen arbitrarily, both are equally correct), so every mismatch found
+    here gets fixed. Nothing is left for reconstruction unless the SQL
+    changed since detection ran (re-derived independently below, not
+    matched against the passed-in mismatches by text/position, so this
+    always agrees with what ``find_integer_division_mismatches`` reported
+    for the same SQL).
+
+    Returns the (possibly rewritten) SQL and the sub-list of mismatches
+    that couldn't be fixed this way (non-``integer_division`` entries,
+    unchanged, for the caller to route to reconstruction as normal).
+    """
+    fixable = [m for m in mismatches if m.get("kind") == "integer_division"]
+    other = [m for m in mismatches if m.get("kind") != "integer_division"]
+    if not fixable or _sqlglot_dialect(dialect) != "postgres":
+        return sql, mismatches
+
+    try:
+        tree = sqlglot.parse_one(sql, read="postgres")
+    except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
+        logger.info(
+            "integer_division_check self-apply: could not parse SQL (%s)", exc
+        )
+        return sql, mismatches
+    if tree is None:
+        return sql, mismatches
+
+    divisions = _confident_integer_divisions(tree, known_types or {})
+    if not divisions:
+        # SQL apparently changed since detection ran — don't silently drop
+        # the reported mismatches, let reconstruction see them instead.
+        return sql, mismatches
+
+    for div in divisions:
+        div.set(
+            "this", exp.Cast(this=div.this.copy(), to=exp.DataType.build("numeric"))
+        )
+
+    return tree.sql(dialect="postgres"), other
+
+
 def _resolve_distinct(
     executor: ProbeExecutor,
     dialect: Optional[str],
@@ -566,6 +771,15 @@ def _render_numeric_scale_mismatch(m: dict[str, Any]) -> str:
     )
 
 
+def _render_integer_division_mismatch(m: dict[str, Any]) -> str:
+    return (
+        f"- `{m['numerator']} / {m['denominator']}`: both sides are "
+        f"integer-typed, so Postgres computes this as integer division and "
+        f"silently truncates toward zero (e.g. 5/2 = 2, not 2.5) — any "
+        f"ratio or average computed this way is wrong."
+    )
+
+
 def build_value_repair_error(mismatches: list[dict[str, Any]]) -> str:
     """Render mismatches (string near-misses and/or numeric scale issues)
     into a targeted reconstruction instruction."""
@@ -577,6 +791,13 @@ def build_value_repair_error(mismatches: list[dict[str, Any]]) -> str:
         m for m in mismatches if m.get("kind") == "case_duplicate_like"
     ]
     numeric_mismatches = [m for m in mismatches if m.get("kind") == "numeric_scale"]
+    # Reaching here at all is the rare fallback: try_self_apply_integer_
+    # division_fixes fixes every integer_division mismatch it's given
+    # deterministically, so this section only fires if self-apply couldn't
+    # run (e.g. the SQL changed between detection and self-apply).
+    integer_division_mismatches = [
+        m for m in mismatches if m.get("kind") == "integer_division"
+    ]
 
     sections = []
     if string_mismatches:
@@ -633,11 +854,28 @@ def build_value_repair_error(mismatches: list[dict[str, Any]]) -> str:
             "everything else — joins, columns, grouping, other filters — "
             "exactly as they are."
         )
+    if integer_division_mismatches:
+        body = "\n".join(
+            _render_integer_division_mismatch(m) for m in integer_division_mismatches
+        )
+        sections.append(
+            "One or more divisions use two integer-typed operands, which "
+            "Postgres silently truncates toward zero instead of producing a "
+            "fractional result:\n"
+            f"{body}\n\n"
+            "Cast the numerator (or denominator) to ::numeric AT THE "
+            "DIVISION ITSELF — casting only the final/outer result does not "
+            "help, the inner division has already truncated by then. Change "
+            "ONLY the affected division(s); keep everything else exactly as "
+            "it is."
+        )
     return "\n\n".join(sections)
 
 
 __all__ = [
     "find_literal_mismatches",
     "find_numeric_scale_mismatches",
+    "find_integer_division_mismatches",
+    "try_self_apply_integer_division_fixes",
     "build_value_repair_error",
 ]

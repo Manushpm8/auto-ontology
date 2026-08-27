@@ -24,7 +24,7 @@ from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from gsf.utils.llm_invoke import get_llm_client, safe_invoke_text_nr
 
-from .kg_coverage import _filter_covered_by_external_knowledge
+from .kg_coverage import _filter_covered_by_external_knowledge, _parse_kg_entries
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +278,14 @@ _COLLISION_LOSER_MAX_GAP = (
     0.08  # loser's own gap (shared hit -> its next-distinct hit) must be under this
 )
 
+# Shared with clarify.py's KB+VDB disambiguation note (which imports this
+# constant rather than defining its own copy). A term whose VDB hit scores
+# below this is a "close enough" schema-column match to be worth weighing
+# against a KB formula at all — anything worse and the column clearly isn't
+# a real alternative, no need to ask (or to bother the merged LLM call below
+# with it).
+_KB_VDB_DISAMBIG_THRESHOLD = 0.62
+
 _COMPOSITE_HIT_RE = re.compile(r"\b(json|jsonb|structured)\b", re.IGNORECASE)
 # "jsonb" needs its own alternative, not just "json": `\bjson\b` requires a word
 # boundary right after "json", which "JSONB" never has (the "b" is a word char
@@ -405,6 +413,13 @@ Two or more terms extracted from a question both resolved, via vector search, to
 SAME database column, which indicated potentially at least one of them is wrong. Decide \
 which column each term actually refers to.
 
+Some terms may also list a candidate with id "KB_FORMULA" — this is NOT a database \
+column. It means the term already has a known calculation formula or description (shown in that \
+candidate's own text) and does not need to be computed from any single raw column at \
+all. Pick "KB_FORMULA" for a term when its own formula or descriptionis what actually answers the \
+question, rather than forcing it onto a column that only superficially matches the term's \
+name.
+
 Question: {question}
 
 Relevant knowledge: {relevant_kg}
@@ -458,16 +473,53 @@ matches the term's wording. If a term has no likely matches, output:\
 # Same derivation as evidence.py's _MAX_EVIDENCE_LINE_CHARS: comfortably above
 # the longest real column description in the dataset, so full definitions
 # (including "Sample values: ..." tails _is_composite_hit relies on) reach the
-# LLM intact instead of being cut off mid-description like the 150-char
-# truncation collision resolution uses for its much shorter use case.
+# LLM intact instead of being cut off mid-description. Previously collision
+# resolution used its own separate, much shorter 150-char cutoff on the
+# (unfounded) assumption that it was a "shorter use case" — measured against
+# real embedding text this was wrong even for a plain column (a description
+# alone commonly runs 200-300 chars, before "Sample values:" ever starts), so
+# both mechanisms now share this one budget instead of drifting independently.
 _CANDIDATE_HIT_MAX_CHARS = 600
+
+# JSON-typed columns need more room than that: their disambiguating content is
+# a whole list of key+example entries (e.g. "Tx_Adh [e.g. 'High'], Func_Impv
+# [e.g. 'Moderate'], ..."), not one short value — measured at ~850 chars for
+# an 11-key column already close to _CANDIDATE_HIT_MAX_CHARS, and up to 20
+# keys are possible (see visit_enter.py's per-column cap), so this is sized
+# for a full 20-key column rather than the single example seen so far.
+_CANDIDATE_HIT_MAX_CHARS_JSON = 1600
+
+# A "KB_FORMULA" candidate (see _resolve_collisions' merged KB-formula-vs-
+# column decision) is a different animal again: a formula/definition, not a
+# column description or a key list. Truncating a description loses color;
+# truncating a formula mid-expression can look complete while being silently
+# wrong, which is worse than showing nothing. Measured real KB entry text
+# (name + description + definition) across 5 databases: max 643 chars
+# (archeology_scan); this candidate's own ~70-char prefix pushes the observed
+# worst case to ~710, so this leaves real margin rather than barely fitting
+# the one case measured.
+_CANDIDATE_HIT_MAX_CHARS_KB_FORMULA = 1000
+
+
+def _candidate_text_budget(hit: dict) -> int:
+    """Text-length budget for one candidate line — KB_FORMULA and JSON-typed
+    columns each get more room than a plain column, for different reasons
+    (see the constants above)."""
+    if hit.get("id") == "KB_FORMULA":
+        return _CANDIDATE_HIT_MAX_CHARS_KB_FORMULA
+    data_type = hit.get("data_type") or hit.get("type") or ""
+    return (
+        _CANDIDATE_HIT_MAX_CHARS_JSON
+        if "json" in str(data_type).lower()
+        else _CANDIDATE_HIT_MAX_CHARS
+    )
 
 
 def _format_candidate_hit(hit: dict) -> str:
     """One candidate line: id, data type (if known), and its full description."""
     data_type = hit.get("data_type") or hit.get("type")
     type_tag = f" [{data_type}]" if data_type else ""
-    text = str(hit.get("text") or "")[:_CANDIDATE_HIT_MAX_CHARS]
+    text = str(hit.get("text") or "")[: _candidate_text_budget(hit)]
     return f"  id={hit.get('id')}{type_tag}: {text}"
 
 
@@ -588,9 +640,12 @@ def _llm_disambiguate_collision(
     """
     blocks = []
     for entity, hits in entity_candidates.items():
-        lines = "\n".join(
-            f"  id={h.get('id')}: {str(h.get('text') or '')[:150]}" for h in hits
-        )
+        # Shares _format_candidate_hit's budget with resolve_ambiguous_entities
+        # (see _CANDIDATE_HIT_MAX_CHARS / _CANDIDATE_HIT_MAX_CHARS_JSON) rather
+        # than the previous separate, unjustified 150-char cutoff — collision
+        # resolution is an equally consequential decision, not a "shorter use
+        # case", and needs the same "Sample values: ..." tail to disambiguate.
+        lines = "\n".join(_format_candidate_hit(h) for h in hits)
         blocks.append(f'"{entity}":\n{lines}')
     prompt = _COLLISION_LLM_PROMPT.format(
         question=question,
@@ -632,6 +687,8 @@ def _resolve_collisions(
     db_name: str | None,
     kb_covered_norms: set[str] | None = None,
     hit_verdicts: dict[str, bool] | None = None,
+    kb_text_by_norm: dict[str, tuple[str, str]] | None = None,
+    adjudicated_norms_out: set[str] | None = None,
 ) -> list[str]:
     """Resolve entities whose best VDB hit collides with another entity's, in place.
 
@@ -654,16 +711,39 @@ def _resolve_collisions(
     different turns), since the cache key is the stable column id, not the
     entity string.
 
+    *kb_text_by_norm* (normalized term -> (KB entry name, KB formula text))
+    lets Step 0 offer the KB formula itself as a candidate to the
+    disambiguation LLM, instead of always blind-dropping a KB-covered
+    entity's column claim — the name travels with the text so the resulting
+    note can identify which KB entry won, not just say "a KB formula".
+    Optional — pass ``None`` to keep the old blind-drop behavior everywhere
+    (e.g. from a caller that hasn't computed KB text per term).
+
+    *adjudicated_norms_out* (mutated in place, a set of normalized terms) is
+    populated with every term Step 0 routed to the merged LLM decision (with
+    or without a competitive score — see Step 0 below), so a caller like
+    clarify.py's KB+VDB disambiguation note can skip re-deciding the same term
+    independently later, off a possibly-stale VDB score, and contradicting
+    what the merge already adjudicated.
+
     Resolution order, most confident/cheapest first:
       0. Either colliding entity is already KB-covered (has a formula from
-         external knowledge, e.g. "Aggressive Trading Intensity") -> it doesn't
-         need a raw column identity at all; drop it from best_hit_per_entity
-         rather than let it win or get auto-assigned one. It only showed up
-         as a VDB "entity" because the working question repeats its name from
-         a clarification answer, not because it's a schema concept — resolving
-         it to a column risks handing evidence-gen a confident-looking but
-         nonsensical mapping (e.g. a computed metric name assigned to an
-         unrelated real column) with no disambiguation signal attached.
+         external knowledge, e.g. "Aggressive Trading Intensity"). If its own
+         VDB hit isn't a competitive match (score >= _KB_VDB_DISAMBIG_THRESHOLD),
+         it doesn't need a raw column identity at all; drop it from
+         best_hit_per_entity rather than let it win or get auto-assigned one —
+         it only showed up as a VDB "entity" because the working question
+         repeats its name from a clarification answer, not because it's a
+         schema concept. If its VDB hit *is* competitive, though, the column
+         is a real enough alternative that guessing either way (auto-drop, or
+         clarify.py's separate KB+VDB note silently assuming both are valid)
+         risks the two signals disagreeing with no one having actually
+         weighed them together — route it to the same LLM disambiguation
+         call as any other colliding entity, with the KB formula added as one
+         more candidate for it to choose (see the "KB_FORMULA" candidate
+         id below), which also opts it out of the score-margin auto-resolve
+         in step 3 for the same reason (that heuristic doesn't know a KB
+         formula is on the table).
       1. Otherwise, the shared id already has a cached verdict -> apply it
          directly, no re-derivation, no LLM call.
       2. Otherwise, shared hit is a JSON column -> assume both terms correctly
@@ -680,6 +760,7 @@ def _resolve_collisions(
     notes: list[str] = []
     kb_covered_norms = kb_covered_norms or set()
     hit_verdicts = {} if hit_verdicts is None else hit_verdicts
+    kb_text_by_norm = kb_text_by_norm or {}
 
     id_to_entities: dict[str, list[str]] = {}
     for entity, hit in best_hit_per_entity.items():
@@ -689,13 +770,29 @@ def _resolve_collisions(
         return notes
 
     for shared_id, entities in collisions.items():
-        # Step 0: KB-covered entities don't compete for a column at all.
+        # Step 0: a KB-covered entity's column claim is either dropped (not a
+        # competitive score — the column clearly isn't a real alternative) or
+        # routed to the merged LLM decision below (competitive score — a real
+        # "KB formula vs. this column" question, see the docstring). Entities
+        # in kb_formula_candidates stay in `entities` and in
+        # best_hit_per_entity; only the genuinely non-competitive ones get
+        # dropped here.
         kb_covered_here = [
             e
             for e in entities
             if (_normalize_entity(e) or e.lower().strip()) in kb_covered_norms
         ]
+        kb_formula_candidates: dict[str, tuple[str, str]] = {}  # entity -> (name, text)
         for e in kb_covered_here:
+            norm = _normalize_entity(e) or e.lower().strip()
+            kb_entry = kb_text_by_norm.get(norm)
+            score = best_hit_per_entity[e].get("score")
+            score = float(score) if score is not None else float("inf")
+            if kb_entry and score < _KB_VDB_DISAMBIG_THRESHOLD:
+                kb_formula_candidates[e] = kb_entry
+                if adjudicated_norms_out is not None:
+                    adjudicated_norms_out.add(norm)
+                continue
             logger.info(
                 "Clarify — collision: %r is already KB-covered (has a formula), "
                 "dropping its VDB column claim to %r instead of resolving it",
@@ -703,10 +800,92 @@ def _resolve_collisions(
                 shared_id,
             )
             best_hit_per_entity.pop(e, None)
-        entities = [e for e in entities if e not in kb_covered_here]
+        entities = [
+            e for e in entities if e not in kb_covered_here or e in kb_formula_candidates
+        ]
         if len(entities) < 2:
+            # Not a real multi-entity collision anymore. A lone competitive
+            # kb_formula_candidate left here (never popped, still in
+            # best_hit_per_entity) is a single-term "KB formula vs. this one
+            # column" question — exactly what clarify.py's standalone KB+VDB
+            # disambiguation note already handles; leave it for that
+            # mechanism instead of duplicating the decision here.
             continue  # no real collision left once KB-covered terms are removed
         shared_hit = best_hit_per_entity[entities[0]]
+
+        if kb_formula_candidates:
+            # At least one entity here has a competitive KB formula as an
+            # alternative to the shared column. None of steps 1-3 below know
+            # that option exists — the cached verdict (step 1) answers a
+            # different question ("is this column safe as a shared target",
+            # not "should this entity use it or its KB formula"), the
+            # composite/JSON shortcut (step 2) would silently assume sharing
+            # is fine without ever weighing the KB formula, and the
+            # score-margin heuristic (step 3) can't see the KB option either.
+            # So skip straight to the LLM call with every entity in the
+            # group as a participant, KB formula injected as a candidate for
+            # whichever entities have one.
+            fresh_hits = {
+                e: _entity_ranked_hits(e, semantic_retriever, db_name) for e in entities
+            }
+            entity_candidates: dict[str, list[dict]] = {}
+            for e in entities:
+                cands = list(fresh_hits[e][:3])
+                if e in kb_formula_candidates:
+                    kb_name, kb_text = kb_formula_candidates[e]
+                    cands = [
+                        {
+                            "id": "KB_FORMULA",
+                            "data_type": None,
+                            "text": (
+                                f"Use the KB-defined formula {kb_name!r} for this "
+                                f"term instead of a schema column: {kb_text}"
+                            ),
+                        }
+                    ] + cands
+                entity_candidates[e] = cands
+            decision = _llm_disambiguate_collision(
+                question, relevant_kg_text, entity_candidates
+            )
+            if decision is None:
+                for e in entities:
+                    logger.warning(
+                        "Clarify — collision (KB-formula variant) unresolved for "
+                        "%r; dropping VDB hit",
+                        e,
+                    )
+                    best_hit_per_entity.pop(e, None)
+                hit_verdicts[shared_id] = False
+                continue
+            by_id = {
+                str(h.get("id")): h
+                for hits in entity_candidates.values()
+                for h in hits
+            }
+            for entity, chosen_id in decision.items():
+                if chosen_id == "KB_FORMULA":
+                    kb_name = kb_formula_candidates.get(entity, ("", ""))[0]
+                    logger.info(
+                        "Clarify — collision LLM-resolved: %r uses its KB formula "
+                        "%r, not a schema column",
+                        entity,
+                        kb_name,
+                    )
+                    best_hit_per_entity.pop(entity, None)
+                    notes.append(
+                        f'Note (confirmed by disambiguation): "{entity}" is defined '
+                        f"by its KB formula ({kb_name}), not a direct schema column."
+                    )
+                elif chosen_id.upper() == "NONE" or chosen_id not in by_id:
+                    best_hit_per_entity.pop(entity, None)
+                else:
+                    best_hit_per_entity[entity] = by_id[chosen_id]
+            logger.info("Clarify — collision LLM-resolved (KB-formula variant): %s", decision)
+            # This shared_id's fate was decided alongside a KB-formula
+            # question specific to these entities, not a general "is this
+            # column a legitimate shared target" fact — don't cache it for
+            # reuse by an unrelated future collision on the same id.
+            continue
 
         # Step 1: a past collision (this turn or an earlier one) already
         # settled whether this exact column id is safe to trust as shared.
@@ -717,7 +896,14 @@ def _resolve_collisions(
                 shared_id,
                 entities,
             )
-            notes.append(_shared_column_note(entities, shared_hit, shared_id))
+            # Call for its logging side effect only — don't append the
+            # returned note to Evidence. SQL-gen's system prompt treats the
+            # entire Evidence section as authoritative ground truth that
+            # overrides its own interpretation, same trust level as a
+            # verified fact, even though this is an assumed (not
+            # LLM-confirmed) sharing. Caching to skip re-derivation is kept;
+            # only feeding the guess into Evidence as fact is removed.
+            _shared_column_note(entities, shared_hit, shared_id)
             continue
         if cached is False:
             # Same bypass as Step 0's KB-covered exclusion: this id's fate is
@@ -737,7 +923,13 @@ def _resolve_collisions(
         # cached is always None here — True/False both returned above already.
         if _is_composite_hit(shared_hit):
             hit_verdicts[shared_id] = True
-            notes.append(_shared_column_note(entities, shared_hit, shared_id))
+            # Called for its logging side effect only — see the Step-1
+            # cache-reuse branch above for why the note itself isn't
+            # appended to Evidence: this is a blind assumption (JSON-typed
+            # shared hit implies sharing is fine), never confirmed by an
+            # LLM, and Evidence treats whatever lands in it as ground truth
+            # regardless.
+            _shared_column_note(entities, shared_hit, shared_id)
             continue
 
         # Fresh per-entity queries — see _entity_ranked_hits for why col_hits can't be reused.
@@ -880,7 +1072,14 @@ def _resolve_collisions(
                 continue
             hit_verdicts[new_id] = True
             if _is_composite_hit(by_id[new_id]):
-                notes.append(_shared_column_note(ents, by_id[new_id], new_id))
+                # Called for its logging side effect only — see the other
+                # two _shared_column_note call sites for why the note isn't
+                # appended to Evidence. This one has slightly more backing
+                # (an LLM actually converged these entities onto new_id, not
+                # a blind assumption), but it's still the same claim shape
+                # ("these share a JSON column") landing in the same
+                # over-trusted Evidence channel. Caching is kept regardless.
+                _shared_column_note(ents, by_id[new_id], new_id)
 
     return notes
 
@@ -893,6 +1092,7 @@ def _find_unresolvable_entities(
     children_map: dict[str, list[str]] | None = None,
     hit_verdicts: dict[str, bool] | None = None,
     ambiguous_hits_out: dict[str, list[dict]] | None = None,
+    adjudicated_norms_out: set[str] | None = None,
 ) -> tuple[
     list[tuple[str, str | None]],
     list[tuple[str, str, float, str]],
@@ -939,6 +1139,13 @@ def _find_unresolvable_entities(
     last call's result (this function is re-run every turn on the latest
     working_question) is what's left in it by the time resolve_pending_ambiguities
     reads it, right before SQL generation — see coordinator.py.
+
+    *adjudicated_norms_out*, if given, is populated (not cleared — accumulate
+    across calls, same as the *_ever_* pattern) with every normalized term
+    _resolve_collisions routed to its merged KB-formula-vs-column LLM
+    decision. Pass ``session._kb_vdb_adjudicated_norms`` so clarify.py's
+    standalone KB+VDB disambiguation note can skip a term already decided
+    here instead of re-deciding it off a possibly-stale VDB score.
     """
     if ambiguous_hits_out is not None:
         ambiguous_hits_out.clear()
@@ -1063,6 +1270,30 @@ def _find_unresolvable_entities(
         # _filter_covered_by_external_knowledge ("external_kg covers: ...") —
         # no need to repeat the same set here.
 
+    # Per-term KB formula (name, text), for _resolve_collisions' merged
+    # KB-formula-vs-column decision — same fuzzy entry-name lookup clarify.py's
+    # own KB+VDB disambiguation note uses, kept in sync with it deliberately.
+    # The name travels alongside the text so the resulting evidence note can
+    # name which KB entry won, not just say "a KB formula" with nothing to
+    # cross-reference it against.
+    kb_text_by_norm: dict[str, tuple[str, str]] = {}
+    if entry_to_original_terms:
+        kb_entries_parsed = _parse_kg_entries(relevant_kg_text)
+        for entry_name, matched_terms in entry_to_original_terms.items():
+            entry_text = next(
+                (
+                    v
+                    for k, v in kb_entries_parsed.items()
+                    if k.startswith(entry_name) or entry_name.startswith(k)
+                ),
+                "",
+            )
+            if not entry_text:
+                continue
+            for t in matched_terms:
+                norm = _normalize_entity(t) or t.lower().strip()
+                kb_text_by_norm[norm] = (entry_name, entry_text)
+
     # Resolve any entities that collided on the same best hit, in place.
     entities_before_resolution = set(best_hit_per_entity.keys())
     json_notes = _resolve_collisions(
@@ -1073,6 +1304,8 @@ def _find_unresolvable_entities(
         db_name,
         kb_covered_norms,
         hit_verdicts,
+        kb_text_by_norm,
+        adjudicated_norms_out,
     )
 
     # Reconcile needs_kb_rescue against what collision resolution actually did —

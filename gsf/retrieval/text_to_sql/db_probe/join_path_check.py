@@ -286,6 +286,40 @@ def find_join_path_mismatches(
             }
             if hop_pair == written_pair:
                 continue  # verified — exactly what the graph says
+
+            # The graph knows *a* direct relationship between these two
+            # tables — but two tables can legitimately have more than one
+            # (e.g. a treatments table with both prescribing_clinician_id
+            # and reviewing_clinician_id, each a real FK to clinicians). The
+            # graph having learned one doesn't mean the model's different,
+            # also-real column pair is wrong — same reasoning as the
+            # missing_bridge case above, so the same live check applies
+            # before concluding it's fabricated.
+            overlap = None
+            if executor.budget_left:
+                overlap = _value_overlap(
+                    executor, dialect, table_a, left.name, table_b, right.name
+                )
+                if overlap is None:
+                    overlap = _value_overlap(
+                        executor, dialect, table_b, right.name, table_a, left.name
+                    )
+            if overlap is not None and overlap >= _OVERLAP_KEEP_THRESHOLD:
+                logger.info(
+                    "join_path_check: graph knows a different column pair for "
+                    "%s <-> %s, but live overlap %.2f >= threshold on the "
+                    "written %s.%s = %s.%s — treating it as a real, "
+                    "additional relationship and leaving it alone",
+                    table_a,
+                    table_b,
+                    overlap,
+                    table_a,
+                    left.name,
+                    table_b,
+                    right.name,
+                )
+                continue
+
             mismatches.append(
                 {
                     "table_a": table_a,
@@ -300,6 +334,39 @@ def find_join_path_mismatches(
             continue
 
         if len(hops) > 1:
+            # The graph knows *an* indirect path — but unlike the "no path
+            # at all" branch below, this used to trust that as proof the
+            # model's direct join is wrong, with no live check. That's only
+            # true when the direct columns aren't *also* a real relationship
+            # the graph simply never modeled (e.g. an undeclared FK-shaped
+            # column with no formal constraint) — the graph having *an*
+            # answer doesn't mean it has the *only* answer. Apply the same
+            # value-overlap safety net used below before concluding the
+            # direct join is fabricated, so a correct-but-unmodeled direct
+            # join isn't torn out in favor of a technically-known but wrong
+            # indirect route.
+            overlap = None
+            if executor.budget_left:
+                overlap = _value_overlap(
+                    executor, dialect, table_a, left.name, table_b, right.name
+                )
+                if overlap is None:
+                    overlap = _value_overlap(
+                        executor, dialect, table_b, right.name, table_a, left.name
+                    )
+            if overlap is not None and overlap >= _OVERLAP_KEEP_THRESHOLD:
+                logger.info(
+                    "join_path_check: graph only knows an indirect path for "
+                    "%s.%s = %s.%s, but live overlap %.2f >= threshold — "
+                    "treating the direct join as real and leaving it alone",
+                    table_a,
+                    left.name,
+                    table_b,
+                    right.name,
+                    overlap,
+                )
+                continue
+
             bridge_tables = sorted(
                 {h[side] for h in hops for side in ("source_table", "target_table")}
                 - {table_a, table_b}
@@ -530,13 +597,65 @@ def _hub_bridge_hops(m: dict[str, Any]) -> Optional[tuple[dict, dict]]:
     return hop_a, hop_b
 
 
+def _chain_bridge_hops(m: dict[str, Any]) -> Optional[tuple[dict, dict]]:
+    """``(hop_a, hop_b)`` for the other narrow, unambiguous shape: a genuine
+    2-hop *path* through one intermediate table (``table_a -> bridge ->
+    table_b``), as opposed to ``_hub_bridge_hops``'s shared-parent shape
+    (``table_a -> hub <- table_b``, two independent edges to a common
+    table). ``find_join_path`` returns this as an ordered chain — hop[0]
+    lands on the bridge, hop[1] leaves it — rather than
+    ``find_shared_hub_bridge``'s two same-target hops, so it needs its own
+    recognizer, but once recognized the fix is the identical mechanical
+    edit: insert one JOIN for the bridge, rewrite the other to reference it.
+    Reorients whichever hop runs "backwards" (bridge -> table_b instead of
+    table_b -> bridge) so both come out in the same ``(source=table,
+    target=bridge)`` shape ``_hub_bridge_hops`` produces, letting the rest
+    of the self-apply logic treat both shapes identically.
+    """
+    hops = m.get("hops") or []
+    bridge_tables = m.get("bridge_tables") or []
+    if len(hops) != 2 or len(bridge_tables) != 1:
+        return None
+    bridge = bridge_tables[0].lower()
+    h0, h1 = hops
+    if h0["target_table"].lower() != bridge or h1["source_table"].lower() != bridge:
+        return None
+    endpoints = {h0["source_table"].lower(), h1["target_table"].lower()}
+    if endpoints != {m["table_a"].lower(), m["table_b"].lower()}:
+        return None
+
+    def _reversed(h: dict) -> dict:
+        return {
+            "source_schema": h.get("target_schema", ""),
+            "source_table": h["target_table"],
+            "source_column": h["target_column"],
+            "target_schema": h.get("source_schema", ""),
+            "target_table": h["source_table"],
+            "target_column": h["source_column"],
+        }
+
+    if h0["source_table"].lower() == m["table_a"].lower():
+        return h0, _reversed(h1)
+    return _reversed(h1), h0
+
+
+def _bridge_hops(m: dict[str, Any]) -> Optional[tuple[dict, dict]]:
+    """Either recognized self-applicable bridge shape for *m* — shared-hub
+    first, then linear-chain — or ``None`` if neither matches."""
+    return _hub_bridge_hops(m) or _chain_bridge_hops(m)
+
+
 def try_self_apply_missing_bridge_fixes(
     mismatches: list[dict[str, Any]], sql: str, dialect: Optional[str]
 ) -> tuple[str, list[dict[str, Any]]]:
     """Deterministically fix the narrow, unambiguous subclass of
-    ``missing_bridge`` mismatches: exactly one shared hub table, connected to
-    each side of the fabricated join by a single known hop, where the hub
-    isn't already referenced anywhere else in the query.
+    ``missing_bridge`` mismatches: exactly one intermediate table between
+    ``table_a``/``table_b``, in either of two recognized shapes (see
+    :func:`_bridge_hops`) — a shared hub (``table_a -> hub <- table_b``, two
+    independent edges to a common table) or a genuine 2-hop chain
+    (``table_a -> bridge -> table_b``, a real path through one intermediate)
+    — where that intermediate table isn't already referenced anywhere else
+    in the query.
 
     Scoped this narrowly on purpose. Given the two hops, the new JOIN's ON
     condition is fully determined and there's exactly one safe place to
@@ -546,10 +665,10 @@ def try_self_apply_missing_bridge_fixes(
     :func:`try_self_apply_wrong_column_fixes` is for ``wrong_column``.
 
     Left to reconstruction (unchanged mismatch, same as if this were never
-    called): multi-hop chains (more than one intermediate table, or a hop
-    shape :func:`_hub_bridge_hops` doesn't recognize — real structural
-    judgment about where/how many joins to insert); WHERE-implicit joins (no
-    ``exp.Join`` node to attach to); and any case where the hub table is
+    called): longer chains (more than one intermediate table, or a hop shape
+    :func:`_bridge_hops` doesn't recognize — real structural judgment about
+    where/how many joins to insert); WHERE-implicit joins (no ``exp.Join``
+    node to attach to); and any case where the intermediate table is
     already referenced elsewhere in the query (attach-vs-reuse is an
     alias-management judgment call this local edit can't safely make).
 
@@ -568,7 +687,7 @@ def try_self_apply_missing_bridge_fixes(
     for m in mismatches:
         if m["verdict"] != "missing_bridge":
             continue
-        if _hub_bridge_hops(m) is not None:
+        if _bridge_hops(m) is not None:
             fixable[id(m)] = m
     if not fixable:
         return sql, mismatches
@@ -632,7 +751,7 @@ def try_self_apply_missing_bridge_fixes(
                     # Hub already referenced elsewhere in the query —
                     # attach-vs-reuse ambiguity, leave to reconstruction.
                     continue
-                hop_a, hop_b = _hub_bridge_hops(m)
+                hop_a, hop_b = _bridge_hops(m)
                 hop_for = {
                     m["table_a"].lower(): hop_a,
                     m["table_b"].lower(): hop_b,

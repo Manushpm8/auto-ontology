@@ -232,6 +232,9 @@ def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -
                             )
                         else:
                             col_line += f" | sample values: {sample_values}"
+                    notation = col.get("format")
+                    if notation and "format:" not in (col_desc or "").lower():
+                        col_line += f" | format: {notation}"
                     table_parts.append(col_line)
                 elif isinstance(col, str):
                     # If column is a string, use it directly

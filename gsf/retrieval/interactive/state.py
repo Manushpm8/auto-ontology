@@ -30,9 +30,14 @@ class InteractiveSessionState:
     _cached_resolved_hits: Optional[list] = (
         None  # VDB resolved hits for current question
     )
-    _json_shared_notes: list[str] = field(
+    _collision_resolution_notes: list[str] = field(
         default_factory=list
-    )  # collision-resolution notes ("shared column" + "resolved to these distinct columns") — accumulated across turns (never replaced), injected verbatim into Evidence
+    )  # collision-resolution notes (KB-formula-vs-column decisions + "resolved to these distinct columns") — accumulated across turns (never replaced), injected verbatim into Evidence.
+    # Renamed from _json_shared_notes: that name described the "shared JSON
+    # column" note specifically, but that note is no longer emitted (it
+    # asserted an unconfirmed mapping with the same authority as verified
+    # Evidence — see the collision-resolution fix), so the old name was
+    # actively misleading about what this list actually carries now.
     _collision_hit_verdicts: dict = field(
         default_factory=dict
     )  # column id -> True/False, persists collision-resolution verdicts across turns so a later collision on the same id (even under different entity-name phrasing) skips re-deriving it
@@ -49,6 +54,16 @@ class InteractiveSessionState:
     _ever_term_to_kb_entry: dict = field(
         default_factory=dict
     )  # norm -> (entry_name, entry_text)
+    # Normalized terms already adjudicated by collision resolution's merged
+    # KB-formula-vs-schema-column decision (see _resolve_collisions Step 0).
+    # _ever_vdb_hit_norms freezes a term's first-ever-seen score via setdefault
+    # and the KB+VDB disambiguation note (clarify.py) re-checks every turn
+    # against that frozen score — without this, a term the merge already
+    # decided on could still get a second, independently-derived (and
+    # potentially contradicting) note from that separate mechanism on a later
+    # turn. Backstop only: the primary fix is routing the same-turn overlap
+    # through one decision (the merge); this catches the cross-turn gap.
+    _kb_vdb_adjudicated_norms: set = field(default_factory=set)
     _grounded_kg: Optional[str] = (
         None  # relevant KB text extracted during coverage check
     )

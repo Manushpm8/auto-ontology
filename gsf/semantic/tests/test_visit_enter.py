@@ -9,11 +9,13 @@ import pandas as pd
 from gsf.semantic.visit_enter import calculate_columns_profiling, process_table
 
 
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
 @patch("gsf.semantic.visit_enter.store_column_uniqueness")
 @patch("gsf.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling_unhashable_values(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
 ) -> None:
     # Postgres array / JSON columns come back as Python lists/dicts, which are
     # unhashable — profiling must not crash on them.
@@ -42,11 +44,13 @@ def test_calculate_columns_profiling_unhashable_values(
     assert result["id"]["is_unique"] is True
 
 
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
 @patch("gsf.semantic.visit_enter.store_column_uniqueness")
 @patch("gsf.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
 ) -> None:
     df = pd.DataFrame(
         {
@@ -97,6 +101,87 @@ def test_calculate_columns_profiling(
     assert "created_at" not in stored
     assert "token" not in stored
     assert stored["status"][0] == "open"
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_infers_date_format(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    # Isolated from test_calculate_columns_profiling: that fixture triggers a
+    # DISTINCT-cardinality probe whose mocked connector.execute return value
+    # (a pre-existing test issue, unrelated to date-format inference) corrupts
+    # unrelated columns' sample values once the probe runs more than once.
+    # Every column here is unique, so no DISTINCT probe fires.
+    df = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "created_at": ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"],
+        }
+    )
+    connector = MagicMock()
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "created_at", "data_type": "timestamp"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert result["created_at"]["format"] == "YYYY-MM-DD"
+    mock_store_dates.assert_called_once()
+    assert mock_store_dates.call_args[0][1] == {"created_at": "YYYY-MM-DD"}
+    # Declared date/timestamp type: sample_values stay excluded regardless of
+    # the format inference (pre-existing _is_excluded_sample_type behavior).
+    stored = mock_store_samples.call_args[0][1]
+    assert "created_at" not in stored
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_text_column_with_date_format_keeps_sample_values(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    """A TEXT-typed date column, unlike a declared date/timestamp type, keeps
+    its persisted sample_values alongside the inferred format — samples stay
+    available to semantic_fk.py's SQL-probe fallback (which reads persisted
+    Column.sample_values, not this call's in-memory profiling dict), and date
+    values are short enough that keeping them costs little.
+    """
+    df = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "signup_date": ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"],
+        }
+    )
+    connector = MagicMock()
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "users", "schema_name": "public"}
+    columns = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "signup_date", "data_type": "text"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert result["signup_date"]["format"] == "YYYY-MM-DD"
+    stored = mock_store_samples.call_args[0][1]
+    assert "signup_date" in stored
+    assert set(stored["signup_date"]) == {
+        "2020-01-01",
+        "2020-01-02",
+        "2020-01-03",
+        "2020-01-04",
+    }
 
 
 @patch("gsf.semantic.visit_enter.merge_column_attribute")

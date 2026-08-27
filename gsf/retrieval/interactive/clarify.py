@@ -19,6 +19,7 @@ from .entity_resolution import (
     _normalize_entity,
     _FILLER,
     _CONNECTIVES,
+    _KB_VDB_DISAMBIG_THRESHOLD,
 )
 from .kg_coverage import _parse_kg_entries, _compact_schema
 
@@ -254,6 +255,7 @@ def should_clarify(
             session.external_kg_children_map,
             session._collision_hit_verdicts,
             session._last_ambiguous_hits,
+            session._kb_vdb_adjudicated_norms,
         )
         session._cached_unresolvable = unresolvable
         session._cached_unresolvable_for = session.working_question
@@ -262,8 +264,8 @@ def should_clarify(
         # collision resolved before the entity phrasing drifted) must survive
         # even if this turn's fresh extraction has no collision to report.
         for note in json_shared_notes:
-            if note not in session._json_shared_notes:
-                session._json_shared_notes.append(note)
+            if note not in session._collision_resolution_notes:
+                session._collision_resolution_notes.append(note)
         # Always replace with the fresh KB result — never carry stale content forward.
         # An empty result is valid (entities not covered by KB this turn).
         session._grounded_kg = relevant_kg
@@ -300,7 +302,6 @@ def should_clarify(
         # (e.g. KB confirms it turn 2, VDB only finds the column turn 3). Requiring
         # both to be true within a single turn's local resolved_hits/kb_covered_norms
         # silently missed every term whose two signals arrived a turn apart.
-        _KB_VDB_DISAMBIG_THRESHOLD = 0.62
         kb_entries_parsed = _parse_kg_entries(relevant_kg)
         for entry_name, matched_terms in entry_to_original_terms.items():
             entry_text = next(
@@ -328,6 +329,11 @@ def should_clarify(
             for norm, (col_text, score) in session._ever_vdb_hit_norms.items()
             if norm in session._ever_kb_covered_norms
             and score < _KB_VDB_DISAMBIG_THRESHOLD
+            # Already adjudicated by _resolve_collisions' merged KB-formula-
+            # vs-column decision (possibly off a fresher score than the one
+            # frozen here by setdefault) — don't re-decide independently and
+            # risk contradicting it.
+            and norm not in session._kb_vdb_adjudicated_norms
         ]
         for norm, col_text, score in kb_covered_hits:
             entry_name, kb_text = session._ever_term_to_kb_entry.get(norm, ("", ""))
@@ -539,13 +545,14 @@ def refresh_grounded_kg(session: "InteractiveSessionState") -> None:
         session.external_kg_children_map,
         session._collision_hit_verdicts,
         session._last_ambiguous_hits,
+        session._kb_vdb_adjudicated_norms,
     )
     session._cached_unresolvable = unresolvable
     session._cached_unresolvable_for = session.working_question
     # Accumulate, never replace — see the sibling call site above.
     for note in json_shared_notes:
-        if note not in session._json_shared_notes:
-            session._json_shared_notes.append(note)
+        if note not in session._collision_resolution_notes:
+            session._collision_resolution_notes.append(note)
     session._grounded_kg = relevant_kg
     session._grounded_kg_for = session.working_question
     _cache_resolved_hits(session, resolved_hits)

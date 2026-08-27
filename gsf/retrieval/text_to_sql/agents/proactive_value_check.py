@@ -25,10 +25,19 @@ from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_t
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.retrieval.text_to_sql.db_probe.literal_check import (
     build_value_repair_error,
+    find_integer_division_mismatches,
     find_literal_mismatches,
     find_numeric_scale_mismatches,
+    try_self_apply_integer_division_fixes,
 )
 from gsf.retrieval.text_to_sql.state import AgentState
+
+
+def _describe_mismatch(m: dict) -> str:
+    """One-line description of a mismatch for the routing-decision log line."""
+    if m.get("kind") == "integer_division":
+        return f"{m['numerator']} / {m['denominator']}"
+    return f"{m['table']}.{m['column']}='{m['used']}'"
 
 
 class ProactiveValueCheckAgent(BaseAgent):
@@ -53,11 +62,59 @@ class ProactiveValueCheckAgent(BaseAgent):
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
 
+        # Cheap, already-fetched — no extra DB/graph round-trip. Same pattern
+        # as JsonbPathCheckAgent: lets find_integer_division_mismatches tell
+        # a known-integer column from an unresolvable one without probing.
+        known_types: dict[tuple[str, str], str] = {}
+        for table in relevant_tables:
+            table_name = table.get("name")
+            if not table_name:
+                continue
+            for col in table.get("columns") or []:
+                if not isinstance(col, dict):
+                    continue
+                col_name = col.get("name")
+                data_type = col.get("data_type")
+                if col_name and data_type:
+                    known_types[(table_name.lower(), col_name.lower())] = data_type
+
         with ProbeExecutor(connector) as executor:
             mismatches = find_literal_mismatches(executor, dialect, sql_code)
             mismatches += find_numeric_scale_mismatches(executor, dialect, sql_code)
+        mismatches += find_integer_division_mismatches(
+            dialect, sql_code, known_types=known_types
+        )
 
         if not mismatches:
+            return {"decision": "valid_sql", "path_state": path_state}
+
+        # Integer-division mismatches have exactly one correct fix (cast the
+        # numerator) — self-apply them directly instead of routing through
+        # reconstruction, same reasoning as jsonb_path_check.py's dotted-key
+        # self-apply. Every other mismatch kind still needs reconstruction's
+        # judgment (which real value/scale fits the question's intent).
+        sql_before_self_apply = sql_code
+        sql_code, mismatches = try_self_apply_integer_division_fixes(
+            mismatches, sql_code, dialect, known_types=known_types
+        )
+        if sql_code != sql_before_self_apply:
+            response = path_state.get("sql_generation_result")
+            if response is not None:
+                path_state["sql_generation_result"] = response.model_copy(
+                    update={"sql_code": sql_code}
+                )
+            else:
+                path_state["sql_code"] = sql_code
+            self.logger.info(
+                "[%s] Proactive check — self-applied integer-division cast fix(es), "
+                "%d mismatch(es) still need reconstruction",
+                path_state.get("task_id", "?"),
+                len(mismatches),
+            )
+
+        if not mismatches:
+            # Every mismatch was self-applied — nothing left for reconstruction.
+            path_state["value_repair_attempted"] = True
             return {"decision": "valid_sql", "path_state": path_state}
 
         path_state["value_repair_attempted"] = True
@@ -72,7 +129,7 @@ class ProactiveValueCheckAgent(BaseAgent):
             "[%s] Proactive check — routing to reconstruction to fix %d literal(s): %s",
             path_state.get("task_id", "?"),
             len(mismatches),
-            [f"{m['table']}.{m['column']}='{m['used']}'" for m in mismatches],
+            [_describe_mismatch(m) for m in mismatches],
         )
         return {"decision": "invalid_sql", "path_state": path_state}
 

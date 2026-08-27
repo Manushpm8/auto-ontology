@@ -23,6 +23,7 @@ Design Decisions:
 """
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
@@ -72,6 +73,61 @@ def _qualified_name(t: dict) -> str:
     schema = t.get("schema_name", "")
     name = t.get("name", "")
     return f"{schema}.{name}" if schema else name
+
+
+# Off by default: an A/B test (real LLM calls, real schema/GT data) showed
+# showing the relevance filter each table's columns — with sample values for
+# JSONB columns specifically, since their key names alone (e.g. "Res_Scr")
+# can decoy-match unrelated tables — fixes real wrong table drops (including
+# ones production's downstream force-include reconciliation had to paper
+# over), at the cost of a real ~2s/call latency increase. Gate behind an env
+# flag rather than shipping unconditionally so that cost is opt-in; a future
+# version may make this conditional on whether the candidate tables actually
+# contain JSONB columns instead of a global on/off switch.
+_RELEVANCE_FILTER_INCLUDE_COLUMNS = os.environ.get(
+    "RELEVANCE_FILTER_INCLUDE_COLUMNS", ""
+).strip().lower() in ("1", "true", "yes")
+
+# Only added for JSONB-typed columns (see _RELEVANCE_FILTER_INCLUDE_COLUMNS
+# docstring above) — flat columns have self-explanatory names in this schema
+# and get their description (when present) instead; JSONB sample values are
+# already stored on the Column node (visit_enter.py profiling) and reach
+# here for free via fetch_tables_by_ids's nested `columns`, so this adds no
+# extra DB round trip, only extra prompt tokens.
+_RELEVANCE_FILTER_MAX_COLS = 25
+
+
+def _format_relevance_filter_column(c: dict) -> str:
+    name = c.get("name", "")
+    ctype = c.get("data_type") or "unknown"
+    desc = c.get("description")
+    sv = c.get("sample_values")
+    extra = ""
+    # sample_values is already normalized to list[str] | None by
+    # fetch_tables_by_ids (via parse_sample_values) — no JSON decoding here.
+    if sv and "json" in str(ctype).lower():
+        extra = f" | JSONB keys: {', '.join(str(v) for v in sv[:12])}"
+    if desc:
+        extra = (extra + f" | {desc}") if extra else f" | {desc}"
+    return f"    - {name} ({ctype}){extra}"
+
+
+def _build_relevance_tables_summary(tables: list[dict]) -> str:
+    if not _RELEVANCE_FILTER_INCLUDE_COLUMNS:
+        return "\n".join(
+            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
+            for t in tables
+        )
+    lines = []
+    for t in tables:
+        lines.append(f"- {_qualified_name(t)}: {t.get('description', '(no description)')}")
+        cols = t.get("columns") or []
+        if cols:
+            lines.append("  Columns:")
+            lines.extend(
+                _format_relevance_filter_column(c) for c in cols[:_RELEVANCE_FILTER_MAX_COLS]
+            )
+    return "\n".join(lines)
 
 
 def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
@@ -679,10 +735,7 @@ class CandidatePreparationAgent(BaseAgent):
             self.logger.warning("No LLM in state — skipping relevance filter")
             return tables, ""
 
-        tables_summary = "\n".join(
-            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
-            for t in tables
-        )
+        tables_summary = _build_relevance_tables_summary(tables)
 
         domain_rules_text = rules_to_text(state.get("domain_rules", []))
         domain_rules_section = ""

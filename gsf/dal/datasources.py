@@ -263,7 +263,8 @@ MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: col.description,
-                         sample_values: col.sample_values}}) AS cols
+                         sample_values: col.sample_values,
+                         format: col.format}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
        sch.name AS schema_name, tbl.pk AS pk, cols
 """
@@ -545,6 +546,7 @@ RETURN c.id AS id,
        c.description AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
+       c.format AS format,
        EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key,
        EXISTS {{
            (:{Labels.COLUMN})-[:{Edges.FOREIGN_KEY}]->(c)
@@ -627,6 +629,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r.get("description"),
             "ordinal_position": r.get("ordinal_position"),
             "sample_values": r.get("sample_values"),
+            "format": r.get("format"),
             "is_foreign_key_target": bool(r.get("is_foreign_key_target")),
         }
         for r in rows
@@ -702,6 +705,39 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
              AS iu
         WHERE iu IS NOT NULL
         SET col.is_unique = iu
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:
+    """Write inferred value notations onto Column ``format``.
+
+    ``format`` is generic storage notation (how values are written), not a
+    date-specific property. Today only date inference fills it (``YYMMDD``,
+    ``YYYY-MM-DD``, …); an address or id profiler would write the same field.
+    The column's type/name/description say *what* the values are.
+
+    Skips silently when *date_formats* is empty.
+    """
+    if not date_formats:
+        return
+    entries = [
+        {"column_name": col, "format": str(fmt)}
+        for col, fmt in date_formats.items()
+        if fmt
+    ]
+    if not entries:
+        return
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.format][0]
+             AS fmt
+        WHERE fmt IS NOT NULL
+        SET col.format = fmt
         """,
         {"table_id": table_id, "entries": entries},
     )

@@ -182,11 +182,12 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     session._ever_kb_covered_norms = set()
     session._ever_vdb_hit_norms = {}
     session._ever_term_to_kb_entry = {}
+    session._kb_vdb_adjudicated_norms = set()
     # Same reasoning for collision-resolution notes: unlike _collision_hit_verdicts
     # (keyed by stable column id — a schema fact, still valid across phases),
     # these are injected verbatim into Evidence and reference Phase 1's specific
     # entities/columns, which are usually irrelevant to Phase 2's question.
-    session._json_shared_notes = []
+    session._collision_resolution_notes = []
 
     # Reset clarify state for Phase 2; clarification questions are not allowed.
     session.working_question = follow_up_q if follow_up_q else session.working_question
@@ -264,18 +265,20 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     evidence = generate_evidence(evidence_question, combined_kg, resolved_terms_section)
     if session._named_column_evidence:
         evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
-    if session._json_shared_notes:
+    if session._collision_resolution_notes:
         # Injected directly rather than left to evidence-gen's LLM to relay —
         # that step isn't reliable about preserving instructions passed through it.
-        evidence = "\n".join(filter(None, [evidence, *session._json_shared_notes]))
+        evidence = "\n".join(
+            filter(None, [evidence, *session._collision_resolution_notes])
+        )
         logger.info(
-            "[%s] SQL gen — injected %d shared-JSON-column note(s)",
+            "[%s] SQL gen — injected %d collision-resolution note(s)",
             session.task_id,
-            len(session._json_shared_notes),
+            len(session._collision_resolution_notes),
         )
     if session._ambiguity_resolution_notes:
-        # Same reasoning as _json_shared_notes above — injected directly, not
-        # left to evidence-gen's LLM to relay.
+        # Same reasoning as _collision_resolution_notes above — injected
+        # directly, not left to evidence-gen's LLM to relay.
         evidence = "\n".join(
             filter(None, [evidence, *session._ambiguity_resolution_notes])
         )
