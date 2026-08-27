@@ -79,6 +79,7 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                                   {{name: c.name,
                                                     data_type: toString(coalesce(c.data_type, "")),
                                                     description: {column_description_expr("c")},
+                                                    format: c.format,
                                                     sample_values: CASE
                                                         WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
                                                         THEN c.sample_values ELSE null END
@@ -108,6 +109,7 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                           {{name: c.name,
                                             data_type: toString(coalesce(c.data_type, "")),
                                             description: {column_description_expr("c")},
+                                            format: c.format,
                                             sample_values: CASE
                                                 WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
                                                 THEN c.sample_values ELSE null END
@@ -128,6 +130,7 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                   {{name: c.name,
                                     data_type: toString(coalesce(c.data_type, "")),
                                     description: {column_description_expr("c")},
+                                    format: c.format,
                                     sample_values: CASE WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
                                                         THEN c.sample_values ELSE null END
                                   }}] AS column_list
