@@ -102,6 +102,34 @@ The token is simply your own identity here, because the process is yours alone.
 That is why it is safe in this mode and refused in the shared one: see
 [`GSF_MCP_ALLOW_SHARED_TOKEN`](#one-identity-for-everyone).
 
+### Against GSF on your own machine
+
+`GSF_API_URL` is the only thing that changes — for the Docker stack, the web app
+is on `:3000`:
+
+```sh
+GSF_MCP_TRANSPORT=http GSF_MCP_SIGN_IN=gsf GSF_API_URL=http://localhost:3000 gsf-mcp
+```
+
+Nothing else is needed. In particular there is no writable data directory to
+arrange, because in this mode GSF holds the client registrations rather than this
+server, and no public URL to set — it is derived, and a wildcard bind resolves to
+`localhost`. If you do pin `GSF_MCP_HOST`, set `GSF_MCP_PUBLIC_URL` to the URL
+clients actually use: the metadata is built from the bind address, and a client
+configured for `localhost` rejects a server calling itself `127.0.0.1`.
+
+Sign-in does require that the GSF you point at is new enough to be an
+authorization server, which a previously built image will not be. Confirm it
+before starting, since the failure otherwise surfaces as a client that cannot log
+in:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' $GSF_API_URL/.well-known/oauth-authorization-server
+```
+
+A `200` is what you want. Anything else means running the frontend from your
+checkout instead — `pnpm dev`, with `GSF_API_URL` pointing at its port.
+
 ## Sign-in
 
 `GSF_MCP_SIGN_IN=gsf` makes GSF the authorization server that clients log in
@@ -278,6 +306,11 @@ check it with `curl -H "x-api-key: $GSF_API_TOKEN" $GSF_API_URL/api/terms`.
 
 **"This request carried no signed-in session"** — the grant behind the call
 expired or was revoked in GSF. Sign in again from the client.
+
+**"Protected resource ... does not match expected ..."** — the server advertises
+the address it was bound to, and the client is reaching it under a different
+spelling of the same host, almost always `127.0.0.1` against `localhost`. Set
+`GSF_MCP_PUBLIC_URL` to the URL the client uses, or leave `GSF_MCP_HOST` unset.
 
 **A client cannot discover how to sign in** — check that
 `$GSF_API_URL/.well-known/oauth-authorization-server` returns JSON. A redirect to
