@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -60,8 +61,22 @@ def test_calculate_columns_profiling(
             "token": ["a" * 40, "b" * 40, "a" * 40, "c" * 40],
         }
     )
+
+    def _fake_execute(sql: str) -> pd.DataFrame:
+        # The main profiling query (SELECT *) gets the full table. A
+        # per-column DISTINCT probe (see _distinct_values_if_low_cardinality)
+        # fires for non-unique text columns ("status", "token" here) — a
+        # real connector would return only that column, so the mock must
+        # too, or df.iloc[:, 0] silently reads whichever column comes first
+        # instead of the one actually queried.
+        match = re.search(r'SELECT DISTINCT "([^"]+)"', sql)
+        if not match:
+            return df
+        col = match.group(1)
+        return pd.DataFrame({col: df[col].dropna().unique().tolist()})
+
     connector = MagicMock()
-    connector.execute.return_value = df
+    connector.execute.side_effect = _fake_execute
 
     table = {"id": "t1", "name": "orders", "schema_name": "public"}
     columns = [
@@ -73,8 +88,11 @@ def test_calculate_columns_profiling(
 
     result = calculate_columns_profiling(table, columns, connector)
 
-    sql = connector.execute.call_args[0][0]
-    assert "public.orders" in sql
+    # The main profiling query is the first connector.execute call — later
+    # calls (e.g. a per-column DISTINCT check for long-string columns like
+    # "token") would otherwise shadow it if we looked at call_args (last call).
+    sql = connector.execute.call_args_list[0][0][0]
+    assert '"public"."orders"' in sql
     assert "LIMIT 1000" in sql
 
     # Returned dict includes every column (dates, long strings included),
@@ -111,11 +129,9 @@ def test_calculate_columns_profiling_infers_date_format(
     mock_store_unique: MagicMock,
     mock_store_dates: MagicMock,
 ) -> None:
-    # Isolated from test_calculate_columns_profiling: that fixture triggers a
-    # DISTINCT-cardinality probe whose mocked connector.execute return value
-    # (a pre-existing test issue, unrelated to date-format inference) corrupts
-    # unrelated columns' sample values once the probe runs more than once.
-    # Every column here is unique, so no DISTINCT probe fires.
+    # Every column here is unique, so no DISTINCT-cardinality probe fires —
+    # kept simple/isolated from test_calculate_columns_profiling, which
+    # exercises that probe (via non-unique "status"/"token" columns) instead.
     df = pd.DataFrame(
         {
             "id": [1, 2, 3, 4],
