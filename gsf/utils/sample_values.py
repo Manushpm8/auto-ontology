@@ -15,7 +15,8 @@ def parse_sample_values(raw: Any) -> list[str] | None:
 
     Profiling persists ``col.sample_values`` as a JSON string (see
     ``store_column_sample_values``); catalog PATCH may store a list. Callers
-    expect ``list[str] | None``.
+    expect ``list[str] | None``. JSON ``null`` / Python ``None`` entries are
+    dropped so they are not stringified to ``"None"``.
     """
     if raw is None:
         return None
@@ -31,4 +32,4 @@ def parse_sample_values(raw: Any) -> list[str] | None:
         values = parsed
     else:
         return None
-    return [str(value) for value in values]
+    return [str(value) for value in values if value is not None]

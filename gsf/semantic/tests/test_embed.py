@@ -21,3 +21,5 @@ def test_format_sample_values_filters_long_values_and_handles_empty() -> None:
     assert _format_sample_values([long_value, "ok"]) == " Sample values: ok."
     assert _format_sample_values(None) == ""
     assert _format_sample_values([]) == ""
+    assert _format_sample_values(["a", None, "b"]) == " Sample values: a, b."
+    assert _format_sample_values('["a", null, "b"]') == " Sample values: a, b."

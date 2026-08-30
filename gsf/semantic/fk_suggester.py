@@ -72,12 +72,12 @@ def _candidate_columns(
 
 
 def _format_sample_values(raw: Any) -> str:
-    """Return a 'samples: ...' string filtered to ≤30-char non-null values, or empty."""
+    """Return a 'samples: ...' string filtered to ≤30-char values, or empty."""
     values = parse_sample_values(raw)
     if not values:
         return ""
-    non_null = [v for v in values if v is not None and len(v) <= 30]
-    return ("samples: " + ", ".join(non_null)) if non_null else ""
+    values = [v for v in values if len(v) <= 30]
+    return ("samples: " + ", ".join(values)) if values else ""
 
 
 def _format_column_line(col: dict[str, Any], is_unique: bool | None = None) -> str:

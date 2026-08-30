@@ -224,10 +224,10 @@ def _format_sample_values(raw: Any) -> str:
     values = parse_sample_values(raw)
     if not values:
         return ""
-    non_null = [v for v in values if v is not None and len(v) <= 30]
-    if not non_null:
+    values = [v for v in values if len(v) <= 30]
+    if not values:
         return ""
-    return " Sample values: " + ", ".join(non_null) + "."
+    return " Sample values: " + ", ".join(values) + "."
 
 
 def _build_rows(

@@ -113,6 +113,8 @@ def test_format_sample_values_handles_legacy_json_string_and_native_list() -> No
     assert _format_sample_values(["a", "b", "b"]) == "samples: a, b, b"
     assert _format_sample_values(None) == ""
     assert _format_sample_values([]) == ""
+    assert _format_sample_values(["a", None, "b"]) == "samples: a, b"
+    assert _format_sample_values('["a", null, "b"]') == "samples: a, b"
 
 
 @patch(

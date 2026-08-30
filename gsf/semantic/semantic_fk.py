@@ -230,10 +230,10 @@ def _format_sample_values(raw: Any) -> str:
     values = parse_sample_values(raw)
     if not values:
         return ""
-    non_null = [v for v in values if v is not None and len(v) <= 30]
-    if not non_null:
+    values = [v for v in values if len(v) <= 30]
+    if not values:
         return ""
-    return "sample_values: " + ", ".join(non_null)
+    return "sample_values: " + ", ".join(values)
 
 
 def _resolve_via_vdb(
@@ -358,7 +358,7 @@ def _match_hit_by_sample_values(
 def _distinct_samples(raw: Any) -> list[str]:
     """Parse, deduplicate, and preserve the order of stored sample values."""
     values = parse_sample_values(raw) or []
-    return list(dict.fromkeys(value for value in values if value is not None))
+    return list(dict.fromkeys(values))
 
 
 def _sample_match_sql(
