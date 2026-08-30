@@ -206,7 +206,7 @@ def test_generated_sql_does_not_interpolate_raw_sql_syntax() -> None:
     sql = main.build_value_lookup_sql(
         _context(),
         "alex' OR 1=1 --",
-        "postgresql",
+        "postgres",
     )
 
     assert sql is not None

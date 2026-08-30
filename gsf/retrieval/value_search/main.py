@@ -22,7 +22,6 @@ from gsf.retrieval.text_to_sql.connector_routing import (
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from gsf.utils.sample_values import parse_sample_values
-from gsf.utils.sql_dialects import get_sqlglot_dialect
 
 logger = logging.getLogger(__name__)
 
@@ -192,12 +191,8 @@ def build_value_lookup_sql(
         )
         .limit(1)
     )
-    dialect_name = get_sqlglot_dialect(
-        dialect,
-        preserve_unknown=True,
-    )
     try:
-        return query.sql(dialect=dialect_name, identify=True)
+        return query.sql(dialect=dialect or None, identify=True)
     except ValueError:
         return query.sql(identify=True)
 
