@@ -25,11 +25,14 @@ from gsf.server.models import (
 )
 from gsf.server.models import (
     ColumnAttribute,
+    ColumnAttributeExplorationDetails,
+    ColumnExplorationDetails,
     CustomAnalysis,
     DataExplorationGraph,
     DatabaseSummary,
     EntityCoverageResult,
     ExplorationEdge,
+    ExplorationLinkPath,
     ExplorationRelatedNodes,
     IdRef,
     PqlAnalysis,
@@ -37,15 +40,18 @@ from gsf.server.models import (
     SchemaSummary,
     SemanticExplorationGraph,
     SqlAttribute,
-    SsoFederationState,
+    SqlAttributeExplorationDetails,
+    SqlExplorationDetails,
     SqlExpressionValidationResult,
     SqlValidationResult,
+    SsoFederationState,
     TableColumns,
     TableExplorationDetails,
     TableSummary,
     Term,
     TermCountEntry,
     TermDetail,
+    TermExplorationDetails,
     TermListItem,
     ValueSearchResult,
     Zone,
@@ -57,11 +63,12 @@ T = TypeVar("T")
 JsonObject = dict[str, Any]
 
 __all__ = [
-    "ChartsResponse",
     "ChatCancelResponse",
+    "ColumnAttributeExplorationDetailsResponse",
     "ColumnAttributePageResponse",
     "ColumnAttributePatchResponse",
     "ColumnAttributeResponse",
+    "ColumnExplorationDetailsResponse",
     "ConnectionListResponse",
     "ConnectionResponse",
     "ConnectionTestResponse",
@@ -85,11 +92,14 @@ __all__ = [
     "PqlAnalysisResponse",
     "SchemasPayload",
     "SemanticExplorationGraphResponse",
+    "SemanticRunningResponse",
     "SemanticStatusResponse",
+    "SqlAttributeExplorationDetailsResponse",
     "SqlAttributeListResponse",
     "SqlAttributePageResponse",
     "SqlAttributePatchResponse",
     "SqlAttributeResponse",
+    "SqlExplorationDetailsResponse",
     "SqlExpressionValidationResponse",
     "SqlValidationResponse",
     "SsoFederationResponse",
@@ -99,6 +109,7 @@ __all__ = [
     "TableListResponse",
     "TableZonesResponse",
     "TermDetailResponse",
+    "TermExplorationDetailsResponse",
     "TermResponse",
     "TermsPageResponse",
     "ValueSearchResponse",
@@ -164,6 +175,19 @@ class HealthResponse(_Payload):
 
 class SemanticStatusResponse(_Payload):
     calculated: bool
+    running: bool
+    last_success_at: str | None
+    last_failure_at: str | None
+
+
+class SemanticRunningResponse(_Payload):
+    """The ingestion service's own status endpoint: whether a compilation pass
+    is executing right now, when the last one finished successfully, and when
+    it last failed (only set if more recent than the last success)."""
+
+    running: bool
+    last_success_at: str | None
+    last_failure_at: str | None
 
 
 class ChatCancelResponse(_Payload):
@@ -173,12 +197,6 @@ class ChatCancelResponse(_Payload):
 # ---------------------------------------------------------------------------
 # Route-specific shapes
 # ---------------------------------------------------------------------------
-
-
-class ChartsResponse(_Payload):
-    """``charts`` is null when the model declined to propose a chart."""
-
-    charts: list[JsonObject] | None
 
 
 class ConnectionTestResponse(_Payload):
@@ -276,6 +294,14 @@ ExplorationEdgeListResponse = ListResponse[ExplorationEdge]
 DataExplorationGraphResponse = DataResponse[DataExplorationGraph]
 SemanticExplorationGraphResponse = DataResponse[SemanticExplorationGraph]
 TableExplorationDetailsResponse = DataResponse[TableExplorationDetails]
+TermExplorationDetailsResponse = DataResponse[TermExplorationDetails]
+ColumnExplorationDetailsResponse = DataResponse[ColumnExplorationDetails]
+ColumnAttributeExplorationDetailsResponse = DataResponse[
+    ColumnAttributeExplorationDetails
+]
+SqlAttributeExplorationDetailsResponse = DataResponse[SqlAttributeExplorationDetails]
+SqlExplorationDetailsResponse = DataResponse[SqlExplorationDetails]
+ExplorationLinkPathResponse = DataResponse[ExplorationLinkPath]
 ExplorationRelatedNodesResponse = DataResponse[ExplorationRelatedNodes]
 TableZonesResponse = DataResponse[dict[str, list[ZoneChip]]]
 

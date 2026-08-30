@@ -6,15 +6,19 @@
 export enum ConnectionType {
 	DATABRICKS = 'databricks',
 	POSTGRESQL = 'postgresql',
+	MYSQL = 'mysql',
 	SNOWFLAKE = 'snowflake',
 	HEAVYDB = 'heavydb',
+	KYUUBI = 'kyuubi',
 }
 
 export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.DATABRICKS]: 'Databricks',
 	[ConnectionType.POSTGRESQL]: 'PostgreSQL',
+	[ConnectionType.MYSQL]: 'MySQL',
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
+	[ConnectionType.KYUUBI]: 'Apache Kyuubi',
 };
 
 export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
@@ -32,6 +36,10 @@ export type ConnectionFieldKey =
 	| 'private_key_passphrase'
 	| 'database'
 	| 'protocol'
+	| 'ssa_url'
+	| 'truststore'
+	| 'truststore_file'
+	| 'truststore_password'
 	| 'schema'
 	| 'sso_federation';
 
@@ -48,6 +56,10 @@ export type ConnectionField = {
 	boolean?: boolean;
 	/** Rendered as a textarea. Needed for pasted PEM keys, which span many lines. */
 	multiline?: boolean;
+	/** Rendered as a file picker; the value is the file's base64-encoded bytes. */
+	file?: boolean;
+	/** `accept` attribute for a file field. */
+	fileAccept?: string;
 	/** Helper text shown under the field. */
 	hint?: string;
 };
@@ -103,6 +115,13 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'my_database' },
 	],
+	[ConnectionType.MYSQL]: [
+		{ key: 'host', label: 'Host', placeholder: 'localhost' },
+		{ key: 'port', label: 'Port', placeholder: '3306', optional: true },
+		{ key: 'user', label: 'User', placeholder: 'root' },
+		{ key: 'password', label: 'Password', secret: true },
+		{ key: 'database', label: 'Database', placeholder: 'my_database' },
+	],
 	[ConnectionType.SNOWFLAKE]: [
 		{ key: 'account', label: 'Account', placeholder: 'xy12345.us-east-1' },
 		{ key: 'warehouse', label: 'Warehouse', placeholder: 'COMPUTE_WH' },
@@ -139,5 +158,41 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'heavyai' },
 		{ key: 'protocol', label: 'Protocol', placeholder: 'binary', optional: true },
+	],
+	[ConnectionType.KYUUBI]: [
+		{ key: 'host', label: 'Host' },
+		{ key: 'port', label: 'Port', optional: true },
+		{
+			key: 'user',
+			label: 'Generate Token Client ID',
+			hint: 'The SSA client ID for a service account, or your account name when using a pasted token.',
+		},
+		{
+			key: 'password',
+			label: 'Generate Token Client Secret',
+			secret: true,
+			hint: 'The SSA client secret when a token URL is set below, otherwise a JWT copied from the data platform profile page.',
+		},
+		{
+			key: 'ssa_url',
+			label: 'Generate Token URL',
+			optional: true,
+			hint: 'Enables service-account auth. Tokens expire hourly, so this lets the connector mint fresh ones instead of failing after an hour.',
+		},
+		{ key: 'database', label: 'Catalog' },
+		{
+			key: 'truststore_file',
+			label: 'Truststore (JKS)',
+			file: true,
+			fileAccept: '.jks,.keystore,.truststore',
+			optional: true,
+			hint: 'Upload the CA truststore. Needed when the server does not already trust the internal CA.',
+		},
+		{
+			key: 'truststore_password',
+			label: 'Truststore password',
+			secret: true,
+			optional: true,
+		},
 	],
 };

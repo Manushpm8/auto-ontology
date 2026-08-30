@@ -266,7 +266,8 @@ MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
       -[:{Edges.CONTAINS}]->(tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: {column_description_expr("col")}}}) AS cols
+                         description: {column_description_expr("col")},
+                         format: col.format}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
        db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
 """
@@ -491,6 +492,7 @@ RETURN c.id AS id,
        {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
+       c.format AS format,
        EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key,
        EXISTS {{
            (:{Labels.COLUMN})-[:{Edges.FOREIGN_KEY}]->(c)
@@ -513,8 +515,9 @@ UNWIND $col_ids AS col_id
 MATCH (col:{Labels.COLUMN} {{id: col_id}})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
       <-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
       <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
-RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name,
-       db.name AS database_name
+RETURN col.id AS col_id, tbl.id AS table_id, tbl.name AS table_name,
+       sch.id AS schema_id, sch.name AS schema_name,
+       db.id AS database_id, db.name AS database_name
 """
 
 
@@ -617,6 +620,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r.get("description"),
             "ordinal_position": r.get("ordinal_position"),
             "sample_values": r.get("sample_values"),
+            "format": r.get("format"),
             "is_foreign_key_target": bool(r.get("is_foreign_key_target")),
         }
         for r in rows
@@ -627,7 +631,14 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
 
 
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Batch lookup: Column id → database/schema/table identity."""
+    """Batch lookup: Column id → database/schema/table identity (ids + names).
+
+    Ids are included alongside names so a caller that needs to let a client
+    expand a Table/Column further (e.g. `find_term_link_path`'s catalog
+    enrichment) can reuse this instead of re-running the same
+    Database→Schema→Table→Column traversal itself; a caller that only wants
+    display text (e.g. `find_join_path`) simply ignores the extra keys.
+    """
     if not col_ids:
         return {}
     try:
@@ -637,8 +648,11 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
         return {}
     return {
         r["col_id"]: {
+            "table_id": r.get("table_id") or "",
             "table_name": r.get("table_name") or "",
+            "schema_id": r.get("schema_id") or "",
             "schema_name": r.get("schema_name") or "",
+            "database_id": r.get("database_id") or "",
             "database_name": r.get("database_name") or "",
         }
         for r in rows
@@ -691,6 +705,39 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
              AS iu
         WHERE iu IS NOT NULL
         SET col.is_unique = iu
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
+def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:
+    """Write inferred value notations onto Column ``format``.
+
+    ``format`` is generic storage notation (how values are written), not a
+    date-specific property. Today only date inference fills it (``YYMMDD``,
+    ``YYYY-MM-DD``, …); an address or id profiler would write the same field.
+    The column's type/name/description say *what* the values are.
+
+    Skips silently when *date_formats* is empty.
+    """
+    if not date_formats:
+        return
+    entries = [
+        {"column_name": col, "format": str(fmt)}
+        for col, fmt in date_formats.items()
+        if fmt
+    ]
+    if not entries:
+        return
+    graph().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.format][0]
+             AS fmt
+        WHERE fmt IS NOT NULL
+        SET col.format = fmt
         """,
         {"table_id": table_id, "entries": entries},
     )

@@ -30,7 +30,6 @@ from sqlglot import exp
 
 from gsf.retrieval.text_to_sql.db_probe.config import DB_PROBE_LOW_CARD_THRESHOLD
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
-from gsf.utils.sql_dialects import get_sqlglot_dialect
 
 logger = logging.getLogger(__name__)
 
@@ -128,10 +127,9 @@ def _fetch_distinct(
     ``None`` when the column isn't in this table, the probe fails, or the column
     is high-cardinality (so we never judge a free-text/name column).
     """
-    selected_dialect = get_sqlglot_dialect(dialect)
     # Bare column (drop table qualifier) so it works regardless of alias scoping.
-    col_ref = exp.column(col.this).sql(dialect=selected_dialect)
-    table_ref = table_node.sql(dialect=selected_dialect)
+    col_ref = exp.column(col.this).sql(dialect=dialect or None)
+    table_ref = table_node.sql(dialect=dialect or None)
     threshold = DB_PROBE_LOW_CARD_THRESHOLD
     sql = (
         f"SELECT DISTINCT {col_ref} AS value FROM {table_ref} "
@@ -158,7 +156,7 @@ def find_literal_mismatches(
     has no close real counterpart and the empty result is legitimate).
     """
     try:
-        tree = sqlglot.parse_one(sql, read=get_sqlglot_dialect(dialect))
+        tree = sqlglot.parse_one(sql, read=dialect or None)
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
         logger.info("literal_check: could not parse SQL (%s)", exc)
         return []

@@ -34,7 +34,6 @@ from gsf.retrieval.data_access.graph_schemas import (
     fetch_all_schema_ids,
     get_schemas_by_ids,
 )
-from gsf.utils.sql_dialects import get_sqlglot_dialect
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +74,8 @@ def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
     if not sql or not sql.strip():
         return "the generated SQL is empty"
 
-    read = get_sqlglot_dialect(dialect)
     try:
-        parsed = sqlglot.parse_one(sql, read=read)
+        parsed = sqlglot.parse_one(sql, read=dialect or None)
     except Exception:
         # Unparseable here → let the normal parse validator handle it.
         return ""

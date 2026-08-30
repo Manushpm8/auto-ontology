@@ -62,6 +62,25 @@ model Configuration {
   @@schema("public")
 }
 
+// Owned and written by GSF (Python) via psycopg — see
+// gsf/ingestion_service/history.py, which creates this table itself
+// (`CREATE TABLE IF NOT EXISTS`) rather than through a Prisma migration.
+//
+// Declared here purely so `prisma db push` recognizes it as part of the
+// desired schema and leaves it alone. Without this, `db push` treats it as
+// drift (an "unknown" table) and offers to drop it on every `pnpm dev`
+// restart — which is exactly what wiped its history previously. The
+// frontend does not read or write this table directly.
+model SemanticCompilationHistory {
+  id          BigInt    @id @default(autoincrement())
+  started_at  DateTime  @db.Timestamptz
+  finished_at DateTime? @db.Timestamptz
+  status      String?
+
+  @@map("semantic_compilation_history")
+  @@schema("public")
+}
+
 model Acronym {
   id          String   @id @default(uuid()) @db.Uuid
   name        String   @unique
