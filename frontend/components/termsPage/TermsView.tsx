@@ -271,6 +271,9 @@ export const TermsView = () => {
 		setColumnAttrEditing(false);
 		setColumnAttrEditError(null);
 		setCertError(null);
+		// Leaving the term drops the detail copy; moving between terms keeps the
+		// old one on screen until the new term's fetch lands.
+		if (focusId == null) setFocusedTermDetail(null);
 	}
 	const [sqlEditModalOpen, setSqlEditModalOpen] = useState(false);
 	const [sqlEditValue, setSqlEditValue] = useState('');
@@ -285,10 +288,7 @@ export const TermsView = () => {
 	// single-page fetch, so the header would otherwise fall back to the term
 	// id. Load the term whenever an attribute page is open.
 	useEffect(() => {
-		if (focusId == null) {
-			setFocusedTermDetail(null);
-			return;
-		}
+		if (focusId == null) return;
 		if (colAttrId == null && sqlAttrId == null) return;
 
 		const termId = focusId;
