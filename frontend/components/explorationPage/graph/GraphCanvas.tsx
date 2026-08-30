@@ -1141,10 +1141,11 @@ export const GraphCanvas = ({
 			bboxFreezeArmed = false;
 			simulation.alphaTarget(0).alpha(0).stop();
 			// Camera pan is a second, independent gesture on the same
-			// mousedown+move. Even with `preventSigmaDefault` below, one
-			// un-prevented move (mouse slipping off the node disc, or onto a
-			// chrome overlay at the canvas edge) would slide the *whole*
-			// graph. Lock panning for the duration of the node drag.
+			// mousedown+move. Even with the per-move `preventSigmaDefault()`
+			// that `handleMoveBody` below issues, one un-prevented move (mouse
+			// slipping off the node disc, or onto a chrome overlay at the
+			// canvas edge) would slide the *whole* graph. Lock panning for the
+			// duration of the node drag.
 			renderer.getCamera().enabledPanning = false;
 			syncCanvasCursor();
 		};
