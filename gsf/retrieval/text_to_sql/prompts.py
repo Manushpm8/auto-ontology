@@ -558,9 +558,31 @@ def create_intent_validation_prompt(
     entities_text: str,
     sql_code: str,
     custom_analyses: str = "",
+    join_path_check_active: bool = True,
 ) -> str:
     question_block = format_dual_question_block(original_question, sanitized_question)
     custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
+    # Join-legality criterion depends on whether db_probe.join_path_check (the
+    # deterministic live-DB probe) is enabled to cover join legality itself:
+    # - active: this LLM check stays lenient and only judges semantic fit,
+    #   since join_path_check is the source of truth for legality.
+    # - inactive: nothing else checks join legality, so fall back to main's
+    #   original (pre-rework) criterion asking the LLM to judge it directly.
+    if join_path_check_active:
+        join_criterion = (
+            "1. Every join in this query is already known to be real — do not question whether it exists. "
+            "Flag it only if either (a) it is self-evidently broken regardless of any alternative (a "
+            "tautological condition, a table joined to itself, columns of clearly unrelated meaning being "
+            "equated), or (b) it clearly reaches the wrong entity for the question and you can name a "
+            "specific, better-fitting real relationship instead. Do not flag a join just because it merely "
+            "looks unfamiliar (different fields/roles for the same concept, e.g. customer vs supplier "
+            "delivery city for a region filter, are OK)."
+        )
+    else:
+        join_criterion = (
+            "1. Are there any joins that would produce COMPLETELY WRONG results? "
+            "(Alternative join approaches are OK)"
+        )
     return f"""User's Question:
 {question_block}
 {custom_analyses_block}
@@ -570,7 +592,7 @@ Generated SQL Query:
 ```
 
 Check for CRITICAL issues ONLY (be lenient):
-1. Every join in this query is already known to be real — do not question whether it exists. Flag it only if either (a) it is self-evidently broken regardless of any alternative (a tautological condition, a table joined to itself, columns of clearly unrelated meaning being equated), or (b) it clearly reaches the wrong entity for the question and you can name a specific, better-fitting real relationship instead. Do not flag a join just because it merely looks unfamiliar (different fields/roles for the same concept, e.g. customer vs supplier delivery city for a region filter, are OK).
+{join_criterion}
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.

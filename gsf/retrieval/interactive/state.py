@@ -73,6 +73,15 @@ class InteractiveSessionState:
     incomplete_formula_terms: list = field(
         default_factory=list
     )  # [(term, what_is_missing)]
+    # Normalized (lowercased) incomplete-formula terms the forced-question guard
+    # (clarify.py's never-asked override) has already generated a question for.
+    # Checked directly instead of only inferring "already asked" from lexical
+    # overlap with past question text — the forced question deliberately
+    # paraphrases the term into business language (see _FORCED_QUESTION_PROMPT),
+    # so a term like a snake_case column name or hyphenated join phrase can
+    # legitimately never appear verbatim in its own generated question, which
+    # made the overlap-only check re-fire on the same term turn after turn.
+    _forced_terms_asked: set[str] = field(default_factory=set)
     persistent_unresolved: list[str] = field(
         default_factory=list
     )  # terms never resolved by KB/VDB; pruned after each answered turn
@@ -85,9 +94,6 @@ class InteractiveSessionState:
     external_kg_children_map: dict[str, list[str]] = field(
         default_factory=dict
     )  # parent entry name → [full child texts]
-    _named_column_evidence: str = (
-        ""  # direct column→schema hints extracted from user answers
-    )
     # Ambiguous-entity resolution (one term, 2+ close-scoring candidate columns —
     # see entity_resolution._ambiguity_check). Accumulated across turns like the
     # _ever_* KB/VDB bookkeeping above, since an entity can be flagged ambiguous on

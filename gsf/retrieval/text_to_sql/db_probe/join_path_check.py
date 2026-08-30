@@ -1015,10 +1015,13 @@ def _count_case_dirty_rejects(
         _eq(*_oriented_columns(p, table_a), True) for p in extra
     )
 
+    # SUM(CASE WHEN ... THEN 1 ELSE 0 END) instead of COUNT(*) FILTER (WHERE ...):
+    # FILTER is Postgres/standard-SQL syntax, not supported by MySQL, so this
+    # keeps the probe portable across every dialect this module supports.
     sql = (
         f"SELECT "
-        f"COUNT(*) FILTER (WHERE NOT ({extra_raw})) AS total_rejects, "
-        f"COUNT(*) FILTER (WHERE NOT ({extra_raw}) AND ({extra_normalized})) "
+        f"SUM(CASE WHEN NOT ({extra_raw}) THEN 1 ELSE 0 END) AS total_rejects, "
+        f"SUM(CASE WHEN NOT ({extra_raw}) AND ({extra_normalized}) THEN 1 ELSE 0 END) "
         f"AS casing_only_rejects "
         f"FROM {a_ref} a JOIN {b_ref} b ON {core_on}"
     )

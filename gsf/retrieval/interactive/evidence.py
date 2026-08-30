@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 import re
 
-from gsf.retrieval.data_access.semantic_search import search_semantic_index
-from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from gsf.utils.llm_invoke import safe_invoke_text_nr
 
 from .state import InteractiveSessionState
@@ -35,61 +33,6 @@ to connect KB entries to the working question even when the phrasing differs. \
 If an entry is marked [DISAMBIGUATION], it means a KB formula and a direct schema column \
 both matched the same term — include only whichever is correct given the question context. \
 If nothing applies, output: NONE"""
-
-
-# Matches a column name in parentheses: (battlifeh), (pwractmw)
-_PAREN_COL_RE = re.compile(r'\(([a-zA-Z][a-zA-Z0-9_]*)\)')
-# Matches explicit "column <name>" or 'column "name"' or "column 'name'"
-_KEYWORD_COL_RE = re.compile(r'\bcolumns?\s+["\']?([a-zA-Z][a-zA-Z0-9_]+)["\']?', re.IGNORECASE)
-# Strict score threshold for exact column name lookup (lower = closer match)
-_NAMED_COL_SCORE_THRESHOLD = 0.45
-
-
-def detect_and_resolve_named_columns(session: InteractiveSessionState, answer: str) -> None:
-    """Extract explicit column names from a user answer and resolve them to schema entries.
-
-    Detects two patterns:
-    - Parenthetical: "battery life in hours (battlifeh)"
-    - Keyword: "stored in the column dogs" / 'column "pwractmw"'
-
-    For each candidate, runs a VDB lookup. On a confident hit, injects a direct
-    "column_name → <schema description>" line into session._named_column_evidence
-    so the SQL generator knows which table the column belongs to.
-    """
-    if session.semantic_retriever is None:
-        return
-
-    candidates: set[str] = set()
-    for m in _PAREN_COL_RE.finditer(answer):
-        candidates.add(m.group(1))
-    for m in _KEYWORD_COL_RE.finditer(answer):
-        candidates.add(m.group(1))
-
-    if not candidates:
-        return
-
-    already = session._named_column_evidence
-    for col in candidates:
-        if col in already:
-            continue
-        try:
-            hits = search_semantic_index(
-                session.semantic_retriever, col, [LABEL_COLUMN_ATTRIBUTE], 1, session.db_name
-            )
-        except Exception:
-            continue
-        if not hits:
-            continue
-        score = hits[0].get("score", 1.0)
-        if score > _NAMED_COL_SCORE_THRESHOLD:
-            continue
-        hit_text = hits[0].get("text", "")
-        entry = f"{col} → {hit_text}"
-        logger.info("Named column resolved: %r (score=%.3f) → %s", col, score, hit_text[:120])
-        session._named_column_evidence = (
-            already + "\n" + entry if already else entry
-        )
-        already = session._named_column_evidence
 
 
 def build_grounded_terms_hint(session: InteractiveSessionState) -> str:

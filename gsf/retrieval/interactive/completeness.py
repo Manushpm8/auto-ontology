@@ -103,7 +103,9 @@ If everything is clearly defined for SQL generation, output:
   COMPLETE"""
 
 
-def _parse_gaps(response: str) -> list[tuple[str, str]]:
+def _parse_gaps(
+    response: str, current_gaps: list[tuple[str, str]]
+) -> list[tuple[str, str]]:
     if response.upper().startswith("COMPLETE"):
         return []
     gaps: list[tuple[str, str]] = []
@@ -119,6 +121,15 @@ def _parse_gaps(response: str) -> list[tuple[str, str]]:
             if term not in seen:
                 seen.add(term)
                 gaps.append((term, missing.strip()))
+    if not gaps:
+        # Response was neither "COMPLETE" nor any recognizable "INCOMPLETE:"
+        # line — malformed LLM output, not a genuine completeness verdict.
+        # Preserve whatever was already tracked rather than silently wiping it.
+        logger.warning(
+            "Completeness — unparseable response, keeping prior gaps: %s",
+            response[:200],
+        )
+        return list(current_gaps)
     return gaps
 
 
@@ -165,7 +176,7 @@ def detect_incomplete_formulas(
 
     response = safe_invoke_text(llm, prompt).strip()
     logger.debug("Completeness — raw response: %s", response[:600])
-    gaps = _parse_gaps(response)
+    gaps = _parse_gaps(response, current_gaps)
     logger.info("Completeness — gaps found: %s", gaps)
     return gaps
 

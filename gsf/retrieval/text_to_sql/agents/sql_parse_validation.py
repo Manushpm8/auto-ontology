@@ -29,6 +29,7 @@ from sqlglot import expressions as exp
 from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
 from gsf.dal.attributes import find_table_key_columns
 from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
 from gsf.retrieval.data_access.graph_schemas import (
@@ -677,9 +678,10 @@ class SQLValidationAgent(BaseAgent):
         response = path_state.get("sql_generation_result")
         connectors = state.get("connectors") or []
         dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
+        connector = resolve_connector_from_tables(path_state.get("relevant_tables"), connectors)
         schemas_ids = fetch_all_schema_ids()
         schemas = get_schemas_by_ids(schemas_ids)
-        degenerate_dialect = dialects[0] if dialects else None
+        degenerate_dialect = getattr(connector, "dialect", None)
 
         # Every constructed/reconstructed SQL passes through this node before
         # execution (see the graph: construct_sql_from_candidates,

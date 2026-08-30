@@ -32,6 +32,14 @@ logger = logging.getLogger(__name__)
 # Covers: calculate/calculated/calculation, compute/computed/computation, derive/derived/derivation.
 _CALC_TRIGGER = re.compile(r"\b(calculat|comput|deriv)", re.IGNORECASE)
 
+# Shared tokenizer for the "was this term already asked about" check below.
+# Splits on any run of non-word characters (whitespace, slashes, hyphens, etc.),
+# so "X-to-Y join" and "X to Y join" tokenize identically. Used on both the
+# incomplete-formula term and past clarify-history question text — they must
+# share one normalization pipeline, or terms containing punctuation the two
+# sides split differently on can never register as "already asked".
+_TOKEN_SPLIT = re.compile(r"[^\w]+")
+
 _STUCK_PHRASES = frozenset(
     [
         "out of scope",
@@ -481,20 +489,33 @@ def should_clarify(
         and session.incomplete_formula_terms
         and turns_remaining > 0
     ):
+        # Same split regex on both sides (unlike an earlier version of this check,
+        # which split the term on whitespace/slash only and the asked-history text
+        # on whitespace/slash/any-non-word-char — that asymmetry mashed hyphenated
+        # terms like "X-to-Y join" into one token that could never match how the
+        # words appear, split apart, in a real sentence).
         asked_tokens = {
-            re.sub(r"[^\w]", "", tok).lower()
+            tok.lower()
             for h in session.clarify_history
-            for tok in re.split(r"[\s/\W]+", h["q"])
+            for tok in _TOKEN_SPLIT.split(h["q"])
             if tok
-        } - {""}
+        }
         for term, description in session.incomplete_formula_terms:
+            term_key = term.strip().lower()
+            if term_key in session._forced_terms_asked:
+                # Already force-asked this exact term in a prior turn — the LLM's
+                # generated question deliberately paraphrases the term into business
+                # language (see _FORCED_QUESTION_PROMPT), so lexical overlap with
+                # that question is not a reliable "already asked" signal on its own.
+                continue
             term_tokens = {
-                re.sub(r"[^\w]", "", tok)
-                for tok in re.split(r"[\s/]+", term.lower())
+                tok
+                for tok in _TOKEN_SPLIT.split(term.lower())
                 if tok and tok not in _FILLER and tok not in _CONNECTIVES
-            } - {""}
+            }
             if term_tokens and not (term_tokens & asked_tokens):
                 question = _generate_forced_question(term, description, llm)
+                session._forced_terms_asked.add(term_key)
                 logger.info(
                     "Clarify — DECISION override: ASK (never-asked incomplete term %r)",
                     term,
@@ -507,6 +528,20 @@ def should_clarify(
             "Clarify — DECISION: ASK  (history len=%d)", len(session.clarify_history)
         )
         return True, question
+
+    # Malformed-response fallback: the decide-LLM is instructed to return exactly
+    # "ASK: <question>" or "PROCEED", so anything else is a parsing failure, not
+    # a real verdict. Defaulting to PROCEED on malformed output risks silently
+    # skipping a real clarifying question, so treat a short response containing
+    # a "?" as a dropped "ASK:" prefix and ask it verbatim. The length cap avoids
+    # misfiring on longer off-format text (e.g. stray reasoning) that happens to
+    # contain a question mark without actually being a question to ask.
+    if "?" in response and len(response) < 300:
+        logger.warning(
+            "Clarify — DECISION: malformed response treated as ASK (%r)", response
+        )
+        return True, response
+
     logger.info(
         "Clarify — DECISION: PROCEED  (history len=%d)", len(session.clarify_history)
     )

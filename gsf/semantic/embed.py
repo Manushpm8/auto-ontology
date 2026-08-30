@@ -18,6 +18,20 @@ from gsf.vdb.postgres import PostgresVDB
 
 logger = logging.getLogger(__name__)
 
+# Max length of one already-formatted sample_values list entry kept in a
+# non-JSON ColumnAttribute's embedding text. Historically the only cutoff
+# here — kept as-is for every ordinary column so this change stays scoped to
+# JSONB, not a blanket loosening.
+_MAX_EMBEDDED_SAMPLE_LEN = 30
+
+# Same idea, but for JSONB columns specifically: their sample_values entries
+# are visit_enter.py's formatted `key [e.g. 'value']` strings (brackets and
+# quotes included), which need more headroom than a bare value does — using
+# the plain 30-char cutoff on those would routinely drop the entry whole,
+# including the key name itself. Scoped to JSON-typed columns only (via the
+# ``data_type`` param below) so ordinary columns are unaffected.
+_MAX_EMBEDDED_JSON_SAMPLE_LEN = 60
+
 
 @dataclass
 class SemanticEmbedder:
@@ -219,15 +233,31 @@ def embed_all_semantic_nodes(
     return len(with_embeddings)
 
 
-def _format_sample_values(raw: str | list[Any] | None) -> str:
-    """Return a ' Sample values: ...' suffix string, or empty string if unavailable."""
+def _format_sample_values(
+    raw: str | list[Any] | None, data_type: str | None = None
+) -> str:
+    """Return a ' Sample values: ...' suffix string, or empty string if unavailable.
+
+    *data_type* is the owning column's declared type. JSON-typed columns get a
+    higher per-entry length cutoff (see ``_MAX_EMBEDDED_JSON_SAMPLE_LEN``)
+    since their sample_values entries are visit_enter.py's formatted
+    ``key [e.g. 'value']`` strings, not bare values — every other column keeps
+    the original cutoff unchanged.
+    """
     if not raw:
         return ""
     try:
         import json
 
+        max_len = (
+            _MAX_EMBEDDED_JSON_SAMPLE_LEN
+            if "json" in (data_type or "").lower()
+            else _MAX_EMBEDDED_SAMPLE_LEN
+        )
         values = json.loads(raw) if isinstance(raw, str) else list(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
+        non_null = [
+            str(v) for v in values if v is not None and len(str(v)) <= max_len
+        ]
         if not non_null:
             return ""
         return " Sample values: " + ", ".join(non_null) + "."
@@ -275,7 +305,7 @@ def _build_rows(
         if not attr_name:
             continue
         owner = a.get("term_name") or term_name or ""
-        sample_block = _format_sample_values(a.get("sample_values"))
+        sample_block = _format_sample_values(a.get("sample_values"), a.get("datatype"))
         text = (
             f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}. "
             f"{a.get('description') or ''}"

@@ -29,6 +29,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.db_probe.config import is_db_probe_join_path_check
 from gsf.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
     create_intent_validation_prompt,
@@ -178,13 +179,17 @@ class IntentValidationAgent(BaseAgent):
         # absence from the semantic graph's declared edges is not itself evidence
         # it's wrong (real, undeclared FK-shaped relationships are common; the
         # deterministic live-DB probe in db_probe.join_path_check is the source of
-        # truth for join *legality*). See create_intent_validation_prompt.
+        # truth for join *legality*) — but only when that probe is actually
+        # enabled (DB_PROBE_JOIN_PATH_CHECK). When it's off, nothing else checks
+        # join legality, so this prompt falls back to judging it directly
+        # instead of assuming every join is real. See create_intent_validation_prompt.
         validation_prompt = create_intent_validation_prompt(
             original_question,
             sanitized_question,
             "",
             sql_code,
             custom_analyses=ca_section,
+            join_path_check_active=is_db_probe_join_path_check(),
         )
 
         messages = [

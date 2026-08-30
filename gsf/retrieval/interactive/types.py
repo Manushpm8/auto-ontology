@@ -7,12 +7,7 @@ from typing import Optional
 
 class InteractivePhase(str, Enum):
     PHASE1_CLARIFY = "phase1_clarify"
-    PHASE1_SUBMIT  = "phase1_submit"
-    PHASE1_DEBUG   = "phase1_debug"
     PHASE2_CLARIFY = "phase2_clarify"
-    PHASE2_SUBMIT  = "phase2_submit"
-    PHASE2_DEBUG   = "phase2_debug"
-    DONE           = "done"
 
 
 class TurnType(str, Enum):

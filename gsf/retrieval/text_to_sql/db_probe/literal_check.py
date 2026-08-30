@@ -831,6 +831,10 @@ def build_value_repair_error(mismatches: list[dict[str, Any]]) -> str:
             _render_case_duplicate_like_mismatch(m)
             for m in case_duplicate_like_mismatches
         )
+        # NOTE: this always tells reconstruction to switch to ILIKE, which is
+        # Postgres-only (e.g. banned outright by the SQLite dialect rules in
+        # prompts.py) — potentially wrong advice on non-Postgres connectors.
+        # flagging for future generalization.
         sections.append(
             "One or more filter patterns use a case-sensitive LIKE, but the "
             "column stores case/whitespace variants of the same real-world "

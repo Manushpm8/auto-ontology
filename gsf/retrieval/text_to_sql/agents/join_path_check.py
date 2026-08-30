@@ -43,6 +43,7 @@ from gsf.retrieval.text_to_sql.agents.sql_parse_validation import (
     detect_degenerate_sql,
     detect_missing_aggregation,
     detect_vacuous_group_by,
+    quote_known_mixed_case_identifiers,
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
@@ -156,6 +157,19 @@ class JoinPathCheckAgent(BaseAgent):
                     )
 
         if not mismatches and not case_dirty:
+            # A self-applied fix above (wrong_column or missing_bridge) can
+            # substitute in a column whose quoting need differs from the one
+            # it replaced. Re-run quote_known_mixed_case_identifiers .
+            requoted_sql = quote_known_mixed_case_identifiers(
+                sql_code, relevant_tables, dialect
+            )
+            if requoted_sql != sql_code:
+                self._write_sql_code(path_state, requoted_sql)
+                self.logger.info(
+                    "[%s] Join path check — quoted mixed-case identifier(s) "
+                    "introduced by self-repair",
+                    path_state.get("task_id", "?"),
+                )
             return {"decision": "valid_sql", "path_state": path_state}
 
         path_state["join_path_repair_attempts"] = attempts + 1

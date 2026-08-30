@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from gsf.semantic.bridge_tables import build_bridge_tables_sql_attributes
+from gsf.semantic.bridge_tables import (
+    bridge_table_sql_attributes_enabled,
+    build_bridge_tables_sql_attributes,
+)
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import build_semantic_embedder
 from gsf.semantic.semantic_fk import resolve_semantic_fks
@@ -58,10 +61,16 @@ def run_semantic_compilation(
     attr_count = suggest_sql_attributes(database_name)
     logger.info("New SqlAttribute nodes written: %d", attr_count)
 
-    logger.info("=" * 60)
-    logger.info("Building bridge tables sql attributes")
-    logger.info("=" * 60)
-    bridge_table_count = build_bridge_tables_sql_attributes(database_name)
-    logger.info("Bridge tables built: %d", bridge_table_count)
+    if bridge_table_sql_attributes_enabled():
+        logger.info("=" * 60)
+        logger.info("Building bridge tables sql attributes")
+        logger.info("=" * 60)
+        bridge_table_count = build_bridge_tables_sql_attributes(database_name)
+        logger.info("Bridge tables built: %d", bridge_table_count)
+    else:
+        logger.info(
+            "Skipping bridge table sql attribute generation "
+            "(BRIDGE_TABLE_SQL_ATTRIBUTES=false)"
+        )
 
     return count

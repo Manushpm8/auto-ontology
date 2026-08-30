@@ -117,7 +117,7 @@ class CombinedPrecheckAgent(BaseAgent):
             header = (
                 f"{len(sections)} separate issues were found in this SQL. Fix all."
             )
-            path_state["error"] = header + "\n\n".join(sections)
+            path_state["error"] = header + "\n\n" + "\n\n".join(sections)
         else:
             path_state["error"] = "\n\n".join(sections)
         if known_fixable:

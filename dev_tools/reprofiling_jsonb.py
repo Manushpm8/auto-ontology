@@ -143,6 +143,7 @@ def reprofiling_for_connection(connection_string: str, *, force: bool = False) -
     set-if-null guard in store_column_sample_values).
     """
     import gsf.dal.datasources as _ds
+    import gsf.semantic.visit_enter as _ve
 
     connector = create_connector(connection_string)
     db_name = connector.database_name
@@ -177,15 +178,21 @@ def reprofiling_for_connection(connection_string: str, *, force: bool = False) -
         ]
 
         # Intercept what store_column_sample_values actually receives so we log
-        # the stored keys rather than the raw profiling data.
+        # the stored keys rather than the raw profiling data. Must patch the
+        # name as bound inside visit_enter.py (via its own `from ... import`),
+        # not the gsf.dal.datasources module attribute — calculate_columns_
+        # profiling calls its own already-bound reference, so patching the
+        # datasources module attribute alone is silently never observed by it
+        # (the real write still goes through, only this capture is skipped).
         stored_for_table: dict[str, list] = {}
-        _orig_store = _ds.store_column_sample_values
+        _orig_store = _ve.store_column_sample_values
 
         def _capturing_store(tid: str, samples: dict, _orig=_orig_store) -> None:
             stored_for_table.update(samples)
             _orig(tid, samples)
 
         _ds.store_column_sample_values = _capturing_store
+        _ve.store_column_sample_values = _capturing_store
         logger.info("  Re-profiling %s ...", table_name)
         try:
             calculate_columns_profiling(table, columns, connector)
@@ -195,6 +202,7 @@ def reprofiling_for_connection(connection_string: str, *, force: bool = False) -
             failed += 1
         finally:
             _ds.store_column_sample_values = _orig_store
+            _ve.store_column_sample_values = _orig_store
 
         for col_name in jsonb_col_names:
             stored = stored_for_table.get(col_name, [])

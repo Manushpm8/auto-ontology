@@ -31,7 +31,6 @@ from .conditional_output import conditional_output_enabled, get_conditional_outp
 from .completeness import detect_incomplete_formulas
 from .evidence import (
     build_grounded_terms_hint,
-    detect_and_resolve_named_columns,
     generate_evidence,
 )
 from .followup_merge import merge_follow_up_question
@@ -141,12 +140,24 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
     # out) gets zero path-check coverage instead of the one fresh pass every
     # other repair guard below already gets. "join_path_repair_attempts" is
     # the analogous counter for JoinPathCheckAgent — same reasoning.
+    # "stuck_table_discovery_done" is _find_stuck_table's per-alias one-shot
+    # guard (sql_reconstruction.py) — same "stays true forever unless popped"
+    # shape as the other guards above, so it needs the same reset or a debug
+    # turn hitting the same stuck-alias pattern silently loses the targeted
+    # search and falls back to the generic (first-error-only) classifier.
+    # "value_repair_attempted" (proactive_value_check.py, empty_result_value_repair.py),
+    # "null_jsonb_retry_attempted", and "empty_like_retry_attempted"
+    # (empty_like_result_check.py) are the same one-shot-per-phase shape —
+    # popped here so each repair gets its one fresh attempt on the new turn's
+    # SQL instead of silently no-opping because a prior turn already used it.
     for key in (
-        "repair_attempted",
-        "value_repair_done",
         "failed_attempts",
         "jsonb_path_repair_attempted",
         "join_path_repair_attempts",
+        "stuck_table_discovery_done",
+        "value_repair_attempted",
+        "null_jsonb_retry_attempted",
+        "empty_like_retry_attempted",
     ):
         session.path_state.pop(key, None)
 
@@ -158,6 +169,11 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     # Clear Phase 1 SQL artifacts; keep relevant_tables as merge hints.
     # Also clear similar_questions so Phase 1 VDB-retrieved examples don't bleed in —
     # Phase 1 context is injected explicitly via the follow-up instruction block instead.
+    #
+    # The repair/one-shot-guard keys (failed_attempts through
+    # empty_like_retry_attempted) reset here for the same reason
+    # _apply_debug_seed resets them: Phase 2 asks a fresh question
+    # and gets a fresh repair budget.
     for key in (
         "normalized_question",
         "sql_code",
@@ -170,6 +186,13 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
         "final_response",
         "sql_response_from_db",
         "similar_questions",
+        "failed_attempts",
+        "jsonb_path_repair_attempted",
+        "join_path_repair_attempts",
+        "stuck_table_discovery_done",
+        "value_repair_attempted",
+        "null_jsonb_retry_attempted",
+        "empty_like_retry_attempted",
     ):
         session.path_state.pop(key, None)
 
@@ -188,12 +211,25 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
     # these are injected verbatim into Evidence and reference Phase 1's specific
     # entities/columns, which are usually irrelevant to Phase 2's question.
     session._collision_resolution_notes = []
+    # Same reasoning again for pending-ambiguity resolution: the notes are injected
+    # verbatim into Evidence and reference Phase 1's specific entities, and the
+    # one-shot guard must be re-armed so Phase 2's own ambiguous entities (a fresh
+    # working_question can surface new ones) actually get resolved instead of being
+    # silently skipped because Phase 1 already flipped the flag.
+    session._ambiguity_resolved = False
+    session._ambiguity_resolution_notes = []
+    # scalar_hint is one-way (False→True) per question — Phase 1's verdict on
+    # its question says nothing about Phase 2's, and leaving it True would
+    # force SCALAR_HINT into Phase 2's Evidence (steering toward an aggregate
+    # answer) even when the follow-up explicitly wants a breakdown/table.
+    session.scalar_hint = False
 
     # Reset clarify state for Phase 2; clarification questions are not allowed.
     session.working_question = follow_up_q if follow_up_q else session.working_question
     session.original_question = session.working_question
     session.clarify_history = []
     session._pending_question = None
+    session._forced_terms_asked = set()
     session.max_clarify_turns = 0
     logger.info(
         "[%s] Phase 2 Query: \033[1;35m%s\033[0m",
@@ -263,8 +299,6 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
 
     resolved_terms_section = build_grounded_terms_hint(session)
     evidence = generate_evidence(evidence_question, combined_kg, resolved_terms_section)
-    if session._named_column_evidence:
-        evidence = "\n".join(filter(None, [evidence, session._named_column_evidence]))
     if session._collision_resolution_notes:
         # Injected directly rather than left to evidence-gen's LLM to relay —
         # that step isn't reliable about preserving instructions passed through it.
@@ -425,11 +459,7 @@ def step(
                     # "table" and "ddl" → skip silently, no hint needed
 
     elif turn_type == TurnType.FOLLOW_UP:
-        if session.phase not in (
-            InteractivePhase.PHASE2_CLARIFY,
-            InteractivePhase.PHASE2_SUBMIT,
-            InteractivePhase.PHASE2_DEBUG,
-        ):
+        if session.phase != InteractivePhase.PHASE2_CLARIFY:
             _apply_follow_up_seed(session, orchestrator_message)
             session.phase = InteractivePhase.PHASE2_CLARIFY
 
@@ -561,8 +591,6 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
                     _get_fast_llm(),
                 )
                 session._cached_vdb_only_norms = set(remaining_vdb)
-
-        detect_and_resolve_named_columns(session, last_turn["a"])
 
         if merged:
             session.working_question = merged

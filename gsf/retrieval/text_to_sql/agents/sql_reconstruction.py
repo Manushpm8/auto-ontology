@@ -192,6 +192,8 @@ def _format_known_columns_for_classification(
 # with the same tables by stripping non-numeric characters before casting,
 # never a missing_data situation. Matching here skips the LLM classification
 # call, same as the existing db_probe pre-classification checks below.
+# Postgres-specific error text; other dialects just won't match (fails safe),
+# could be generalized with per-dialect patterns later.
 _NUMERIC_FORMAT_CAST_ERROR_RE = re.compile(
     r'invalid input syntax for type (?:numeric|double precision|integer|bigint):'
     r'\s*"[^"]*(?:%|\$|USD|EUR|GBP)[^"]*"',
@@ -207,6 +209,8 @@ def _is_numeric_format_cast_error(error: str) -> bool:
 
 # Postgres' "column <alias>.<col> does not exist" — the identifiers are
 # sometimes double-quoted (mixed-case columns), sometimes not.
+# Postgres-specific error text; other dialects just won't match (fails safe),
+# could be generalized with per-dialect patterns later.
 _UNDEFINED_COLUMN_RE = re.compile(
     r'column\s+"?([A-Za-z_][\w]*)"?\."?([A-Za-z_][\w]*)"?\s+does not exist',
     re.IGNORECASE,
