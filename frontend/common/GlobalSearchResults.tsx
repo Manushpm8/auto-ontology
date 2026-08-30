@@ -20,6 +20,14 @@ import { SearchObjectType } from '@/enums/search';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import type { GlobalSearchItem } from '@/types/search';
 
+const parentTermName = (item: GlobalSearchItem): string | null => {
+	const termCrumb =
+		item.breadcrumbs.find((crumb) => crumb.type === SearchObjectType.Term) ??
+		item.breadcrumbs[0];
+	const name = termCrumb?.name?.trim();
+	return name ? name : null;
+};
+
 const catalogFocusId = (item: GlobalSearchItem): string => {
 	const ancestorIds = item.breadcrumbs
 		.map((crumb) => crumb.id)
@@ -63,6 +71,23 @@ const certificationStatus = (
 	if (certified === CertificationStatus.Partial) return CertificationStatus.Partial;
 	if (certified === CertificationStatus.Pending) return CertificationStatus.Pending;
 	return null;
+};
+
+const DESCRIPTION_LEAD_LENGTH = 50;
+
+const descriptionWithVisibleMatch = (description: string, query: string): string => {
+	const needle = query.trim();
+	if (needle === '') return description;
+
+	const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const parts = description.split(new RegExp(`(${escaped})`, 'gi'));
+	if (parts.length < 2) return description;
+
+	const prefix = parts[0] ?? '';
+	if (prefix.length <= DESCRIPTION_LEAD_LENGTH) return description;
+
+	const lead = description.slice(0, DESCRIPTION_LEAD_LENGTH).trimEnd();
+	return `${lead}... ${parts.slice(1).join('')}`;
 };
 
 const HighlightedText = ({ text, query }: { text: string; query: string }) => {
@@ -158,9 +183,14 @@ export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchRe
 	<ul className="flex flex-col gap-2 p-3">
 		{items.map((item) => {
 			const status = certificationStatus(item.certified);
-			const path = item.breadcrumbs.map((crumb) => crumb.name).join(' / ');
-			const href = hrefForGlobalSearchItem(item);
 			const kind = searchObjectTypeFromHit(item);
+			const isAttributeCard =
+				kind === SearchObjectType.Attribute || kind === SearchObjectType.SqlAttribute;
+			const termName = isAttributeCard ? parentTermName(item) : null;
+			const path = isAttributeCard
+				? ''
+				: item.breadcrumbs.map((crumb) => crumb.name).join(' / ');
+			const href = hrefForGlobalSearchItem(item);
 			const typeIcon = SEARCH_TYPE_ICON[kind] ?? IconName.Table;
 			const typeLabel = SEARCH_TYPE_LABEL[kind] ?? kind;
 
@@ -181,11 +211,6 @@ export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchRe
 								{typeLabel}
 							</span>
 						</div>
-						{path !== '' && (
-							<p className="truncate pl-6 text-xs text-zinc-500 dark:text-zinc-400">
-								<HighlightedText text={path} query={query} />
-							</p>
-						)}
 						{item.synonyms && item.synonyms.length > 0 ? (
 							<p className="min-w-0 truncate pl-6 text-xs text-zinc-500 dark:text-zinc-400">
 								<span className="text-zinc-400 dark:text-zinc-500">Synonyms: </span>
@@ -199,7 +224,27 @@ export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchRe
 						) : null}
 						{item.description ? (
 							<p className="line-clamp-2 min-w-0 overflow-hidden pl-6 text-xs leading-5 text-zinc-400 dark:text-zinc-500">
-								<HighlightedText text={item.description} query={query} />
+								<HighlightedText
+									text={descriptionWithVisibleMatch(item.description, query)}
+									query={query}
+								/>
+							</p>
+						) : null}
+						{path !== '' && (
+							<p className="truncate pl-6 text-xs text-zinc-500 dark:text-zinc-400">
+								{path}
+							</p>
+						)}
+						{termName != null ? (
+							<p className="flex min-w-0 items-center gap-1.5 pl-6 text-xs text-zinc-500 dark:text-zinc-400">
+								<Icon
+									name={SEARCH_TYPE_ICON[SearchObjectType.Term]}
+									className="h-3.5 w-3.5 shrink-0 text-zinc-400"
+								/>
+								<span className="shrink-0 text-zinc-400 dark:text-zinc-500">
+									Term:{' '}
+								</span>
+								<span className="min-w-0 truncate">{termName}</span>
 							</p>
 						) : null}
 					</Link>
