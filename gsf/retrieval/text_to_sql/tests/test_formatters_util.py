@@ -81,3 +81,24 @@ def test_prompt_omits_sample_values_when_absent() -> None:
         ]
     )
     assert "sample values" not in rendered
+
+
+def test_prompt_renders_date_format_when_present() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "matches",
+                "database_name": "cricket",
+                "schema_name": "public",
+                "columns": [
+                    {
+                        "name": "Match_Date",
+                        "data_type": "text",
+                        "description": "Date the match was played.",
+                        "format": "YYMMDD",
+                    }
+                ],
+            }
+        ]
+    )
+    assert "format: YYMMDD" in rendered
