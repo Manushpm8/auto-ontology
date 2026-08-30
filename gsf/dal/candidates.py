@@ -31,22 +31,35 @@ from gsf.utils.sample_values import parse_sample_values
 logger = logging.getLogger(__name__)
 
 
-def _normalize_sample_values_in_place(results: dict) -> None:
-    """Normalize each nested column's ``sample_values`` to ``list[str] | None``.
+def _parse_sample_values_key(node: dict) -> None:
+    """Rewrite ``node["sample_values"]`` in place when the key is present."""
+    if "sample_values" in node:
+        node["sample_values"] = parse_sample_values(node["sample_values"])
 
-    The Cypher below returns ``c.sample_values`` as Neo4j stored it, which for
-    a Column that predates the switch to storing a native list may still be a
-    legacy JSON-encoded string (see ``gsf.utils.sample_values``). Callers of
-    ``expand_info`` (SQL-agent prompt formatting) always expect a plain list.
+
+def _normalize_sample_values_in_place(results: dict) -> None:
+    """Normalize every ``sample_values`` in the result map to ``list[str] | None``.
+
+    The Cypher below returns ``sample_values`` as Neo4j stored it, which for a
+    Column that predates the switch to storing a native list is still a legacy
+    JSON-encoded string (see ``gsf.utils.sample_values``). Existing deployments
+    are never backfilled, so both shapes coexist and are parsed on read.
+
+    A Column item carries the property twice: on the item itself (via
+    ``apoc.map.setPairs(properties(n), ...)``) and inside the parent table's
+    ``columns`` list. Both are normalized.
     """
-    for items in results.values():
-        for item in items or []:
+    for value in results.values():
+        # ``apoc.map.groupBy`` maps each id to a single item; tolerate a list in
+        # case a caller passes the grouped-multi shape.
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            _parse_sample_values_key(item)
             for table in item.get("relevant_tables") or []:
                 for column in table.get("columns") or []:
-                    if "sample_values" in column:
-                        column["sample_values"] = parse_sample_values(
-                            column["sample_values"]
-                        )
+                    _parse_sample_values_key(column)
 
 
 def expand_info(ids_and_labels: list | None) -> dict:
