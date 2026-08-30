@@ -659,6 +659,11 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
 def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
     """Write sample_values onto Column nodes for a given table as a native list.
 
+    Values are coerced with ``str()``: Neo4j property arrays must hold
+    homogeneous primitives, and every reader expects ``list[str]`` (see
+    ``gsf.utils.sample_values``). Numeric samples therefore persist as
+    ``["10", "20", "30"]``.
+
     Skips silently when *samples* is empty.
     """
     if not samples:
