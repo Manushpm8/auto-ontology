@@ -50,6 +50,7 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
     get_relevant_tables_from_candidates,
 )
+from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
@@ -96,6 +97,29 @@ _RELEVANCE_FILTER_INCLUDE_COLUMNS = os.environ.get(
 # extra DB round trip, only extra prompt tokens.
 _RELEVANCE_FILTER_MAX_COLS = 25
 
+# Off by default. find_anchor_hub_siblings() pulls in tables that share a
+# hub with the anchor's own table via FK — see its docstring for why. Opt-in
+# via env flag (this deployment's .env sets it to true) so new/other
+# deployments aren't defaulted into the extra Neo4j + embedding-search cost
+# without an explicit choice.
+_HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
+    "HUB_SIBLING_EXPANSION_ENABLED", "false"
+).strip().lower() in ("1", "true", "yes")
+
+# How many siblings per hub survive the cap — see _rank_and_cap_hub_siblings.
+# Raised from 5 (find_anchor_hub_siblings' old built-in default) to 6 after
+# an audit of 28.8's run: capped-out siblings matched a GT-required table in
+# ~30% of truncation events, and re-ranking by embedding score (rather than
+# raising the cap alone) recovered most of those within the *same* cap size —
+# see _rank_and_cap_hub_siblings' docstring.
+_HUB_SIBLING_CAP = int(os.environ.get("HUB_SIBLING_CAP", "6"))
+
+# How many ColumnAttribute hits to pull per entity when scoring hub siblings
+# for the rank — generous relative to per-hub sibling counts (median 2, rare
+# mega-hubs up to ~20) so a sibling several entities down the ranking still
+# has a chance to be seen, without unbounded index-scan cost.
+_HUB_SIBLING_RANK_K = 30
+
 
 def _format_relevance_filter_column(c: dict) -> str:
     name = c.get("name", "")
@@ -120,12 +144,15 @@ def _build_relevance_tables_summary(tables: list[dict]) -> str:
         )
     lines = []
     for t in tables:
-        lines.append(f"- {_qualified_name(t)}: {t.get('description', '(no description)')}")
+        lines.append(
+            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
+        )
         cols = t.get("columns") or []
         if cols:
             lines.append("  Columns:")
             lines.extend(
-                _format_relevance_filter_column(c) for c in cols[:_RELEVANCE_FILTER_MAX_COLS]
+                _format_relevance_filter_column(c)
+                for c in cols[:_RELEVANCE_FILTER_MAX_COLS]
             )
     return "\n".join(lines)
 
@@ -332,9 +359,21 @@ class CandidatePreparationAgent(BaseAgent):
                 # the relevance filter, since it's unreliable at preserving
                 # structurally-connected tables even when given this info.
                 anchor_table_id = anchor_ctx.get("table_id")
-                if anchor_table_id:
-                    hub_sibling_hops, hub_sibling_truncated = find_anchor_hub_siblings(
-                        anchor_table_id
+                if anchor_table_id and _HUB_SIBLING_EXPANSION_ENABLED:
+                    # Uncapped here (max_siblings=None) — capping now happens
+                    # after ranking, in _rank_and_cap_hub_siblings, instead of
+                    # on Neo4j's arbitrary RETURN DISTINCT order.
+                    hub_sibling_hops, _ = find_anchor_hub_siblings(
+                        anchor_table_id, max_siblings=None
+                    )
+                    hub_sibling_hops, hub_sibling_truncated = (
+                        self._rank_and_cap_hub_siblings(
+                            state,
+                            path_state.get("entities") or [],
+                            target_db,
+                            hub_sibling_hops,
+                            cap=_HUB_SIBLING_CAP,
+                        )
                     )
                     if hub_sibling_hops:
                         attribute_join_paths.append({"path": hub_sibling_hops})
@@ -471,7 +510,8 @@ class CandidatePreparationAgent(BaseAgent):
             # Term nodes are global, so without this a shared term name
             # (e.g. "Case") can pull in tables from an unrelated database.
             pairs = [
-                p for p in fetch_term_table_pairs(database_name=target_db)
+                p
+                for p in fetch_term_table_pairs(database_name=target_db)
                 if str(p.get("term_id") or "") == subject_term_id
             ]
             subject_table_ids = list(
@@ -500,9 +540,7 @@ class CandidatePreparationAgent(BaseAgent):
         # — never surface a table the filter was never shown, which would be
         # discovering new information rather than enforcing the filter's own
         # "don't remove a needed bridge" rule.
-        pre_filter_candidate_ids = {
-            t["id"] for t in relevant_tables if t.get("id")
-        }
+        pre_filter_candidate_ids = {t["id"] for t in relevant_tables if t.get("id")}
 
         # --- 5. Filter tables by relevance ---
         relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(
@@ -592,6 +630,106 @@ class CandidatePreparationAgent(BaseAgent):
                 "term_synonyms": term_synonyms,
             }
         }
+
+    def _rank_and_cap_hub_siblings(
+        self,
+        state: AgentState,
+        entities: list[str],
+        target_db: str | None,
+        hub_sibling_hops: list[dict],
+        cap: int,
+    ) -> tuple[list[dict], int]:
+        """Rank a hub's sibling tables by embedding similarity to the
+        question's extracted entities, then cap — replacing
+        ``find_anchor_hub_siblings``'s old behavior of capping in whatever
+        arbitrary order Neo4j's ``RETURN DISTINCT`` happened to return.
+
+        That arbitrary order was a real bug, not just a theoretical one: an
+        audit of a full eval run found that when a hub had more than the cap
+        (siblings dropped), the dropped sibling was the one GT actually
+        needed in ~30% of those events — e.g. a "risk_and_moderation" table
+        losing out to "monitoring" purely because of Neo4j's return order,
+        despite both being plausible siblings of the same "accounts" hub.
+        Re-ranking by embedding score (rather than just raising the cap)
+        recovered most of those within the *same* cap size, since the
+        dropped table was usually still a strong match once actually
+        compared against the question — it just never got the chance.
+
+        Scoring reuses the exact same vector index and per-entity search
+        ``candidate_retrieval`` already runs every turn (``ColumnAttribute``
+        label, same retriever) — no LLM call, and no new embedding calls
+        beyond what this turn already pays for elsewhere; only the
+        request/response size for these specific lookups is new. For each
+        sibling table, its score is the *best* (lowest-distance) hit across
+        all entities among that table's own ColumnAttributes — i.e. "does
+        any extracted entity match any column on this table well" — not a
+        weighted blend across entities, to keep this cheap and legible.
+        The hub itself is never scored or dropped (see
+        ``find_anchor_hub_siblings``'s docstring for why it's always kept).
+
+        Falls back to the prior (unranked, arbitrary-order) cap on any
+        failure — retriever missing, search error, etc. — so this can only
+        ever do as well as or better than the old behavior, never worse.
+
+        Returns ``(kept_hops, truncated_count)`` in the same shape
+        ``find_anchor_hub_siblings`` returns.
+        """
+        hub_entries = [h for h in hub_sibling_hops if h.get("is_hub")]
+        sibling_entries = [h for h in hub_sibling_hops if not h.get("is_hub")]
+
+        def _unranked_fallback() -> tuple[list[dict], int]:
+            kept = sibling_entries[:cap]
+            return hub_entries + kept, len(sibling_entries) - len(kept)
+
+        if len(sibling_entries) <= cap or not entities:
+            return _unranked_fallback()
+
+        retriever = state.get("data_retriever")
+        if retriever is None:
+            return _unranked_fallback()
+
+        sibling_table_ids = {h["id"] for h in sibling_entries if h.get("id")}
+        best_score: dict[str, float] = {}
+        try:
+            for entity in entities:
+                rows = search_semantic_index(
+                    retriever,
+                    entity,
+                    label_filter=["ColumnAttribute"],
+                    per_label_k=_HUB_SIBLING_RANK_K,
+                    database_name=target_db,
+                )
+                attr_ids = [r["id"] for r in rows if r.get("id")]
+                if not attr_ids:
+                    continue
+                ctx = fetch_attr_column_contexts(attr_ids)
+                for r in rows:
+                    c = ctx.get(r.get("id"))
+                    tid = c.get("table_id") if c else None
+                    if tid not in sibling_table_ids:
+                        continue
+                    score = r.get("score")
+                    if score is None:
+                        continue
+                    if tid not in best_score or score < best_score[tid]:
+                        best_score[tid] = score
+        except Exception:
+            self.logger.warning(
+                "Hub-sibling relevance ranking failed — falling back to unranked cap",
+                exc_info=True,
+            )
+            return _unranked_fallback()
+
+        # Siblings with no scored hit at all (never matched any entity)
+        # sort last rather than being dropped outright — they still get a
+        # chance to fill remaining cap slots after scored ones.
+        ranked = sorted(
+            sibling_entries,
+            key=lambda h: best_score.get(h.get("id"), float("inf")),
+        )
+        kept = ranked[:cap]
+        truncated = len(sibling_entries) - len(kept)
+        return hub_entries + kept, truncated
 
     def _retrieve_additional_tables(
         self,

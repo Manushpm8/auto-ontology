@@ -731,7 +731,7 @@ def find_shared_hub_bridge(col_a_id: str, col_b_id: str) -> dict:
 
 
 def find_anchor_hub_siblings(
-    anchor_table_id: str, max_siblings: int = 5
+    anchor_table_id: str, max_siblings: int | None = 6
 ) -> tuple[list[dict], int]:
     """Find tables that share a hub table with *anchor_table_id* via FK.
 
@@ -750,10 +750,19 @@ def find_anchor_hub_siblings(
     add: exactly one verified, single-hop forward FK per distinct hub, not
     proportional to how many siblings reference it.
 
-    Sibling count is capped at *max_siblings* per hub — measured against the
-    live graph, most hubs have few siblings (median 2), but some are genuine
-    mega-hubs (up to 20), and an uncapped expansion would dump a large,
-    low-precision batch of tables into the candidate set for those.
+    Sibling count is capped at *max_siblings* per hub, applied here in
+    Neo4j-return order (arbitrary — no relevance signal). *max_siblings=None*
+    skips capping entirely and returns every sibling; callers that want a
+    relevance-ranked cap (e.g. embedding similarity to the question) should
+    pass ``None`` here and rank+truncate themselves — see
+    ``CandidatePreparationAgent._rank_and_cap_hub_siblings`` for the ranked
+    version used in production, which replaced a blind order-based cap after
+    an audit found it was silently dropping the one relevant sibling in
+    ~30% of truncation events. This function's own cap stays as a safety-net
+    default for any other/future caller that doesn't rank — measured against
+    the live graph, most hubs have few siblings (median 2), but some are
+    genuine mega-hubs (up to 20), and an uncapped expansion would dump a
+    large, low-precision batch of tables into the candidate set for those.
 
     This is a discovery/relevance signal, not a verified join path — it
     does NOT claim the anchor and sibling should be joined directly (they
@@ -820,7 +829,7 @@ def find_anchor_hub_siblings(
             }
         )
         sibs = siblings_by_hub.get(hub_id, [])
-        if len(sibs) > max_siblings:
+        if max_siblings is not None and len(sibs) > max_siblings:
             truncated += len(sibs) - max_siblings
             sibs = sibs[:max_siblings]
         for s in sibs:
