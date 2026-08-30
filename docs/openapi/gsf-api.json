@@ -5641,6 +5641,62 @@
         "x-gsf-proxied": true
       }
     },
+    "/api/value-search": {
+      "post": {
+        "description": "Resolve a described value to the one physical column that stores it, and to\nthe exact stored spelling. Same retrieval capability as chat, so it is gated\non `chat: ['use']`.",
+        "operationId": "post_api_value_search",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValueSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_ValueSearchResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Find Column Value",
+        "tags": ["value-search"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/value-search/route.ts",
+        "x-gsf-permissions": {
+          "chat": ["use"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
     "/api/zones": {
       "get": {
         "description": "zonesApi.getAll — list zones (viewable by all).",
@@ -7345,6 +7401,17 @@
         },
         "required": ["data"],
         "title": "DataResponse[TermExplorationDetails]",
+        "type": "object"
+      },
+      "DataResponse_ValueSearchResult_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ValueSearchResult"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[ValueSearchResult]",
         "type": "object"
       },
       "DataResponse_Zone_": {
@@ -10199,6 +10266,63 @@
         },
         "required": ["loc", "msg", "type"],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "ValueSearchRequest": {
+        "description": "Payload for resolving a described value to one physical column.",
+        "properties": {
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "value": {
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": ["value", "description"],
+        "title": "ValueSearchRequest",
+        "type": "object"
+      },
+      "ValueSearchResult": {
+        "additionalProperties": true,
+        "description": "One physical field and its matching value exactly as stored.",
+        "properties": {
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "title": "ValueSearchResult",
         "type": "object"
       },
       "Zone": {

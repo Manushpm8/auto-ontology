@@ -1379,6 +1379,19 @@
         "title": "DataResponse[Term]",
         "type": "object"
       },
+      "DataResponse_ValueSearchResult_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ValueSearchResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[ValueSearchResult]",
+        "type": "object"
+      },
       "DataResponse_Zone_": {
         "additionalProperties": true,
         "properties": {
@@ -4507,6 +4520,66 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "ValueSearchRequest": {
+        "description": "Payload for resolving a described value to one physical column.",
+        "properties": {
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "value": {
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "description"
+        ],
+        "title": "ValueSearchRequest",
+        "type": "object"
+      },
+      "ValueSearchResult": {
+        "additionalProperties": true,
+        "description": "One physical field and its matching value exactly as stored.",
+        "properties": {
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "title": "ValueSearchResult",
+        "type": "object"
+      },
       "Zone": {
         "additionalProperties": true,
         "description": "A zone with its catalog data items.\n\n``items`` is absent on the list endpoint, a list of ``ZoneItem`` on the\ndetail/update endpoints, and a plain list of the ids that were linked on\ncreate.",
@@ -7407,6 +7480,48 @@
         "summary": "List Term Sql Attributes By Id",
         "tags": [
           "terms"
+        ]
+      }
+    },
+    "/api/value-search": {
+      "post": {
+        "description": "Return the most likely physical field and its exact stored value.",
+        "operationId": "find_column_value_api_value_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValueSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_ValueSearchResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Find Column Value",
+        "tags": [
+          "metadata"
         ]
       }
     },
