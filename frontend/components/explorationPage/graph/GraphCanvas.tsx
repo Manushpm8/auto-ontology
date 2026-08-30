@@ -970,12 +970,11 @@ export const GraphCanvas = ({
 		// rescale the canvas live. `resetExtent` remains the way to bring
 		// it back.
 		const computeStableBBox = (): { x: [number, number]; y: [number, number] } | null => {
-			const source = simNodes;
 			let minX = Infinity;
 			let maxX = -Infinity;
 			let minY = Infinity;
 			let maxY = -Infinity;
-			source.forEach((node) => {
+			simNodes.forEach((node) => {
 				if (node.x == null || node.y == null) return;
 				minX = Math.min(minX, node.x);
 				maxX = Math.max(maxX, node.x);
@@ -1129,7 +1128,7 @@ export const GraphCanvas = ({
 			// of a Term especially, since they're on a short, strong edge.
 			// Isolated drag is what the exploration-page review asked for:
 			// only the grabbed node moves, everyone else stays put. Leaving
-			// `fx`/`fy` set after drop (see `handlePointerUp`) keeps that freeze so
+			// `fx`/`fy` set after drop (see `endDrag`) keeps that freeze so
 			// nothing settles into a new equilibrium the instant the mouse
 			// is released. Newly grafted expansion nodes stay unpinned until
 			// the next drag, so `addExpansion` can still lay them out.
@@ -1153,9 +1152,19 @@ export const GraphCanvas = ({
 			isPanning = true;
 			syncCanvasCursor();
 		};
-		const handlePointerUp = () => {
+		// Single funnel for "the gesture is over": the real `mouseup` plus the
+		// recovery paths below, for releases the page never sees at all.
+		// Idempotent, so calling it spuriously costs nothing.
+		const endDrag = () => {
 			const wasNodeDrag = draggedNode != null;
 			isPanning = false;
+			// Sigma's captor bails out of its own `handleUp` unless
+			// `isMouseDown` is set, and pans the camera on every move while it
+			// stays set. On the recovery paths it never got its `mouseup`
+			// either, so clear it here or the graph slides along with a cursor
+			// that isn't pressing anything. No-op after a real `mouseup`,
+			// which clears the flag before emitting.
+			renderer.getMouseCaptor().isMouseDown = false;
 			if (wasNodeDrag) {
 				// Deliberately leaves every node's `fx`/`fy` set (rather than
 				// nulling the non-dragged ones back out) so the rest of the graph
@@ -1167,6 +1176,16 @@ export const GraphCanvas = ({
 			syncCanvasCursor();
 		};
 		const handleMoveBody = (coords: MouseCoords) => {
+			// Also bound on `document`, so this fires for the move back *into*
+			// the page after a release the page never saw — the button let go
+			// outside the browser window delivers no `mouseup`, and no `blur`
+			// either, since focus never left. No button held while a gesture is
+			// still armed is the earliest available evidence that it ended.
+			const { original } = coords;
+			if ('buttons' in original && original.buttons === 0) {
+				if (draggedNode != null || isPanning) endDrag();
+				return;
+			}
 			if (draggedNode == null) return;
 			const simNode = simNodesById.get(draggedNode);
 			if (!simNode) return;
@@ -1551,7 +1570,15 @@ export const GraphCanvas = ({
 		// a chrome overlay" as a drop cancelled the drag and let the next
 		// move pan the camera, which is the "graph goes weird at the border"
 		// bug.
-		renderer.getMouseCaptor().on('mouseup', handlePointerUp);
+		renderer.getMouseCaptor().on('mouseup', endDrag);
+		// Alt-tabbing mid-gesture (or anything else that pulls focus away:
+		// devtools, an OS dialog) means the eventual release lands in another
+		// window and no `mouseup` ever reaches the captor. Without this, a node
+		// drag leaves `enabledPanning` `false` for the rest of the component's
+		// life, and a stage pan leaves `isPanning` — hence a "grabbing" cursor
+		// — stuck the same way.
+		const handleWindowBlur = () => endDrag();
+		window.addEventListener('blur', handleWindowBlur);
 		renderer.getCamera().on('updated', handleCameraUpdated);
 
 		// The graph starts from a random scatter (see `buildGraphologyGraph`
@@ -1646,10 +1673,6 @@ export const GraphCanvas = ({
 			getCamera: () => renderer.getCamera(),
 			refresh: () => renderer.refresh(),
 			resetExtent: () => {
-				// Deliberately `renderer.getBBox()` (the live extent over *every*
-				// node) rather than `computeStableBBox()` above, which excludes
-				// pinned nodes on purpose — here a dragged/pinned node going
-				// off-frame is exactly the case this exists to recover from.
 				renderer.setCustomBBox(renderer.getBBox());
 				renderer.refresh();
 			},
@@ -1662,6 +1685,7 @@ export const GraphCanvas = ({
 			window.clearTimeout(centerTimeout);
 			if (bboxAnimationFrame != null) cancelAnimationFrame(bboxAnimationFrame);
 			colorSchemeQuery.removeEventListener('change', handleColorSchemeChange);
+			window.removeEventListener('blur', handleWindowBlur);
 			resizeObserver.disconnect();
 			onControllerChange(null);
 			onHoverNode(null);
