@@ -25,6 +25,19 @@ from gsf.connectors.sqlite import SQLiteDatabase
 
 logger = logging.getLogger(__name__)
 
+# Every connector here MUST expose a ``dialect`` that sqlglot recognises
+# (one of ``sqlglot.dialects.DIALECTS``). Callers pass ``connector.dialect``
+# straight into ``sqlglot.parse_one(read=...)`` / ``Expression.sql(dialect=...)``
+# with no translation layer in between, and sqlglot raises on an unknown
+# dialect *name* before it ever looks at the SQL — so a bad name is a hard
+# error, not a silent fall back to the generic parser.
+#
+# An engine sqlglot has no dialect for must map itself onto the closest one it
+# does have; see ``HeavyDBDatabase.dialect``, which reports ``"postgres"``.
+# ``test_registry_dialects.py`` enforces this.
+#
+# Note the keys below are connection-string schemes, NOT dialects: ``postgresql``,
+# ``heavydb`` and ``kyuubi`` are valid keys but none is a sqlglot dialect name.
 CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "postgres": PostgresDatabase,
     "postgresql": PostgresDatabase,
