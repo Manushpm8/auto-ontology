@@ -361,18 +361,21 @@ _fast_llm = None
 def _get_llm():
     global _llm
     if _llm is None:
-        from gsf.retrieval.text_to_sql.main import llm_client
+        from gsf.utils.llm_invoke import get_llm_client
 
-        _llm = llm_client
+        _llm = get_llm_client()
     return _llm
 
 
 def _get_fast_llm():
     global _fast_llm
     if _fast_llm is None:
-        from gsf.retrieval.text_to_sql.main import non_reasoning_llm_client
+        from gsf.utils.llm_invoke import get_non_reasoning_llm_client
 
-        _fast_llm = non_reasoning_llm_client or _get_llm()
+        try:
+            _fast_llm = get_non_reasoning_llm_client(max_tokens=2048)
+        except (ValueError, EnvironmentError):
+            _fast_llm = _get_llm()
     return _fast_llm
 
 

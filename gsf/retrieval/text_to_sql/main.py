@@ -212,6 +212,7 @@ def get_agent_response(payload: TextToSQLPayload) -> dict:
 
 def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
     """Like get_agent_response but also returns path_state in the result under key 'path_state'."""
+    # Required by gsf/retrieval/interactive/coordinator.py to persist path_state across turns/phases.
     state = _build_state(payload)
     final_state = dict(state)
 
