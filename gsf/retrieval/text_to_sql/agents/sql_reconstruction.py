@@ -119,7 +119,9 @@ def _format_known_columns(
     column is "quote_depth_snapshot"). Terse by design — this is a repair
     prompt, not the first-pass generation prompt.
     """
-    column_lines, hop_lines = _collect_known_columns(primary_attribute, attribute_join_paths)
+    column_lines, hop_lines = _collect_known_columns(
+        primary_attribute, attribute_join_paths
+    )
     if not column_lines and not hop_lines:
         return ""
 
@@ -156,7 +158,9 @@ def _format_known_columns_for_classification(
     "fixable" even when the resolution itself picked the wrong table/column
     and a real missing_data rediscovery is needed.
     """
-    column_lines, hop_lines = _collect_known_columns(primary_attribute, attribute_join_paths)
+    column_lines, hop_lines = _collect_known_columns(
+        primary_attribute, attribute_join_paths
+    )
     if not column_lines and not hop_lines:
         return ""
 
@@ -195,7 +199,7 @@ def _format_known_columns_for_classification(
 # Postgres-specific error text; other dialects just won't match (fails safe),
 # could be generalized with per-dialect patterns later.
 _NUMERIC_FORMAT_CAST_ERROR_RE = re.compile(
-    r'invalid input syntax for type (?:numeric|double precision|integer|bigint):'
+    r"invalid input syntax for type (?:numeric|double precision|integer|bigint):"
     r'\s*"[^"]*(?:%|\$|USD|EUR|GBP)[^"]*"',
     re.IGNORECASE,
 )
@@ -205,63 +209,6 @@ def _is_numeric_format_cast_error(error: str) -> bool:
     """Whether ``error`` is a Postgres cast failure on a %/currency-formatted
     string value (see ``_NUMERIC_FORMAT_CAST_ERROR_RE``)."""
     return bool(_NUMERIC_FORMAT_CAST_ERROR_RE.search(error or ""))
-
-
-# Postgres' "column <alias>.<col> does not exist" — the identifiers are
-# sometimes double-quoted (mixed-case columns), sometimes not.
-# Postgres-specific error text; other dialects just won't match (fails safe),
-# could be generalized with per-dialect patterns later.
-_UNDEFINED_COLUMN_RE = re.compile(
-    r'column\s+"?([A-Za-z_][\w]*)"?\."?([A-Za-z_][\w]*)"?\s+does not exist',
-    re.IGNORECASE,
-)
-# Postgres' own "Perhaps you meant..." suggestion, when it has one — captures
-# just the alias half, since that's all that matters for deciding whether the
-# suggestion points back at the same table or somewhere else entirely.
-_UNDEFINED_COLUMN_HINT_RE = re.compile(
-    r'perhaps you meant[^"\n]*"?([A-Za-z_][\w]*)"?\.', re.IGNORECASE
-)
-
-
-def _find_stuck_table(
-    failed_attempts: list[dict], current_error: str, min_repeats: int = 2
-) -> dict[str, Any] | None:
-    """Detect a reconstruction chain stuck guessing column names on the same
-    table: the current error is an ``UndefinedColumn`` on some alias, and
-    that same alias has already failed the same way at least
-    ``min_repeats - 1`` times before in this chain — with Postgres never once
-    suggesting a real column on that *same* alias (a same-alias hint means
-    it's plausibly converging via a case/spelling fix, not stuck; a hint
-    pointing at a *different* alias is actually corroborating evidence the
-    current table is wrong, not a reason to hold off).
-
-    Returns ``{"alias", "attempted_columns"}`` for the stuck alias, or
-    ``None`` when nothing qualifies (including when the current error isn't
-    an UndefinedColumn at all, or when a same-alias hint has appeared).
-    """
-    current_match = _UNDEFINED_COLUMN_RE.search(current_error or "")
-    if current_match is None:
-        return None
-    alias = current_match.group(1)
-
-    all_errors = [a.get("error", "") for a in failed_attempts] + [current_error]
-    attempted_columns: list[str] = []
-    hits = 0
-    for err in all_errors:
-        match = _UNDEFINED_COLUMN_RE.search(err or "")
-        if match is None or match.group(1).lower() != alias.lower():
-            continue
-        hint_match = _UNDEFINED_COLUMN_HINT_RE.search(err or "")
-        if hint_match is not None and hint_match.group(1).lower() == alias.lower():
-            return None  # plausibly converging on this same table — not stuck
-        hits += 1
-        col = match.group(2)
-        if col.lower() not in (c.lower() for c in attempted_columns):
-            attempted_columns.append(col)
-
-    if hits < min_repeats:
-        return None
-    return {"alias": alias, "attempted_columns": attempted_columns}
 
 
 class ErrorType(str, Enum):
@@ -330,32 +277,6 @@ wrong column reference, wrong aggregation, bad logic, etc.). Leave \
 search_queries empty."""
 
 
-_STUCK_TABLE_SEARCH_PROMPT_TEMPLATE = """\
-You are looking for the correct table/column to answer part of a SQL query, \
-after repeated failed guesses on one table.
-
-Question the user asked:
-"{question}"
-
-The query needs a value for this part of the SQL, currently attempted \
-against table alias "{alias}":
-{error_context}
-
-Column names already tried on "{alias}" and confirmed NOT to exist there: \
-{attempted_columns}. Postgres never suggested a close real-column match on \
-"{alias}" itself for any of these — "{alias}" is very likely NOT the right \
-source table for this value (it may have been filtered out earlier as \
-"not relevant" and that judgment may have been wrong for this specific need).
-
-Tables currently available:
-{table_summary}
-{known_columns_section}
-Write 2-4 targeted semantic search queries to find the actual table/column \
-that holds this specific value — describe the concept/entity/relationship \
-itself (e.g. what the value represents in the question), not SQL syntax, \
-and not another guess at a column name on "{alias}"."""
-
-
 # ------------------------------------------------------------------
 # Agent
 # ------------------------------------------------------------------
@@ -378,9 +299,7 @@ class SQLReconstructionAgent(BaseAgent):
             return False
         return True
 
-    def _format_attempt_history(
-        self, attempts: list[dict], *, label: str
-    ) -> list[str]:
+    def _format_attempt_history(self, attempts: list[dict], *, label: str) -> list[str]:
         """Render past ``{"sql", "error"}`` attempts as numbered prompt lines."""
         lines: list[str] = []
         for i, attempt in enumerate(attempts, 1):
@@ -449,75 +368,6 @@ class SQLReconstructionAgent(BaseAgent):
                 explanation="LLM analysis returned None — defaulting to fixable.",
             )
         return result
-
-    def _targeted_missing_data_search(
-        self,
-        state: AgentState,
-        question: str,
-        error_context: str,
-        existing_tables: list[dict],
-        stuck: dict[str, Any],
-    ) -> ErrorAnalysis:
-        """Root-cause is already known (``_find_stuck_table`` detected the
-        same table alias repeatedly failing with no self-alias hint) — skip
-        the generic classification call entirely and go straight to a
-        search-query-generation prompt seeded with that diagnosis, instead
-        of asking the LLM to re-derive "this table is probably wrong" from
-        the raw error text alone. Same call count as the generic path (one
-        LLM call), just replacing a generic diagnosis with a targeted one.
-        """
-        llm = state["llm"]
-        path_state = state["path_state"]
-
-        table_summary = (
-            ", ".join(t.get("name", "?") for t in existing_tables) or "(none)"
-        )
-        known_columns_section = _format_known_columns_for_classification(
-            path_state.get("primary_attribute"),
-            path_state.get("attribute_join_paths"),
-        )
-
-        prompt = _STUCK_TABLE_SEARCH_PROMPT_TEMPLATE.format(
-            question=question,
-            alias=stuck["alias"],
-            error_context=error_context,
-            attempted_columns=", ".join(stuck["attempted_columns"]),
-            table_summary=table_summary,
-            known_columns_section=known_columns_section,
-        )
-
-        result = invoke_with_structured_output(
-            llm,
-            [SystemMessage(content=prompt)],
-            ErrorAnalysis,
-        )
-
-        if result is None or not result.search_queries:
-            # Even without search queries this is still a confident
-            # missing_data verdict — fall back to the attempted column
-            # names themselves as search terms rather than losing the
-            # diagnosis entirely.
-            return ErrorAnalysis(
-                error_type=ErrorType.MISSING_DATA,
-                search_queries=[
-                    f"{question} — {col}" for col in stuck["attempted_columns"]
-                ],
-                explanation=(
-                    f'Table "{stuck["alias"]}" failed {len(stuck["attempted_columns"])} '
-                    f"distinct column guesses with no Postgres hint ever pointing "
-                    f"back at it — likely the wrong table for this value."
-                ),
-            )
-        return ErrorAnalysis(
-            error_type=ErrorType.MISSING_DATA,
-            search_queries=result.search_queries,
-            explanation=result.explanation
-            or (
-                f'Table "{stuck["alias"]}" failed {len(stuck["attempted_columns"])} '
-                f"distinct column guesses with no Postgres hint ever pointing "
-                f"back at it — likely the wrong table for this value."
-            ),
-        )
 
     # ------------------------------------------------------------------
     # VDB discovery (MISSING_DATA path)
@@ -645,54 +495,6 @@ class SQLReconstructionAgent(BaseAgent):
             interpretation_history.append(previous_thought)
         path_state["interpretation_history"] = interpretation_history
 
-        # --- Step 0: Deterministic stuck-table detection (every cycle) ---
-        # Runs independently of the "once per chain" gate below: the normal
-        # classifier only ever sees the FIRST error of a reconstruction
-        # chain, so a table that only reveals itself as a dead end after
-        # several *later* cycles (a different wrong column guessed each
-        # time) never gets a second look — see _find_stuck_table's
-        # docstring. This check re-examines every cycle's error against the
-        # accumulated history, and — since the diagnosis is unambiguous by
-        # construction (same alias, repeated UndefinedColumn, no self-alias
-        # hint) — skips the LLM classification call entirely and goes
-        # straight to a targeted table search. Fires at most once per alias
-        # (stuck_table_discovery_done), so a table that's still wrong after
-        # discovery doesn't retrigger the same search every subsequent cycle.
-        stuck = _find_stuck_table(path_state.get("failed_attempts") or [], error)
-        already_tried = set(path_state.get("stuck_table_discovery_done") or [])
-        if stuck is not None and stuck["alias"].lower() not in already_tried:
-            already_tried.add(stuck["alias"].lower())
-            path_state["stuck_table_discovery_done"] = list(already_tried)
-            path_state["error_analysis_done"] = True
-            path_state["error_type"] = ErrorType.MISSING_DATA.value
-
-            error_context = f"Actual validation/execution error: {error}"
-            analysis = self._targeted_missing_data_search(
-                state, question_block, error_context, relevant_tables, stuck
-            )
-            self.logger.info(
-                "[stuck-table] %s repeated UndefinedColumn on alias %r "
-                "(tried: %s) with no self-alias hint — forcing missing_data, "
-                "skipping LLM classification: %s",
-                path_state.get("task_id", "?"),
-                stuck["alias"],
-                stuck["attempted_columns"],
-                analysis.explanation[:150],
-            )
-            if analysis.explanation:
-                record_thought(path_state, self.agent_name, analysis.explanation)
-            if analysis.search_queries:
-                new_tables = self._discover_tables(
-                    state, analysis.search_queries, relevant_tables
-                )
-                if new_tables:
-                    relevant_tables = self._merge_tables(relevant_tables, new_tables)
-                    self.logger.info(
-                        "[stuck-table] Tables after targeted discovery: %d (%s)",
-                        len(relevant_tables),
-                        [t["name"] for t in relevant_tables],
-                    )
-
         # --- Step 1: Classify the error (once per reconstruction chain) ---
         if not path_state.get("error_analysis_done"):
             path_state["error_analysis_done"] = True
@@ -776,7 +578,9 @@ class SQLReconstructionAgent(BaseAgent):
             path_state.get("phase1_failed_attempts") or []
         )
         history_lines = [
-            *self._format_attempt_history(phase1_failed_attempts, label="Phase 1 attempt"),
+            *self._format_attempt_history(
+                phase1_failed_attempts, label="Phase 1 attempt"
+            ),
             *self._format_attempt_history(failed_attempts[:-1], label="Attempt"),
         ]
         if history_lines:

@@ -140,11 +140,6 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
     # out) gets zero path-check coverage instead of the one fresh pass every
     # other repair guard below already gets. "join_path_repair_attempts" is
     # the analogous counter for JoinPathCheckAgent — same reasoning.
-    # "stuck_table_discovery_done" is _find_stuck_table's per-alias one-shot
-    # guard (sql_reconstruction.py) — same "stays true forever unless popped"
-    # shape as the other guards above, so it needs the same reset or a debug
-    # turn hitting the same stuck-alias pattern silently loses the targeted
-    # search and falls back to the generic (first-error-only) classifier.
     # "value_repair_attempted" (proactive_value_check.py, empty_result_value_repair.py),
     # "null_jsonb_retry_attempted", and "empty_like_retry_attempted"
     # (empty_like_result_check.py) are the same one-shot-per-phase shape —
@@ -154,7 +149,6 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
         "failed_attempts",
         "jsonb_path_repair_attempted",
         "join_path_repair_attempts",
-        "stuck_table_discovery_done",
         "value_repair_attempted",
         "null_jsonb_retry_attempted",
         "empty_like_retry_attempted",
@@ -189,7 +183,6 @@ def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> Non
         "failed_attempts",
         "jsonb_path_repair_attempted",
         "join_path_repair_attempts",
-        "stuck_table_discovery_done",
         "value_repair_attempted",
         "null_jsonb_retry_attempted",
         "empty_like_retry_attempted",
