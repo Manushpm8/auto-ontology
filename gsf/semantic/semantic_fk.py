@@ -363,7 +363,9 @@ def _match_hit_by_sample_values(
 def _distinct_samples(raw: Any) -> list[str]:
     """Parse, deduplicate, and preserve the order of stored sample values."""
     values = parse_sample_values(raw) or []
-    return list(dict.fromkeys(value for value in values if value is not None))
+    return list(
+        dict.fromkeys(str(value) for value in values if value is not None)
+    )
 
 
 def _sample_match_sql(
@@ -389,7 +391,9 @@ def _sample_match_sql(
         .distinct()
         .from_(table)
         .where(
-            text_column.copy().isin(*(exp.Literal.string(value) for value in samples))
+            text_column.copy().isin(
+                *(exp.Literal.string(str(value)) for value in samples)
+            )
         )
         .limit(len(samples))
     )

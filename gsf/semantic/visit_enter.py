@@ -7,6 +7,8 @@ import threading
 import time
 from collections import defaultdict
 from contextlib import contextmanager
+from datetime import date, datetime, time as dt_time
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Iterator
 
 from sqlglot import exp
@@ -134,20 +136,83 @@ def _quoted_identifier(name: str, dialect: str | None) -> str:
         return '"' + name.replace('"', '""') + '"'
 
 
+def _json_ready_sample(value: Any) -> Any:
+    """Convert a live DB value to a JSON-serializable Python scalar or container.
+
+    Numpy/pandas scalars become native ``int`` / ``float`` / ``bool``; nested
+    arrays and objects are converted recursively. Types JSON cannot represent
+    (``Decimal``, ``datetime``) are reduced to number / ISO string so
+    ``json.dumps`` in ``store_column_sample_values`` succeeds.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dt_time):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_ready_sample(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready_sample(v) for v in value]
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            converted = item()
+        except (ValueError, AttributeError):
+            converted = value
+        else:
+            if converted is not value:
+                return _json_ready_sample(converted)
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        try:
+            return _json_ready_sample(tolist())
+        except (ValueError, AttributeError, TypeError):
+            pass
+    return value
+
+
+def _sample_key(value: Any) -> str:
+    """Stable string key for grouping equal sample values."""
+    return str(value)
+
+
+def _keep_persisted_sample(value: Any) -> bool:
+    """Drop overlong *string* samples; non-strings are kept as-is."""
+    if isinstance(value, str):
+        return len(value) <= _MAX_SAMPLE_VALUE_LEN
+    return True
+
+
 def _distinct_values_if_low_cardinality(
     connector: "SQLDatabase",
     qualified: str,
     col_name: str,
     cap: int,
-) -> list[str] | None:
+) -> list[Any] | None:
     """Return the full distinct value set for a low-cardinality column.
 
     Runs ``SELECT DISTINCT <col> ... LIMIT cap + 1``. Returns the distinct
-    values (as strings) when the column has at most *cap* distinct non-null
-    values; returns ``None`` for high-cardinality columns (more than *cap*
-    distinct values) or on any error, so the caller falls back to the
-    most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
-    huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
+    values (JSON-ready native types) when the column has at most *cap*
+    distinct non-null values; returns ``None`` for high-cardinality columns
+    (more than *cap* distinct values) or on any error, so the caller falls
+    back to the most-common-values behaviour. The ``LIMIT`` keeps the probe
+    cheap even on huge, high-cardinality columns (the scan stops after
+    cap + 1 distinct rows).
     """
     quoted = _quoted_identifier(col_name, getattr(connector, "dialect", None))
     try:
@@ -159,7 +224,7 @@ def _distinct_values_if_low_cardinality(
         return None
     if df is None or df.empty:
         return None
-    values = [str(v) for v in df.iloc[:, 0].tolist()]
+    values = [_json_ready_sample(v) for v in df.iloc[:, 0].tolist()]
     if len(values) > cap:
         return None
     return values
@@ -184,6 +249,8 @@ def calculate_columns_profiling(
     sources such as SQLite store dates as TEXT — and ``sample_values`` for
     every column except those with a date format or a declared date/time/uuid
     type (individual string values longer than 30 chars are dropped).
+    Persisted samples keep their JSON-native types (int, float, bool, string,
+    nested list/object); they are not stringified.
 
     Returns ``{column_name: {"sample_values": [...], "is_unique": bool,
     "format": str | None}}`` for *all* columns (values unfiltered —
@@ -224,13 +291,22 @@ def calculate_columns_profiling(
     for column in df.columns:
         col_name = str(column)
         try:
-            # Cast to string first: some columns hold unhashable values (e.g.
-            # Postgres array columns come back as Python lists, JSON/JSONB as
-            # dict/list), and both is_unique and value_counts hash values.
-            series = df[column].dropna().map(str)
+            dropped = df[column].dropna()
+            # Hash uniqueness / value_counts on strings: Postgres array and
+            # JSON/JSONB columns come back as Python lists/dicts, which are
+            # unhashable. Map those string keys back to the original values
+            # so persisted samples keep their true types.
+            str_series = dropped.map(_sample_key)
+            original_by_key: dict[str, Any] = {}
+            for original, key in zip(dropped, str_series):
+                if key not in original_by_key:
+                    original_by_key[key] = _json_ready_sample(original)
 
-            is_unique = bool(len(series) > 0 and series.is_unique)
-            top5 = list(series.value_counts().head(_PROFILING_TOP_N).index)
+            is_unique = bool(len(str_series) > 0 and str_series.is_unique)
+            top5 = [
+                original_by_key[key]
+                for key in str_series.value_counts().head(_PROFILING_TOP_N).index
+            ]
         except Exception:
             logger.warning(
                 "[%s] profiling failed for column %r — skipping column",
@@ -269,7 +345,7 @@ def calculate_columns_profiling(
         # declared type alone misses them: infer from the values as well, which
         # only yields a format when every sampled value shares one notation.
         date_format = (
-            infer_date_format(series)
+            infer_date_format(str_series)
             if is_date_type(declared_type) or _is_text_sample_type(declared_type)
             else None
         )
@@ -285,7 +361,7 @@ def calculate_columns_profiling(
 
         if _is_excluded_sample_type(declared_type) or date_format:
             continue
-        filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
+        filtered = [v for v in col_values if _keep_persisted_sample(v)]
         if filtered:
             sample_values[col_name] = filtered
 

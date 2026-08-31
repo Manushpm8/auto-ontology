@@ -90,6 +90,11 @@ def test_calculate_columns_profiling_unhashable_values(
     assert result["tags"]["is_unique"] is False  # ["a","b"] repeated
     assert result["meta"]["is_unique"] is True
     assert result["id"]["is_unique"] is True
+    assert result["id"]["sample_values"] == [1, 2]
+    assert result["tags"]["sample_values"] == [["a", "b"]]
+    stored = mock_store_samples.call_args[0][1]
+    assert stored["id"] == [1, 2]
+    assert stored["tags"] == [["a", "b"]]
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")
@@ -160,6 +165,8 @@ def test_calculate_columns_profiling(
     assert "created_at" not in stored
     assert "token" not in stored
     assert stored["status"][0] == "open"
+    assert set(stored["id"]) == {1, 2, 3, 4}
+    assert all(type(v) is int for v in stored["id"])
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")
@@ -202,6 +209,43 @@ def test_calculate_columns_profiling_distinct_only_when_under_top_n(
     assert "banned" in result["status"]["sample_values"]
     assert "open" in result["status"]["sample_values"]
     assert "closed" in result["status"]["sample_values"]
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_preserves_scalar_types(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    df = pd.DataFrame(
+        {
+            "count": [1, 1, 2],
+            "amount": [1.5, 2.5, 1.5],
+            "active": [True, False, True],
+        }
+    )
+    connector = MagicMock()
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {"name": "count", "data_type": "integer"},
+        {"name": "amount", "data_type": "float"},
+        {"name": "active", "data_type": "boolean"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    stored = mock_store_samples.call_args[0][1]
+    assert stored["count"][0] == 1
+    assert all(type(v) is int for v in stored["count"])
+    assert stored["amount"][0] == 1.5
+    assert all(type(v) is float for v in stored["amount"])
+    assert stored["active"][0] is True
+    assert all(type(v) is bool for v in stored["active"])
+    assert result["count"]["sample_values"][0] == 1
 
 
 @patch("gsf.semantic.visit_enter.merge_column_attribute")
