@@ -13,7 +13,7 @@ from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
 from gsf.utils.model_config import resolve
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import stringify_sample_values
 from gsf.vdb import get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
 
@@ -221,10 +221,7 @@ def embed_all_semantic_nodes(
 
 def _format_sample_values(raw: Any) -> str:
     """Return a ' Sample values: ...' suffix string, or empty string if unavailable."""
-    values = parse_sample_values(raw)
-    if not values:
-        return ""
-    values = [v for v in values if len(v) <= 30]
+    values = stringify_sample_values(raw, max_len=30)
     if not values:
         return ""
     return " Sample values: " + ", ".join(values) + "."

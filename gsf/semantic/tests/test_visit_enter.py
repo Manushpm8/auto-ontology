@@ -145,6 +145,10 @@ def test_calculate_columns_profiling_unhashable_values(
     assert result["tags"]["sample_values"] == [["a", "b"]]
     assert result["meta"]["sample_values"] == [{"k": 1}, {"k": 2}]
 
+    stored = mock_store_samples.call_args[0][1]
+    assert stored["id"] == [1, 2]
+    assert stored["tags"] == [["a", "b"]]
+
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")
 @patch("gsf.semantic.visit_enter.store_column_uniqueness")
@@ -215,6 +219,7 @@ def test_calculate_columns_profiling(
     assert "token" not in stored
     assert stored["status"][0] == "open"
     assert stored["id"] == [1, 2, 3, 4]
+    assert all(type(v) is int for v in stored["id"])
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")

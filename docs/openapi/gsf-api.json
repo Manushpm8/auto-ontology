@@ -7769,7 +7769,7 @@
       },
       "ForeignKeyRef": {
         "additionalProperties": true,
-        "description": "One foreign-key column pair behind an exploration edge.\n\n``source_column`` always names a column on the edge's ``source``. The\nsample values are normalized through ``parse_sample_values`` before\nreaching this model, so both legacy (JSON-string) and current (native\nlist) Column storage shapes collapse to a plain string list.",
+        "description": "One foreign-key column pair behind an exploration edge.\n\n``source_column`` always names a column on the edge's ``source``. The\nsample values are rendered through ``stringify_sample_values`` before\nreaching this model, so legacy (JSON-string) and current (typed native\narray) Column storage shapes collapse to a plain string list.",
         "properties": {
           "source_column": {
             "anyOf": [

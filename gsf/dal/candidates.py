@@ -25,7 +25,7 @@ from gsf.semantic.constants import (
     LABEL_TERM,
     REL_PROPERTY_OF,
 )
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import stringify_sample_values
 
 
 logger = logging.getLogger(__name__)
@@ -34,16 +34,17 @@ logger = logging.getLogger(__name__)
 def _parse_sample_values_key(node: dict) -> None:
     """Rewrite ``node["sample_values"]`` in place when the key is present."""
     if "sample_values" in node:
-        node["sample_values"] = parse_sample_values(node["sample_values"])
+        node["sample_values"] = stringify_sample_values(node["sample_values"])
 
 
 def _normalize_sample_values_in_place(results: dict) -> None:
     """Normalize every ``sample_values`` in the result map to ``list[str] | None``.
 
-    The Cypher below returns ``sample_values`` as Neo4j stored it, which for a
-    Column that predates the switch to storing a native list is still a legacy
-    JSON-encoded string (see ``gsf.utils.sample_values``). Existing deployments
-    are never backfilled, so both shapes coexist and are parsed on read.
+    The Cypher below returns ``sample_values`` as Neo4j stored it: a typed
+    native array, or a legacy JSON-encoded string on Columns that predate the
+    switch to arrays (see ``gsf.utils.sample_values``). Existing deployments
+    are never backfilled, so both shapes coexist and are rendered on read —
+    the candidate context this feeds ends up in a prompt as text.
 
     A Column item carries the property twice: on the item itself (via
     ``apoc.map.setPairs(properties(n), ...)``) and inside the parent table's

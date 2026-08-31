@@ -377,9 +377,9 @@ class ForeignKeyRef(ApiModel):
     """One foreign-key column pair behind an exploration edge.
 
     ``source_column`` always names a column on the edge's ``source``. The
-    sample values are normalized through ``parse_sample_values`` before
-    reaching this model, so both legacy (JSON-string) and current (native
-    list) Column storage shapes collapse to a plain string list.
+    sample values are rendered through ``stringify_sample_values`` before
+    reaching this model, so legacy (JSON-string) and current (typed native
+    array) Column storage shapes collapse to a plain string list.
     """
 
     source_column: str | None = None

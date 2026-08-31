@@ -12,7 +12,7 @@ from gsf.utils.llm_invoke import (
     get_non_reasoning_llm_client,
     invoke_with_structured_output,
 )
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import stringify_sample_values
 from gsf.semantic.models import FkAndPkResult, PotentialFkResult, PotentialFkSuggestion
 
 logger = logging.getLogger(__name__)
@@ -73,11 +73,10 @@ def _candidate_columns(
 
 def _format_sample_values(raw: Any) -> str:
     """Return a 'samples: ...' string filtered to ≤30-char values, or empty."""
-    values = parse_sample_values(raw)
+    values = stringify_sample_values(raw, max_len=30)
     if not values:
         return ""
-    values = [v for v in values if len(v) <= 30]
-    return ("samples: " + ", ".join(values)) if values else ""
+    return "samples: " + ", ".join(values)
 
 
 def _format_column_line(col: dict[str, Any], is_unique: bool | None = None) -> str:

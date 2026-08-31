@@ -40,7 +40,7 @@ from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_BRIDGE,
 )
 from gsf.utils.join_columns import parse_join_columns
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import as_neo4j_property_array, stringify_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -573,7 +573,7 @@ def fetch_columns_for_table(
         return None
     table = rows[0]
     for column in table.get("columns") or []:
-        column["sample_values"] = parse_sample_values(column.get("sample_values"))
+        column["sample_values"] = stringify_sample_values(column.get("sample_values"))
     return table
 
 
@@ -659,22 +659,26 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
     }
 
 
-def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
+def store_column_sample_values(table_id: str, samples: dict[str, list[Any]]) -> None:
     """Write sample_values onto Column nodes for a given table as a native list.
 
-    Values are coerced with ``str()``: Neo4j property arrays must hold
-    homogeneous primitives, and every reader expects ``list[str]`` (see
-    ``gsf.utils.sample_values``). Numeric samples therefore persist as
-    ``["10", "20", "30"]``.
+    Values keep the type profiling reported, so a numeric column persists as
+    ``[10, 20, 30]`` and readers can tell it from a text column holding
+    ``["10", "20", "30"]``. A column of containers persists as JSON text and a
+    column of disagreeing types is left unwritten (see
+    ``as_neo4j_property_array``) rather than written empty.
 
     Skips silently when *samples* is empty.
     """
     if not samples:
         return
     entries = [
-        {"column_name": col, "sample_values": [str(v) for v in vals]}
+        {"column_name": col, "sample_values": storable}
         for col, vals in samples.items()
+        if (storable := as_neo4j_property_array(vals))
     ]
+    if not entries:
+        return
     graph().query_write(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
@@ -781,9 +785,9 @@ def fetch_tables_and_columns_by_node_ids(
         # `sample_values` may still be a legacy JSON string for columns that
         # predate the switch to storing a native Neo4j list — normalize before
         # handing the frame to TabularFetchEmbeddingsOp, which slices it
-        # assuming a real list.
+        # assuming a real list and renders it into embedding text.
         columns_df["sample_values"] = columns_df["sample_values"].apply(
-            parse_sample_values
+            stringify_sample_values
         )
     tables_df = pd.DataFrame(
         conn.query_read(

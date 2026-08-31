@@ -64,7 +64,7 @@ from gsf.server.model_interchange.schemas import (
 )
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
 from gsf.utils.join_columns import dump_join_columns, parse_join_columns
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import as_neo4j_property_array, parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -458,6 +458,8 @@ def _assemble_databases(
             },
         )
         if row.get("column_id"):
+            # Typed, not rendered: the exported document is re-importable, so
+            # an integer column has to leave as numbers to come back as numbers.
             sample_values = parse_sample_values(row.get("sample_values")) or []
             table_entry["columns"].append(
                 ModelColumn(
@@ -1224,7 +1226,13 @@ def _import_catalog(
                                 "name": column.name,
                                 "description": column.description,
                                 "data_type": column.type,
-                                "sample_values": column.sample_values or None,
+                                # An imported document is untrusted input, so it
+                                # gets the same narrowing a profiled column does
+                                # — a Neo4j property array cannot hold a mix.
+                                "sample_values": as_neo4j_property_array(
+                                    column.sample_values
+                                )
+                                or None,
                                 "is_unique": column.is_unique,
                                 "is_nullable": column.is_nullable,
                                 "ordinal_position": ordinal,

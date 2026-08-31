@@ -79,6 +79,26 @@ def merge_column_attribute(
     return rows[0]["id"] if rows else None
 
 
+def fetch_column_attribute_column(attr_id: str) -> dict[str, Any] | None:
+    """Return ``{id, data_type}`` of the Column owning a ColumnAttribute.
+
+    ``None`` when the attribute is missing or has no owning Column. Read on
+    its own, ahead of ``update_column_attribute``, so a sample-value edit can
+    be refused against the Column's declared type before any metadata is
+    written (see ``gsf.server.terms.service.update_column_attribute``).
+    """
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
+              (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: $attr_id}})
+        RETURN col.id AS id, col.data_type AS data_type
+        LIMIT 1
+        """,
+        {"attr_id": attr_id},
+    )
+    return dict(rows[0]) if rows else None
+
+
 def update_column_attribute(
     attr_id: str,
     term_id: str,

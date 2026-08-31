@@ -38,7 +38,7 @@ from gsf.utils.llm_invoke import (
     invoke_with_structured_output,
 )
 from gsf.utils.model_config import resolve
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import stringify_sample_values
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
 
@@ -222,10 +222,7 @@ def _build_query_text(col: dict[str, Any]) -> str:
 
 def _format_sample_values(raw: Any) -> str:
     """Return a 'sample_values: ...' string, or empty when unavailable."""
-    values = parse_sample_values(raw)
-    if not values:
-        return ""
-    values = [v for v in values if len(v) <= 30]
+    values = stringify_sample_values(raw, max_len=30)
     if not values:
         return ""
     return "sample_values: " + ", ".join(values)
@@ -351,8 +348,13 @@ def _match_hit_by_sample_values(
 
 
 def _distinct_samples(raw: Any) -> list[str]:
-    """Parse, deduplicate, and preserve the order of stored sample values."""
-    values = parse_sample_values(raw) or []
+    """Parse, deduplicate, and preserve the order of stored sample values.
+
+    Rendered as strings because ``_sample_match_sql`` casts the candidate
+    column to TEXT and probes it with string literals, so a numeric sample has
+    to be compared in its rendered form either way.
+    """
+    values = stringify_sample_values(raw) or []
     return list(dict.fromkeys(values))
 
 

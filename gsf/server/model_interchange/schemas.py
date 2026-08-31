@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +37,10 @@ class ModelColumn(BaseModel):
     name: str = ""
     description: str = ""
     type: str = ""
-    sample_values: list[str] = Field(default_factory=list)
+    # Typed rather than `list[str]`: an integer column's samples round-trip as
+    # numbers, so a re-import can still tell 1 from '1'. The Neo4j write side
+    # narrows whatever arrives here (see ``as_neo4j_property_array``).
+    sample_values: list[Any] = Field(default_factory=list)
     is_nullable: bool = True
     is_unique: bool = False
 

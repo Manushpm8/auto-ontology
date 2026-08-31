@@ -32,7 +32,7 @@ from gsf.dal.terms import (
     term_is_in_scope,
 )
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import stringify_sample_values
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_SQL_ATTRIBUTE,
@@ -151,10 +151,10 @@ def fetch_data_exploration_edges(
         fk_detail = {
             "source_column": row.get("target_column" if flipped else "source_column"),
             "target_column": row.get("source_column" if flipped else "target_column"),
-            "source_sample_values": parse_sample_values(
+            "source_sample_values": stringify_sample_values(
                 row.get("target_sample_values" if flipped else "source_sample_values")
             ),
-            "target_sample_values": parse_sample_values(
+            "target_sample_values": stringify_sample_values(
                 row.get("source_sample_values" if flipped else "target_sample_values")
             ),
         }

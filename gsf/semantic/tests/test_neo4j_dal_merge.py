@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from gsf.dal import terms as neo4j_terms
 from gsf.dal import datasources as neo4j_datasources
 from gsf.semantic.constants import SEMANTIC_SOURCE
+from gsf.utils.sample_values import stringify_sample_values
 
 
 @patch("gsf.dal.terms.get_neo4j_conn")
@@ -48,7 +49,106 @@ def test_store_column_sample_values_writes_native_list(mock_conn: MagicMock) -> 
     entries = params["entries"]
     assert len(entries) == 1
     assert entries[0]["column_name"] == "amount"
-    assert entries[0]["sample_values"] == ["10", "20", "30"]
+    assert entries[0]["sample_values"] == [10, 20, 30]
+    assert all(type(v) is int for v in entries[0]["sample_values"])
+
+
+@patch("gsf.dal.datasources.graph")
+def test_store_column_sample_values_keeps_scalar_types(mock_conn: MagicMock) -> None:
+    mock_conn.return_value = MagicMock()
+    neo4j_datasources.store_column_sample_values(
+        "table-1",
+        {"active": [True, False], "ratio": [1.5, 2.5], "status": ["open", "closed"]},
+    )
+    entries = mock_conn.return_value.query_write.call_args[0][1]["entries"]
+    stored = {e["column_name"]: e["sample_values"] for e in entries}
+    assert stored["active"] == [True, False]
+    assert stored["ratio"] == [1.5, 2.5]
+    assert stored["status"] == ["open", "closed"]
+
+
+@patch("gsf.dal.datasources.graph")
+def test_store_column_sample_values_widens_mixed_numbers(mock_conn: MagicMock) -> None:
+    """A property array must be homogeneous, so ints join floats as floats."""
+    mock_conn.return_value = MagicMock()
+    neo4j_datasources.store_column_sample_values("table-1", {"amount": [1, 2.5]})
+    entries = mock_conn.return_value.query_write.call_args[0][1]["entries"]
+    assert entries[0]["sample_values"] == [1.0, 2.5]
+    assert all(type(v) is float for v in entries[0]["sample_values"])
+
+
+@patch("gsf.dal.datasources.graph")
+def test_store_column_sample_values_renders_containers_as_json(
+    mock_conn: MagicMock,
+) -> None:
+    """A property array cannot nest, so array/JSON columns persist as text."""
+    mock_conn.return_value = MagicMock()
+    neo4j_datasources.store_column_sample_values(
+        "table-1",
+        {"tags": [["a", "b"]], "meta": [{"k": 1}]},
+    )
+    entries = mock_conn.return_value.query_write.call_args[0][1]["entries"]
+    stored = {e["column_name"]: e["sample_values"] for e in entries}
+    assert stored["tags"] == ['["a", "b"]']
+    assert stored["meta"] == ['{"k": 1}']
+
+
+@patch("gsf.dal.datasources.graph")
+def test_store_column_sample_values_container_matches_rendered_form(
+    mock_conn: MagicMock,
+) -> None:
+    """What is stored must read back as what a prompt would have rendered."""
+    mock_conn.return_value = MagicMock()
+    samples = [{"k": 1}, ["a", "b"]]
+    neo4j_datasources.store_column_sample_values("table-1", {"meta": samples})
+    entries = mock_conn.return_value.query_write.call_args[0][1]["entries"]
+    stored = entries[0]["sample_values"]
+    assert stringify_sample_values(stored) == stringify_sample_values(samples)
+
+
+@patch("gsf.dal.datasources.graph")
+def test_store_column_sample_values_skips_columns_of_mixed_types(
+    mock_conn: MagicMock,
+) -> None:
+    """Samples that cannot name one type are not written; siblings still are.
+
+    A SQLite column declared without an affinity keeps whatever was inserted,
+    and a JSONB / VARIANT column may hold any JSON value, so both reach this
+    point with disagreeing types.
+    """
+    mock_conn.return_value = MagicMock()
+    neo4j_datasources.store_column_sample_values(
+        "table-1",
+        {
+            "loose": ["open", 1, True],
+            "flags": [True, 1],
+            "payload": [{"a": 1}, 5],
+            "status": ["open", "closed"],
+        },
+    )
+    entries = mock_conn.return_value.query_write.call_args[0][1]["entries"]
+    stored = {e["column_name"]: e["sample_values"] for e in entries}
+    assert stored == {"status": ["open", "closed"]}
+
+
+@patch("gsf.dal.datasources.graph")
+def test_store_column_sample_values_ignores_none_when_judging_types(
+    mock_conn: MagicMock,
+) -> None:
+    """A null alongside one real type is not a type disagreement."""
+    mock_conn.return_value = MagicMock()
+    neo4j_datasources.store_column_sample_values("table-1", {"note": ["a", None, "b"]})
+    entries = mock_conn.return_value.query_write.call_args[0][1]["entries"]
+    assert entries[0]["sample_values"] == ["a", "b"]
+
+
+@patch("gsf.dal.datasources.graph")
+def test_store_column_sample_values_skips_write_when_nothing_storable(
+    mock_conn: MagicMock,
+) -> None:
+    mock_conn.return_value = MagicMock()
+    neo4j_datasources.store_column_sample_values("table-1", {"empty": [None, None]})
+    mock_conn.return_value.query_write.assert_not_called()
 
 
 @patch("gsf.dal.datasources.graph")

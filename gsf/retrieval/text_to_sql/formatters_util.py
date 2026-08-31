@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import stringify_sample_values
 
 
 def _format_sample_values(raw: Any) -> str:
@@ -14,7 +14,7 @@ def _format_sample_values(raw: Any) -> str:
     ``gsf.semantic.embed``); interpolating the list itself would leak Python
     repr punctuation into the prompt.
     """
-    values = parse_sample_values(raw)
+    values = stringify_sample_values(raw)
     if not values:
         return ""
     return ", ".join(values)
