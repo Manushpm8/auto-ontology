@@ -106,6 +106,15 @@ _HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
     "HUB_SIBLING_EXPANSION_ENABLED", "false"
 ).strip().lower() in ("1", "true", "yes")
 
+# Off by default. find_kept_table_bridges() force-restores tables the
+# relevance filter dropped when they join two tables the filter kept — see
+# §5b below and find_kept_table_bridges' docstring. Opt-in via env flag
+# (this deployment's .env sets it to true) so new/other deployments aren't
+# defaulted into the extra Neo4j round trip without an explicit choice.
+_TABLE_BRIDGE_RECONCILIATION_ENABLED = os.environ.get(
+    "TABLE_BRIDGE_RECONCILIATION_ENABLED", "false"
+).strip().lower() in ("1", "true", "yes")
+
 # How many siblings per hub survive the cap — see _rank_and_cap_hub_siblings.
 # Raised from 5 (find_anchor_hub_siblings' old built-in default) to 6 after
 # an audit of 28.8's run: capped-out siblings matched a GT-required table in
@@ -434,10 +443,8 @@ class CandidatePreparationAgent(BaseAgent):
             deduped_tables.append(t)
         relevant_tables = deduped_tables
 
-        # NOTE: log message says "capped at 20" but there is no actual [:20] slice
-        # anywhere in this path — flagged 2026-08-13, revisit if this matters later.
         self.logger.debug(
-            "Found %d relevant tables (after dedupe, capped at 20): %s",
+            "Found %d relevant tables (after dedupe): %s",
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
@@ -534,6 +541,19 @@ class CandidatePreparationAgent(BaseAgent):
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
 
+        # Term nodes are global (no database_name), so a Term shared across two
+        # databases (e.g. the same domain ingested as both a full DB and a
+        # "_template" variant) can pull wrong-DB tables into relevant_tables via
+        # the subject-Term/candidate expansion above. Drop them before the
+        # relevance filter and bridge reconciliation ever see them, rather than
+        # relying on those steps to notice a table that doesn't belong.
+        if target_db:
+            relevant_tables = [
+                table
+                for table in relevant_tables
+                if table.get("database_name") == target_db
+            ]
+
         # Snapshot the candidate pool BEFORE the relevance filter runs. §5b's
         # bridge reconciliation must only ever restore a table that was
         # already a candidate here (and that the filter had a chance to see)
@@ -568,33 +588,34 @@ class CandidatePreparationAgent(BaseAgent):
         #       relevant, it never second-guesses which tables matter, and
         #       (via pre_filter_candidate_ids) never introduces a table the
         #       filter was never shown in the first place.
-        kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
-        bridge_tables, bridge_paths, skipped_pairs = find_kept_table_bridges(
-            kept_ids, pre_filter_candidate_ids
-        )
-        if bridge_tables:
-            forced_table_ids.update(t["id"] for t in bridge_tables)
-            self.logger.info(
-                "Pairwise bridge reconciliation added %d table(s) between "
-                "kept tables: %s%s",
-                len(bridge_tables),
-                [t["name"] for t in bridge_tables],
-                f" ({skipped_pairs} pair(s) skipped after cap)"
-                if skipped_pairs
-                else "",
+        if _TABLE_BRIDGE_RECONCILIATION_ENABLED:
+            kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
+            bridge_tables, bridge_paths, skipped_pairs = find_kept_table_bridges(
+                kept_ids, pre_filter_candidate_ids
             )
-        # A bridge table with no join hops reaching SQL-gen is a table the
-        # model can see but not connect — without the real FK chain, it has
-        # to guess the join condition and can fabricate one between unrelated
-        # columns. Surface the real FK chain the same way attribute_join_paths
-        # already does for verified semantic joins.
-        if bridge_paths:
-            attribute_join_paths.extend({"path": hops} for hops in bridge_paths)
-            self.logger.info(
-                "Pairwise bridge reconciliation added %d join path(s) for "
-                "bridge table(s)",
-                len(bridge_paths),
-            )
+            if bridge_tables:
+                forced_table_ids.update(t["id"] for t in bridge_tables)
+                self.logger.info(
+                    "Pairwise bridge reconciliation added %d table(s) between "
+                    "kept tables: %s%s",
+                    len(bridge_tables),
+                    [t["name"] for t in bridge_tables],
+                    f" ({skipped_pairs} pair(s) skipped after cap)"
+                    if skipped_pairs
+                    else "",
+                )
+            # A bridge table with no join hops reaching SQL-gen is a table the
+            # model can see but not connect — without the real FK chain, it has
+            # to guess the join condition and can fabricate one between unrelated
+            # columns. Surface the real FK chain the same way attribute_join_paths
+            # already does for verified semantic joins.
+            if bridge_paths:
+                attribute_join_paths.extend({"path": hops} for hops in bridge_paths)
+                self.logger.info(
+                    "Pairwise bridge reconciliation added %d join path(s) for "
+                    "bridge table(s)",
+                    len(bridge_paths),
+                )
 
         forced_table_ids -= {t.get("id") for t in relevant_tables}
         if forced_table_ids:

@@ -558,17 +558,19 @@ def create_intent_validation_prompt(
     entities_text: str,
     sql_code: str,
     custom_analyses: str = "",
-    join_path_check_active: bool = True,
+    join_paths: str = "",
+    joins_validated_elsewhere: bool = False,
 ) -> str:
     question_block = format_dual_question_block(original_question, sanitized_question)
     custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
-    # Join-legality criterion depends on whether db_probe.join_path_check (the
-    # deterministic live-DB probe) is enabled to cover join legality itself:
-    # - active: this LLM check stays lenient and only judges semantic fit,
-    #   since join_path_check is the source of truth for legality.
-    # - inactive: nothing else checks join legality, so fall back to main's
-    #   original (pre-rework) criterion asking the LLM to judge it directly.
-    if join_path_check_active:
+    # joins_validated_elsewhere (INTENT_VALIDATION_JOINS_VALIDATED_ELSEWHERE,
+    # off by default) opts into this branch's own, more permissive join
+    # criterion instead of main's current one, and never shows AUTHORITATIVE
+    # JOIN PATHS — appropriate only when a separate deterministic check (e.g.
+    # db_probe.join_path_check) already covers join legality, so this LLM
+    # check doesn't have to. See the flag's docstring in intent_validation.py.
+    if joins_validated_elsewhere:
+        join_paths_block = ""
         join_criterion = (
             "1. Every join in this query is already known to be real — do not question whether it exists. "
             "Flag it only if either (a) it is self-evidently broken regardless of any alternative (a "
@@ -578,14 +580,22 @@ def create_intent_validation_prompt(
             "looks unfamiliar (different fields/roles for the same concept, e.g. customer vs supplier "
             "delivery city for a region filter, are OK)."
         )
+        authoritative_note = ""
     else:
+        join_paths_block = f"\n{join_paths}" if join_paths.strip() else ""
         join_criterion = (
-            "1. Are there any joins that would produce COMPLETELY WRONG results? "
-            "(Alternative join approaches are OK)"
+            "1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible "
+            "join paths that could still answer it are OK — including different fields/roles for the same "
+            "concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those."
+        )
+        authoritative_note = (
+            "\nIf AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that follows "
+            "one of those verified paths."
         )
     return f"""User's Question:
 {question_block}
 {custom_analyses_block}
+{join_paths_block}
 Generated SQL Query:
 ```sql
 {sql_code}
@@ -596,7 +606,7 @@ Check for CRITICAL issues ONLY (be lenient):
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
-If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain definitions — do not flag the generated query as invalid merely for following those patterns.
+If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain definitions — do not flag the generated query as invalid merely for following those patterns.{authoritative_note}
 
 Provide your analysis."""
 

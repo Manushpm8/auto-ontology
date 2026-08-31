@@ -568,7 +568,9 @@ _FETCH_COL_TABLE_CONTEXTS = f"""
 UNWIND $col_ids AS col_id
 MATCH (col:{Labels.COLUMN} {{id: col_id}})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
       <-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name
+      <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
+RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name,
+       db.name AS database_name
 """
 
 
@@ -640,7 +642,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
 
 
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Batch lookup: Column id → {table_name, schema_name}."""
+    """Batch lookup: Column id → {table_name, schema_name, database_name}."""
     if not col_ids:
         return {}
     try:
@@ -654,6 +656,7 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
         r["col_id"]: {
             "table_name": r.get("table_name") or "",
             "schema_name": r.get("schema_name") or "",
+            "database_name": r.get("database_name") or "",
         }
         for r in rows
         if r.get("col_id")

@@ -131,8 +131,12 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
     return rows[0]["id"] if rows else None
 
 
-def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
-    """Fetch Column + Table + Schema context for ColumnAttribute IDs.
+def fetch_attr_column_contexts(
+    attr_ids: list[str],
+    *,
+    database_name: str | None = None,
+) -> dict[str, dict]:
+    """Fetch Column + Table + Schema + Term context for ColumnAttribute IDs.
 
     Prefers the attribute's own defining column (HAS_ATTRIBUTE) over a
     referencing FK column (SEMANTIC_FK) when both exist for the same
@@ -141,8 +145,16 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     column instead of the real hub table it points at, producing a spurious
     "1 hop" join path that's actually just an intra-table hop.
 
+    When *database_name* is given, only attributes whose defining/referencing
+    column belongs to that database are returned — an attribute with no
+    resolvable column at all (``col`` is null) still passes through, since
+    there's nothing to scope. Defaults to ``None`` (no filtering) so existing
+    callers that haven't been scoped to a single database yet keep working
+    unchanged.
+
     Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
-    col_name, table_id, table_name, schema_name, datatype}.
+    col_name, table_id, table_name, schema_name, database_name, term_name,
+    datatype}.
     """
     if not attr_ids:
         return {}
@@ -155,13 +167,19 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     WITH attr, definingCol, collect(refCol)[0] AS refCol
     WITH attr, coalesce(definingCol, refCol) AS col
     OPTIONAL MATCH (col)<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
+          <-[:CONTAINS]-(db:Database)
+    WHERE $database_name IS NULL OR col IS NULL OR db.name = $database_name
+    OPTIONAL MATCH (attr)-[:PROPERTY_OF]->(term:Term)
     RETURN attr.id AS attr_id, attr.name AS attr_name,
            attr.description AS attr_description, attr.datatype AS datatype,
            col.id AS col_id, col.name AS col_name,
-           tbl.id AS table_id, tbl.name AS table_name, sch.name AS schema_name
+           tbl.id AS table_id, tbl.name AS table_name, sch.name AS schema_name,
+           db.name AS database_name, term.name AS term_name
     """
     try:
-        rows = get_neo4j_conn().query_read(query, {"attr_ids": attr_ids})
+        rows = get_neo4j_conn().query_read(
+            query, {"attr_ids": attr_ids, "database_name": database_name}
+        )
     except Exception:
         logger.warning("fetch_attr_column_contexts: Neo4j query failed", exc_info=True)
         return {}
@@ -178,6 +196,8 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
             "table_id": row.get("table_id"),
             "table_name": row.get("table_name") or "",
             "schema_name": row.get("schema_name") or "",
+            "database_name": row.get("database_name") or "",
+            "term_name": row.get("term_name") or "",
             # Only present on attrs re-ingested since this field was added —
             # older rows fall back to "" here (rendered as no tag downstream).
             "datatype": row.get("datatype") or "",
@@ -561,6 +581,29 @@ def _extract_fk_hops(
     return hops
 
 
+def _database_names(col_ctx: dict[str, dict]) -> set[str]:
+    """Distinct non-empty ``database_name`` values across a col_ctx mapping."""
+    return {
+        context.get("database_name")
+        for context in col_ctx.values()
+        if context.get("database_name")
+    }
+
+
+def _spans_multiple_databases(col_ctx: dict[str, dict]) -> bool:
+    """Whether the columns in *col_ctx* belong to more than one database.
+
+    A path/bridge that's structurally valid in Neo4j can still cross two
+    ingested databases — e.g. two tables that independently FK into a
+    same-named column in an unrelated database. That's not a real join:
+    the generated SQL would reference a table that doesn't exist in the
+    query's target database. Shared by :func:`find_join_path` and
+    :func:`find_table_bridge`, which both build hops from a Neo4j path and
+    need the same guard before handing one back to a caller.
+    """
+    return len(_database_names(col_ctx)) > 1
+
+
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     """Find the shortest semantic join path between two Column nodes.
 
@@ -650,6 +693,14 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
 
     col_ids = [c["id"] for pair in crossings for c in pair if c.get("id")]
     col_ctx = fetch_col_table_contexts(col_ids)
+    if _spans_multiple_databases(col_ctx):
+        logger.warning(
+            "find_join_path: rejected cross-database path %s -> %s (%s)",
+            anchor_col_id,
+            dest_col_id,
+            ", ".join(sorted(_database_names(col_ctx))),
+        )
+        return []
 
     hops: list[dict] = []
     for src, tgt in crossings:
@@ -959,6 +1010,15 @@ def find_table_bridge(
 
         col_ids = [c["id"] for pair in crossings for c in pair if c.get("id")]
         col_ctx = fetch_col_table_contexts(col_ids)
+        if _spans_multiple_databases(col_ctx):
+            logger.warning(
+                "find_table_bridge: rejected cross-database path %s -> %s (%s)",
+                src,
+                dst,
+                ", ".join(sorted(_database_names(col_ctx))),
+            )
+            continue
+
         hops: list[dict] = []
         for c_src, c_tgt in crossings:
             src_ctx = col_ctx.get(c_src.get("id") or "", {})

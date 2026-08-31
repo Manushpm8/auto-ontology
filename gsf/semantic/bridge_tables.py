@@ -14,7 +14,6 @@ description). No new Term is created for the bridge table itself.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -210,21 +209,6 @@ def _generate_bridge_sql_attribute(
 
     result = invoke_with_structured_output(llm, messages, _BridgeSqlAttributeProposal)
     return result
-
-
-_TRUTHY = {"1", "true", "yes", "on"}
-
-
-def bridge_table_sql_attributes_enabled() -> bool:
-    """Whether ingestion should discover pure-FK bridge/junction tables and
-    LLM-generate a structural join SqlAttribute for each one found.
-
-    Off by default, same convention as the other opt-in flags (DB_PROBE_*,
-    INTERACTIVE, ...); set BRIDGE_TABLE_SQL_ATTRIBUTES=true to enable it and
-    accept its per-bridge-table LLM (and, when reranking owner Terms, rerank)
-    calls at ingest time.
-    """
-    return os.environ.get("BRIDGE_TABLE_SQL_ATTRIBUTES", "").strip().lower() in _TRUTHY
 
 
 def build_bridge_tables_sql_attributes(database_name: str) -> int:
