@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 class InteractivePhase(str, Enum):
@@ -11,8 +10,8 @@ class InteractivePhase(str, Enum):
 
 
 class TurnType(str, Enum):
-    INITIAL   = "initial"    # Phase 1 or Phase 2 first message (clarify + submit)
-    DEBUG     = "debug"      # "Your SQL is not executable/correct"
+    INITIAL = "initial"  # Phase 1 or Phase 2 first message (clarify + submit)
+    DEBUG = "debug"  # "Your SQL is not executable/correct"
     FOLLOW_UP = "follow_up"  # "Phase 1 is complete. Here is a follow-up"
 
 

@@ -4,6 +4,7 @@ Live test to compare reasoning vs non-reasoning model for formula completeness d
 Run with:
     uv run pytest gsf/tests/interactive/test_completeness.py -s -v
 """
+
 import pytest
 
 from gsf.retrieval.interactive.completeness import detect_incomplete_formulas
@@ -32,7 +33,10 @@ CASES = [
             ),
         },
         "relevant_kg": "None",
-        "expected_incomplete": ["SQS", "noise"],  # at least one of these should be flagged
+        "expected_incomplete": [
+            "SQS",
+            "noise",
+        ],  # at least one of these should be flagged
     },
     {
         "id": "alien_8_ntm_modulation_from_kb",
@@ -71,7 +75,7 @@ CASES = [
             "a": "BFR = BandwidthHz / (FreqMhz * 1,000,000).",
         },
         "relevant_kg": "None",
-        "expected_incomplete": ["NTM"],   # BFR resolved; NTM still open
+        "expected_incomplete": ["NTM"],  # BFR resolved; NTM still open
         "should_not_flag": ["BFR", "bandwidth ratio"],
     },
     {
@@ -87,8 +91,11 @@ CASES = [
             "a": "BFR = BandwidthHz / (FreqMhz * 1,000,000). This is the ratio of signal bandwidth to center frequency.",
         },
         "relevant_kg": "None",
-        "expected_incomplete": [],     # not used — see should_not_flag below
-        "should_not_flag": ["BFR", "bandwidth ratio"],  # the answered question should be resolved
+        "expected_incomplete": [],  # not used — see should_not_flag below
+        "should_not_flag": [
+            "BFR",
+            "bandwidth ratio",
+        ],  # the answered question should be resolved
     },
 ]
 
@@ -100,21 +107,29 @@ def test_completeness_comparison(case):
     prior = case.get("prior_gaps", [])
 
     r_gaps = detect_incomplete_formulas(
-        case["working_question"], case["last_turn"], case["relevant_kg"], prior, reasoning
+        case["working_question"],
+        case["last_turn"],
+        case["relevant_kg"],
+        prior,
+        reasoning,
     )
     nr_gaps = detect_incomplete_formulas(
-        case["working_question"], case["last_turn"], case["relevant_kg"], prior, non_reasoning
+        case["working_question"],
+        case["last_turn"],
+        case["relevant_kg"],
+        prior,
+        non_reasoning,
     )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Case: {case['id']}")
     print(f"Description: {case['description']}")
-    print(f"\n--- Reasoning gaps ---")
+    print("\n--- Reasoning gaps ---")
     for term, missing in r_gaps:
         print(f"  INCOMPLETE: {term} | {missing}")
     if not r_gaps:
         print("  COMPLETE")
-    print(f"\n--- Non-reasoning gaps ---")
+    print("\n--- Non-reasoning gaps ---")
     for term, missing in nr_gaps:
         print(f"  INCOMPLETE: {term} | {missing}")
     if not nr_gaps:
@@ -129,7 +144,9 @@ def test_completeness_comparison(case):
         )
         nr_flagged = " ".join(t + " " + m for t, m in nr_gaps).lower()
         nr_ok = any(kw.lower() in nr_flagged for kw in expected)
-        print(f"  [non-reasoning] catches expected gaps: {nr_ok} (known limitation if False)")
+        print(
+            f"  [non-reasoning] catches expected gaps: {nr_ok} (known limitation if False)"
+        )
 
     should_not_flag = case.get("should_not_flag", [])
     for result, label in [(r_gaps, "reasoning"), (nr_gaps, "non-reasoning")]:

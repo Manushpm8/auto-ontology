@@ -1,3 +1,5 @@
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 from gsf.retrieval.interactive.grounding import ground_external_knowledge
@@ -11,6 +13,7 @@ def _make_llm(response: str) -> MagicMock:
 
 # ── ground_external_knowledge ─────────────────────────────────────────────────
 
+
 def test_ground_empty_kg_returns_empty_without_llm_call():
     llm = MagicMock()
     result = ground_external_knowledge("How many panels?", "", llm)
@@ -20,26 +23,36 @@ def test_ground_empty_kg_returns_empty_without_llm_call():
 
 def test_ground_llm_returns_none_gives_empty():
     llm = _make_llm("NONE")
-    result = ground_external_knowledge("How many panels?", "- PPR: some definition", llm)
+    result = ground_external_knowledge(
+        "How many panels?", "- PPR: some definition", llm
+    )
     assert result == ""
 
 
 def test_ground_llm_returns_none_case_insensitive():
     llm = _make_llm("none")
-    result = ground_external_knowledge("How many panels?", "- PPR: some definition", llm)
+    result = ground_external_knowledge(
+        "How many panels?", "- PPR: some definition", llm
+    )
     assert result == ""
 
 
 def test_ground_returns_llm_output_when_relevant():
-    llm = _make_llm("- PPR: Panel Performance Ratio = MeasuredPower / RatedPower * 100%")
-    result = ground_external_knowledge("What is the average PPR?", "- PPR: some definition", llm)
+    llm = _make_llm(
+        "- PPR: Panel Performance Ratio = MeasuredPower / RatedPower * 100%"
+    )
+    result = ground_external_knowledge(
+        "What is the average PPR?", "- PPR: some definition", llm
+    )
     assert "PPR" in result
     assert result != ""
 
 
 def test_ground_passes_question_and_kg_to_prompt():
     llm = _make_llm("- some fact")
-    ground_external_knowledge("What is churn?", "- churn rate: % of lost customers", llm)
+    ground_external_knowledge(
+        "What is churn?", "- churn rate: % of lost customers", llm
+    )
     # safe_invoke_text wraps the prompt as [HumanMessage(content=prompt)], not a raw string.
     messages = llm.invoke.call_args[0][0]
     prompt_text = messages[0].content
@@ -52,9 +65,6 @@ def test_ground_passes_question_and_kg_to_prompt():
 # coordinator._run_sql_generation does a lazy `from gsf.retrieval.text_to_sql.main import ...`
 # which triggers module-level LLM client initialisation (requires REASONING_API_KEY).
 # Inject a fake module into sys.modules before the import runs to avoid this.
-
-import sys
-import types
 
 
 def _make_fake_t2s_main(fake_fn):
@@ -75,7 +85,9 @@ def test_run_sql_generation_sets_custom_prompts():
     from gsf.retrieval.interactive.state import InteractiveSessionState
 
     sess = InteractiveSessionState(
-        session_id="s1", task_id="t1", db_name="solar",
+        session_id="s1",
+        task_id="t1",
+        db_name="solar",
         db_schema="TABLE panels ...",
         external_kg="- PPR: Panel Performance Ratio",
         original_question="What is the average PPR?",
@@ -88,10 +100,16 @@ def test_run_sql_generation_sets_custom_prompts():
         captured_payload.update(payload)
         return {"sql_code": "SELECT AVG(ppr) FROM panels", "path_state": {}}
 
-    mock_llm = _make_llm("- PPR: Panel Performance Ratio = MeasuredPower / RatedPower * 100%")
+    mock_llm = _make_llm(
+        "- PPR: Panel Performance Ratio = MeasuredPower / RatedPower * 100%"
+    )
 
-    with patch("gsf.retrieval.interactive.coordinator._get_fast_llm", return_value=mock_llm):
-        sys.modules["gsf.retrieval.text_to_sql.main"] = _make_fake_t2s_main(fake_get_agent_response)
+    with patch(
+        "gsf.retrieval.interactive.coordinator._get_fast_llm", return_value=mock_llm
+    ):
+        sys.modules["gsf.retrieval.text_to_sql.main"] = _make_fake_t2s_main(
+            fake_get_agent_response
+        )
         sys.modules["gsf.retrieval.text_to_sql.state"] = _make_fake_t2s_state()
         try:
             _run_sql_generation(sess)
@@ -108,7 +126,9 @@ def test_run_sql_generation_empty_kg_gives_empty_custom_prompts():
     from gsf.retrieval.interactive.state import InteractiveSessionState
 
     sess = InteractiveSessionState(
-        session_id="s1", task_id="t1", db_name="solar",
+        session_id="s1",
+        task_id="t1",
+        db_name="solar",
         db_schema="TABLE panels ...",
         external_kg="",
         original_question="How many panels?",
@@ -123,8 +143,12 @@ def test_run_sql_generation_empty_kg_gives_empty_custom_prompts():
 
     mock_llm = MagicMock()
 
-    with patch("gsf.retrieval.interactive.coordinator._get_fast_llm", return_value=mock_llm):
-        sys.modules["gsf.retrieval.text_to_sql.main"] = _make_fake_t2s_main(fake_get_agent_response)
+    with patch(
+        "gsf.retrieval.interactive.coordinator._get_fast_llm", return_value=mock_llm
+    ):
+        sys.modules["gsf.retrieval.text_to_sql.main"] = _make_fake_t2s_main(
+            fake_get_agent_response
+        )
         sys.modules["gsf.retrieval.text_to_sql.state"] = _make_fake_t2s_state()
         try:
             _run_sql_generation(sess)

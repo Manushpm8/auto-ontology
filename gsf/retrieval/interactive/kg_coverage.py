@@ -47,14 +47,16 @@ Output in exactly this format (one line per term, entry names after YES separate
 """
 
 # Unicode hyphen/dash variants that LLMs commonly emit instead of ASCII '-'
-_UNICODE_HYPHENS = str.maketrans({
-    "‐": "-",  # hyphen
-    "‑": "-",  # non-breaking hyphen
-    "‒": "-",  # figure dash
-    "–": "-",  # en dash
-    "—": "-",  # em dash
-    "―": "-",  # horizontal bar
-})
+_UNICODE_HYPHENS = str.maketrans(
+    {
+        "‐": "-",  # hyphen
+        "‑": "-",  # non-breaking hyphen
+        "‒": "-",  # figure dash
+        "–": "-",  # en dash
+        "—": "-",  # em dash
+        "―": "-",  # horizontal bar
+    }
+)
 
 
 def _norm_key(s: str) -> str:
@@ -88,7 +90,8 @@ def _slim_kg_for_coverage(formatted_kg: str) -> str:
     looked up separately from the original formatted_kg, so nothing is lost.
     """
     return "\n".join(
-        line for line in formatted_kg.splitlines()
+        line
+        for line in formatted_kg.splitlines()
         if not line.startswith("  Definition:")
     )
 
@@ -122,16 +125,19 @@ def _filter_covered_by_external_knowledge(
         entity_list=entity_list,
         question=question or "(not provided)",
     )
+
     def _is_valid_coverage_response(r: str, n_entities: int) -> bool:
         """True when r looks like structured YES/NO lines, not prose."""
-        lines = [l for l in r.splitlines() if l.strip()]
+        lines = [line for line in r.splitlines() if line.strip()]
         if not lines:
             return False
         # A valid response has ~n_entities lines. Responses with far more lines
         # are chain-of-thought prose that happens to contain ": YES"/": NO" substrings.
         if len(lines) > n_entities * 4 + 10:
             return False
-        structured = sum(1 for l in lines if ": YES" in l.upper() or ": NO" in l.upper())
+        structured = sum(
+            1 for line in lines if ": YES" in line.upper() or ": NO" in line.upper()
+        )
         return structured >= max(1, n_entities // 2)
 
     response = ""
@@ -143,26 +149,37 @@ def _filter_covered_by_external_knowledge(
             if response:
                 logger.warning(
                     "Clarify — coverage LLM returned prose on attempt %d/%d — retrying",
-                    attempt + 1, RETRY_MAX_ATTEMPTS,
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
                 )
             else:
                 logger.warning(
                     "Clarify — coverage LLM returned empty on attempt %d/%d — retrying",
-                    attempt + 1, RETRY_MAX_ATTEMPTS,
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
                 )
             response = ""
         except requests.exceptions.ReadTimeout:
             logger.warning(
                 "Clarify — coverage LLM timed out on attempt %d/%d",
-                attempt + 1, RETRY_MAX_ATTEMPTS,
+                attempt + 1,
+                RETRY_MAX_ATTEMPTS,
             )
         except Exception as e:
-            logger.error("Clarify — coverage LLM error on attempt %d/%d: %s", attempt + 1, RETRY_MAX_ATTEMPTS, e)
+            logger.error(
+                "Clarify — coverage LLM error on attempt %d/%d: %s",
+                attempt + 1,
+                RETRY_MAX_ATTEMPTS,
+                e,
+            )
             break
         if attempt < RETRY_MAX_ATTEMPTS - 1:
             time.sleep(2 ** (attempt + 1))
         else:
-            logger.error("Clarify — coverage LLM failed after %d attempts; treating all entities as unresolvable", RETRY_MAX_ATTEMPTS)
+            logger.error(
+                "Clarify — coverage LLM failed after %d attempts; treating all entities as unresolvable",
+                RETRY_MAX_ATTEMPTS,
+            )
     logger.debug("Clarify — coverage LLM raw response:\n%s", response)
 
     kg_entries = _parse_kg_entries(formatted_kg)
@@ -201,7 +218,11 @@ def _filter_covered_by_external_knowledge(
     for term, entry_names in term_to_entry_names.items():
         for entry_name in entry_names:
             match = next(
-                (k for k in kg_entries if k.startswith(entry_name) or entry_name.startswith(k)),
+                (
+                    k
+                    for k in kg_entries
+                    if k.startswith(entry_name) or entry_name.startswith(k)
+                ),
                 None,
             )
             logger.debug("Clarify — lookup %r → match=%r", entry_name, match)
@@ -223,20 +244,29 @@ def _filter_covered_by_external_knowledge(
                         "Clarify — KB entry %r has %d child(ren)", match, len(children)
                     )
                 for child_text in children:
-                    child_name = _norm_key(child_text.split("\n")[0].lstrip("- ").strip())
+                    child_name = _norm_key(
+                        child_text.split("\n")[0].lstrip("- ").strip()
+                    )
                     if child_name and child_name not in seen_names:
                         seen_names.add(child_name)
                         relevant_lines.append(child_text)
                         logger.debug(
                             "Clarify — injected child KB entry: %r (parent: %r)",
-                            child_name, match,
+                            child_name,
+                            match,
                         )
                     # Inject grandchildren — covers 2-level KB hierarchies (e.g. PAR→CGPI→SPR).
-                    grandchildren = norm_children_map.get(child_name, [])[:_MAX_CHILDREN_PER_PARENT] if child_name else []
+                    grandchildren = (
+                        norm_children_map.get(child_name, [])[:_MAX_CHILDREN_PER_PARENT]
+                        if child_name
+                        else []
+                    )
                     if grandchildren:
                         logger.debug(
                             "Clarify — KB entry %r has %d grandchild(ren) via %r",
-                            child_name, len(grandchildren), match,
+                            child_name,
+                            len(grandchildren),
+                            match,
                         )
                     for gc_text in grandchildren:
                         gc_name = _norm_key(gc_text.split("\n")[0].lstrip("- ").strip())
@@ -245,28 +275,46 @@ def _filter_covered_by_external_knowledge(
                             relevant_lines.append(gc_text)
                             logger.debug(
                                 "Clarify — injected grandchild KB entry: %r (child: %r, parent: %r)",
-                                gc_name, child_name, match,
+                                gc_name,
+                                child_name,
+                                match,
                             )
                         # Inject great-grandchildren — covers 3-level KB hierarchies.
-                        great_grandchildren = norm_children_map.get(gc_name, [])[:_MAX_CHILDREN_PER_PARENT] if gc_name else []
+                        great_grandchildren = (
+                            norm_children_map.get(gc_name, [])[
+                                :_MAX_CHILDREN_PER_PARENT
+                            ]
+                            if gc_name
+                            else []
+                        )
                         if great_grandchildren:
                             logger.debug(
                                 "Clarify — KB entry %r has %d great-grandchild(ren) via %r",
-                                gc_name, len(great_grandchildren), match,
+                                gc_name,
+                                len(great_grandchildren),
+                                match,
                             )
                         for ggc_text in great_grandchildren:
-                            ggc_name = _norm_key(ggc_text.split("\n")[0].lstrip("- ").strip())
+                            ggc_name = _norm_key(
+                                ggc_text.split("\n")[0].lstrip("- ").strip()
+                            )
                             if ggc_name and ggc_name not in seen_names:
                                 seen_names.add(ggc_name)
                                 relevant_lines.append(ggc_text)
                                 logger.debug(
                                     "Clarify — injected great-grandchild KB entry: %r (grandchild: %r, parent: %r)",
-                                    ggc_name, gc_name, match,
+                                    ggc_name,
+                                    gc_name,
+                                    match,
                                 )
 
     relevant_kg_text = "\n".join(relevant_lines)
     logger.info("Clarify — external_kg covers: %s", covered or "none")
-    logger.debug("Clarify — relevant_kg_text stored (%d chars): %r", len(relevant_kg_text), relevant_kg_text[:300] if relevant_kg_text else "")
+    logger.debug(
+        "Clarify — relevant_kg_text stored (%d chars): %r",
+        len(relevant_kg_text),
+        relevant_kg_text[:300] if relevant_kg_text else "",
+    )
     return covered, relevant_kg_text, entry_to_original_terms
 
 
@@ -291,7 +339,9 @@ def _compact_schema(db_schema: str) -> str:
             if stripped.startswith(");"):
                 in_ddl = False
                 continue
-            if not stripped or stripped.startswith(("PRIMARY KEY", "FOREIGN KEY", "CONSTRAINT", ")")):
+            if not stripped or stripped.startswith(
+                ("PRIMARY KEY", "FOREIGN KEY", "CONSTRAINT", ")")
+            ):
                 continue
             col_name = stripped.split()[0]
             if col_name:
@@ -301,7 +351,9 @@ def _compact_schema(db_schema: str) -> str:
     return "\n".join(result) or db_schema[:3000]
 
 
-def expand_kg_with_children(formatted_kg: str, children_map: dict[str, list[str]]) -> str:
+def expand_kg_with_children(
+    formatted_kg: str, children_map: dict[str, list[str]]
+) -> str:
     """Return formatted_kg with child entries appended for every parent already present.
 
     Used by the debug/grounding path where the coverage LLM sees the full KB and

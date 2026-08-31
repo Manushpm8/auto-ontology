@@ -4,8 +4,6 @@ import logging
 import re
 from typing import Any, Union
 
-logger = logging.getLogger(__name__)
-
 # NOTE: get_agent_response_with_state and TextToSQLPayload are imported lazily
 # inside _run_sql_generation to avoid triggering LLM client initialisation at
 # import time (which requires NVIDIA_API_KEY to be set).
@@ -38,6 +36,8 @@ from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
+
+logger = logging.getLogger(__name__)
 
 
 # ── Message classifier ──────────────────────────────────────────────────────

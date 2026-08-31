@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock, patch
 
 from gsf.retrieval.interactive.coordinator import (
@@ -14,8 +13,11 @@ from gsf.retrieval.interactive.state import InteractiveSessionState
 
 def _make_session(**kwargs):
     defaults = dict(
-        session_id="s1", task_id="t1", db_name="alien",
-        db_schema="TABLE aliens ...", external_kg="[]",
+        session_id="s1",
+        task_id="t1",
+        db_name="alien",
+        db_schema="TABLE aliens ...",
+        external_kg="[]",
         original_question="test question",
         working_question="test question",
     )
@@ -68,11 +70,15 @@ def test_step_routes_exec_error_through_debug_path():
     branch — is what actually runs.
     """
     sess = _make_session()
-    sess.path_state["sql_code"] = "SELECT bad_column FROM aliens"  # prior failed attempt
+    sess.path_state["sql_code"] = (
+        "SELECT bad_column FROM aliens"  # prior failed attempt
+    )
 
     last_submit_raw = '[exec_err_flg] column "bad_column" does not exist'
     actual_error = last_submit_raw.split("[exec_err_flg]", 1)[1].strip()
-    orchestrator_message = f"Your SQL is not executable: {actual_error}\nPlease fix and call submit_sql."
+    orchestrator_message = (
+        f"Your SQL is not executable: {actual_error}\nPlease fix and call submit_sql."
+    )
 
     with patch(
         "gsf.retrieval.interactive.coordinator._run_sql_generation",
@@ -107,7 +113,9 @@ def test_apply_user_answer_merges_question():
         patch("gsf.retrieval.interactive.coordinator._get_llm", return_value=mock_llm),
         # merge_clarification is called with _get_fast_llm(), not _get_llm() —
         # both must be mocked or the real (unmocked) LLM client gets used instead.
-        patch("gsf.retrieval.interactive.coordinator._get_fast_llm", return_value=mock_llm),
+        patch(
+            "gsf.retrieval.interactive.coordinator._get_fast_llm", return_value=mock_llm
+        ),
     ):
         apply_user_answer(sess, "2023")
     assert sess.working_question == "How many aliens were observed in 2023?"

@@ -9,14 +9,18 @@ Equipment Problems is not relevant).
 Run with:
     uv run pytest gsf/tests/interactive/test_kg_coverage.py -s -v
 """
+
 import time
-import pytest
 
 from gsf.retrieval.interactive.kg_coverage import (
     _slim_kg_for_coverage,
     _KG_COVERAGE_PROMPT,
 )
-from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client, safe_invoke_text
+from gsf.utils.llm_invoke import (
+    get_llm_client,
+    get_non_reasoning_llm_client,
+    safe_invoke_text,
+)
 
 # ── KB fixture: alien_3 external knowledge (relevant entries only) ────────────
 
@@ -54,7 +58,9 @@ FALSE_POSITIVE_TERM = "problematic events"
 FALSE_POSITIVE_ENTRY = "equipment problems"
 
 
-def _run_coverage(llm, entities: list[str], formatted_kg: str, question: str = "") -> tuple[dict[str, list[str]], float]:
+def _run_coverage(
+    llm, entities: list[str], formatted_kg: str, question: str = ""
+) -> tuple[dict[str, list[str]], float]:
     """Run coverage LLM and return (term → matched_entries, elapsed_seconds)."""
     entity_list = "\n".join(f"- {e}" for e in entities)
     slim_kg = _slim_kg_for_coverage(formatted_kg)
@@ -70,6 +76,7 @@ def _run_coverage(llm, entities: list[str], formatted_kg: str, question: str = "
 
     # Parse YES lines the same way _filter_covered_by_external_knowledge does
     import re
+
     term_to_entries: dict[str, list[str]] = {}
     for line in response.splitlines():
         if ": YES" not in line.upper():
@@ -93,21 +100,25 @@ def test_coverage_comparison():
     non_reasoning_llm = get_non_reasoning_llm_client()
 
     r_result, r_time = _run_coverage(reasoning_llm, _ENTITIES, _ALIEN_KB, _QUESTION)
-    nr_result, nr_time = _run_coverage(non_reasoning_llm, _ENTITIES, _ALIEN_KB, _QUESTION)
+    nr_result, nr_time = _run_coverage(
+        non_reasoning_llm, _ENTITIES, _ALIEN_KB, _QUESTION
+    )
 
-    print(f"\n{'─'*60}")
+    print(f"\n{'─' * 60}")
     print(f"{'Term':<30}  {'Reasoning':>20}  {'Non-reasoning':>20}")
-    print(f"{'─'*60}")
+    print(f"{'─' * 60}")
     for term in _ENTITIES:
         r_entries = r_result.get(term, [])
         nr_entries = nr_result.get(term, [])
         r_str = ", ".join(r_entries) if r_entries else "NO"
         nr_str = ", ".join(nr_entries) if nr_entries else "NO"
         fp_flag = ""
-        if (FALSE_POSITIVE_ENTRY in r_entries or FALSE_POSITIVE_ENTRY in nr_entries) and term == FALSE_POSITIVE_TERM:
+        if (
+            FALSE_POSITIVE_ENTRY in r_entries or FALSE_POSITIVE_ENTRY in nr_entries
+        ) and term == FALSE_POSITIVE_TERM:
             fp_flag = "  ← FALSE POSITIVE"
         print(f"  {term:<28}  {r_str:>20}  {nr_str:>20}{fp_flag}")
-    print(f"{'─'*60}")
+    print(f"{'─' * 60}")
     print(f"  Runtime — reasoning: {r_time:.1f}s   non-reasoning: {nr_time:.1f}s")
 
     r_fp = FALSE_POSITIVE_ENTRY in r_result.get(FALSE_POSITIVE_TERM, [])
