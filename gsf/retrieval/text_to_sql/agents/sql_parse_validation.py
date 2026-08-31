@@ -21,6 +21,7 @@ Design Decisions:
 """
 
 import logging
+import os
 from typing import Any, Dict
 
 import sqlglot
@@ -49,6 +50,19 @@ _SQLGLOT_DIALECTS = {
     "mysql": "mysql",
     "heavydb": "postgres",
 }
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _vacuous_group_by_check_enabled() -> bool:
+    """Whether :func:`detect_vacuous_group_by` is wired in.
+
+    Off by default: the uniqueness inference it relies on (PK/FK metadata,
+    observed-data profiling) can misfire on a dataset where that metadata is
+    incomplete or misleading, incorrectly rejecting a correct query and
+    burning a reconstruction cycle. Opt-in via ``DETECT_VACUOUS_GROUP_BY``.
+    """
+    return os.environ.get("DETECT_VACUOUS_GROUP_BY", "").strip().lower() in _TRUTHY
 
 
 def _unwrap_projection(e: exp.Expression) -> exp.Expression:
@@ -248,11 +262,20 @@ def detect_vacuous_group_by(
     in practice as the next thing reconstruction tried once the GROUP-BY
     form got rejected.
 
+    Off by default — see :func:`_vacuous_group_by_check_enabled`; opt-in via
+    ``DETECT_VACUOUS_GROUP_BY``. Both call sites (this module's
+    ``SQLValidationAgent`` and ``join_path_check.py``'s self-applied
+    bridge-fix guard) already treat ``""`` as "nothing wrong", so disabling
+    this check is a no-op change to their control flow.
+
     Returns ``""`` when nothing looks wrong, including whenever the SQL
     doesn't contain "group by"/"partition by"/an aggregate function call at
     all (checked before any parsing, so the common case costs nothing) or
     isn't parseable (left to the normal parse validator).
     """
+    if not _vacuous_group_by_check_enabled():
+        return ""
+
     sql_lower = (sql or "").lower()
     _CLUE_WORDS = ("group by", "partition by", "avg(", "sum(", "count(", "min(", "max(")
     if not any(kw in sql_lower for kw in _CLUE_WORDS):
@@ -349,7 +372,14 @@ def _check_select_block_vacuous(select: exp.Select, database_name: str | None) -
     # ``(SELECT AVG(s.x) FROM t s WHERE s.pk = rp.pk)``. Filtering to an
     # exact match on a unique column matches at most one row, so wrapping it
     # in AVG/SUM/etc. is exactly as vacuous as GROUP BY on that column.
-    if group is None and select.find(exp.AggFunc) is not None:
+    # Scoped to this block's own SELECT list (not select.find(), which would
+    # also match an AggFunc buried in a WHERE subquery — e.g. `WHERE pk =
+    # (SELECT MAX(pk) FROM t)`, the standard "latest row" idiom, which has no
+    # aggregate over the outer row set at all and would otherwise be a false
+    # positive here).
+    if group is None and any(
+        e.find(exp.AggFunc) is not None for e in select.expressions or []
+    ):
         where_cols: set[str] = set()
         where = select.args.get("where")
         if where is not None:
