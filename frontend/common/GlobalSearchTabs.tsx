@@ -11,7 +11,8 @@ import {
 	SEARCH_TYPE_TAB_ORDER,
 } from '@/common/globalSearchMeta';
 import { SkeletonBlock } from '@/common/Skeleton';
-import { GLOBAL_SEARCH_ALL_TAB, SearchObjectType } from '@/enums/search';
+import { GLOBAL_SEARCH_ALL_TAB } from '@/constants/search';
+import { SearchObjectType } from '@/enums/search';
 import { SkeletonVariant } from '@/enums/skeleton';
 
 type GlobalSearchTabsProps = {

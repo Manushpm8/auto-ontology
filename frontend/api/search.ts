@@ -10,43 +10,21 @@ import type { ResponseWithCount, ResponseWithError } from './types';
 type GlobalSearchListResponse = ResponseWithError<ResponseWithCount<GlobalSearchItem[]>>;
 type GlobalSearchCountResponse = ResponseWithError<{ data: Record<string, number> }>;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	value != null && typeof value === 'object' && !Array.isArray(value);
-
-const readCountMap = (value: unknown): Record<string, number> => {
-	if (!isRecord(value)) return {};
-	if (isRecord(value.data)) {
-		const nested = readCountMap(value.data);
-		if (Object.keys(nested).length > 0) return nested;
-	}
-	const out: Record<string, number> = {};
-	Object.entries(value).forEach(([key, raw]) => {
-		if (key === 'data' || key === 'count' || key === 'error' || key === 'message') return;
-		if (typeof raw === 'number' && Number.isFinite(raw)) out[key] = raw;
-	});
-	return out;
-};
-
-/** Unwrap the list envelope (or a nested `{ data }` copy) into hit rows. */
+/**
+ * Unwrap `{ data, count }` from `/search/global-search`.
+ *
+ * `data` is absent only when `requests` replaced the body with an `ApiError`,
+ * so callers must check `response.error` themselves to tell a failed search
+ * apart from one that simply matched nothing.
+ */
 export const globalSearchItemsFromResponse = (
 	response: GlobalSearchListResponse,
-): GlobalSearchItem[] => {
-	if (response.error) return [];
-	const payload: unknown = response.data;
-	if (Array.isArray(payload)) return payload;
-	if (isRecord(payload) && Array.isArray(payload.data)) return payload.data as GlobalSearchItem[];
-	return [];
-};
+): GlobalSearchItem[] => (response.error ? [] : response.data);
 
 /** Unwrap `{ data: { type: n } }` from `/search/global-search/count`. */
 export const globalSearchCountsFromResponse = (
 	response: GlobalSearchCountResponse,
-): Record<string, number> => {
-	if (response.error) return {};
-	const fromData = readCountMap(response.data);
-	if (Object.keys(fromData).length > 0) return fromData;
-	return readCountMap(response);
-};
+): Record<string, number> => (response.error ? {} : response.data);
 
 const withDefaults = (payload: GlobalSearchRequest): GlobalSearchRequest => ({
 	text_match_option: TextMatchOption.Contains,

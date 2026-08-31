@@ -22,12 +22,90 @@ import {
 } from '@/common/GlobalSearchTabs';
 import { Modal } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
+import { GLOBAL_SEARCH_ALL_TAB, GLOBAL_SEARCH_LIST_LIMIT } from '@/constants/search';
 import { EmptyStateVariant } from '@/enums/emptyState';
-import { GLOBAL_SEARCH_ALL_TAB, GLOBAL_SEARCH_LIST_LIMIT, TextMatchOption } from '@/enums/search';
+import { TextMatchOption } from '@/enums/search';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { GlobalSearchItem } from '@/types/search';
 
 const DEFAULT_SEARCH_FILTERS = { description: true } as const;
+
+type GlobalSearchTabsBarProps = {
+	showTabs: boolean;
+	showSkeleton: boolean;
+	counts: Record<string, number>;
+	selected: string;
+	onSelect: (tabId: string) => void;
+};
+
+const GlobalSearchTabsBar = ({
+	showTabs,
+	showSkeleton,
+	counts,
+	selected,
+	onSelect,
+}: GlobalSearchTabsBarProps) => {
+	if (!showTabs && !showSkeleton) return null;
+
+	return (
+		<div className="shrink-0 border-b border-zinc-100 dark:border-zinc-800">
+			{showTabs ? (
+				<GlobalSearchTabs counts={counts} selected={selected} onSelect={onSelect} />
+			) : (
+				<GlobalSearchTabsSkeleton />
+			)}
+		</div>
+	);
+};
+
+const GlobalSearchLimitBanner = () => (
+	<p className="shrink-0 px-3 py-2 text-sm text-zinc-500 dark:text-zinc-400">
+		Viewing top {GLOBAL_SEARCH_LIST_LIMIT} results - Try filtering to get a more accurate search
+		results
+	</p>
+);
+
+type GlobalSearchBodyProps = {
+	showSkeleton: boolean;
+	items: GlobalSearchItem[];
+	query: string;
+	showEmpty: boolean;
+	error: string | null;
+	onRetry: () => void;
+	onNavigate: () => void;
+};
+
+const GlobalSearchBody = ({
+	showSkeleton,
+	items,
+	query,
+	showEmpty,
+	error,
+	onRetry,
+	onNavigate,
+}: GlobalSearchBodyProps) => (
+	<div className="min-h-0 flex-1 overflow-y-auto" aria-busy={showSkeleton}>
+		{showSkeleton ? <GlobalSearchResultsSkeleton /> : null}
+		{items.length > 0 ? (
+			<GlobalSearchResults items={items} query={query} onNavigate={onNavigate} />
+		) : null}
+		{error !== null ? (
+			<EmptyState
+				variant={EmptyStateVariant.Borderless}
+				title="Search Is Unavailable"
+				description={error}
+				action={{ label: 'Try Again', onClick: onRetry }}
+			/>
+		) : null}
+		{showEmpty ? (
+			<EmptyState
+				variant={EmptyStateVariant.Borderless}
+				illustration={<Placeholders.NoResults />}
+				title="No Results Match Your Search"
+			/>
+		) : null}
+	</div>
+);
 
 export const GlobalSearch = () => {
 	const [open, setOpen] = useState(false);
@@ -37,6 +115,8 @@ export const GlobalSearch = () => {
 	const [counts, setCounts] = useState<Record<string, number>>({});
 	const [resultKey, setResultKey] = useState('');
 	const [countsKey, setCountsKey] = useState('');
+	const [listError, setListError] = useState<string | null>(null);
+	const [attempt, setAttempt] = useState(0);
 	const debouncedQuery = useDebouncedValue(query, 1000);
 	const trimmedQuery = debouncedQuery.trim();
 	const liveQuery = query.trim();
@@ -66,12 +146,13 @@ export const GlobalSearch = () => {
 			)
 			.then((response) => {
 				if (abort.signal.aborted) return;
+				setListError(response.error ? (response.message ?? 'Request failed') : null);
 				setItems(globalSearchItemsFromResponse(response));
 				setResultKey(`${trimmedQuery}::${selectedTab}`);
 			});
 
 		return () => abort.abort();
-	}, [open, trimmedQuery, selectedTab]);
+	}, [open, trimmedQuery, selectedTab, attempt]);
 
 	useEffect(() => {
 		if (!open || trimmedQuery.length < 2) return;
@@ -87,19 +168,26 @@ export const GlobalSearch = () => {
 				abort,
 			)
 			.then((response) => {
-				if (abort.signal.aborted) return;
+				if (abort.signal.aborted || response.error) return;
 				setCounts(globalSearchCountsFromResponse(response));
 				setCountsKey(trimmedQuery);
 			});
 
 		return () => abort.abort();
-	}, [open, trimmedQuery]);
+	}, [open, trimmedQuery, attempt]);
 
 	const resetResults = () => {
 		setItems([]);
 		setCounts({});
 		setResultKey('');
 		setCountsKey('');
+		setListError(null);
+	};
+
+	// Clearing the keys puts the skeleton back while the refetch is in flight.
+	const handleRetry = () => {
+		resetResults();
+		setAttempt((value) => value + 1);
 	};
 
 	const handleQueryChange = (value: string) => {
@@ -116,15 +204,17 @@ export const GlobalSearch = () => {
 	};
 
 	const queryActive = liveQuery.length >= 2;
-	const visibleItems = searching && !awaitingSearch && queryActive ? items : [];
-	const showEmpty = searching && !awaitingSearch && queryActive && visibleItems.length === 0;
+	const searchSettled = searching && !awaitingSearch && queryActive;
+	const visibleItems = searchSettled ? items : [];
+	const visibleError = searchSettled ? listError : null;
+	const showEmpty = searchSettled && visibleError === null && visibleItems.length === 0;
 	const showPlaceholder = !queryActive;
 	const itemCounts = visibleItems.reduce<Record<string, number>>((acc, item) => {
 		const kind = searchObjectTypeFromHit(item);
 		acc[kind] = (acc[kind] ?? 0) + 1;
 		return acc;
 	}, {});
-	const tabCounts = totalGlobalSearchCount(counts) > 0 ? counts : itemCounts;
+	const tabCounts = countsReady && totalGlobalSearchCount(counts) > 0 ? counts : itemCounts;
 	const tabTotal =
 		selectedTab === GLOBAL_SEARCH_ALL_TAB
 			? totalGlobalSearchCount(tabCounts)
@@ -177,42 +267,23 @@ export const GlobalSearch = () => {
 						className="w-full"
 					/>
 				</div>
-				{showTabs ? (
-					<div className="shrink-0 border-b border-zinc-100 dark:border-zinc-800">
-						<GlobalSearchTabs
-							counts={tabCounts}
-							selected={selectedTab}
-							onSelect={setSelectedTab}
-						/>
-					</div>
-				) : showTabSkeleton ? (
-					<div className="shrink-0 border-b border-zinc-100 dark:border-zinc-800">
-						<GlobalSearchTabsSkeleton />
-					</div>
-				) : null}
-				{showLimitBanner ? (
-					<p className="shrink-0 px-3 py-2 text-sm text-zinc-500 dark:text-zinc-400">
-						Viewing top 200 results - Try filtering to get a more accurate search
-						results
-					</p>
-				) : null}
-				<div className="min-h-0 flex-1 overflow-y-auto" aria-busy={showResultSkeleton}>
-					{showResultSkeleton ? <GlobalSearchResultsSkeleton /> : null}
-					{visibleItems.length > 0 ? (
-						<GlobalSearchResults
-							items={visibleItems}
-							query={trimmedQuery}
-							onNavigate={handleClose}
-						/>
-					) : null}
-					{showEmpty || showPlaceholder ? (
-						<EmptyState
-							variant={EmptyStateVariant.Borderless}
-							illustration={<Placeholders.NoResults />}
-							title="No Results Match Your Search"
-						/>
-					) : null}
-				</div>
+				<GlobalSearchTabsBar
+					showTabs={showTabs}
+					showSkeleton={showTabSkeleton}
+					counts={tabCounts}
+					selected={selectedTab}
+					onSelect={setSelectedTab}
+				/>
+				{showLimitBanner ? <GlobalSearchLimitBanner /> : null}
+				<GlobalSearchBody
+					showSkeleton={showResultSkeleton}
+					items={visibleItems}
+					query={trimmedQuery}
+					showEmpty={showEmpty || showPlaceholder}
+					error={visibleError}
+					onRetry={handleRetry}
+					onNavigate={handleClose}
+				/>
 			</Modal>
 		</>
 	);
