@@ -75,10 +75,28 @@ def _extract_followup_question(message: str) -> str:
 # ── Seeds ───────────────────────────────────────────────────────────────────
 
 
-def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
-    """Prepare path_state to resume at reconstruct_sql with the submit feedback as context."""
+def _apply_debug_seed(
+    session: InteractiveSessionState,
+    message: str,
+    *,
+    debug_error: str | None = None,
+    use_message_for_error: bool = True,
+) -> None:
+    """Prepare path_state to resume at reconstruct_sql with the submit feedback as context.
+
+    *debug_error*, when given, is an already-extracted DB error string the
+    caller obtained from its own submit response (see `step`'s *turn_type*
+    param) — it is used verbatim and *message* is not re-parsed for it.
+    *use_message_for_error* is False whenever the caller passed an explicit
+    turn_type but no debug_error, meaning it has already determined this is
+    the "wrong results" case (no execution-error text to extract) rather
+    than genuinely wanting the "Your SQL is not executable:" fallback scan.
+    """
     session.path_state["_resume_from"] = "reconstruct_sql"
-    if "Your SQL is not executable:" in message:
+    if debug_error is not None:
+        session.path_state["error"] = debug_error
+        logger.info("Debug seed: execution error → %s", debug_error[:200])
+    elif use_message_for_error and "Your SQL is not executable:" in message:
         # Extract the actual DB error from the submit feedback and inject it for reconstruction.
         after = message.split("Your SQL is not executable:", 1)[1].strip()
         actual_error = after.split("\n")[0].strip()
@@ -156,9 +174,23 @@ def _apply_debug_seed(session: InteractiveSessionState, message: str) -> None:
         session.path_state.pop(key, None)
 
 
-def _apply_follow_up_seed(session: InteractiveSessionState, message: str) -> None:
-    """Prepare session for Phase 2: new question, carry Phase 1 context for SQL gen."""
-    follow_up_q = _extract_followup_question(message)
+def _apply_follow_up_seed(
+    session: InteractiveSessionState,
+    message: str,
+    *,
+    follow_up_question: str | None = None,
+) -> None:
+    """Prepare session for Phase 2: new question, carry Phase 1 context for SQL gen.
+
+    *follow_up_question*, when given, is the already-extracted follow-up
+    question text (a caller may extract this itself once, at the same time
+    it classifies the turn — see `step`'s params) and is used verbatim
+    instead of re-parsing *message* for it.
+    """
+    follow_up_q = (
+        follow_up_question if follow_up_question is not None
+        else _extract_followup_question(message)
+    )
 
     # Clear Phase 1 SQL artifacts; keep relevant_tables as merge hints.
     # Also clear similar_questions so Phase 1 VDB-retrieved examples don't bleed in —
@@ -415,13 +447,38 @@ def create_session(
 def step(
     session: InteractiveSessionState,
     orchestrator_message: str,
+    *,
+    turn_type: TurnType | None = None,
+    debug_error: str | None = None,
+    initial_question: str | None = None,
+    follow_up_question: str | None = None,
 ) -> Union[AskUserAction, SubmitSQLAction]:
-    turn_type = _classify_message(orchestrator_message)
+    """Advance the session one turn given the orchestrator's latest message.
+
+    By default, turn type and any turn-specific text (the initial question,
+    a DEBUG turn's DB error, a FOLLOW_UP turn's question) are all derived by
+    pattern-matching *orchestrator_message* itself — this keeps the
+    coordinator usable standalone against any orchestrator that follows the
+    same "User Query:\\n...", "Your SQL is not executable/correct", and
+    "Phase 1 is complete ... follow-up" text conventions.
+
+    Callers that already know these from their own structured protocol state
+    (e.g. a `phase_completed`/`passed` result obtained a turn earlier, or a
+    task definition's question field known since session init) can pass
+    *turn_type* plus *debug_error*/*initial_question*/*follow_up_question* to
+    use that directly instead of re-deriving it from text.
+    """
+    explicit_turn_type = turn_type is not None
+    turn_type = turn_type if explicit_turn_type else _classify_message(orchestrator_message)
 
     if turn_type == TurnType.INITIAL:
         # Extract question from message on first turn (question not in init_session state)
         if not session.clarify_history and not session.path_state.get("sql_code"):
-            extracted = _extract_question_from_initial(orchestrator_message)
+            extracted = (
+                initial_question
+                if initial_question is not None
+                else _extract_question_from_initial(orchestrator_message)
+            )
             if extracted:
                 session.original_question = extracted
                 session.working_question = extracted
@@ -456,11 +513,18 @@ def step(
 
     elif turn_type == TurnType.FOLLOW_UP:
         if session.phase != InteractivePhase.PHASE2_CLARIFY:
-            _apply_follow_up_seed(session, orchestrator_message)
+            _apply_follow_up_seed(
+                session, orchestrator_message, follow_up_question=follow_up_question
+            )
             session.phase = InteractivePhase.PHASE2_CLARIFY
 
     elif turn_type == TurnType.DEBUG:
-        _apply_debug_seed(session, orchestrator_message)
+        _apply_debug_seed(
+            session,
+            orchestrator_message,
+            debug_error=debug_error,
+            use_message_for_error=not explicit_turn_type,
+        )
 
     under_budget = len(session.clarify_history) < session.max_clarify_turns
 

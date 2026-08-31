@@ -63,8 +63,8 @@ def test_debug_seed_sets_error():
 
 
 def test_step_routes_exec_error_through_debug_path():
-    """End-to-end (no live DB/orchestrator): mirrors how eval_bird_interact's
-    _build_debug_message() turns a real submit_sql exec-error response into the
+    """End-to-end (no live DB/orchestrator): mirrors how an orchestrator's
+    debug-message builder turns a real submit_sql exec-error response into the
     orchestrator message, then drives it through the real coordinator.step() to
     confirm the 'not executable' branch — not the generic 'not correct' hint
     branch — is what actually runs.
@@ -92,6 +92,69 @@ def test_step_routes_exec_error_through_debug_path():
     # The real DB error was extracted and seeded, not the generic wrong-result hint.
     assert sess.path_state["error"] == actual_error
     assert sess.path_state["_resume_from"] == "reconstruct_sql"
+
+
+def test_debug_seed_explicit_error_skips_message_parsing():
+    """When a caller already knows the DB error (e.g. from its own structured
+    submit response), debug_error is used verbatim and message text is never
+    scanned for the "Your SQL is not executable:" marker."""
+    sess = _make_session()
+    _apply_debug_seed(
+        sess,
+        "this text is irrelevant and contains no marker",
+        debug_error="column X does not exist",
+        use_message_for_error=False,
+    )
+    assert sess.path_state["error"] == "column X does not exist"
+
+
+def test_debug_seed_explicit_wrong_result_skips_message_parsing():
+    """turn_type=DEBUG with no debug_error (caller determined it's the
+    wrong-result case) must go straight to the generic hint, even if the
+    message text happens to contain the exec-error marker."""
+    sess = _make_session()
+    _apply_debug_seed(
+        sess,
+        "Your SQL is not executable: this should be ignored",
+        debug_error=None,
+        use_message_for_error=False,
+    )
+    assert "SQL produced incorrect results" in sess.path_state["error"]
+
+
+def test_step_accepts_explicit_turn_type_override():
+    """A caller-supplied turn_type/debug_error bypasses _classify_message and
+    the "Your SQL is not executable:" scan entirely, while still using
+    orchestrator_message for anything override doesn't cover (there is
+    nothing else to extract on a DEBUG turn)."""
+    sess = _make_session()
+    sess.path_state["sql_code"] = "SELECT bad_column FROM aliens"
+
+    with patch(
+        "gsf.retrieval.interactive.coordinator._run_sql_generation",
+        return_value="SELECT column FROM aliens",
+    ):
+        action = step(
+            sess,
+            "some orchestrator text that doesn't matter",
+            turn_type=TurnType.DEBUG,
+            debug_error='column "bad_column" does not exist',
+        )
+
+    assert isinstance(action, SubmitSQLAction)
+    assert sess.path_state["error"] == 'column "bad_column" does not exist'
+
+
+def test_follow_up_seed_explicit_question_skips_message_parsing():
+    """follow_up_question, when given, is used verbatim instead of re-parsing
+    message for the "follow-up question:\\n\\n..." marker."""
+    sess = _make_session()
+    _apply_follow_up_seed(
+        sess,
+        "irrelevant text with no follow-up marker at all",
+        follow_up_question="Show totals for 2023.",
+    )
+    assert sess.working_question == "Show totals for 2023."
 
 
 def test_follow_up_seed_clears_sql_keys():

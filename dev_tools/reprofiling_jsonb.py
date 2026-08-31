@@ -18,14 +18,9 @@ semantic compile later if you want those refreshed too.
 Usage (from repo root)::
 
     uv run python -m dev_tools.reprofiling_jsonb \\
-        --connection postgresql://root:123123@localhost:5434/mental \\
-        --connection postgresql://root:123123@localhost:5434/solar
+        --connection postgresql://user:pass@localhost:5432/mydb \\
+        --connection postgresql://user:pass@localhost:5432/otherdb
         ...
-
-    # or pass every BIRD LITE / FULL DB at once:
-    uv run python -m dev_tools.reprofiling_jsonb --lite
-    uv run python -m dev_tools.reprofiling_jsonb --full
-    uv run python -m dev_tools.reprofiling_jsonb --lite --full
 """
 
 from __future__ import annotations
@@ -48,43 +43,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("reprofiling_jsonb")
-
-_LITE_CONNECTIONS = [
-    "postgresql://root:123123@localhost:5434/credit",
-    "postgresql://root:123123@localhost:5434/mental",
-    "postgresql://root:123123@localhost:5434/solar",
-    "postgresql://root:123123@localhost:5434/polar",
-    "postgresql://root:123123@localhost:5434/crypto",
-    "postgresql://root:123123@localhost:5434/cybermarket",
-    "postgresql://root:123123@localhost:5434/news",
-    "postgresql://root:123123@localhost:5434/disaster",
-]
-
-_FULL_CONNECTIONS = [
-    "postgresql://root:123123@localhost:5433/cold_chain_pharma_compliance",
-    "postgresql://root:123123@localhost:5433/organ_transplant",
-    "postgresql://root:123123@localhost:5433/households",
-    "postgresql://root:123123@localhost:5433/reverse_logistics",
-    "postgresql://root:123123@localhost:5433/crypto_exchange",
-    "postgresql://root:123123@localhost:5433/exchange_traded_funds",
-    "postgresql://root:123123@localhost:5433/sports_events",
-    "postgresql://root:123123@localhost:5433/labor_certification_applications",
-    "postgresql://root:123123@localhost:5433/hulushows",
-    "postgresql://root:123123@localhost:5433/archeology_scan",
-    "postgresql://root:123123@localhost:5433/cross_border",
-    "postgresql://root:123123@localhost:5433/cybermarket_pattern",
-    "postgresql://root:123123@localhost:5433/disaster_relief",
-    "postgresql://root:123123@localhost:5433/fake_account",
-    "postgresql://root:123123@localhost:5433/insider_trading",
-    "postgresql://root:123123@localhost:5433/mental_health",
-    "postgresql://root:123123@localhost:5433/museum_artifact",
-    "postgresql://root:123123@localhost:5433/planets_data",
-    "postgresql://root:123123@localhost:5433/polar_equipment",
-    "postgresql://root:123123@localhost:5433/robot_fault_prediction",
-    "postgresql://root:123123@localhost:5433/solar_panel",
-    "postgresql://root:123123@localhost:5433/virtual_idol",
-]
-
 
 def _find_jsonb_tables_in_neo4j(database_name: str) -> list[dict]:
     """Return Neo4j table rows that contain at least one jsonb column."""
@@ -226,16 +184,6 @@ def main() -> None:
         help="Connection string to re-profile (repeatable)",
     )
     parser.add_argument(
-        "--lite",
-        action="store_true",
-        help="Re-profile all BIRD LITE databases with JSONB columns",
-    )
-    parser.add_argument(
-        "--full",
-        action="store_true",
-        help="Re-profile all BIRD FULL databases with JSONB columns",
-    )
-    parser.add_argument(
         "--force",
         action="store_true",
         help=(
@@ -247,13 +195,9 @@ def main() -> None:
     args = parser.parse_args()
 
     connections: list[str] = list(args.connection)
-    if args.lite:
-        connections.extend(_LITE_CONNECTIONS)
-    if args.full:
-        connections.extend(_FULL_CONNECTIONS)
 
     if not connections:
-        parser.error("Specify at least one --connection, --lite, or --full")
+        parser.error("Specify at least one --connection")
 
     # Deduplicate while preserving order
     seen: set[str] = set()

@@ -26,7 +26,7 @@ def test_analyze_error_includes_path_state_error():
     state = {
         "llm": mock_llm,
         "path_state": {
-            "error": "Bird external feedback: column aliens_count does not exist",
+            "error": "External feedback: column aliens_count does not exist",
             "target_db": "alien",
         },
         "data_retriever": MagicMock(),
@@ -41,7 +41,7 @@ def test_analyze_error_includes_path_state_error():
 
     assert captured_prompts, "LLM was never invoked"
     combined = " ".join(captured_prompts)
-    assert "Bird external feedback" in combined, (
+    assert "External feedback" in combined, (
         f"path_state['error'] not found in prompt. Got: {combined[:500]}"
     )
 
