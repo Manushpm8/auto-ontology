@@ -14,6 +14,7 @@ from gsf.server.responses import (
     GlobalSearchListResponse,
 )
 from gsf.server.search import service as search_service
+from gsf.server.search.constants import TEXT_MATCH_CONTAINS
 
 router = APIRouter()
 
@@ -25,7 +26,7 @@ class GlobalSearchFilters(BaseModel):
 
 class GlobalSearchRequest(BaseModel):
     search_term: str = Field(min_length=0)
-    text_match_option: str = search_service.TEXT_MATCH_CONTAINS
+    text_match_option: str = TEXT_MATCH_CONTAINS
     filters: GlobalSearchFilters = Field(default_factory=GlobalSearchFilters)
 
 

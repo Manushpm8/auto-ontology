@@ -12,9 +12,8 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 from gsf.dal import search as search_dal
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
+from gsf.server.search.constants import MIN_SEARCH_LENGTH, TEXT_MATCH_CONTAINS
 
-MIN_SEARCH_LENGTH = 2
-TEXT_MATCH_CONTAINS = "contains"
 _PARENT_FROM_LAST_CRUMB = {Labels.COLUMN, LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE}
 
 

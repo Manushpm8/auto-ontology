@@ -14,6 +14,8 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Labels,
     TableTypes,
 )
+from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from neo4j.exceptions import ClientError
 
 from gsf.dal.neo4j_tx import graph
 from gsf.semantic.constants import (
@@ -50,7 +52,11 @@ SEARCH_OBJECT_TYPES = (*_SEARCH_INDEX_LABELS, SEARCH_TYPE_VIEW)
 
 # Lucene treats these as operators; strip them like illumex
 # ``filter_special_characters`` so a typed query cannot break the index call.
+# ``-`` is a separator for a second reason: inside a ``*term*`` wildcard it
+# parses without error but matches nothing, because the index analyzer has
+# already split the stored name on it.
 _LUCENE_STRIP = (
+    "-",
     "\\",
     "/",
     "#",
@@ -183,14 +189,28 @@ def _synonym_term_source() -> str:
     """
 
 
-def ensure_search_indexes() -> None:
+_indexes_ready = False
+
+# ``db.index.fulltext.queryNodes`` on a dropped index fails as a generic
+# procedure error, so the message is part of the match: a malformed Lucene
+# query raises the same code and must not trigger an index rebuild.
+_MISSING_INDEX_CODE = "Neo.ClientError.Procedure.ProcedureCallFailed"
+_MISSING_INDEX_TEXT = "no such fulltext schema index"
+
+
+def ensure_search_indexes(*, force: bool = False) -> None:
     """Create fulltext name/description indexes if they are missing.
 
-    Schema changes cannot run inside a data transaction; this uses the
-    auto-commit connection. ``IF NOT EXISTS`` makes it cheap to call on
-    every boot and before a search.
+    Schema changes cannot run inside a data transaction, so this deliberately
+    bypasses :func:`graph` (which joins an open ``write_transaction``) for the
+    auto-commit connection. The schema write runs at most once per process:
+    boot calls it, and a search only pays for it when boot could not reach
+    Neo4j. Pass *force* to re-arm it after a missing-index error.
     """
-    conn = graph()
+    global _indexes_ready
+    if _indexes_ready and not force:
+        return
+    conn = get_neo4j_conn()
     conn.query_write(
         f"""
         CREATE FULLTEXT INDEX {NAME_INDEX} IF NOT EXISTS
@@ -205,6 +225,27 @@ def ensure_search_indexes() -> None:
         ON EACH [n.description]
         """
     )
+    _indexes_ready = True
+
+
+def _is_missing_index_error(exc: ClientError) -> bool:
+    """True when a query failed because a gsf fulltext index is gone."""
+    return exc.code == _MISSING_INDEX_CODE and _MISSING_INDEX_TEXT in str(exc)
+
+
+def _read_with_index_repair(query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Run a fulltext read, recreating the indexes once if they were dropped.
+
+    Keeps the schema write off the hot path: searches only pay for it when an
+    index has actually gone missing, instead of on every request.
+    """
+    try:
+        return graph().query_read(query, params)
+    except ClientError as exc:
+        if not _is_missing_index_error(exc):
+            raise
+        ensure_search_indexes(force=True)
+        return graph().query_read(query, params)
 
 
 def _search_params(object_types: set[str]) -> dict[str, Any]:
@@ -336,9 +377,16 @@ def _enrichment_matches() -> str:
             WHERE n:{Labels.SCHEMA}
         OPTIONAL MATCH (n)-[:{REL_PROPERTY_OF}]->(attr_term:{LABEL_TERM})
             WHERE n:{LABEL_COLUMN_ATTRIBUTE} OR n:{LABEL_SQL_ATTRIBUTE}
-        // One parent Term is the product model; collect so a stray extra
-        // PROPERTY_OF edge cannot duplicate the search row.
-        WITH n, col_table, col_schema, col_db, tbl_schema, tbl_db, sch_db,
+        // One parent per level is the product model; every alias is collapsed
+        // so a stray extra CONTAINS / PROPERTY_OF edge cannot duplicate the
+        // search row. ``n`` is the only grouping key.
+        WITH n,
+             head(collect(col_table)) AS col_table,
+             head(collect(col_schema)) AS col_schema,
+             head(collect(col_db)) AS col_db,
+             head(collect(tbl_schema)) AS tbl_schema,
+             head(collect(tbl_db)) AS tbl_db,
+             head(collect(sch_db)) AS sch_db,
              head(collect(attr_term)) AS attr_term
         """
 
@@ -415,7 +463,7 @@ def fetch_global_search(
             {_breadcrumbs_case()} AS breadcrumbs,
             coalesce(n.synonyms, []) AS synonyms
         """
-    return graph().query_read(query, params)
+    return _read_with_index_repair(query, params)
 
 
 def count_global_search(
@@ -438,7 +486,7 @@ def count_global_search(
         WITH {_canonical_label()} AS label, n.table_type AS table_type
         RETURN label, table_type, count(*) AS count
         """
-    rows = graph().query_read(query, params)
+    rows = _read_with_index_repair(query, params)
     out: dict[str, int] = {}
     for row in rows:
         key = search_object_type(row.get("label"), row.get("table_type"))
