@@ -10,9 +10,9 @@ class InteractivePhase(str, Enum):
 
 
 class TurnType(str, Enum):
-    INITIAL = "initial"  # Phase 1 or Phase 2 first message (clarify + submit)
-    DEBUG = "debug"  # "Your SQL is not executable/correct"
-    FOLLOW_UP = "follow_up"  # "Phase 1 is complete. Here is a follow-up"
+    INITIAL = "initial"  # first message for a phase (clarify + submit)
+    DEBUG = "debug"  # prior submission was rejected; retry with feedback
+    FOLLOW_UP = "follow_up"  # prior submission completed; a new question follows
 
 
 @dataclass
