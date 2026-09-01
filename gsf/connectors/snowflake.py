@@ -6,28 +6,15 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import threading
-from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 import snowflake.connector
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
-from gsf.connectors.url_utils import (
-    metadata_database_from_query,
-    parse_query,
-    query_param,
-)
-
 logger = logging.getLogger(__name__)
-
-# Table / column allowlist loaded from enrichment metadata.json when present.
-MetadataAllowlist = tuple[set[str], dict[str, set[str]]]
 
 
 def _quoted_identifier(name: str) -> str:
@@ -35,80 +22,13 @@ def _quoted_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _sql_string_list(values: set[str]) -> str:
-    """Render uppercase identifiers as a Snowflake ``IN (...)`` list literal."""
-    return ", ".join("'" + value.replace("'", "''") + "'" for value in sorted(values))
-
-
-def _datasets_root() -> Path:
-    """Return the datasets root used to resolve enrichment metadata files."""
-    override = os.environ.get("DATASETS_DIR", "").strip()
-    if override:
-        return Path(override).expanduser()
-    return Path.cwd() / "datasets"
-
-
-def resolve_metadata_path(
-    *,
-    database_name: str,
-    metadata_file: str | None = None,
-    datasets_root: Path | None = None,
-) -> Path | None:
-    """Locate enrichment ``metadata.json`` for a Snowflake database, if any.
-
-    Resolution order:
-
-    1. Explicit ``?metadata_file=`` path from the connection string.
-    2. ``<datasets>/<database_name>/metadata.json``.
-    """
-    if metadata_file:
-        path = Path(metadata_file).expanduser()
-        return path if path.is_file() else None
-
-    root = datasets_root if datasets_root is not None else _datasets_root()
-    path = root / database_name / "metadata.json"
-    return path if path.is_file() else None
-
-
-def load_metadata_allowlist(metadata_path: Path) -> MetadataAllowlist:
-    """Parse enrichment metadata into uppercase table / column allowlists."""
-    raw = json.loads(metadata_path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(f"Expected object in metadata file: {metadata_path}")
-
-    tables: set[str] = set()
-    columns_by_table: dict[str, set[str]] = {}
-    for table_name, table_meta in raw.items():
-        table_key = str(table_name).upper()
-        tables.add(table_key)
-        column_names: set[str] = set()
-        if isinstance(table_meta, dict):
-            for column in table_meta.get("columns") or []:
-                if not isinstance(column, dict):
-                    continue
-                column_name = column.get("name")
-                if column_name is None or str(column_name).strip() == "":
-                    continue
-                column_names.add(str(column_name).upper())
-        columns_by_table[table_key] = column_names
-    return tables, columns_by_table
-
-
 def _parse_connection_string(
     connection_string: str,
-) -> tuple[dict[str, Any], str, str, str, str | None]:
-    """Parse a Snowflake URL into connector kwargs, warehouse, and names.
+) -> tuple[dict[str, Any], str, str]:
+    """Parse a Snowflake URL into connector kwargs, warehouse, and database name.
 
-    Returns
-    ``(connect_kwargs, warehouse, physical_database, database_name,
-    metadata_file)``.
-
-    Multi-database loading matches SQLite: put one URL per Snowflake database in
-    ``CONNECTION_STRINGS`` (different ``?database=``). ``database_name`` defaults
-    to that physical database (same role as the SQLite file stem). Optional
-    ``?metadata_database=`` overrides the routing name when needed. Optional
-    ``?metadata_file=`` points at an enrichment metadata JSON used to restrict
-    introspection to the listed tables and columns.
+    Required URL parts: ``user``, ``password``, ``account`` (host), ``warehouse``,
+    and ``database`` query param.
 
     Expected format::
 
@@ -138,14 +58,16 @@ def _parse_connection_string(
     if not password:
         raise ValueError("Snowflake connection string requires a non-empty password")
 
-    query = parse_query(connection_string)
-    warehouse = query_param(query, "warehouse")
+    query = parse_qs(parsed.query)
+    warehouse = query.get("warehouse", [None])[0]
     if not warehouse:
         raise ValueError("Snowflake connection string requires ?warehouse=COMPUTE_WH")
 
-    database = query_param(query, "database")
-    if not database:
-        database = unquote(parsed.path.lstrip("/")) or None
+    database = query.get("database", [None])[0]
+    if database:
+        database = unquote(database)
+    else:
+        database = unquote(parsed.path.lstrip("/"))
     if not database:
         raise ValueError(
             "Snowflake connection string requires ?database=SNOWFLAKE_DB, e.g. "
@@ -161,36 +83,19 @@ def _parse_connection_string(
         "login_timeout": 10,
     }
 
-    role = query_param(query, "role")
+    role = query.get("role", [None])[0]
     if role:
         connect_kwargs["role"] = role
 
-    schema = query_param(query, "schema")
+    schema = query.get("schema", [None])[0]
     if schema:
         connect_kwargs["schema"] = schema
 
-    logical_name = metadata_database_from_query(query) or database
-    metadata_file = query_param(query, "metadata_file")
-    return (
-        connect_kwargs,
-        warehouse,
-        database,
-        logical_name,
-        metadata_file,
-    )
+    return connect_kwargs, warehouse, database
 
 
 class SnowflakeDatabase(SQLDatabase):
     """Concrete :class:`SQLDatabase` backed by ``snowflake-connector-python``.
-
-    Multi-database loading matches SQLite: one connection string per Snowflake
-    database in ``CONNECTION_STRINGS``. Each connector's ``database_name``
-    defaults to ``?database=`` (analogous to the SQLite file stem) so eval can
-    route by ``db_id``.
-
-    When an enrichment ``metadata.json`` is found for the database (see
-    :func:`resolve_metadata_path`), ``get_tables`` / ``get_columns`` and related
-    introspection methods are restricted to the tables and columns listed there.
 
     Parameters
     ----------
@@ -206,12 +111,8 @@ class SnowflakeDatabase(SQLDatabase):
         (
             self._connect_kwargs,
             self._warehouse,
-            self._physical_database,
             self._database_name,
-            metadata_file,
         ) = _parse_connection_string(connection_string)
-        self._connection: Any | None = None
-        self._connection_lock = threading.RLock()
         # Optional ingestion allowlist: an explicit structured-connection
         # selection takes precedence; otherwise a URL ``schema=`` parameter
         # scopes env-var connections such as CONNECTION_STRINGS. Without this
@@ -233,24 +134,6 @@ class SnowflakeDatabase(SQLDatabase):
                 sorted(self._schema_filter),
             )
 
-        self._metadata_tables: set[str] | None = None
-        self._metadata_columns: dict[str, set[str]] | None = None
-        self._metadata_path = resolve_metadata_path(
-            database_name=self._database_name,
-            metadata_file=metadata_file,
-        )
-        if self._metadata_path is not None:
-            tables, columns = load_metadata_allowlist(self._metadata_path)
-            self._metadata_tables = tables
-            self._metadata_columns = columns
-            logger.info(
-                "Snowflake ingestion restricted to %d table(s) / %d column(s) "
-                "from metadata %s",
-                len(tables),
-                sum(len(cols) for cols in columns.values()),
-                self._metadata_path,
-            )
-
     def _filter_by_schema(self, df: pd.DataFrame) -> pd.DataFrame:
         """Restrict a schema-introspection frame to the configured allowlist.
 
@@ -259,37 +142,6 @@ class SnowflakeDatabase(SQLDatabase):
         if self._schema_filter is None or df.empty or "table_schema" not in df.columns:
             return df
         return df[df["table_schema"].str.upper().isin(self._schema_filter)]
-
-    def _filter_by_metadata(
-        self,
-        df: pd.DataFrame,
-        *,
-        filter_columns: bool = False,
-    ) -> pd.DataFrame:
-        """Restrict introspection rows to enrichment metadata tables/columns."""
-        if self._metadata_tables is None or df.empty or "table_name" not in df.columns:
-            return df
-
-        filtered = df[
-            df["table_name"].astype(str).str.upper().isin(self._metadata_tables)
-        ]
-        if (
-            not filter_columns
-            or self._metadata_columns is None
-            or "column_name" not in filtered.columns
-            or filtered.empty
-        ):
-            return filtered
-
-        def _column_allowed(row: pd.Series) -> bool:
-            table_key = str(row["table_name"]).upper()
-            allowed = self._metadata_columns.get(table_key)
-            if not allowed:
-                # Table is allowlisted but lists no columns → keep none.
-                return False
-            return str(row["column_name"]).upper() in allowed
-
-        return filtered[filtered.apply(_column_allowed, axis=1)]
 
     @property
     def dialect(self) -> str:
@@ -303,25 +155,10 @@ class SnowflakeDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
-    def _get_connection(self) -> Any:
-        """Return this connector's reusable, database-pinned Snowflake session."""
-        if self._connection is None:
-            conn = snowflake.connector.connect(**self._connect_kwargs)
+    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+        with snowflake.connector.connect(**self._connect_kwargs) as conn:
             with conn.cursor() as cur:
                 cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")
-                cur.execute(
-                    f"USE DATABASE {_quoted_identifier(self._physical_database)}"
-                )
-            self._connection = conn
-        return self._connection
-
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        # Snowflake cursors/connections are not safe for concurrent mutation.
-        # Serializing access lets schema introspection reuse one authenticated
-        # session instead of reconnecting for each metadata query.
-        with self._connection_lock:
-            conn = self._get_connection()
-            with conn.cursor() as cur:
                 if parameters:
                     cur.execute(sql, parameters)
                 else:
@@ -354,23 +191,20 @@ class SnowflakeDatabase(SQLDatabase):
         return [str(name) for name in df["schema_name"].tolist()]
 
     def get_tables(self) -> pd.DataFrame:
-        sql = """
+        return self._filter_by_schema(
+            self.execute("""
             SELECT
                 TABLE_SCHEMA AS "table_schema",
                 TABLE_NAME   AS "table_name",
                 TABLE_TYPE   AS "table_type"
             FROM INFORMATION_SCHEMA.TABLES
             WHERE TABLE_SCHEMA != 'INFORMATION_SCHEMA'
-        """
-        if self._metadata_tables:
-            sql += (
-                f" AND UPPER(TABLE_NAME) IN ({_sql_string_list(self._metadata_tables)})"
-            )
-        sql += " ORDER BY TABLE_SCHEMA, TABLE_NAME"
-        return self._filter_by_metadata(self._filter_by_schema(self.execute(sql)))
+            ORDER BY TABLE_SCHEMA, TABLE_NAME
+        """)
+        )
 
     def get_columns(self) -> pd.DataFrame:
-        sql = """
+        df = self.execute("""
             SELECT
                 TABLE_SCHEMA     AS "table_schema",
                 TABLE_NAME       AS "table_name",
@@ -380,13 +214,8 @@ class SnowflakeDatabase(SQLDatabase):
                 ORDINAL_POSITION AS "ordinal_position"
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_SCHEMA != 'INFORMATION_SCHEMA'
-        """
-        if self._metadata_tables:
-            sql += (
-                f" AND UPPER(TABLE_NAME) IN ({_sql_string_list(self._metadata_tables)})"
-            )
-        sql += " ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
-        df = self.execute(sql)
+            ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+        """)
         if df.empty:
             return df
 
@@ -394,10 +223,7 @@ class SnowflakeDatabase(SQLDatabase):
         df["column_name"] = df["column_name"].str.removesuffix("$SYS_FACADE$0")
         df["column_name"] = df["column_name"].str.removesuffix("$SYS_FACADE$1")
         df = df.drop_duplicates(subset=["table_schema", "table_name", "column_name"])
-        return self._filter_by_metadata(
-            self._filter_by_schema(df),
-            filter_columns=True,
-        )
+        return self._filter_by_schema(df)
 
     def get_queries(self, hours: int = 24) -> pd.DataFrame:
         """Return recent queries from ``INFORMATION_SCHEMA.QUERY_HISTORY``."""
@@ -428,7 +254,7 @@ class SnowflakeDatabase(SQLDatabase):
             return pd.DataFrame(columns=["end_time", "query_text"])
 
     def get_views(self) -> pd.DataFrame:
-        db = _quoted_identifier(self._physical_database)
+        db = _quoted_identifier(self._database_name)
         df = self.execute(f"SHOW VIEWS IN DATABASE {db}")
         if df.empty:
             return pd.DataFrame(
@@ -446,10 +272,10 @@ class SnowflakeDatabase(SQLDatabase):
                 "text": "view_definition",
             }
         )[["table_schema", "table_name", "view_definition"]]
-        return self._filter_by_metadata(self._filter_by_schema(df))
+        return self._filter_by_schema(df)
 
     def get_pks(self) -> pd.DataFrame:
-        db = _quoted_identifier(self._physical_database)
+        db = _quoted_identifier(self._database_name)
         df = self.execute(f"SHOW PRIMARY KEYS IN DATABASE {db}")
         if df.empty:
             return pd.DataFrame(
@@ -468,13 +294,10 @@ class SnowflakeDatabase(SQLDatabase):
                 "key_sequence": "ordinal_position",
             }
         )[["table_schema", "table_name", "column_name", "ordinal_position"]]
-        return self._filter_by_metadata(
-            self._filter_by_schema(df),
-            filter_columns=True,
-        )
+        return self._filter_by_schema(df)
 
     def get_fks(self) -> pd.DataFrame:
-        db = _quoted_identifier(self._physical_database)
+        db = _quoted_identifier(self._database_name)
         df = self.execute(f"SHOW IMPORTED KEYS IN DATABASE {db}")
         if df.empty:
             return pd.DataFrame(
@@ -508,19 +331,7 @@ class SnowflakeDatabase(SQLDatabase):
                 "referenced_column",
             ]
         ]
-        filtered = self._filter_by_metadata(
-            self._filter_by_schema(df),
-            filter_columns=True,
-        )
-        if self._metadata_tables is None or filtered.empty:
-            return filtered
-        # Drop FKs that point outside the metadata allowlist.
-        return filtered[
-            filtered["referenced_table"]
-            .astype(str)
-            .str.upper()
-            .isin(self._metadata_tables)
-        ]
+        return self._filter_by_schema(df)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -528,11 +339,10 @@ class SnowflakeDatabase(SQLDatabase):
 
     def ping(self) -> None:
         """Verify credentials, the warehouse, and that schemas are visible."""
-        self.execute("SELECT 1")
+        with snowflake.connector.connect(**self._connect_kwargs) as conn:
+            conn.execute_string(
+                f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}; SHOW SCHEMAS"
+            )
 
     def close(self) -> None:
-        """Close the reusable Snowflake session, if one was opened."""
-        with self._connection_lock:
-            if self._connection is not None:
-                self._connection.close()
-                self._connection = None
+        """No persistent connection to close (connections are per-query)."""

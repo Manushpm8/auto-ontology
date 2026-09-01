@@ -17,7 +17,7 @@ Example
 
     from duckdb_connector import DuckDB  # run from tabular-dev-tools/
 
-    conn = DuckDB("./mydatabase.duckdb")
+    conn = DuckDB("./spider2.duckdb")
     rows = conn.execute("SELECT * FROM Airlines.flights LIMIT 5")
     # rows -> [{"flight_id": 1, ...}]
 """

@@ -105,10 +105,8 @@ def get_connectors() -> list[SQLDatabase]:
     ``relevant_tables[*].database_name`` (see
     ``nemo_retriever.tabular_data.retrieval.text_to_sql.connector_routing``).
     Each connector's ``database_name`` must therefore be unique across the
-    returned list — the same multi-database pattern as SQLite (one connection
-    string per database). Use distinct ``?database=`` (Snowflake), distinct
-    logical hosts, or ``metadata_database`` when
-    two URLs would otherwise share a name.
+    returned list — use ``metadata_database`` on Snowflake URLs (or distinct
+    physical databases) when wiring multiple connections.
     """
     global _connectors
     if _connectors is None:

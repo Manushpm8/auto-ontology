@@ -51,17 +51,10 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         user = _require(connection, "user")
         password = _require(connection, "password")
         database = _require(connection, "database")
-        url = (
+        return (
             f"snowflake://{_enc(user)}:{_enc(password)}@{account}"
             f"?warehouse={_enc(warehouse)}&database={_enc(database)}"
         )
-        metadata_database = str(connection.get("metadata_database") or "").strip()
-        if metadata_database:
-            url += f"&metadata_database={_enc(metadata_database)}"
-        metadata_file = str(connection.get("metadata_file") or "").strip()
-        if metadata_file:
-            url += f"&metadata_file={_enc(metadata_file)}"
-        return url
 
     if conn_type == "databricks":
         host = _require(connection, "host").rstrip("/")
