@@ -35,9 +35,7 @@ _ONE_DATABASE = {"data": [{"id": "d1", "name": "dw"}], "count": 1}
 def _settings() -> Settings:
     return Settings(
         api_url="http://gsf.test",
-        api_token="gsf_token",
         spec_path=DEFAULT_SPEC_PATH,
-        transport="stdio",
         host="127.0.0.1",
         port=3003,
         timeout_s=30.0,

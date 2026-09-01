@@ -5,21 +5,21 @@
 """GSF MCP server entrypoint.
 
 Exposes the GSF semantic layer to any MCP-capable agent harness. It holds no
-database connections and no model configuration: it is an HTTP client of the
-public GSF API and needs only a URL and an API token, so it runs equally well
-beside a deployment or on a laptop far away from one.
+database connections, no model configuration, and no credentials: it is an HTTP
+client of the public GSF API and needs only the URL of a GSF deployment, so it
+runs equally well beside one or on a laptop far away from it.
 
 Usage::
 
     export GSF_API_URL=https://gsf.example.com
-    export GSF_API_TOKEN=gsf_...
-
-    gsf-mcp                              # stdio, for a local client
-    GSF_MCP_TRANSPORT=http gsf-mcp       # listen on a port instead
+    gsf-mcp
 
 Without installing anything::
 
     uvx --from gsf-mcp gsf-mcp
+
+Callers sign in against GSF itself in a browser, so there is nothing to give the
+server up front and nothing for a user to mint by hand.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ import sys
 from dotenv import load_dotenv
 
 # Load before importing config so a `.env` beside the working directory can
-# supply the token, matching how the rest of GSF is configured locally.
+# supply the URL, matching how the rest of GSF is configured locally.
 load_dotenv()
 
 from gsf_mcp import get_version  # noqa: E402
@@ -41,9 +41,6 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> int:
-    # On stdio the protocol itself occupies stdout, so logs must go to stderr
-    # or they corrupt the session. basicConfig already defaults to stderr;
-    # naming it keeps a later edit from quietly redirecting to stdout.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -57,19 +54,16 @@ def main() -> int:
         return 2
 
     logger.info(
-        "Starting GSF MCP server — version %s, transport %s",
+        "Starting GSF MCP server — version %s, listening on %s",
         get_version(),
-        settings.transport,
+        settings.public_url,
     )
 
     mcp, _client = build_server(settings)
 
     # FastMCP owns the event loop and closes the client's connections when the
     # transport shuts down, so there is no separate teardown to run here.
-    if settings.transport == "http":
-        mcp.run(transport="http", host=settings.host, port=settings.port)
-    else:
-        mcp.run(transport="stdio")
+    mcp.run(transport="http", host=settings.host, port=settings.port)
     return 0
 
 

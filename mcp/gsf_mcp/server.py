@@ -15,13 +15,11 @@ from typing import Any
 import httpx
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-from fastmcp.server.dependencies import get_http_headers
 from mcp.types import Icon
 
 from gsf_mcp import chat, readiness
 from gsf_mcp.config import ConfigError, Settings
 from gsf_mcp.gsf_auth import build_gsf_auth, gsf_access_token
-from gsf_mcp.oidc import build_auth, sso_id_token
 from gsf_mcp.tools import (
     apply_description,
     missing_from_spec,
@@ -129,30 +127,23 @@ def load_icons() -> list[Icon]:
     ]
 
 
-API_KEY_HEADER = "x-api-key"
 BEARER_HEADER = "authorization"
 
-# GSF mints API tokens with this prefix, which is what makes a credential in the
-# bearer slot distinguishable from an SSO id token.
-GSF_TOKEN_PREFIX = "gsf_"
+# Not a credential this server accepts — one it refuses. FastMCP copies the
+# incoming request's headers onto the outbound call, and GSF resolves an API key
+# ahead of a bearer token, so a caller who sent one would be acting as its owner
+# rather than as whoever they signed in as. It is stripped on the way out.
+API_KEY_HEADER = "x-api-key"
 
 
 class CallerAuth(httpx.Auth):
-    """Authenticate each outbound call as the caller who triggered it.
+    """Authenticate every outbound call as the caller who triggered it.
 
-    Credentials belong to requests, not to the server. Holding one token for the
-    process was fine while every process served one user — which is what stdio
-    is — but on the HTTP transport it makes every caller act as that token's
-    owner, inheriting their permissions and their conversation history. So the
-    credential is resolved per request, from the incoming request itself.
-
-    ``settings.api_token`` remains as a fallback for the cases where a
-    process-wide identity is the correct one: stdio, and an HTTP deployment that
-    explicitly opted into a single shared identity.
-
-    With ``use_sso`` the credential comes from the OIDC sign-in instead of from
-    any header; see :mod:`gsf_mcp.oidc` for why the incoming one is unusable
-    there.
+    This server holds no credential, and there is no setting that would give it
+    one. Identity comes from the sign-in the caller completed against GSF, and
+    the access token GSF issued for it is forwarded upstream unchanged: GSF is
+    both the authorization server and the resource server here, so there is
+    nothing to exchange and no id token to unwrap.
 
     Attaching this as httpx auth rather than at each call site is deliberate: it
     covers the generated tools and the hand-written streaming one through the
@@ -160,83 +151,21 @@ class CallerAuth(httpx.Auth):
     authenticate.
     """
 
-    def __init__(
-        self,
-        fallback_token: str = "",
-        use_sso: bool = False,
-        use_gsf_token: bool = False,
-    ) -> None:
-        self._fallback = fallback_token
-        self._use_sso = use_sso
-        self._use_gsf_token = use_gsf_token
-
     def auth_flow(self, request: httpx.Request):  # type: ignore[override]
-        header, value = self._credential()
-        # Drop both first: a request must never carry two competing identities,
-        # whichever slot the incoming one arrived in.
-        for name in (API_KEY_HEADER, BEARER_HEADER):
-            if name in request.headers:
-                del request.headers[name]
-        request.headers[header] = value
-        yield request
-
-    def _credential(self) -> tuple[str, str]:
-        """Return the header name and value to authenticate this request with."""
-        if self._use_gsf_token:
-            # GSF issued this token, so it is the one credential we can forward
-            # untouched — no exchange, no id token to unwrap.
-            token = gsf_access_token()
-            if token:
-                return BEARER_HEADER, f"Bearer {token}"
+        token = gsf_access_token()
+        if not token:
             raise ToolError(
                 "This request carried no signed-in session. Sign in again "
                 "through the GSF deployment this server is pointed at."
             )
 
-        if self._use_sso:
-            # Sign-in settles identity before a tool ever runs, so it wins
-            # outright — and it has to, because the Authorization header on this
-            # request is FastMCP's own token, which GSF cannot verify. Honouring
-            # a header here would also let a caller present one identity to the
-            # sign-in and a different one to GSF.
-            id_token = sso_id_token()
-            if id_token:
-                return BEARER_HEADER, f"Bearer {id_token}"
-            raise ToolError(
-                "Signed in, but the provider issued no id token, so there is "
-                "nothing GSF can verify. Confirm the 'openid' scope is granted "
-                "to this server's client registration."
-            )
-
-        # `authorization` is excluded from this view by default, on the sound
-        # general principle that forwarding it blindly is usually wrong. Here it
-        # is precisely what we are after, so ask for it back.
-        headers = get_http_headers(include={BEARER_HEADER})
-
-        api_key = (headers.get(API_KEY_HEADER) or "").strip()
-        if api_key:
-            return API_KEY_HEADER, api_key
-
-        bearer = (headers.get(BEARER_HEADER) or "").strip()
-        scheme, _, token = bearer.partition(" ")
-        token = token.strip()
-        if scheme.lower() == "bearer" and token:
-            # A GSF API token is unambiguous, so hand it to the header GSF
-            # resolves first. Anything else here is an SSO id token, which only
-            # resolves from the bearer slot.
-            if token.startswith(GSF_TOKEN_PREFIX):
-                return API_KEY_HEADER, token
-            return BEARER_HEADER, bearer
-
-        if self._fallback:
-            return API_KEY_HEADER, self._fallback
-
-        raise ToolError(
-            "No GSF credential on this request. This server holds no token of "
-            "its own, so each caller authenticates as itself: send a GSF API "
-            "token in an 'x-api-key' header, or as 'Authorization: Bearer'. "
-            "Mint one in the GSF UI under user menu → API Tokens."
-        )
+        # A request must never carry two identities, whichever slot the
+        # caller's arrived in, so drop both before setting ours.
+        for name in (API_KEY_HEADER, BEARER_HEADER):
+            if name in request.headers:
+                del request.headers[name]
+        request.headers[BEARER_HEADER] = f"Bearer {token}"
+        yield request
 
 
 def build_client(settings: Settings) -> httpx.AsyncClient:
@@ -247,11 +176,7 @@ def build_client(settings: Settings) -> httpx.AsyncClient:
     """
     return httpx.AsyncClient(
         base_url=settings.api_url,
-        auth=CallerAuth(
-            settings.api_token,
-            use_sso=settings.oidc is not None,
-            use_gsf_token=settings.sign_in_with_gsf,
-        ),
+        auth=CallerAuth(),
         timeout=settings.timeout_s,
         # An agent harness may fan out across several tools at once.
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
@@ -267,12 +192,6 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
     spec = load_spec(settings)
     client = build_client(settings)
 
-    # Two ways to offer sign-in, and the configuration rejects asking for both:
-    # against GSF itself, or against an identity provider directly.
-    auth = (
-        build_gsf_auth(settings) if settings.sign_in_with_gsf else build_auth(settings)
-    )
-
     mcp: FastMCP = FastMCP.from_openapi(
         openapi_spec=spec,
         client=client,
@@ -286,40 +205,18 @@ def build_server(settings: Settings) -> tuple[FastMCP, httpx.AsyncClient]:
         instructions=INSTRUCTIONS,
         version=get_version(),
         icons=load_icons(),
-        auth=auth,
+        auth=build_gsf_auth(settings),
     )
 
     chat.register(mcp, settings, client)
     readiness.register(mcp, settings, client)
 
     logger.info(
-        "GSF MCP server built against %s (spec: %s)",
+        "GSF MCP server built against %s (spec: %s). Callers sign in against "
+        "that GSF deployment; this server holds no credentials.",
         settings.api_url,
         settings.spec_path,
     )
-    if settings.transport == "http":
-        if settings.sign_in_with_gsf:
-            logger.info(
-                "Callers sign in against GSF itself (%s); this server holds no "
-                "credentials.",
-                settings.api_url,
-            )
-        elif settings.oidc is not None:
-            logger.info(
-                "Callers sign in through %s; their id token authenticates them to GSF.",
-                settings.oidc.config_url,
-            )
-        elif settings.api_token:
-            logger.warning(
-                "Authenticating every caller as the owner of GSF_API_TOKEN "
-                "(GSF_MCP_ALLOW_SHARED_TOKEN is set). Callers do not get their "
-                "own permissions or conversation history."
-            )
-        else:
-            logger.info(
-                "Callers authenticate per request via x-api-key or "
-                "Authorization: Bearer."
-            )
     return mcp, client
 
 

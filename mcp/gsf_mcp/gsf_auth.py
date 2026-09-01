@@ -2,14 +2,14 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Sign-in where GSF itself is the authorization server.
+"""Sign-in, where GSF itself is the authorization server.
 
-The alternative in :mod:`gsf_mcp.oidc` puts this server between the client and
-the deployment's identity provider, which works but has to be told a client id,
-a client secret, and a redirect URI that someone has registered with that
-provider first. That is a per-deployment ticket, and it is the reason this mode
-exists: GSF already knows how to sign a person in, so let it, and this server
-carries no credentials at all.
+This server could instead sit between the client and the deployment's identity
+provider. That works, but it has to be told a client id, a client secret, and a
+redirect URI that someone registered with that provider first — a ticket for
+every deployment, and a secret to hold and rotate. GSF already knows how to sign
+a person in, including through SSO, so it does, and this server carries no
+credentials at all.
 
 What that buys, concretely:
 

@@ -44,9 +44,7 @@ _LIVE_ANSWER = {
 def _settings(chat_timeout_s: float = 900.0) -> Settings:
     return Settings(
         api_url="http://gsf.test",
-        api_token="gsf_token",
         spec_path=DEFAULT_SPEC_PATH,
-        transport="stdio",
         host="127.0.0.1",
         port=3003,
         timeout_s=30.0,

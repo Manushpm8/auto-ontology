@@ -124,9 +124,8 @@ async def _probe(client: httpx.AsyncClient, path: str) -> Any:
 
     if response.status_code == 401:
         raise ToolError(
-            "GSF rejected the credentials while checking readiness. Check "
-            "GSF_API_TOKEN is current, or sign in again if this deployment "
-            "uses SSO. (HTTP 401)"
+            "GSF rejected the credentials while checking readiness. Sign in "
+            "again. (HTTP 401)"
         )
     if response.status_code == 403:
         logger.info("Readiness probe %s is not permitted for this caller", path)

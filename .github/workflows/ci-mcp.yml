@@ -95,7 +95,7 @@ jobs:
       - name: Server starts and lists its tools from outside the repo
         run: |
           cd /tmp
-          GSF_API_TOKEN=ci-placeholder /tmp/probe/bin/python - <<'PY'
+          /tmp/probe/bin/python - <<'PY'
           import asyncio
           from fastmcp import Client
           from gsf_mcp.config import load_settings

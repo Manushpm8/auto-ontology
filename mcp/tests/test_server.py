@@ -37,13 +37,12 @@ from gsf_mcp import get_version
 def _settings(spec_path: Path = DEFAULT_SPEC_PATH) -> Settings:
     return Settings(
         api_url="http://gsf.test",
-        api_token="gsf_token",
         spec_path=spec_path,
-        transport="stdio",
         host="127.0.0.1",
         port=3003,
         timeout_s=30.0,
         chat_timeout_s=900.0,
+        public_url="http://127.0.0.1:3003",
     )
 
 
@@ -202,91 +201,49 @@ def test_no_credential_is_attached_to_the_client_itself() -> None:
         asyncio.run(client.aclose())
 
 
-def test_falls_back_to_the_configured_token_without_a_request() -> None:
-    """This is the stdio case: the process token *is* the user's identity."""
-    headers = _sent_headers(CallerAuth("gsf_token"))
+def test_the_signed_in_callers_token_is_forwarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GSF issued it, so it goes upstream untouched — no exchange, no unwrapping."""
+    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
 
-    assert headers["x-api-key"] == "gsf_token"
+    headers = _sent_headers(CallerAuth())
 
-
-def test_forwards_the_callers_api_key_header() -> None:
-    headers = _sent_headers(CallerAuth("gsf_server"), {"x-api-key": "gsf_caller"})
-
-    assert headers["x-api-key"] == "gsf_caller"
+    assert headers["authorization"] == "Bearer gsf-issued"
 
 
-def test_a_gsf_token_in_the_bearer_slot_is_sent_as_an_api_key() -> None:
-    """GSF resolves API tokens from x-api-key first, and the prefix is proof."""
-    headers = _sent_headers(CallerAuth(), {"authorization": "Bearer gsf_caller"})
+def test_a_smuggled_api_key_cannot_override_the_signed_in_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FastMCP copies the caller's headers onto the outbound request, and GSF
+    resolves x-api-key ahead of a bearer token. Left in place, a caller could
+    sign in as one user and then call GSF as the owner of some other token.
+    """
+    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
 
-    assert headers["x-api-key"] == "gsf_caller"
-    assert "authorization" not in headers
+    headers = _sent_headers(CallerAuth(), {"x-api-key": "gsf_someone_else"})
 
-
-def test_a_non_gsf_bearer_token_stays_a_bearer_token() -> None:
-    """An SSO id token only resolves from the bearer slot, so leave it there."""
-    headers = _sent_headers(CallerAuth(), {"authorization": "Bearer eyJhbGciOi"})
-
-    assert headers["authorization"] == "Bearer eyJhbGciOi"
+    assert headers["authorization"] == "Bearer gsf-issued"
     assert "x-api-key" not in headers
 
 
-def test_the_caller_outranks_the_configured_token() -> None:
-    """Opting into a shared token must not override a caller who identified."""
-    headers = _sent_headers(CallerAuth("gsf_shared"), {"x-api-key": "gsf_caller"})
-
-    assert headers["x-api-key"] == "gsf_caller"
-
-
-def test_two_identities_are_never_sent_together() -> None:
-    headers = _sent_headers(
-        CallerAuth(),
-        {"x-api-key": "gsf_caller", "authorization": "Bearer eyJhbGciOi"},
-    )
-
-    assert headers["x-api-key"] == "gsf_caller"
-    assert "authorization" not in headers
-
-
-def test_missing_credential_is_an_actionable_error() -> None:
-    """With no server token and no caller token there is nobody to act as."""
-    with pytest.raises(ToolError, match="No GSF credential"):
-        _sent_headers(CallerAuth(), {"accept": "application/json"})
-
-
-def test_a_signed_in_caller_is_authenticated_by_their_id_token(
+def test_a_smuggled_bearer_token_cannot_override_it_either(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(server, "sso_id_token", lambda: "eyJhbGciOi")
+    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
 
-    headers = _sent_headers(CallerAuth(use_sso=True))
+    headers = _sent_headers(CallerAuth(), {"authorization": "Bearer someone-else"})
 
-    assert headers["authorization"] == "Bearer eyJhbGciOi"
-    assert "x-api-key" not in headers
+    assert headers["authorization"] == "Bearer gsf-issued"
 
 
-def test_sign_in_outranks_any_header_the_caller_sends(
+def test_a_request_with_no_signed_in_session_is_an_actionable_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Otherwise a caller could sign in as one user and call GSF as another."""
-    monkeypatch.setattr(server, "sso_id_token", lambda: "eyJhbGciOi")
+    monkeypatch.setattr(server, "gsf_access_token", lambda: None)
 
-    headers = _sent_headers(
-        CallerAuth("gsf_shared", use_sso=True), {"x-api-key": "gsf_someone_else"}
-    )
-
-    assert headers["authorization"] == "Bearer eyJhbGciOi"
-    assert "x-api-key" not in headers
-
-
-def test_sign_in_without_an_id_token_is_an_actionable_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A provider that grants no 'openid' scope authenticates nothing to GSF."""
-    monkeypatch.setattr(server, "sso_id_token", lambda: None)
-
-    with pytest.raises(ToolError, match="no id token"):
-        _sent_headers(CallerAuth(use_sso=True))
+    with pytest.raises(ToolError, match="Sign in again"):
+        _sent_headers(CallerAuth())
 
 
 def test_rejects_a_spec_that_is_not_json(tmp_path: Path) -> None:
@@ -314,39 +271,3 @@ def test_refuses_to_start_when_a_curated_endpoint_disappeared(tmp_path: Path) ->
 
     with pytest.raises(ConfigError, match="GET /api/terms"):
         load_spec(_settings(trimmed))
-
-
-def test_a_caller_signed_in_against_gsf_forwards_that_token(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """GSF issued it, so it goes upstream untouched — no exchange, no unwrapping."""
-    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
-
-    headers = _sent_headers(CallerAuth(use_gsf_token=True))
-
-    assert headers["authorization"] == "Bearer gsf-issued"
-    assert "x-api-key" not in headers
-
-
-def test_signing_in_against_gsf_outranks_any_header_the_caller_sends(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Otherwise a caller could sign in as one user and call GSF as another."""
-    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
-
-    headers = _sent_headers(
-        CallerAuth("gsf_shared", use_gsf_token=True),
-        {"x-api-key": "gsf_someone_else"},
-    )
-
-    assert headers["authorization"] == "Bearer gsf-issued"
-    assert "x-api-key" not in headers
-
-
-def test_a_request_with_no_signed_in_session_is_an_actionable_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(server, "gsf_access_token", lambda: None)
-
-    with pytest.raises(ToolError, match="Sign in again"):
-        _sent_headers(CallerAuth(use_gsf_token=True))

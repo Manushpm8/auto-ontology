@@ -28,11 +28,11 @@ From a checkout of this directory, `uvx --from . gsf-mcp` does the same.
 > access to the repository. It becomes a plain `uvx gsf-mcp` once the package is
 > published to PyPI.
 
-Run one server for several people and let them log in — they configure a URL and
-nothing else:
+Run one server; people log in through it. The URL of your GSF deployment is the
+only thing it needs to be told:
 
 ```sh
-GSF_MCP_TRANSPORT=http GSF_MCP_SIGN_IN=gsf GSF_API_URL=https://gsf.example.com gsf-mcp
+GSF_API_URL=https://gsf.example.com gsf-mcp
 ```
 
 ## Connect a client
@@ -57,10 +57,6 @@ call afterwards runs as that person.
 Then ask something like *"what does GSF mean by an active customer, and how many
 were there last quarter?"*
 
-To run it just for yourself instead, the client can launch the process directly
-and authenticate with a GSF API token — see
-[`docs/mcp.md`](../docs/mcp.md#running-it-just-for-yourself).
-
 ## Tools
 
 `ask_question` is the one that answers questions: it runs GSF's text-to-SQL agent
@@ -75,8 +71,9 @@ glossary, the catalog, or the underlying databases.
 ## Notes
 
 This server is a plain HTTP client of the GSF API, so it needs no database
-credentials and can run anywhere that can reach your deployment. It never has
-more access than the person calling it.
+credentials and can run anywhere that can reach your deployment. It holds no
+credentials of its own either — GSF signs each caller in — so it never has more
+access than the person calling it.
 
 Full documentation — all configuration variables, the complete tool list, and how
 to extend it — is in [`docs/mcp.md`](../docs/mcp.md).
