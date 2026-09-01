@@ -70,10 +70,16 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 
 
 def _qualified_name(t: dict) -> str:
-    """Build schema-qualified table name (e.g. 'public.users') for dedup/filtering."""
+    """Build a database/schema-qualified table name for deduplication.
+
+    Includes database_name (not just schema.name) so two same-named tables
+    in different databases (e.g. two "public.orders") don't collide during
+    dedup and silently merge into one.
+    """
+    database = t.get("database_name", "")
     schema = t.get("schema_name", "")
     name = t.get("name", "")
-    return f"{schema}.{name}" if schema else name
+    return ".".join(part for part in (database, schema, name) if part)
 
 
 # Off by default: an A/B test (real LLM calls, real schema/GT data) showed
@@ -301,7 +307,10 @@ class CandidatePreparationAgent(BaseAgent):
             ]
             attr_ids = list(dict.fromkeys(attr_ids))
 
-            attr_contexts = fetch_attr_column_contexts(attr_ids)
+            attr_contexts = fetch_attr_column_contexts(
+                attr_ids,
+                database_name=target_db,
+            )
             self.logger.info(
                 "Fetched Neo4j context for %d/%d column attributes",
                 len(attr_contexts),
@@ -321,6 +330,7 @@ class CandidatePreparationAgent(BaseAgent):
                     "col_name": anchor_ctx["col_name"],
                     "table_name": anchor_ctx["table_name"],
                     "schema_name": anchor_ctx["schema_name"],
+                    "database_name": anchor_ctx["database_name"],
                     "datatype": anchor_ctx.get("datatype") or "",
                 }
 
@@ -346,6 +356,7 @@ class CandidatePreparationAgent(BaseAgent):
                                 "col_name": dest_ctx["col_name"],
                                 "table_name": dest_ctx["table_name"],
                                 "schema_name": dest_ctx["schema_name"],
+                                "database_name": dest_ctx["database_name"],
                                 "datatype": dest_ctx.get("datatype") or "",
                                 "path": join_path,
                             }
@@ -723,7 +734,10 @@ class CandidatePreparationAgent(BaseAgent):
                 attr_ids = [r["id"] for r in rows if r.get("id")]
                 if not attr_ids:
                     continue
-                ctx = fetch_attr_column_contexts(attr_ids)
+                ctx = fetch_attr_column_contexts(
+                    attr_ids,
+                    database_name=target_db,
+                )
                 for r in rows:
                     c = ctx.get(r.get("id"))
                     tid = c.get("table_id") if c else None

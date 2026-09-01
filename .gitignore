@@ -52,3 +52,4 @@ openmetadata-eval/
 
 # Claude Code's local agent-memory/session state — machine-specific, never commit.
 .claude/projects/
+dev_tools/pgadmin/

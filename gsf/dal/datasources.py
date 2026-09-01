@@ -258,15 +258,15 @@ RETURN t1.name AS source_table,
 
 _FETCH_TABLES_BY_IDS = f"""
 UNWIND $table_ids AS tid
-MATCH (tbl:{Labels.TABLE} {{id: tid}})
-MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
+      -[:{Edges.CONTAINS}]->(tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
+WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: col.description,
                          sample_values: col.sample_values,
                          format: col.format}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       sch.name AS schema_name, tbl.pk AS pk, cols
+       db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -410,6 +410,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "id": tid,
                 "name": row.get("name") or "",
                 "description": row.get("description") or "",
+                "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
                 # Without this, a table discovered here during SQL repair

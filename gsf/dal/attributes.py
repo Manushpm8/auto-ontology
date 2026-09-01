@@ -134,7 +134,7 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
 def fetch_attr_column_contexts(
     attr_ids: list[str],
     *,
-    database_name: str | None = None,
+    database_name: str | None,
 ) -> dict[str, dict]:
     """Fetch Column + Table + Schema + Term context for ColumnAttribute IDs.
 
@@ -145,12 +145,14 @@ def fetch_attr_column_contexts(
     column instead of the real hub table it points at, producing a spurious
     "1 hop" join path that's actually just an intra-table hop.
 
-    When *database_name* is given, only attributes whose defining/referencing
-    column belongs to that database are returned — an attribute with no
-    resolvable column at all (``col`` is null) still passes through, since
-    there's nothing to scope. Defaults to ``None`` (no filtering) so existing
-    callers that haven't been scoped to a single database yet keep working
-    unchanged.
+    *database_name* is required (pass ``None`` explicitly for "don't scope")
+    so every call site has to make a conscious choice instead of silently
+    inheriting an unscoped default — this is exactly the kind of query a
+    caller can forget to scope and not notice until a shared ColumnAttribute
+    or Term pulls in a wrong-database column. When given, only attributes
+    whose defining/referencing column belongs to that database are returned;
+    an attribute with no resolvable column at all (``col`` is null) still
+    passes through, since there's nothing to scope.
 
     Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
     col_name, table_id, table_name, schema_name, database_name, term_name,
@@ -615,8 +617,8 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     (e.g. two person-id columns). HAS_ATTRIBUTE and CONTAINS stay undirected.
 
     Returns a list of hop dicts:
-        [{source_schema, source_table, source_column,
-          target_schema, target_table, target_column}, ...]
+        [{source_database, source_schema, source_table, source_column,
+          target_database, target_schema, target_table, target_column}, ...]
     Returns [] when anchor == dest or no path exists.
     """
     if anchor_col_id == dest_col_id:
@@ -708,9 +710,11 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         tgt_ctx = col_ctx.get(tgt.get("id") or "", {})
         hops.append(
             {
+                "source_database": src_ctx.get("database_name", ""),
                 "source_schema": src_ctx.get("schema_name", ""),
                 "source_table": src_ctx.get("table_name", ""),
                 "source_column": src.get("name", ""),
+                "target_database": tgt_ctx.get("database_name", ""),
                 "target_schema": tgt_ctx.get("schema_name", ""),
                 "target_table": tgt_ctx.get("table_name", ""),
                 "target_column": tgt.get("name", ""),
