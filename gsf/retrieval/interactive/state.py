@@ -17,9 +17,9 @@ class InteractiveSessionState:
     working_question: str
     max_clarify_turns: int = 5
     clarify_history: list[dict] = field(default_factory=list)  # [{"q": ..., "a": ...}]
-    phase: InteractivePhase = InteractivePhase.PHASE1_CLARIFY
-    phase1_sql: Optional[str] = None
-    phase1_question: Optional[str] = None  # working_question at phase1 submit
+    phase: InteractivePhase = InteractivePhase.ROUND1_CLARIFY
+    prior_round_sql: Optional[str] = None
+    prior_round_question: Optional[str] = None  # working_question at round-1 submit
     latest_feedback: Optional[str] = None  # message from the external submit service
     path_state: dict = field(default_factory=dict)  # durable across GSF calls
     _pending_question: Optional[str] = (
@@ -68,7 +68,7 @@ class InteractiveSessionState:
         None  # relevant KB text extracted during coverage check
     )
     _grounded_kg_for: Optional[str] = None  # working_question when _grounded_kg was set
-    phase1_grounded_kg: str = ""  # snapshot of cumulative_grounded_kg at Phase 1 PROCEED, carried into Phase 2
+    prior_round_grounded_kg: str = ""  # snapshot of cumulative_grounded_kg at round-1 PROCEED, carried into round 2
     cumulative_grounded_kg: str = ""  # union of all _grounded_kg values seen this phase (never replaced, only grows)
     incomplete_formula_terms: list = field(
         default_factory=list

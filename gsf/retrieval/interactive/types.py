@@ -5,8 +5,8 @@ from enum import Enum
 
 
 class InteractivePhase(str, Enum):
-    PHASE1_CLARIFY = "phase1_clarify"
-    PHASE2_CLARIFY = "phase2_clarify"
+    ROUND1_CLARIFY = "round1_clarify"
+    ROUND2_CLARIFY = "round2_clarify"
 
 
 class TurnType(str, Enum):

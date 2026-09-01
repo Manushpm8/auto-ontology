@@ -568,18 +568,18 @@ class SQLReconstructionAgent(BaseAgent):
             )
 
         history_section = ""
-        # Phase 1's own reconstruction lineage, carried forward read-only by
+        # Round 1's own reconstruction lineage, carried forward read-only by
         # a debug turn's seed (see coordinator.py::_apply_debug_seed) — kept
         # under a separate key so it never touches len(failed_attempts),
         # which the graph's routers use as the reconstruction-budget cap.
         # Every entry here is already a *past* attempt (none is "the one
         # currently being reconstructed"), unlike failed_attempts below.
-        phase1_failed_attempts: list[dict] = list(
-            path_state.get("phase1_failed_attempts") or []
+        prior_round_failed_attempts: list[dict] = list(
+            path_state.get("prior_round_failed_attempts") or []
         )
         history_lines = [
             *self._format_attempt_history(
-                phase1_failed_attempts, label="Phase 1 attempt"
+                prior_round_failed_attempts, label="Round 1 attempt"
             ),
             *self._format_attempt_history(failed_attempts[:-1], label="Attempt"),
         ]

@@ -82,21 +82,21 @@ def _apply_debug_seed(
             "primary-entity rows should still appear."
         )
         logger.info("Debug seed: wrong results — injecting targeted hints")
-    # Preserve Phase 1's reconstruction lineage as read-only prompt context
+    # Preserve round 1's reconstruction lineage as read-only prompt context
     # before wiping "failed_attempts" below — see sql_reconstruction.py's
-    # history_section, which renders "phase1_failed_attempts" alongside this
-    # turn's own attempts so the debug turn's LLM can see e.g. "you already
-    # tried the flattened JSONB key and were told it was wrong" instead of
-    # reconstructing from scratch with no memory of Phase 1's fixes. This is
-    # deliberately a *separate* key from "failed_attempts": the routers in
-    # text_to_sql_graph.py (route_sql_validation, _make_soft_check_router)
-    # gate on len(failed_attempts), so carrying the phase 1 list forward
-    # under that same key would eat into the fresh reconstruction budget the
-    # counter-reset below exists to guarantee. Content and count are tracked
-    # separately on purpose.
-    phase1_failed_attempts = session.path_state.get("failed_attempts")
-    if phase1_failed_attempts:
-        session.path_state["phase1_failed_attempts"] = phase1_failed_attempts
+    # history_section, which renders "prior_round_failed_attempts" alongside
+    # this turn's own attempts so the debug turn's LLM can see e.g. "you
+    # already tried the flattened JSONB key and were told it was wrong"
+    # instead of reconstructing from scratch with no memory of round 1's
+    # fixes. This is deliberately a *separate* key from "failed_attempts":
+    # the routers in text_to_sql_graph.py (route_sql_validation,
+    # _make_soft_check_router) gate on len(failed_attempts), so carrying the
+    # round 1 list forward under that same key would eat into the fresh
+    # reconstruction budget the counter-reset below exists to guarantee.
+    # Content and count are tracked separately on purpose.
+    prior_round_failed_attempts = session.path_state.get("failed_attempts")
+    if prior_round_failed_attempts:
+        session.path_state["prior_round_failed_attempts"] = prior_round_failed_attempts
 
     session.path_state["sql_attempts"] = 0
     session.path_state["reconstruction_count"] = 0
@@ -175,7 +175,7 @@ def _apply_follow_up_seed(
 
     # Carry the full Phase 1 KB union into Phase 2 Evidence generation,
     # then reset so Phase 2 accumulates its own entries fresh.
-    session.phase1_grounded_kg = session.cumulative_grounded_kg
+    session.prior_round_grounded_kg = session.cumulative_grounded_kg
     session.cumulative_grounded_kg = ""
     # Phase 2 asks a different question — don't carry Phase 1's cross-turn
     # KB/VDB disambiguation bookkeeping into it (see clarify.py).
@@ -234,15 +234,16 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             session.working_question, expanded_kg, _get_fast_llm()
         )
 
-    p1_sql = session.phase1_sql or ""
-    p1_question = session.phase1_question or ""
+    p1_sql = session.prior_round_sql or ""
+    p1_question = session.prior_round_question or ""
 
     # Build Evidence from the union of: Phase 1 carry-over + this-phase KB turns + debug extra.
     # VDB resolved hits are column descriptions, not formulas — the SQL generator
     # rediscovers schema mappings via its own VDB; they only benefit the decide-LLM prompt.
     combined_kg = "\n".join(
         filter(
-            None, [session.phase1_grounded_kg, session.cumulative_grounded_kg, extra_kg]
+            None,
+            [session.prior_round_grounded_kg, session.cumulative_grounded_kg, extra_kg],
         )
     )
 
@@ -460,9 +461,9 @@ def step(
                     # "table" and "ddl" → skip silently, no hint needed
 
     elif turn_type == TurnType.FOLLOW_UP:
-        if session.phase != InteractivePhase.PHASE2_CLARIFY:
+        if session.phase != InteractivePhase.ROUND2_CLARIFY:
             _apply_follow_up_seed(session, follow_up_question=follow_up_question)
-            session.phase = InteractivePhase.PHASE2_CLARIFY
+            session.phase = InteractivePhase.ROUND2_CLARIFY
 
     elif turn_type == TurnType.DEBUG:
         _apply_debug_seed(session, debug_error=debug_error)
@@ -611,8 +612,8 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
 def apply_submit_result(session: InteractiveSessionState, result: dict) -> None:
     """Update session with the submit response for future debug seeding."""
     session.latest_feedback = result.get("message", "")
-    # Save Phase 1 artifacts only on successful completion so they don't
-    # contaminate Phase 1 debug turns with follow-up instruction / cross-phase logic.
-    if session.phase1_question is None and result.get("phase_completed") == 1:
-        session.phase1_question = session.working_question
-        session.phase1_sql = session.path_state.get("sql_code", "")
+    # Save round-1 artifacts only on successful completion so they don't
+    # contaminate round-1 debug turns with follow-up instruction / cross-round logic.
+    if session.prior_round_question is None and result.get("phase_completed") == 1:
+        session.prior_round_question = session.working_question
+        session.prior_round_sql = session.path_state.get("sql_code", "")
