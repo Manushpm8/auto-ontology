@@ -32,6 +32,10 @@ const statement = {
 	connection: ['read', 'manage'],
 	// Zones (settings): everyone may view; only admins may add/edit/delete.
 	zone: ['read', 'manage'],
+	// Tags (settings): admin-only, both actions. Unlike zones there is nothing a
+	// viewer renders yet — the settings page is the only surface — so read is
+	// not granted below rather than granted for a UI that does not exist.
+	tag: ['read', 'manage'],
 	// Semantic compilation (settings): admin-only toggle + manual trigger.
 	semanticCompilation: ['read', 'manage'],
 	// Agent settings: instance-wide visualization toggle, admin-only like the
@@ -63,6 +67,7 @@ export const roles = {
 		catalog: ['read', 'edit'],
 		connection: ['read', 'manage'],
 		zone: ['read', 'manage'],
+		tag: ['read', 'manage'],
 		semanticCompilation: ['read', 'manage'],
 		visualization: ['read', 'manage'],
 		modelInterchange: ['export', 'import'],

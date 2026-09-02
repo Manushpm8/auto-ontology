@@ -25,6 +25,7 @@ Every model allows extra keys — see :class:`ApiModel`.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -61,6 +62,7 @@ __all__ = [
     "TableExplorationTerm",
     "TableSqlQuery",
     "TableSummary",
+    "Tag",
     "Term",
     "TermCountEntry",
     "TermDetail",
@@ -221,6 +223,30 @@ class TableColumns(ApiModel):
     database_name: str | None = None
     columns: list[ColumnSummary] = Field(default_factory=list)
     columns_count: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# Tags
+# ---------------------------------------------------------------------------
+
+
+class Tag(ApiModel):
+    """A tag, as both the list and the create endpoint return it.
+
+    Every field is required here, unlike most of this module: each column is
+    ``NOT NULL`` and ``gsf.dal.tags`` selects all four on both paths.
+
+    ``created`` and ``modified`` are the first timestamps this module carries,
+    so they set the convention: a timezone-aware ``datetime``, which Pydantic
+    serialises as ISO 8601 and the client parses directly. They are read from
+    the database rather than the application clock, so a client comparing two
+    tags is comparing one clock.
+    """
+
+    id: str
+    name: str
+    created: datetime
+    modified: datetime
 
 
 # ---------------------------------------------------------------------------

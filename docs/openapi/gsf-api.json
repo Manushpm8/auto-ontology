@@ -5162,6 +5162,153 @@
         "x-gsf-proxied": true
       }
     },
+    "/api/tags": {
+      "get": {
+        "description": "tagsApi.getAll — list tags (admin only, as the settings page is).",
+        "operationId": "get_api_tags",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Tag_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "summary": "List Tags",
+        "tags": ["tags"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/tags/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["read"]
+        },
+        "x-gsf-proxied": true
+      },
+      "post": {
+        "description": "tagsApi.create — add a tag (admin only).",
+        "operationId": "post_api_tags",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Tag_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Tag",
+        "tags": ["tags"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/tags/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/tags/{tag_id}": {
+      "delete": {
+        "description": "tagsApi.delete — remove a tag (admin only).",
+        "operationId": "delete_api_tags_tag_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Tag",
+        "tags": ["tags"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/tags/[tag_id]/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
     "/api/terms": {
       "get": {
         "description": "termsApi.list — one page of Terms and their per-card count breakdowns.\n`skip`/`limit` pass straight through.",
@@ -7314,6 +7461,17 @@
         "title": "DataResponse[TableExplorationDetails]",
         "type": "object"
       },
+      "DataResponse_Tag_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Tag"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[Tag]",
+        "type": "object"
+      },
       "DataResponse_Term_": {
         "additionalProperties": true,
         "properties": {
@@ -7993,6 +8151,25 @@
         },
         "required": ["data", "count"],
         "title": "ListResponse[TableSummary]",
+        "type": "object"
+      },
+      "ListResponse_Tag_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": ["data", "count"],
+        "title": "ListResponse[Tag]",
         "type": "object"
       },
       "ListResponse_Zone_": {
@@ -9528,6 +9705,44 @@
         },
         "required": ["id"],
         "title": "TableSummary",
+        "type": "object"
+      },
+      "Tag": {
+        "additionalProperties": true,
+        "description": "A tag, as both the list and the create endpoint return it.\n\nEvery field is required here, unlike most of this module: each column is\n``NOT NULL`` and ``gsf.dal.tags`` selects all four on both paths.\n\n``created`` and ``modified`` are the first timestamps this module carries,\nso they set the convention: a timezone-aware ``datetime``, which Pydantic\nserialises as ISO 8601 and the client parses directly. They are read from\nthe database rather than the application clock, so a client comparing two\ntags is comparing one clock.",
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "modified": {
+            "format": "date-time",
+            "title": "Modified",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": ["id", "name", "created", "modified"],
+        "title": "Tag",
+        "type": "object"
+      },
+      "TagCreate": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": ["name"],
+        "title": "TagCreate",
         "type": "object"
       },
       "Term": {

@@ -48,6 +48,7 @@ from gsf.server.models import (
     TableColumns,
     TableExplorationDetails,
     TableSummary,
+    Tag,
     Term,
     TermCountEntry,
     TermDetail,
@@ -107,6 +108,8 @@ __all__ = [
     "TableExplorationDetailsResponse",
     "TableListResponse",
     "TableZonesResponse",
+    "TagListResponse",
+    "TagResponse",
     "TermDetailResponse",
     "TermExplorationDetailsResponse",
     "TermResponse",
@@ -275,6 +278,10 @@ IdResponse = DataResponse[IdRef]
 # Zones
 ZoneResponse = DataResponse[Zone]
 ZoneListResponse = ListResponse[Zone]
+
+# Tags
+TagResponse = DataResponse[Tag]
+TagListResponse = ListResponse[Tag]
 
 # Catalog
 DatabaseListResponse = ListResponse[DatabaseSummary]

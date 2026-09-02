@@ -691,6 +691,52 @@ zone_target = Table(
 )
 
 # ---------------------------------------------------------------------------
+# Tags
+# ---------------------------------------------------------------------------
+
+tag = Table(
+    "tag",
+    METADATA,
+    _id(),
+    # Uniqueness is `uq_tag_name_lower`, not a UNIQUE on this column: the rule
+    # the application enforces is case-insensitive on the *trimmed* name, and a
+    # plain UNIQUE would admit "PII" beside "pii".
+    Column("name", Text, nullable=False),
+    Column(
+        "created",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    # Set by the database on insert and by SQLAlchemy's ``onupdate`` on every
+    # UPDATE the DAL issues, so no caller has to remember to touch it. Equal to
+    # ``created`` until something edits the tag -- there is no rename endpoint
+    # yet -- which is why the settings page renders it as "Never" rather than
+    # repeating the creation date as if the tag had been changed.
+    Column(
+        "modified",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    ),
+    # The tag name rule as a constraint rather than a convention. Unlike
+    # `zone.name` -- whose rule is scoped to the databases a zone's items live
+    # in, which no index can express -- a tag name is unique across the whole
+    # deployment, so an expression index states the rule exactly. It also closes
+    # the window between the DAL's duplicate check and its insert, which two
+    # concurrent creates of the same name would otherwise slip through.
+    #
+    # Spelled as `text()` in Postgres's own deparsed form, and declared here
+    # rather than beside the other indexes below, for two reasons `alembic
+    # check` fails on otherwise: `func.lower(func.trim(...))` renders
+    # `lower(trim(name))` while reflection reports `lower(TRIM(BOTH FROM
+    # name))`, and a bare `text()` index outside a Table is attached to no
+    # table, so autogenerate reads it as an index the models no longer have.
+    Index("uq_tag_name_lower", text("lower(TRIM(BOTH FROM name))"), unique=True),
+)
+
+# ---------------------------------------------------------------------------
 # Service bookkeeping
 # ---------------------------------------------------------------------------
 
