@@ -175,6 +175,66 @@ def test_assemble_export_document_groups_sql_attributes_by_source() -> None:
     assert len(document.semantic_layer.sql_attributes.bridge_table) == 1
 
 
+def test_assemble_export_document_keeps_sample_value_types() -> None:
+    """An integer column must leave as numbers, or a re-import cannot restore them."""
+    rows = _export_rows()
+    rows["catalog"] = [{**_catalog_rows()[0], "sample_values": [1, 2]}]
+
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    column = document.data_layer.databases[0].schemas[0].tables[0].columns[0]
+    assert column.sample_values == [1, 2]
+    assert all(type(value) is int for value in column.sample_values)
+
+
+@pytest.mark.parametrize(
+    ("supplied", "expected"),
+    [
+        ([1, 2], "[1, 2]"),
+        (["1", "2"], '["1", "2"]'),
+        ([{"k": 1}], '[{"k": 1}]'),
+        # JSON carries the type with each value, so a column whose samples
+        # disagree is stored as it arrived rather than narrowed.
+        (["a", 1], '["a", 1]'),
+        ([], None),
+    ],
+)
+@patch("gsf.dal.model_interchange._resolve_entities_batch")
+def test_import_catalog_encodes_supplied_sample_values(
+    mock_resolve: MagicMock,
+    supplied: list,
+    expected: str | None,
+) -> None:
+    """Types survive the round trip, so a re-import restores what was exported."""
+    from collections import defaultdict
+
+    from gsf.dal import schema as s
+    from gsf.dal.model_interchange import _import_catalog
+
+    mock_resolve.side_effect = lambda _table, items, **_kw: {
+        imported_id: (f"live-{imported_id}", True) for imported_id, _ in items
+    }
+    rows = _export_rows()
+    rows["catalog"] = [{**_catalog_rows()[0], "sample_values": supplied}]
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    _import_catalog(document, {}, defaultdict(int), defaultdict(int), None, {})
+
+    column_calls = [
+        call for call in mock_resolve.call_args_list if call[0][0] is s.catalog_column
+    ]
+    props = column_calls[0][0][1][0][1]
+    assert props["sample_values"] == expected
+
+
 def _in_scope_export_rows() -> dict:
     """Export rows whose semantic layer stays inside the exported catalog."""
     rows = _export_rows()
