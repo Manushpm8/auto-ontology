@@ -14,7 +14,7 @@ from gsf.utils.retriever import (
     get_semantic_objects_retriever,
 )
 from gsf.utils.sample_values import (
-    as_neo4j_property_array,
+    dump_sample_values,
     parse_sample_values,
     render_sample_value,
     stringify_sample_values,
@@ -26,7 +26,7 @@ __all__ = [
     "get_semantic_objects_retriever",
     "sample_values_edit_error",
     "sample_values_editable",
-    "as_neo4j_property_array",
+    "dump_sample_values",
     "parse_sample_values",
     "render_sample_value",
     "stringify_sample_values",

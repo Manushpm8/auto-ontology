@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
-from gsf.utils.sample_values import parse_sample_values, stringify_sample_values
+from gsf.utils.sample_values import (
+    dump_sample_values,
+    parse_sample_values,
+    stringify_sample_values,
+)
 
 
 def test_parse_sample_values_drops_none() -> None:
@@ -56,3 +60,41 @@ def test_stringify_sample_values_applies_max_len_to_rendered_form() -> None:
     assert stringify_sample_values(["short", "x" * 31], max_len=30) == ["short"]
     assert stringify_sample_values([12345], max_len=30) == ["12345"]
     assert stringify_sample_values([10**40], max_len=30) == []
+
+
+def test_dump_sample_values_round_trips_scalar_types() -> None:
+    """What profiling saw is what a later read gets back."""
+    values = [10, 1.5, True, "text"]
+    assert parse_sample_values(dump_sample_values(values)) == values
+    assert [type(v) for v in parse_sample_values(dump_sample_values(values)) or []] == [
+        int,
+        float,
+        bool,
+        str,
+    ]
+
+
+def test_dump_sample_values_round_trips_mixed_types_and_containers() -> None:
+    """A single column can hold either: JSONB and VARIANT take any JSON value,
+    and a SQLite column declared without an affinity keeps whatever was
+    inserted."""
+    values = ["open", 1, True, {"k": 1}, ["a", "b"]]
+    assert parse_sample_values(dump_sample_values(values)) == values
+
+
+def test_dump_sample_values_drops_none() -> None:
+    assert parse_sample_values(dump_sample_values(["a", None, "b"])) == ["a", "b"]
+
+
+def test_dump_sample_values_yields_none_when_nothing_is_storable() -> None:
+    """The caller skips the write, leaving what a previous run established."""
+    assert dump_sample_values([]) is None
+    assert dump_sample_values([None, None]) is None
+
+
+def test_dump_sample_values_stores_what_a_prompt_would_render() -> None:
+    """Stored and rendered forms have to agree, containers included."""
+    values = [{"k": 1}, ["a", "b"], 10]
+    assert stringify_sample_values(
+        dump_sample_values(values)
+    ) == stringify_sample_values(values)

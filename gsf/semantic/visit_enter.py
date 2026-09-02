@@ -31,7 +31,7 @@ from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
 
 if TYPE_CHECKING:
-    from nemo_retriever.tabular_data.sql_database import SQLDatabase
+    from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ _LOW_CARDINALITY_MAX = 25
 _TEXT_SAMPLE_TYPES = ("char", "text", "string", "clob", "enum")
 
 # Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
-# the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
+# the commit phase must be serial: VDB search → judge → store merge → VDB embed.
 # Without the lock, two threads could simultaneously propose the same Term,
 # both find zero VDB hits (the first hasn't embedded yet), and create duplicates.
 _term_commit_lock = threading.Lock()
@@ -144,7 +144,7 @@ def _json_ready_sample(value: Any) -> Any:
     numpy scalars, ``Decimal``, ``datetime``, and the lists/dicts Postgres
     returns for array and JSON columns. Stringifying the whole sample up front
     is what this replaces — a number that survives as ``int`` stays a number
-    all the way to the Neo4j write, and only genuinely non-scalar values are
+    all the way into storage, and only genuinely non-scalar values are
     rendered as text.
 
     numpy scalars are unwrapped by duck-typing ``.item()`` rather than by
@@ -248,16 +248,17 @@ def calculate_columns_profiling(
 
     Sample values keep the type the warehouse returned (see
     ``_json_ready_sample``): a numeric column profiles as ``[10, 20, 30]``,
-    not ``["10", "20", "30"]``. Only the Neo4j write coerces, since a property
-    array has to be homogeneous.
+    not ``["10", "20", "30"]``. The types survive storage, since a column's
+    ``sample_values`` is persisted as JSON; only readers that need display
+    text coerce, through ``stringify_sample_values``.
 
-    Persists to Neo4j Column nodes: ``is_unique`` for every column,
-    ``format`` for columns whose sampled values share one notation —
-    whether declared as a date/time type or as text, since loosely-typed
-    sources such as SQLite store dates as TEXT — and ``sample_values`` for
-    every column except those with a date format or a declared date/time/uuid
-    type (values longer than 30 chars are dropped, which by
-    ``_keep_persisted_sample`` applies to text rather than to numbers).
+    Persists to catalog columns: ``is_unique`` for every column, ``format``
+    for columns whose sampled values share one notation — whether declared as
+    a date/time type or as text, since loosely-typed sources such as SQLite
+    store dates as TEXT — and ``sample_values`` for every column except those
+    with a date format or a declared date/time/uuid type (values longer than
+    30 chars are dropped, which by ``_keep_persisted_sample`` applies to text
+    rather than to numbers).
 
     Returns ``{column_name: {"sample_values": [...], "is_unique": bool,
     "format": str | None}}`` for *all* columns (values unfiltered —
@@ -419,7 +420,7 @@ def process_table(
             database_name,
         )
 
-    # --- FK detection (LLM + declared); results not written to Neo4j ---
+    # --- FK detection (LLM + declared); results not written to the store ---
     declared_fks = ctx.get("fks", [])
     with _step(table_name, "Detecting foreign keys"):
         fk_suggestions = suggest_potential_foreign_keys(
@@ -457,7 +458,7 @@ def process_table(
         )
         return ProcessTableResult()
 
-    # Serialize: dedup check + Neo4j writes + VDB embed must be atomic
+    # Serialize: dedup check + the store writes + VDB embed must be atomic
     # so the next thread's VDB search sees this thread's newly embedded terms.
     result_term_names: list[str] = []
     result_attr_names: list[str] = []
@@ -551,7 +552,7 @@ def _commit_terms(
     result_term_names: list[str],
     result_attr_names: list[str],
 ) -> None:
-    """Merge Terms and their ColumnAttributes into Neo4j."""
+    """Merge Terms and their ColumnAttributes into the store."""
     for term, assignments in persisted_terms:
         merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
         result_term_names.append(term.name)

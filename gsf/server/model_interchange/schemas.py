@@ -38,8 +38,8 @@ class ModelColumn(BaseModel):
     description: str = ""
     type: str = ""
     # Typed rather than `list[str]`: an integer column's samples round-trip as
-    # numbers, so a re-import can still tell 1 from '1'. The Neo4j write side
-    # narrows whatever arrives here (see ``as_neo4j_property_array``).
+    # numbers, so a re-import can still tell 1 from '1' (see
+    # ``gsf.utils.sample_values.dump_sample_values``).
     sample_values: list[Any] = Field(default_factory=list)
     is_nullable: bool = True
     is_unique: bool = False

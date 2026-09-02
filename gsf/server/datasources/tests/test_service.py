@@ -39,6 +39,25 @@ def test_sample_values_reach_a_text_column(
     mock_patch.assert_called_once()
 
 
+@patch.object(service, "_refresh_semantic_column_attribute_embeddings")
+@patch.object(service, "_refresh_vdb_embeddings")
+@patch.object(service, "patch_catalog_node")
+@patch.object(service, "fetch_node_properties_by_id")
+def test_patched_sample_values_come_back_as_text(
+    mock_fetch: MagicMock,
+    mock_patch: MagicMock,
+    _mock_vdb: MagicMock,
+    _mock_semantic: MagicMock,
+) -> None:
+    """The write reads back as stored JSON; the response is a string list."""
+    mock_fetch.return_value = {"data_type": "text"}
+    mock_patch.return_value = _patched_column(sample_values="[10, 1.5, true]")
+
+    result = service.update_node_properties("col-1", {"sample_values": ["10"]})
+
+    assert result == {"id": "col-1", "sample_values": ["10", "1.5", "True"]}
+
+
 @patch.object(service, "patch_catalog_node")
 @patch.object(service, "fetch_node_properties_by_id")
 def test_sample_values_are_refused_on_a_non_text_column(
