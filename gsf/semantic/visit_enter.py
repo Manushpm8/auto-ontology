@@ -9,12 +9,16 @@ from collections import defaultdict
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
 
+from sqlglot import exp
+
 from gsf.connectors import get_connectors
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.datasources import (
+    store_column_date_formats,
     store_column_sample_values,
     store_column_uniqueness,
 )
+from gsf.semantic.date_format import infer_date_format, is_date_type
 from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
@@ -24,7 +28,7 @@ from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
 
 if TYPE_CHECKING:
-    from nemo_retriever.tabular_data.sql_database import SQLDatabase
+    from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +50,7 @@ _LOW_CARDINALITY_MAX = 25
 _TEXT_SAMPLE_TYPES = ("char", "text", "string", "clob", "enum")
 
 # Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
-# the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
+# the commit phase must be serial: VDB search → judge → store merge → VDB embed.
 # Without the lock, two threads could simultaneously propose the same Term,
 # both find zero VDB hits (the first hasn't embedded yet), and create duplicates.
 _term_commit_lock = threading.Lock()
@@ -112,6 +116,24 @@ def _is_text_sample_type(data_type: str | None) -> bool:
     return any(token in lowered for token in _TEXT_SAMPLE_TYPES)
 
 
+def _quoted_identifier(name: str, dialect: str | None) -> str:
+    """Quote a schema, table or column name for *dialect*.
+
+    Names carrying a space or a reserved word have to be quoted or the probe
+    below silently loses the table: ``SELECT * FROM main.Sales Orders`` parses
+    as table ``main.Sales``, raises "no such table", and the caller drops every
+    column of that table from profiling. The quote character is dialect-specific
+    (backticks on MySQL and Spark, double quotes elsewhere), so the naive
+    hard-coded ``"`` would trade a SQLite bug for a MySQL one.
+    """
+    try:
+        return exp.to_identifier(name, quoted=True).sql(dialect=dialect or None)
+    except Exception:
+        # Unknown dialect: fall back to the SQL-standard quote rather than
+        # emitting a bare identifier, since bare is what breaks on spaces.
+        return '"' + name.replace('"', '""') + '"'
+
+
 def _distinct_values_if_low_cardinality(
     connector: "SQLDatabase",
     qualified: str,
@@ -127,7 +149,7 @@ def _distinct_values_if_low_cardinality(
     most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
     huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
     """
-    quoted = '"' + col_name.replace('"', '""') + '"'
+    quoted = _quoted_identifier(col_name, getattr(connector, "dialect", None))
     try:
         df = connector.execute(
             f"SELECT DISTINCT {quoted} FROM {qualified} "
@@ -156,17 +178,26 @@ def calculate_columns_profiling(
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
 
-    Persists to Neo4j Column nodes: ``is_unique`` for every column, and
-    ``sample_values`` for every column except those whose declared type is a
-    date/time/uuid (individual string values longer than 30 chars are dropped).
+    Persists to catalog columns: ``is_unique`` for every column, ``format``
+    for columns whose sampled values share one notation — whether declared as
+    a date/time type or as text, since loosely-typed sources such as SQLite
+    store dates as TEXT — and ``sample_values`` for every column except those
+    with a date format or a declared date/time/uuid type (individual string
+    values longer than 30 chars are dropped).
 
-    Returns ``{column_name: {"sample_values": [top-5 values], "is_unique": bool}}``
-    for *all* columns (values unfiltered — includes dates, uuids and long
-    strings).
+    Returns ``{column_name: {"sample_values": [...], "is_unique": bool,
+    "format": str | None}}`` for *all* columns (values unfiltered —
+    includes dates, uuids and long strings).
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
-    qualified = f"{schema_name}.{table_name}" if schema_name else table_name
+    dialect = getattr(connector, "dialect", None)
+    quoted_table = _quoted_identifier(table_name, dialect)
+    qualified = (
+        f"{_quoted_identifier(schema_name, dialect)}.{quoted_table}"
+        if schema_name
+        else quoted_table
+    )
 
     try:
         df = connector.execute(
@@ -188,6 +219,7 @@ def calculate_columns_profiling(
     profiling: dict[str, dict[str, Any]] = {}
     sample_values: dict[str, list] = {}
     uniqueness: dict[str, bool] = {}
+    date_formats: dict[str, str] = {}
 
     for column in df.columns:
         col_name = str(column)
@@ -233,10 +265,25 @@ def calculate_columns_profiling(
                         merged.append(value)
                 col_values = merged
 
-        uniqueness[col_name] = is_unique
-        profiling[col_name] = {"sample_values": col_values, "is_unique": is_unique}
+        # SQLite (and other loosely-typed sources) declare dates as TEXT, so the
+        # declared type alone misses them: infer from the values as well, which
+        # only yields a format when every sampled value shares one notation.
+        date_format = (
+            infer_date_format(series)
+            if is_date_type(declared_type) or _is_text_sample_type(declared_type)
+            else None
+        )
+        if date_format:
+            date_formats[col_name] = date_format
 
-        if _is_excluded_sample_type(declared_type):
+        uniqueness[col_name] = is_unique
+        profiling[col_name] = {
+            "sample_values": col_values,
+            "is_unique": is_unique,
+            "format": date_format,
+        }
+
+        if _is_excluded_sample_type(declared_type) or date_format:
             continue
         filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
         if filtered:
@@ -245,6 +292,7 @@ def calculate_columns_profiling(
     table_id = table["id"]
     store_column_sample_values(table_id, sample_values)
     store_column_uniqueness(table_id, uniqueness)
+    store_column_date_formats(table_id, date_formats)
 
     return profiling
 
@@ -262,8 +310,7 @@ def process_table(
     table_name = table["name"]
 
     # Columns profiling — requires a live connector; skipped when unavailable.
-    # Persists sample_values + is_unique onto Column nodes, and maps each column
-    # to {"sample_values": [...], "is_unique": bool} for FK detection below.
+    # Persists sample_values, is_unique, and format onto Column nodes.
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
     if connector is not None:
@@ -286,7 +333,7 @@ def process_table(
             database_name,
         )
 
-    # --- FK detection (LLM + declared); results not written to Neo4j ---
+    # --- FK detection (LLM + declared); results not written to the store ---
     declared_fks = ctx.get("fks", [])
     with _step(table_name, "Detecting foreign keys"):
         fk_suggestions = suggest_potential_foreign_keys(
@@ -324,7 +371,7 @@ def process_table(
         )
         return ProcessTableResult()
 
-    # Serialize: dedup check + Neo4j writes + VDB embed must be atomic
+    # Serialize: dedup check + the store writes + VDB embed must be atomic
     # so the next thread's VDB search sees this thread's newly embedded terms.
     result_term_names: list[str] = []
     result_attr_names: list[str] = []
@@ -418,7 +465,7 @@ def _commit_terms(
     result_term_names: list[str],
     result_attr_names: list[str],
 ) -> None:
-    """Merge Terms and their ColumnAttributes into Neo4j."""
+    """Merge Terms and their ColumnAttributes into the store."""
     for term, assignments in persisted_terms:
         merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
         result_term_names.append(term.name)
