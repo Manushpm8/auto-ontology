@@ -4,7 +4,7 @@
 
 # Deliberately a separate distribution from `gsf-server`, not an extra on it.
 # The MCP server reaches GSF over HTTP like any other client, so it needs none
-# of the backend's database drivers, model tooling, or Neo4j — installing
+# of the backend's database drivers or model tooling — installing
 # `gsf-server` to run it would pull ~450 packages and over a gigabyte, and it
 # would inherit that project's git dependencies. These four deps install in
 # seconds, which is what makes `uvx gsf-mcp` practical on a laptop.

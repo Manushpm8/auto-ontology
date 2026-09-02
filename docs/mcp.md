@@ -20,7 +20,7 @@ credentials, no model configuration, and no credentials of its own:
 agent harness  ──MCP──▶  gsf-mcp  ──HTTPS──▶  Next.js (public API)
                                                    │
                                                    ▼
-                                        FastAPI, Neo4j, Postgres
+                                        FastAPI, Postgres
 ```
 
 Authentication and permission checks already live in that Next.js layer, so the
@@ -132,7 +132,6 @@ underlying databases.
 | `get_term_sql_attributes` | The SQL attributes defined under a term. |
 | `get_sql_attribute` | One SQL attribute: its expression and purpose. |
 | `describe_table` | A table's columns, related terms, and SQL attributes together. |
-| `list_example_queries` | Curated example analyses — useful few-shot context. |
 
 There is deliberately no tool for browsing databases, schemas, or raw columns.
 Consumers are meant to reach the data through the semantic layer, and a catalog

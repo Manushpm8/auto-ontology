@@ -121,17 +121,6 @@ CURATED: tuple[ToolSpec, ...] = (
         ),
     ),
     ToolSpec(
-        method="GET",
-        path="/api/custom-analyses",
-        name="list_example_queries",
-        description=(
-            "List this deployment's curated example analyses — named "
-            "questions paired with reviewed SQL. Good few-shot context for "
-            "how this particular data is normally queried, including the "
-            "join paths and filters that are conventional here."
-        ),
-    ),
-    ToolSpec(
         method="POST",
         path="/api/question-entity-coverage",
         name="check_answerable",

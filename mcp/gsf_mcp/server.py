@@ -74,9 +74,7 @@ which physical columns a term stands for, `get_term_sql_attributes` and
 `get_sql_attribute` give you expressions that were already reviewed here, and
 `describe_table` says what a table means rather than only its shape. There is
 deliberately no tool for browsing databases, schemas, or raw columns:
-questions are answered against the glossary. `list_example_queries` shows how
-this data is conventionally queried, which is often the fastest way to
-understand its join paths.
+questions are answered against the glossary.
 
 Every tool reads. Nothing here modifies the catalog, the glossary, or the
 underlying databases.
