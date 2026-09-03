@@ -5164,7 +5164,7 @@
     },
     "/api/tags": {
       "get": {
-        "description": "tagsApi.getAll — list tags (admin only, as the settings page is).",
+        "description": "tagsApi.getAll — list tags. Viewers too, unlike the rest of this file: the\ntag picker on every detail page offers the whole vocabulary, and a tag's name\nand id say nothing about the catalog.",
         "operationId": "get_api_tags",
         "responses": {
           "200": {
@@ -5184,7 +5184,7 @@
             "description": "The caller lacks the required permission"
           }
         },
-        "summary": "List Tags",
+        "summary": "tagsApi.getAll — list tags.",
         "tags": ["tags"],
         "security": [
           {
@@ -5305,6 +5305,202 @@
         "x-gsf-source": "frontend/app/api/tags/[tag_id]/route.ts",
         "x-gsf-permissions": {
           "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
+      },
+      "get": {
+        "description": "tagsApi.getById — one tag with the objects it labels.\n\n`manage` rather than the `read` that guards the tag *list*: this answer names\ncatalog objects and spells out where they sit, and it is not scoped to the\ncaller's zones the way the catalog reads are. Only the settings page asks for\nit, and that whole section is admin-only already.",
+        "operationId": "get_api_tags_tag_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_TagDetail_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "tagsApi.getById — one tag with the objects it labels.",
+        "tags": ["tags"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/tags/[tag_id]/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/tags/{tag_id}/targets": {
+      "post": {
+        "description": "tagsApi.attach — label an object with an existing tag.\n\n`catalog: ['edit']` rather than `tag: ['manage']`, which is what guards the\ntag list itself: curating the vocabulary is an admin's job, but applying a\ntag that already exists is an edit of the object, no different from editing\nits description. Viewers hold that permission and edit terms with it.",
+        "operationId": "post_api_tags_tag_id_targets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagTarget"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_TagChip_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "tagsApi.attach — label an object with an existing tag.",
+        "tags": ["tags"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/tags/[tag_id]/targets/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["edit"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/tags/{tag_id}/targets/{target_type}/{item_id}": {
+      "delete": {
+        "description": "tagsApi.detach — take a tag off one object. Guarded as the attach route is:\nremoving a label edits the object, not the tag.",
+        "operationId": "delete_api_tags_tag_id_targets_target_type_item_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TagTargetType"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_TagChip_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "tagsApi.detach — take a tag off one object.",
+        "tags": ["tags"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/tags/[tag_id]/targets/[target_type]/[item_id]/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["edit"]
         },
         "x-gsf-proxied": true
       }
@@ -6312,6 +6508,20 @@
             ],
             "title": "Table Id"
           },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TagChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
           "term_name": {
             "anyOf": [
               {
@@ -6912,6 +7122,13 @@
               }
             ],
             "title": "Sample Values"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
           }
         },
         "required": ["id"],
@@ -7470,6 +7687,17 @@
         },
         "required": ["data"],
         "title": "DataResponse[Tag]",
+        "type": "object"
+      },
+      "DataResponse_TagDetail_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TagDetail"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[TagDetail]",
         "type": "object"
       },
       "DataResponse_Term_": {
@@ -8172,6 +8400,25 @@
         "title": "ListResponse[Tag]",
         "type": "object"
       },
+      "ListResponse_TagChip_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": ["data", "count"],
+        "title": "ListResponse[TagChip]",
+        "type": "object"
+      },
       "ListResponse_Zone_": {
         "additionalProperties": true,
         "properties": {
@@ -8781,6 +9028,20 @@
               }
             ],
             "title": "Sql Id"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TagChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
           },
           "term_id": {
             "anyOf": [
@@ -9691,6 +9952,13 @@
             ],
             "title": "Table Type"
           },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
           "terms_count": {
             "anyOf": [
               {
@@ -9734,6 +10002,23 @@
         "title": "Tag",
         "type": "object"
       },
+      "TagChip": {
+        "additionalProperties": true,
+        "description": "A tag as rendered beside the object it labels.\n\nDeliberately narrower than :class:`Tag`: a chip needs the name to show and\nthe id to remove itself by, and the timestamps describe the tag rather than\nthe labelling, so carrying them on every chip of every row would say\nnothing the tag's own page does not say better.\n\nHere rather than with the tag models below because every taggable thing\ncarries it, and the catalog ones are modelled before the tags themselves.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": ["id", "name"],
+        "title": "TagChip",
+        "type": "object"
+      },
       "TagCreate": {
         "properties": {
           "name": {
@@ -9744,6 +10029,147 @@
         "required": ["name"],
         "title": "TagCreate",
         "type": "object"
+      },
+      "TagDetail": {
+        "additionalProperties": true,
+        "description": "A tag together with everything it labels.\n\n``items`` is empty for a tag nothing carries — a freshly created tag, or one\nwhose last object was untagged — which the page renders as its empty state\nrather than as a failed read.",
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TagItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "modified": {
+            "format": "date-time",
+            "title": "Modified",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": ["id", "name", "created", "modified"],
+        "title": "TagDetail",
+        "type": "object"
+      },
+      "TagItem": {
+        "additionalProperties": true,
+        "description": "One object carrying a tag, whichever of the five kinds it is.\n\n``type`` is what tells them apart, as :class:`TagTargetType` spells the five.\n\n``path`` says where the object sits — ``database.schema`` for a Table,\n``database.schema.table`` for a Column, and the owning Term for either kind\nof attribute, which are properties of one in the same sense and so are\ndescribed the same way. Null only for a Term, which is a glossary entry\nrather than a catalog object and sits under nothing.\n\nThe four id fields are the same relationships as ids, which is what a link\nto the object's own page is built from: a Table and a Column are addressed\nby their whole catalog chain, an attribute by the Term whose page lists it,\nand a Term by its own id alone. Each kind fills only the ones it has.",
+        "properties": {
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          },
+          "tagged": {
+            "format": "date-time",
+            "title": "Tagged",
+            "type": "string"
+          },
+          "term_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Id"
+          },
+          "type": {
+            "$ref": "#/components/schemas/TagTargetType"
+          }
+        },
+        "required": ["id", "name", "type", "tagged"],
+        "title": "TagItem",
+        "type": "object"
+      },
+      "TagTarget": {
+        "description": "The object to label: what kind it is, and which one.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/TagTargetType"
+          }
+        },
+        "required": ["type", "id"],
+        "title": "TagTarget",
+        "type": "object"
+      },
+      "TagTargetType": {
+        "description": "Which of the five things a tag points at.\n\nThe members take their values from the DAL's ``TARGET_*`` constants rather\nthan repeating the strings, so the vocabulary this API speaks and the one\n``tag_target`` has columns for cannot drift apart.\n\nUsed on both sides of tagging: it is the ``type`` of a :class:`TagItem` a\ntag's page reads, and the ``type`` the attach and detach routes validate\nagainst — which is what makes an unknown kind a 422 from FastAPI's own\nvalidation, listing the five it does accept.",
+        "enum": [
+          "term",
+          "table",
+          "column",
+          "column_attribute",
+          "sql_attribute"
+        ],
+        "title": "TagTargetType",
+        "type": "string"
       },
       "Term": {
         "additionalProperties": true,
@@ -9860,7 +10286,7 @@
       },
       "TermDetail": {
         "additionalProperties": true,
-        "description": "One Term with the tables that represent it and its related terms.",
+        "description": "One Term with the tables that represent it and its related terms.\n\n``tags`` is on the detail rather than on :class:`Term` because only this\nread resolves it: the paged list would need a second query per page to fill\nit, and its cards do not render chips.",
         "properties": {
           "certification": {
             "anyOf": [
@@ -9958,6 +10384,13 @@
               "$ref": "#/components/schemas/TermTable"
             },
             "title": "Tables",
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
             "type": "array"
           },
           "zones": {

@@ -26,9 +26,22 @@ Every model allows extra keys — see :class:`ApiModel`.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# The only import from the DAL here, and it is a vocabulary rather than a
+# query: `TagTargetType` below is the API's name for the five columns
+# `tag_target` has, so taking the strings from where they are defined is what
+# keeps the two from drifting.
+from gsf.dal.tags import (
+    TARGET_COLUMN,
+    TARGET_COLUMN_ATTRIBUTE,
+    TARGET_SQL_ATTRIBUTE,
+    TARGET_TABLE,
+    TARGET_TERM,
+)
 
 __all__ = [
     "ApiModel",
@@ -63,6 +76,10 @@ __all__ = [
     "TableSqlQuery",
     "TableSummary",
     "Tag",
+    "TagChip",
+    "TagDetail",
+    "TagItem",
+    "TagTargetType",
     "Term",
     "TermCountEntry",
     "TermDetail",
@@ -98,6 +115,22 @@ class IdRef(ApiModel):
     """``{"id": ...}`` — echoed by the delete endpoints to confirm the target."""
 
     id: str
+
+
+class TagChip(ApiModel):
+    """A tag as rendered beside the object it labels.
+
+    Deliberately narrower than :class:`Tag`: a chip needs the name to show and
+    the id to remove itself by, and the timestamps describe the tag rather than
+    the labelling, so carrying them on every chip of every row would say
+    nothing the tag's own page does not say better.
+
+    Here rather than with the tag models below because every taggable thing
+    carries it, and the catalog ones are modelled before the tags themselves.
+    """
+
+    id: str
+    name: str
 
 
 class NodeUpdateResult(ApiModel):
@@ -196,6 +229,9 @@ class TableSummary(ApiModel):
     columns_count: int | None = None
     sql_count: int | None = None
     terms_count: int | None = None
+    #: The catalog has no table detail read -- a table's page is built from the
+    #: schema's list -- so its chips travel with the row.
+    tags: list[TagChip] = Field(default_factory=list)
 
 
 class ColumnSummary(ApiModel):
@@ -208,6 +244,7 @@ class ColumnSummary(ApiModel):
     description: str | None = None
     description_certified: bool | None = None
     sample_values: list[str] | None = None
+    tags: list[TagChip] = Field(default_factory=list)
 
 
 class TableColumns(ApiModel):
@@ -249,6 +286,65 @@ class Tag(ApiModel):
     modified: datetime
 
 
+class TagTargetType(StrEnum):
+    """Which of the five things a tag points at.
+
+    The members take their values from the DAL's ``TARGET_*`` constants rather
+    than repeating the strings, so the vocabulary this API speaks and the one
+    ``tag_target`` has columns for cannot drift apart.
+
+    Used on both sides of tagging: it is the ``type`` of a :class:`TagItem` a
+    tag's page reads, and the ``type`` the attach and detach routes validate
+    against — which is what makes an unknown kind a 422 from FastAPI's own
+    validation, listing the five it does accept.
+    """
+
+    TERM = TARGET_TERM
+    TABLE = TARGET_TABLE
+    COLUMN = TARGET_COLUMN
+    COLUMN_ATTRIBUTE = TARGET_COLUMN_ATTRIBUTE
+    SQL_ATTRIBUTE = TARGET_SQL_ATTRIBUTE
+
+
+class TagItem(ApiModel):
+    """One object carrying a tag, whichever of the five kinds it is.
+
+    ``type`` is what tells them apart, as :class:`TagTargetType` spells the five.
+
+    ``path`` says where the object sits — ``database.schema`` for a Table,
+    ``database.schema.table`` for a Column, and the owning Term for either kind
+    of attribute, which are properties of one in the same sense and so are
+    described the same way. Null only for a Term, which is a glossary entry
+    rather than a catalog object and sits under nothing.
+
+    The four id fields are the same relationships as ids, which is what a link
+    to the object's own page is built from: a Table and a Column are addressed
+    by their whole catalog chain, an attribute by the Term whose page lists it,
+    and a Term by its own id alone. Each kind fills only the ones it has.
+    """
+
+    id: str
+    name: str
+    type: TagTargetType
+    path: str | None = None
+    tagged: datetime
+    database_id: str | None = None
+    schema_id: str | None = None
+    table_id: str | None = None
+    term_id: str | None = None
+
+
+class TagDetail(Tag):
+    """A tag together with everything it labels.
+
+    ``items`` is empty for a tag nothing carries — a freshly created tag, or one
+    whose last object was untagged — which the page renders as its empty state
+    rather than as a failed read.
+    """
+
+    items: list[TagItem] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Terms and attributes
 # ---------------------------------------------------------------------------
@@ -282,11 +378,17 @@ class TermTable(ApiModel):
 
 
 class TermDetail(Term):
-    """One Term with the tables that represent it and its related terms."""
+    """One Term with the tables that represent it and its related terms.
+
+    ``tags`` is on the detail rather than on :class:`Term` because only this
+    read resolves it: the paged list would need a second query per page to fill
+    it, and its cards do not render chips.
+    """
 
     table_count: int | None = None
     tables: list[TermTable] = Field(default_factory=list)
     related_terms: list[TermSummary] = Field(default_factory=list)
+    tags: list[TagChip] = Field(default_factory=list)
 
 
 class TermListItem(Term):
@@ -331,6 +433,7 @@ class ColumnAttribute(ApiModel):
     sample_values: list[str] | None = None
     certified: bool | None = None
     zones: list[ZoneChip] | None = None
+    tags: list[TagChip] | None = None
     primary_column: ColumnRef | None = None
     referenced_columns: list[ColumnRef] | None = None
 
@@ -355,6 +458,7 @@ class SqlAttribute(ApiModel):
     term_name: str | None = None
     database_name: str | None = None
     zones: list[ZoneChip] | None = None
+    tags: list[TagChip] | None = None
 
 
 class SqlExpressionValidationResult(ApiModel):

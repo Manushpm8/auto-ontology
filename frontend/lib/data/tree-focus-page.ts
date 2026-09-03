@@ -13,8 +13,10 @@ import {
 } from '@/enums/datasources';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import type { ComposerCertification, ComposerSection } from '@/types/composer-section';
+import type { TagChip } from '@/types/tags';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
 import { fieldStatus } from '@/lib/certification';
+import { entityTagsSection } from '@/lib/tags';
 
 export type TreeResolved =
 	| { type: TreeFocusState.NONE }
@@ -101,9 +103,18 @@ function baseCardsForEntity(
 	];
 }
 
+/**
+ * The page for whichever catalog node *focusId* names, built from the tree the
+ * caller already holds.
+ *
+ * *tagOptions* is every tag that exists, which the picker on a table's or a
+ * column's page offers; the other kinds carry no tags, so an empty list is the
+ * right answer for a caller that knows the focus is one of those.
+ */
 export function buildTreeFocusPageFormat(
 	focusId: string | null,
 	databases: Database[],
+	tagOptions: TagChip[] = [],
 ): SinglePageFormat {
 	const resolvedFocus = resolveTreeNode(focusId, databases);
 
@@ -246,6 +257,7 @@ export function buildTreeFocusPageFormat(
 					{ certified: table.description_certified === true },
 				),
 			);
+			sections.push(entityTagsSection(table.tags, tagOptions));
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-columns',
@@ -299,6 +311,7 @@ export function buildTreeFocusPageFormat(
 					values: Array.isArray(column.sample_values) ? column.sample_values : [],
 					editable: true,
 				},
+				entityTagsSection(column.tags, tagOptions),
 				{
 					type: ComposerSectionKind.INFO_GRID,
 					id: 'information',

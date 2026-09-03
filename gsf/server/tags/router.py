@@ -10,7 +10,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from gsf.dal import tags as dal
-from gsf.server.responses import IdResponse, TagListResponse, TagResponse
+from gsf.server.models import TagTargetType
+from gsf.server.responses import (
+    IdResponse,
+    TagChipListResponse,
+    TagDetailResponse,
+    TagListResponse,
+    TagResponse,
+)
 
 router = APIRouter()
 
@@ -24,11 +31,35 @@ class TagCreate(BaseModel):
     name: str
 
 
+class TagTarget(BaseModel):
+    """The object to label: what kind it is, and which one."""
+
+    type: TagTargetType
+    id: str
+
+
 @router.get("/tags", response_model=TagListResponse)
 def list_tags() -> dict:
     """Return every tag."""
     rows = dal.list_tags()
     return {"data": rows, "count": len(rows)}
+
+
+@router.get("/tags/{tag_id}", response_model=TagDetailResponse)
+def get_tag(tag_id: str) -> dict:
+    """Return one tag with every object it labels.
+
+    404 for an unknown id, rather than an empty tag: the page opens this from a
+    row it has already read, so a missing tag means the row is stale, and a
+    blank page titled with nothing would look like a tag with no items.
+
+    An *existing* tag with nothing tagged is the opposite case and answers 200
+    with ``items: []``, which the page renders as its empty state.
+    """
+    tag = dal.get_tag(tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
+    return {"data": {**tag, "items": dal.list_tag_targets(tag_id)}}
 
 
 @router.post("/tags", status_code=201, response_model=TagResponse)
@@ -66,3 +97,77 @@ def delete_tag(tag_id: str) -> dict:
     if not dal.delete_tag(tag_id):
         raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
     return {"data": {"id": tag_id}}
+
+
+def _chips(tags: list[dict]) -> dict:
+    return {"data": tags, "count": len(tags)}
+
+
+def _target_or_tag_missing(
+    tag_id: str, target_type: TagTargetType, item_id: str
+) -> HTTPException:
+    """Name whichever side is gone, for the attach path's 404.
+
+    The DAL reports both as one ``None``, since a single insert establishes it
+    without reading either row first. Which one it was costs a query only on
+    this path, which is the one that already failed.
+    """
+    if dal.get_tag(tag_id) is None:
+        detail = f"Tag {tag_id!r} not found"
+    else:
+        detail = f"{target_type.value} {item_id!r} not found"
+    return HTTPException(status_code=404, detail=detail)
+
+
+@router.post(
+    "/tags/{tag_id}/targets", status_code=201, response_model=TagChipListResponse
+)
+def attach_tag(tag_id: str, body: TagTarget) -> dict:
+    """Label one object with this tag.
+
+    Both write routes live here rather than on ``/terms/{id}/tags`` and its two
+    attribute equivalents, because ``tag_target`` is one polymorphic table and
+    six routes over three routers would spread that polymorphism across the
+    codebase to say the same thing.
+
+    Answers with the **object's** tags, so the page that added a chip redraws
+    its whole set from one response instead of trusting its own optimistic
+    edit. Labelling something that already carries the tag is a 201 with the
+    same body: two clicks on one tag are one intention.
+
+    409 for a column or SQL attribute that is not a property of any term: it
+    exists, so a 404 would be a lie, but it is unreachable — every list of
+    attributes goes through the term that owns them — and a tag on it could
+    never be seen or taken off again.
+    """
+    try:
+        tags = dal.attach_tag(tag_id=tag_id, kind=body.type, item_id=body.id)
+    except ValueError as exc:
+        # Only the DAL's eligibility rule reaches here. Its other ``ValueError``
+        # is for an unknown target kind, which ``TagTargetType`` has already
+        # rejected with a 422 before this function runs.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if tags is None:
+        raise _target_or_tag_missing(tag_id, body.type, body.id)
+    return _chips(tags)
+
+
+@router.delete(
+    "/tags/{tag_id}/targets/{target_type}/{item_id}",
+    response_model=TagChipListResponse,
+)
+def detach_tag(tag_id: str, target_type: TagTargetType, item_id: str) -> dict:
+    """Take this tag off one object.
+
+    404 when the object was not carrying it — including when either side no
+    longer exists. The page removed a chip it had just rendered, so all three
+    mean its view is stale, and answering "done" would leave the chip gone from
+    the screen and still on the object.
+    """
+    tags = dal.detach_tag(tag_id=tag_id, kind=target_type, item_id=item_id)
+    if tags is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tag {tag_id!r} is not on {target_type.value} {item_id!r}",
+        )
+    return _chips(tags)

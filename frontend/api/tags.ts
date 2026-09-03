@@ -4,10 +4,21 @@
 
 import { requests } from './requests';
 import type { ApiResponse, ResponseWithError } from './types';
-import type { Tag, TagCreateInput } from '@/types/tags';
+import type { TagItemType } from '@/enums/tags';
+import type { Tag, TagChip, TagCreateInput, TagDetail, TagTarget } from '@/types/tags';
 
 export const tagsApi = {
 	getAll: (): Promise<ApiResponse<Tag[]>> => requests.get('tags'),
+
+	/**
+	 * One tag with everything it labels.
+	 *
+	 * 404 when the tag is gone, which — as for `delete` — means the list the
+	 * caller opened it from is stale. An *existing* tag labelling nothing
+	 * answers 200 with an empty `items`.
+	 */
+	getById: (tagId: string): Promise<ResponseWithError<{ data: TagDetail }>> =>
+		requests.get(`tags/${tagId}`),
 
 	/** 409 when the name is taken — its `message` is the backend's own wording. */
 	create: (input: TagCreateInput): Promise<ResponseWithError<{ data: Tag }>> =>
@@ -16,4 +27,21 @@ export const tagsApi = {
 	/** 404 when the tag is already gone, which means the caller's list is stale. */
 	delete: (tagId: string): Promise<ResponseWithError<{ data: { id: string } }>> =>
 		requests.delete(`tags/${tagId}`),
+
+	/**
+	 * Label an object with a tag.
+	 *
+	 * Both of these answer with the **object's** tags afterwards, not the tag
+	 * that moved, so a caller redraws its chips from the response instead of
+	 * trusting its own optimistic edit.
+	 *
+	 * Attaching a tag the object already carries succeeds and returns the same
+	 * list; 404 means the tag or the object is gone.
+	 */
+	attach: (tagId: string, target: TagTarget): Promise<ApiResponse<TagChip[]>> =>
+		requests.post(`tags/${tagId}/targets`, target),
+
+	/** 404 when the object was not carrying the tag — a stale page. */
+	detach: (tagId: string, type: TagItemType, itemId: string): Promise<ApiResponse<TagChip[]>> =>
+		requests.delete(`tags/${tagId}/targets/${type}/${itemId}`),
 };

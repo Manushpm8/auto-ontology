@@ -49,6 +49,8 @@ from gsf.server.models import (
     TableExplorationDetails,
     TableSummary,
     Tag,
+    TagChip,
+    TagDetail,
     Term,
     TermCountEntry,
     TermDetail,
@@ -108,6 +110,8 @@ __all__ = [
     "TableExplorationDetailsResponse",
     "TableListResponse",
     "TableZonesResponse",
+    "TagChipListResponse",
+    "TagDetailResponse",
     "TagListResponse",
     "TagResponse",
     "TermDetailResponse",
@@ -282,6 +286,10 @@ ZoneListResponse = ListResponse[Zone]
 # Tags
 TagResponse = DataResponse[Tag]
 TagListResponse = ListResponse[Tag]
+TagDetailResponse = DataResponse[TagDetail]
+# The attach and detach routes answer with the *object's* tags after the change,
+# which is what the page redraws from — not with the tag that was moved.
+TagChipListResponse = ListResponse[TagChip]
 
 # Catalog
 DatabaseListResponse = ListResponse[DatabaseSummary]
