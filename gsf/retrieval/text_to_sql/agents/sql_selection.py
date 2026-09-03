@@ -439,7 +439,9 @@ def _cardinality_check_rewrite(
 
     stripped_qr = run_sql_fn(stripped_sql, connector)
     if stripped_qr.error or not stripped_qr.result:
-        stats["reason"] = f"stripped_exec_error:{(stripped_qr.error or 'no_result')[:60]}"
+        stats["reason"] = (
+            f"stripped_exec_error:{(stripped_qr.error or 'no_result')[:60]}"
+        )
         return sql, stats
 
     orig_qr = run_sql_fn(sql, connector)
@@ -464,7 +466,9 @@ def _cardinality_check_rewrite(
         return sql, stats
 
     if abs(orig_val - stripped_val) > 0.01:
-        stats["reason"] = f"distinct_matters_orig={orig_val:.2f}_stripped={stripped_val:.2f}"
+        stats["reason"] = (
+            f"distinct_matters_orig={orig_val:.2f}_stripped={stripped_val:.2f}"
+        )
         return sql, stats
 
     stats["applied"] = True

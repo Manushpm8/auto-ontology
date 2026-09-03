@@ -62,6 +62,7 @@ def test_disabled_by_default(monkeypatch):
 
 def test_appends_a_differing_revision(monkeypatch):
     monkeypatch.setenv("BIRD_VERIFY_REVISE", "1")
+    monkeypatch.setenv("BIRD_VERIFY_REVISE_WHEN", "always")
     _patch_llm(monkeypatch, _Rev("SELECT name FROM t"))
     out = verify_revise.revise_pool(
         question="which name",
@@ -79,6 +80,7 @@ def test_appends_a_differing_revision(monkeypatch):
 def test_identical_revision_is_not_appended(monkeypatch):
     """A CORRECT verdict repeats the draft; that must not duplicate the pool."""
     monkeypatch.setenv("BIRD_VERIFY_REVISE", "1")
+    monkeypatch.setenv("BIRD_VERIFY_REVISE_WHEN", "always")
     _patch_llm(monkeypatch, _Rev("SELECT id FROM t", verdict="CORRECT"))
     out = verify_revise.revise_pool(
         question="q",
@@ -94,6 +96,7 @@ def test_identical_revision_is_not_appended(monkeypatch):
 
 def test_revision_that_fails_to_execute_is_dropped(monkeypatch):
     monkeypatch.setenv("BIRD_VERIFY_REVISE", "1")
+    monkeypatch.setenv("BIRD_VERIFY_REVISE_WHEN", "always")
     _patch_llm(monkeypatch, _Rev("SELECT nope FROM t"))
     out = verify_revise.revise_pool(
         question="q",
@@ -110,6 +113,7 @@ def test_revision_that_fails_to_execute_is_dropped(monkeypatch):
 def test_llm_failure_does_not_propagate(monkeypatch):
     """This is an enhancement pass; it must never take generation down."""
     monkeypatch.setenv("BIRD_VERIFY_REVISE", "1")
+    monkeypatch.setenv("BIRD_VERIFY_REVISE_WHEN", "always")
 
     def boom(*a, **k):
         raise RuntimeError("gateway down")
@@ -129,6 +133,7 @@ def test_llm_failure_does_not_propagate(monkeypatch):
 
 def test_markdown_fence_is_stripped(monkeypatch):
     monkeypatch.setenv("BIRD_VERIFY_REVISE", "1")
+    monkeypatch.setenv("BIRD_VERIFY_REVISE_WHEN", "always")
     _patch_llm(monkeypatch, _Rev("```sql\nSELECT name FROM t\n```"))
     out = verify_revise.revise_pool(
         question="q",
@@ -145,6 +150,7 @@ def test_markdown_fence_is_stripped(monkeypatch):
 
 def test_max_candidates_is_respected(monkeypatch):
     monkeypatch.setenv("BIRD_VERIFY_REVISE", "1")
+    monkeypatch.setenv("BIRD_VERIFY_REVISE_WHEN", "always")
     monkeypatch.setenv("BIRD_VERIFY_REVISE_MAX", "1")
     calls = {"n": 0}
 
@@ -231,6 +237,7 @@ def test_arbiter_survives_an_llm_failure(monkeypatch):
 def test_alternative_reading_is_appended_alongside_the_correction(monkeypatch):
     """The second reading is the point: it is a free extra shot at the oracle."""
     monkeypatch.setenv("BIRD_VERIFY_REVISE", "1")
+    monkeypatch.setenv("BIRD_VERIFY_REVISE_WHEN", "always")
     _patch_llm(
         monkeypatch,
         _Rev("SELECT name FROM t", alternative="SELECT DISTINCT name FROM t"),
@@ -252,6 +259,7 @@ def test_alternative_reading_is_appended_alongside_the_correction(monkeypatch):
 
 def test_alternative_equal_to_the_correction_is_not_duplicated(monkeypatch):
     monkeypatch.setenv("BIRD_VERIFY_REVISE", "1")
+    monkeypatch.setenv("BIRD_VERIFY_REVISE_WHEN", "always")
     _patch_llm(
         monkeypatch, _Rev("SELECT name FROM t", alternative="SELECT name FROM t")
     )
@@ -270,6 +278,7 @@ def test_alternative_equal_to_the_correction_is_not_duplicated(monkeypatch):
 def test_confirmed_draft_still_yields_its_alternative(monkeypatch):
     """A CORRECT verdict used to waste the call; now it still adds a reading."""
     monkeypatch.setenv("BIRD_VERIFY_REVISE", "1")
+    monkeypatch.setenv("BIRD_VERIFY_REVISE_WHEN", "always")
     _patch_llm(
         monkeypatch,
         _Rev(
@@ -284,7 +293,9 @@ def test_confirmed_draft_still_yields_its_alternative(monkeypatch):
         query_responses=[_QR([{"id": 7}])],
         schema_block="s",
         llm=object(),
-        run_sql=lambda s, c: _QR([{"id": 7}]),
+        # The alternative has to read differently from the draft to be worth
+        # appending: a result-twin is dropped by VERIFY_REVISE_FAIL_ALONE.
+        run_sql=lambda s, c: _QR([{"id": 8}] if "IS NOT NULL" in s else [{"id": 7}]),
         connector=None,
     )
     assert [c.sql_code for c in out] == ["SELECT id FROM t WHERE x IS NOT NULL"]

@@ -408,6 +408,18 @@ def _is_empty_sig(sig: Optional[tuple]) -> bool:
     return sig is None or len(sig) == 0
 
 
+def _most_common_sig(counts: dict[tuple, int]) -> Optional[tuple]:
+    """The winning signature, breaking count ties on the signature itself.
+
+    The tie-break has to be a property of the content: ``hash()`` over these
+    string tuples is salted per interpreter, so using it made the winner of a
+    tie change between runs, and with it every twin-drop decision downstream.
+    """
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda it: (it[1], it[0]))[0]
+
+
 def _draft_plurality_sig(query_responses: list, n_drafts: int) -> Optional[tuple]:
     """Most common non-empty result among the original drafts."""
     counts: dict[tuple, int] = {}
@@ -416,9 +428,7 @@ def _draft_plurality_sig(query_responses: list, n_drafts: int) -> Optional[tuple
         if _is_empty_sig(sig):
             continue
         counts[sig] = counts.get(sig, 0) + 1  # type: ignore[index]
-    if not counts:
-        return None
-    return max(counts.items(), key=lambda it: (it[1], -hash(it[0]) % 10_000))[0]
+    return _most_common_sig(counts)
 
 
 def _draft_sigs(query_responses: list, n_drafts: int) -> list[Optional[tuple]]:
@@ -439,9 +449,7 @@ def _peer_plurality_sig(
         if i == exclude_idx or _is_empty_sig(sig):
             continue
         counts[sig] = counts.get(sig, 0) + 1  # type: ignore[index]
-    if not counts:
-        return None
-    return max(counts.items(), key=lambda it: (it[1], -hash(it[0]) % 10_000))[0]
+    return _most_common_sig(counts)
 
 
 def revise_targets(

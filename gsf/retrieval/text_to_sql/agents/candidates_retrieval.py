@@ -33,9 +33,11 @@ from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_SQL_ATTRIBUTE,
     LABEL_TERM,
+    SQL_ATTR_SOURCE_BRIDGE,
 )
 
 from gsf import flags
+from gsf.dal.custom_analyses import custom_analysis_exists
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -389,6 +391,22 @@ def _llm_filter_both(
     return filtered_custom, filtered_sql
 
 
+def _all_bridge_sourced(sql_attr_hits: list[dict]) -> bool:
+    """Whether every hit in *sql_attr_hits* is a bridge-table structural join.
+
+    Bridge-table SqlAttributes (``source="bridgeTable"``) are LLM-generated,
+    schema-only join patterns with no business filter to judge for intent —
+    they are always structurally relevant when retrieved. Skipping the LLM
+    filter for a pure-bridge batch avoids its latency; any other source (or
+    an empty/mixed batch) still goes through the filter as usual. ``source``
+    rides along on the hit's own VDB metadata (see ``embed_docs_into_vdb``),
+    so this needs no extra lookup.
+    """
+    if not sql_attr_hits:
+        return False
+    return all(h.get("source") == SQL_ATTR_SOURCE_BRIDGE for h in sql_attr_hits)
+
+
 # ---------------------------------------------------------------------------
 # ColumnAttributeSpec builder
 # ---------------------------------------------------------------------------
@@ -502,16 +520,30 @@ class CandidateRetrievalAgent(BaseAgent):
         if semantic_retriever is not None:
             clean_entities = entities
             search_question = original_question or question
+
+            has_custom = custom_analysis_exists(target_db)
+            if not has_custom:
+                self.logger.info(
+                    "No CustomAnalysis nodes found for database %r — skipping VDB search",
+                    target_db,
+                )
+
             search_tasks: list[tuple[str, Any]] = [
-                (
-                    "custom",
-                    (
-                        semantic_retriever,
-                        search_question,
-                        Labels.CUSTOM_ANALYSIS,
-                        retrieve_k,
-                        target_db,
-                    ),
+                *(
+                    [
+                        (
+                            "custom",
+                            (
+                                semantic_retriever,
+                                search_question,
+                                Labels.CUSTOM_ANALYSIS,
+                                retrieve_k,
+                                target_db,
+                            ),
+                        )
+                    ]
+                    if has_custom
+                    else []
                 ),
                 *(
                     [
@@ -704,9 +736,17 @@ class CandidateRetrievalAgent(BaseAgent):
         # saying a set's translation lives in set_translations.
         skip_filter = str(target_db or "").lower() in flags.CUSTOM_FILTER_SKIP_DBS()
         if not skip_filter:
-            deduped_custom, deduped_sql_attr = _llm_filter_both(
-                llm, search_question, deduped_custom, deduped_sql_attr
-            )
+            if _all_bridge_sourced(deduped_sql_attr):
+                # All hits are structural bridge-table joins — nothing to judge
+                # for intent, so only run the (cheaper) single-list filter on
+                # custom analyses and skip the combined LLM call entirely.
+                deduped_custom = _llm_filter_candidates(
+                    llm, search_question, deduped_custom, "custom analyses"
+                )
+            else:
+                deduped_custom, deduped_sql_attr = _llm_filter_both(
+                    llm, search_question, deduped_custom, deduped_sql_attr
+                )
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom

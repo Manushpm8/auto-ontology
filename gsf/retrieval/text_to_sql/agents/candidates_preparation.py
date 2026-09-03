@@ -619,11 +619,7 @@ class CandidatePreparationAgent(BaseAgent):
             self.logger.info(
                 "Added %d table(s) from subject Term %r: %s",
                 added,
-                (
-                    subject_term.get("name")
-                    if isinstance(subject_term, dict)
-                    else None
-                )
+                (subject_term.get("name") if isinstance(subject_term, dict) else None)
                 or subject_term_id,
                 [t["name"] for t in subject_tables],
             )
