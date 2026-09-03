@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from gsf.semantic.deterministic import enrich_column_description, profile_from_column
+
 
 def qualify_table(database_name: str, schema_name: str, table_name: str) -> str:
     """Build the qualified identifier the model is expected to copy verbatim.
@@ -129,17 +131,15 @@ def format_tables_for_prompt(
                 if isinstance(col, dict):
                     col_name = col.get("name", "UNKNOWN")
                     col_type = col.get("data_type", "UNKNOWN")
-                    col_desc = col.get("description", "")
-                    sample_values = col.get("sample_values")
+                    # Fold profile data into the same description shape semantic
+                    # compilation writes, avoiding duplicate sample lists.
+                    col_desc = enrich_column_description(
+                        col, profile_from_column(col)
+                    ) or col.get("description", "")
 
                     col_line = f"    - {col_name} ({col_type})"
                     if col_desc:
                         col_line += f" - {col_desc}"
-                    if sample_values:
-                        col_line += f" | sample values: {sample_values}"
-                    notation = col.get("format")
-                    if notation and "format:" not in (col_desc or "").lower():
-                        col_line += f" | format: {notation}"
                     table_parts.append(col_line)
                 elif isinstance(col, str):
                     table_parts.append(f"    - {col}")

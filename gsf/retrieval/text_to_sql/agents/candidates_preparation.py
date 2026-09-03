@@ -324,7 +324,7 @@ class CandidatePreparationAgent(BaseAgent):
 
         custom_analyses_str = self._build_custom_analyses_str(relevant_queries)
 
-        # --- 2. Enrich ColumnAttributes with Neo4j context and build join paths ---
+        # --- 2. Enrich ColumnAttributes with catalog context and build join paths ---
         primary_attribute: dict | None = None
         attribute_join_paths: list[dict] = []
         attr_contexts: dict[str, dict] = {}
@@ -491,7 +491,7 @@ class CandidatePreparationAgent(BaseAgent):
             deduped_tables.append(t)
         relevant_tables = deduped_tables
 
-        # Force-inject evidence-named tables (exact Neo4j name lookup + vector).
+        # Force-inject evidence-named tables (exact catalog name lookup + vector).
         force_kept: list[str] = []
         if flags.EVIDENCE_FORCE_KEEP_TABLES() and evidence_table_hints:
             existing_ids = {t.get("id") for t in relevant_tables}
@@ -551,7 +551,7 @@ class CandidatePreparationAgent(BaseAgent):
             [_qualified_name(t) for t in relevant_tables],
         )
 
-        # --- 4b. Add tables referenced by custom analyses via Neo4j ---
+        # --- 4b. Add tables referenced by custom analyses via the catalog ---
         if custom_analyses:
             ca_ids = [str(ca["id"]) for ca in custom_analyses if ca.get("id")]
             ca_linked_tables = fetch_tables_from_custom_analyses(ca_ids)
@@ -568,7 +568,7 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in ca_linked_tables],
             )
 
-        # --- 4c. Enrich SqlAttributes with SQL + term from Neo4j ---
+        # --- 4c. Enrich SqlAttributes with SQL + term from the catalog ---
         sql_attributes: list[dict] = []
         if sql_attributes_raw:
             sa_ids = [
@@ -577,7 +577,7 @@ class CandidatePreparationAgent(BaseAgent):
             sa_ids = list(dict.fromkeys(sa_ids))
             sql_attributes = fetch_sql_attributes_with_sql(sa_ids)
             self.logger.info(
-                "Fetched %d/%d SqlAttribute details from Neo4j",
+                "Fetched %d/%d SqlAttribute details from the catalog",
                 len(sql_attributes),
                 len(sa_ids),
             )
@@ -619,7 +619,12 @@ class CandidatePreparationAgent(BaseAgent):
             self.logger.info(
                 "Added %d table(s) from subject Term %r: %s",
                 added,
-                subject_term.get("name") or subject_term_id,
+                (
+                    subject_term.get("name")
+                    if isinstance(subject_term, dict)
+                    else None
+                )
+                or subject_term_id,
                 [t["name"] for t in subject_tables],
             )
 

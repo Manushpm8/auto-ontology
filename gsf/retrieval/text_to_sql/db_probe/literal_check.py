@@ -36,6 +36,20 @@ from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 
 logger = logging.getLogger(__name__)
 
+_SQLGLOT_DIALECTS = {
+    "postgresql": "postgres",
+    "postgres": "postgres",
+    "sqlite": "sqlite",
+    "duckdb": "duckdb",
+    "snowflake": "snowflake",
+    "mysql": "mysql",
+    "bigquery": "bigquery",
+}
+
+
+def _sqlglot_dialect(dialect: Optional[str]) -> Optional[str]:
+    return _SQLGLOT_DIALECTS.get((dialect or "").lower())
+
 
 def _first_value(row: dict) -> Any:
     """Return the first value of a single-row result dict."""

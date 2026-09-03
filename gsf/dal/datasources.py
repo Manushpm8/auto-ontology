@@ -309,19 +309,25 @@ def fetch_table_by_id(table_id: str) -> dict[str, Any] | None:
     return _table_row(rows[0]) if rows else None
 
 
-def fetch_table_by_name(name: str) -> dict[str, Any] | None:
-    """The first table of that name, in *any* schema or database.
+def fetch_table_by_name(
+    name: str,
+    database_name: str | None = None,
+) -> dict[str, Any] | None:
+    """The first table of that name, optionally scoped to one database.
 
-    Ambiguous by construction: a name is not unique across schemas or
-    databases. Ordered by id so repeated calls agree with each other — which row
-    wins is still arbitrary, but it is the same arbitrary row each time.
+    A name remains ambiguous across schemas. Ordered by id so repeated calls
+    agree with each other — which row wins is still arbitrary, but it is the
+    same arbitrary row each time.
     """
-    rows = store().query_read(
+    statement = (
         _table_select()
         .where(s.catalog_table.c.name == name)
         .order_by(s.catalog_table.c.id)
         .limit(1)
     )
+    if database_name is not None:
+        statement = statement.where(s.catalog_database.c.name == database_name)
+    rows = store().query_read(statement)
     return _table_row(rows[0]) if rows else None
 
 

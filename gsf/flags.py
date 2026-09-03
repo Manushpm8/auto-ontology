@@ -640,6 +640,25 @@ WRONGNESS_GATE = BoolFlag(
     default=False,
     doc="Fail-closed binary wrongness check that switches to the largest other.",
 )
+BEST_BASE_SLOT = BoolFlag(
+    "BIRD_BEST_BASE_SLOT",
+    default=False,
+    doc=(
+        "Within the majority cluster, prefer the lowest-indexed base-generation slot "
+        "(index < n_original, i.e. not a revision) over any revision representative. "
+        "The winning cluster is unchanged; only which member SQL ships differs."
+    ),
+)
+CARDINALITY_CHECK = BoolFlag(
+    "BIRD_CARDINALITY_CHECK",
+    default=False,
+    doc=(
+        "After selection, if the winner uses COUNT(DISTINCT col), strip DISTINCT, "
+        "re-execute, and compare numeric values. When they agree within 0.01 "
+        "(no duplicate keys in the filtered set), ship the non-DISTINCT SQL. "
+        "Safe because an equal cardinality count cannot score worse."
+    ),
+)
 WRONGNESS_MARGIN = IntFlag(
     "BIRD_WRONGNESS_MARGIN",
     default=2,

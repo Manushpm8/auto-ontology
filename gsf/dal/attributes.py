@@ -302,6 +302,7 @@ def fetch_attr_column_contexts(
             s.catalog_table.c.name.label("table_name"),
             s.catalog_schema.c.name.label("schema_name"),
             s.catalog_database.c.name.label("database_name"),
+            s.term.c.id.label("term_id"),
             s.term.c.name.label("term_name"),
         )
         .select_from(
@@ -349,6 +350,7 @@ def fetch_attr_column_contexts(
                 "table_name": row["table_name"] or "",
                 "schema_name": row["schema_name"] or "",
                 "database_name": row["database_name"] or "",
+                "term_id": row["term_id"],
                 "term_name": row["term_name"] or "",
             },
         )
