@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 from gsf import flags
 from gsf.dal.attributes import fetch_attr_column_contexts, find_join_path
 from gsf.dal.custom_analyses import (
@@ -341,7 +341,7 @@ class CandidatePreparationAgent(BaseAgent):
                 database_name=target_db,
             )
             self.logger.info(
-                "Fetched Neo4j context for %d/%d column attributes",
+                "Fetched catalog context for %d/%d column attributes",
                 len(attr_contexts),
                 len(attr_ids),
             )

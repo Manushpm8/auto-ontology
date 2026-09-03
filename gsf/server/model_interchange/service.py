@@ -12,7 +12,11 @@ from collections.abc import Mapping
 from typing import Any
 
 import yaml
-from ossie_gsf import GSFConversionError, convert_gsf_to_ossie, convert_ossie_to_gsf
+from ossie_nvidia_gsf import (
+    GSFConversionError,
+    convert_gsf_to_ossie,
+    convert_ossie_to_gsf,
+)
 
 from gsf.connectors import get_connectors
 from gsf.dal import model_interchange as dal
@@ -152,7 +156,7 @@ def export_model(request: ExportRequest) -> str:
     document = dal.assemble_export_document(
         rows,
         dialect_by_db_name=_dialect_by_database_name(),
-        sql_column_resolver=dal.resolve_sql_column_ids,
+        sql_column_resolver=dal.make_cached_sql_column_resolver(),
     )
     if request.format is ModelFormat.OSSIE:
         _validate_ossie_metric_names(document)

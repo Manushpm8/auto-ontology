@@ -7,14 +7,16 @@
 Serves a FastAPI app exposing ingest and delete-ingest endpoints, and runs two
 background schedulers via the app lifespan:
 
-* :class:`DataScheduler` — data ingestion (which also runs semantic compilation
-  at the end of each ingest).
-* :class:`SemanticScheduler` — semantic compilation on its own, triggerable via
-  ``POST /semantic/compile``.
+* :class:`DataScheduler` — data ingestion, triggerable via ``POST /ingest``.
+* :class:`SemanticScheduler` — semantic compilation over the catalog that
+  :class:`DataScheduler` writes to the store, triggerable via
+  ``POST /semantic/compile``. Its first pass waits for
+  :class:`DataScheduler`'s first pass to finish (see ``semantic_scheduler.py``)
+  so the two, which both start at the same moment on boot, can't race.
 
 Each runs once at startup, then every 24h measured from the previous run —
-independent of how long each run takes. Connections are reloaded from Neo4j on
-every pass so newly added connections are picked up without restarting.
+independent of how long each run takes. Connections are reloaded from the
+catalog on every pass so newly added ones are picked up without restarting.
 
 Usage::
 
@@ -34,6 +36,7 @@ from gsf.env import load_env
 
 load_env()
 
+from gsf.dal.schema_version import require_current_schema  # noqa: E402
 from gsf.ingestion_service.config import (  # noqa: E402
     is_semantic_compilation_enabled,
 )
@@ -47,11 +50,22 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Same gate as the API server: this service writes the catalog, so against a
+    # schema it does not expect every ingest fails partway through instead of
+    # not starting. Worse here than there, because a scheduler runs unattended —
+    # nobody is watching a request come back 500, so the failure surfaces as an
+    # empty catalog hours later.
+    require_current_schema()
+
     # uvicorn owns SIGINT/SIGTERM; each scheduler exposes a stop() that unwinds
     # its in-flight wait promptly on shutdown. Schedulers are stored on
     # app.state so the router can trigger them on demand.
     data_scheduler = DataScheduler()
-    semantic_scheduler = SemanticScheduler()
+    # Waits for the ingest scheduler's first pass before compiling (see
+    # semantic_scheduler.py) so the two starting at the same moment on boot
+    # can't race — otherwise the very first compile could run against a
+    # catalog that ingest hasn't written yet.
+    semantic_scheduler = SemanticScheduler(depends_on=data_scheduler)
     app.state.data_scheduler = data_scheduler
     app.state.semantic_scheduler = semantic_scheduler
 

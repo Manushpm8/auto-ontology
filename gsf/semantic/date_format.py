@@ -49,6 +49,11 @@ _CANDIDATES: tuple[tuple[str, str], ...] = (
     ("%d-%m-%Y", "DD-MM-YYYY"),
     ("%m-%d-%Y", "MM-DD-YYYY"),
     ("%d.%m.%Y", "DD.MM.YYYY"),
+    ("%d/%m/%y", "DD/MM/YY"),
+    ("%m/%d/%y", "MM/DD/YY"),
+    ("%d-%m-%y", "DD-MM-YY"),
+    ("%m-%d-%y", "MM-DD-YY"),
+    ("%d.%m.%y", "DD.MM.YY"),
     ("%Y%m%d", "YYYYMMDD"),
     ("%Y%m", "YYYYMM"),
     ("%y%m%d", "YYMMDD"),
@@ -63,6 +68,15 @@ _CANDIDATES: tuple[tuple[str, str], ...] = (
 _INDISTINGUISHABLE: tuple[frozenset[str], ...] = (
     frozenset({"DD/MM/YYYY", "MM/DD/YYYY"}),
     frozenset({"DD-MM-YYYY", "MM-DD-YYYY"}),
+    frozenset({"DD/MM/YY", "MM/DD/YY"}),
+    frozenset({"DD-MM-YY", "MM-DD-YY"}),
+    frozenset({"DD.MM.YY", "MM.DD.YY"}),
+    frozenset({"D/M/YY", "M/D/YY"}),
+    frozenset({"D-M-YY", "M-D-YY"}),
+    frozenset({"D.M.YY", "M.D.YY"}),
+    frozenset({"D/M/YYYY", "M/D/YYYY"}),
+    frozenset({"D-M-YYYY", "M-D-YYYY"}),
+    frozenset({"D.M.YYYY", "M.D.YYYY"}),
 )
 
 # A four-digit run only reads as a year inside this range. Without the guard
@@ -115,6 +129,26 @@ def _widen_fraction(label: str, values: list[str]) -> str:
     return label.replace(".f", "." + "f" * widest)
 
 
+def _narrow_padding(label: str, values: list[str]) -> str:
+    """Restate a date notation at the digit width actually stored.
+
+    ``strptime`` accepts an unpadded month or day, so ``4/4/20`` and
+    ``04/04/20`` both parse as ``%m/%d/%y``. The notation must not blur them:
+    the model writes an equality predicate against the stored string, and
+    regional_sales stores ``4/4/20``, which ``04/04/20`` never matches. Only
+    date-only notations are narrowed -- a label carrying a time would have its
+    minutes rewritten along with its month.
+    """
+    if any(ch in label for ch in (" ", "T", ":")):
+        return label
+    separator = next((sep for sep in ("/", "-", ".") if sep in label), None)
+    if separator is None:
+        return label
+    if any(len(part) == 1 for value in values for part in value.split(separator)):
+        return label.replace("MM", "M").replace("DD", "D")
+    return label
+
+
 def infer_date_format(values: Iterable[object]) -> str | None:
     """The notation every sampled value follows, or None if that is not one thing.
     Returns a human notation (``YYYY-MM-DD``) rather than a strptime pattern,
@@ -137,7 +171,9 @@ def infer_date_format(values: Iterable[object]) -> str | None:
         return None
 
     matches = [
-        (pattern, label) for pattern, label in _CANDIDATES if _parses_all(pattern, seen)
+        (pattern, _narrow_padding(label, seen))
+        for pattern, label in _CANDIDATES
+        if _parses_all(pattern, seen)
     ]
     if not matches:
         return None

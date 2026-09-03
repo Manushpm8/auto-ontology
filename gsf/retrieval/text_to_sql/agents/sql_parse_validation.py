@@ -26,7 +26,7 @@ from typing import Dict, Any
 import sqlglot
 from sqlglot import expressions as exp
 
-from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
+from gsf.catalog.sql_parse import parse_query_single
 from gsf import flags
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState

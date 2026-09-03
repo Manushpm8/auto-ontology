@@ -22,10 +22,10 @@ def compile_semantic_layer(
     domain_summary: DomainSummary | None = None,
     embedder: SemanticEmbedder | None = None,
 ) -> int:
-    """Run full taxonomy compilation over every table in Neo4j.
+    """Run full taxonomy compilation over every table in the store.
 
     Tables are processed in parallel (LLM calls for FK detection and term
-    extraction run concurrently). The commit phase (VDB dedup check, Neo4j
+    extraction run concurrently). The commit phase (VDB dedup check, the store
     writes, VDB embedding) is serialized via ``_term_commit_lock`` in
     ``visit_enter`` to prevent duplicate Terms.
     """
@@ -67,10 +67,9 @@ def compile_semantic_layer(
             if result is not None:
                 count += 1
                 logger.debug(
-                    "  terms=%s attrs=%s sql_attrs=%s",
+                    "  terms=%s attrs=%s",
                     result.term_names,
                     result.attr_names,
-                    result.sql_attr_names,
                 )
 
     logger.info("Compilation complete — %d table(s) processed", count)

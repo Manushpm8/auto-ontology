@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
@@ -10,36 +9,26 @@ from collections import defaultdict
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
 
+from sqlglot import exp
+
 from gsf.connectors import get_connectors
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.datasources import (
-    store_column_cardinality,
     store_column_date_formats,
-    store_column_exhaustiveness,
     store_column_sample_values,
     store_column_uniqueness,
-    store_table_row_count,
 )
-from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
-from gsf.semantic.constants import MAX_SAMPLE_VALUE_LEN, SQL_ATTR_SOURCE_TABLE
 from gsf.semantic.date_format import infer_date_format, is_date_type
-from gsf.semantic.deterministic import (
-    column_attribute_specs,
-    exact_cardinality_enabled,
-)
+from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
+from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
-from gsf.semantic.sql_attribute_extractor import extract_sql_attributes
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
-from gsf.server.sql_attributes.service import (
-    SqlAttributeNameConflict,
-    create_sql_attribute,
-)
 
 if TYPE_CHECKING:
-    from nemo_retriever.tabular_data.sql_database import SQLDatabase
+    from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +36,8 @@ logger = logging.getLogger(__name__)
 _PROFILING_SAMPLE_LIMIT = 1000
 # Most-common values kept per column.
 _PROFILING_TOP_N = 5
+# String sample values longer than this are not persisted.
+_MAX_SAMPLE_VALUE_LEN = 30
 # Declared data-type substrings whose sample values are not persisted.
 _EXCLUDED_SAMPLE_TYPES = ("date", "time", "timestamp", "datetime", "uuid")
 # A text column with at most this many distinct values is treated as
@@ -57,23 +48,9 @@ _EXCLUDED_SAMPLE_TYPES = ("date", "time", "timestamp", "datetime", "uuid")
 _LOW_CARDINALITY_MAX = 25
 # Declared data-type substrings treated as free/categorical text.
 _TEXT_SAMPLE_TYPES = ("char", "text", "string", "clob", "enum")
-# Declared data-type substrings that store whole numbers.
-_INTEGRAL_SAMPLE_TYPES = ("int", "serial")
-# Declared data-type substrings that store numbers. Coded flags and status
-# codes are routinely stored as INTEGER, so these columns are as categorical as
-# any text enum and get the same low-cardinality treatment.
-_NUMERIC_SAMPLE_TYPES = (
-    "int",
-    "serial",
-    "real",
-    "float",
-    "double",
-    "numeric",
-    "decimal",
-)
 
 # Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
-# the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
+# the commit phase must be serial: VDB search → judge → store merge → VDB embed.
 # Without the lock, two threads could simultaneously propose the same Term,
 # both find zero VDB hits (the first hasn't embedded yet), and create duplicates.
 _term_commit_lock = threading.Lock()
@@ -111,47 +88,6 @@ def _terms_with_assignments(
     return persisted
 
 
-def _extract_sql_attributes_for_table(
-    table: dict,
-    columns: list[dict],
-    schema_name: str | None,
-    term_id: str,
-    term_name: str,
-    database_name: str,
-) -> list[str]:
-    """Run LLM extraction + persistence for one term's columns. Returns created attr names."""
-    term = {
-        "name": term_name,
-        "description": table.get("description", ""),
-    }
-
-    proposals = extract_sql_attributes(table, columns, schema_name, term, database_name)
-    created_names: list[str] = []
-
-    for proposal in proposals:
-        try:
-            row = create_sql_attribute(
-                name=proposal.name,
-                description=proposal.description,
-                expression=proposal.expression,
-                term_id=term_id,
-                connector=database_name,
-                source=SQL_ATTR_SOURCE_TABLE,
-            )
-            created_names.append(row["name"])
-            logger.info("  Created SqlAttribute %r", proposal.name)
-        except SqlAttributeNameConflict:
-            logger.debug("SqlAttribute %r already exists — skipping", proposal.name)
-        except Exception:
-            logger.warning(
-                "  Failed to persist SqlAttribute %r",
-                proposal.name,
-                exc_info=True,
-            )
-
-    return created_names
-
-
 def _resolve_connector(database_name: str | None) -> "SQLDatabase | None":
     """Return the loaded connector whose ``database_name`` matches, or None."""
     if not database_name:
@@ -180,60 +116,22 @@ def _is_text_sample_type(data_type: str | None) -> bool:
     return any(token in lowered for token in _TEXT_SAMPLE_TYPES)
 
 
-def _is_numeric_sample_type(data_type: str | None) -> bool:
-    """Whether a column's declared type stores numbers."""
-    if not data_type:
-        return False
-    lowered = data_type.lower()
-    return any(token in lowered for token in _NUMERIC_SAMPLE_TYPES)
+def _quoted_identifier(name: str, dialect: str | None) -> str:
+    """Quote a schema, table or column name for *dialect*.
 
-
-def _is_integral_type(data_type: str | None) -> bool:
-    """Whether a column's declared type stores whole numbers."""
-    if not data_type:
-        return False
-    lowered = data_type.lower()
-    return any(token in lowered for token in _INTEGRAL_SAMPLE_TYPES)
-
-
-def _stringify(value: Any, integral: bool) -> str:
-    """Render a profiled value, keeping integer columns free of a ``.0`` tail.
-
-    pandas widens an integer column that contains NULLs to ``float64``, so a
-    stored ``418`` arrives as ``418.0``. Sampling that verbatim would put a
-    float literal in the generation prompt for a column whose values are
-    integers, misrepresenting the type the model has to write predicates against.
+    Names carrying a space or a reserved word have to be quoted or the probe
+    below silently loses the table: ``SELECT * FROM main.Sales Orders`` parses
+    as table ``main.Sales``, raises "no such table", and the caller drops every
+    column of that table from profiling. The quote character is dialect-specific
+    (backticks on MySQL and Spark, double quotes elsewhere), so the naive
+    hard-coded ``"`` would trade a SQLite bug for a MySQL one.
     """
-    if integral and isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
-
-
-def _sorted_numerically(values: list[str]) -> list[str]:
-    """Sort stringified numbers by value, leaving the list alone if any is not one."""
     try:
-        return sorted(values, key=float)
-    except (TypeError, ValueError):
-        return values
-
-
-def _quote_identifier(name: str) -> str:
-    """Double-quote a schema/table/column name for interpolation into SQL.
-
-    Table names used to be interpolated raw, which made every profiling query
-    against a table named after a reserved word — ``order``, ``group``,
-    ``table`` — a syntax error, silently costing that table its sample values
-    and uniqueness flags.
-    """
-    return '"' + str(name).replace('"', '""') + '"'
-
-
-def _qualified_table(schema_name: str | None, table_name: str) -> str:
-    """``"schema"."table"`` when a schema is known, else ``"table"``."""
-    quoted_table = _quote_identifier(table_name)
-    if not schema_name:
-        return quoted_table
-    return f"{_quote_identifier(schema_name)}.{quoted_table}"
+        return exp.to_identifier(name, quoted=True).sql(dialect=dialect or None)
+    except Exception:
+        # Unknown dialect: fall back to the SQL-standard quote rather than
+        # emitting a bare identifier, since bare is what breaks on spaces.
+        return '"' + name.replace('"', '""') + '"'
 
 
 def _distinct_values_if_low_cardinality(
@@ -241,7 +139,6 @@ def _distinct_values_if_low_cardinality(
     qualified: str,
     col_name: str,
     cap: int,
-    integral: bool = False,
 ) -> list[str] | None:
     """Return the full distinct value set for a low-cardinality column.
 
@@ -252,71 +149,20 @@ def _distinct_values_if_low_cardinality(
     most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
     huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
     """
-    quoted = _quote_identifier(col_name)
+    quoted = _quoted_identifier(col_name, getattr(connector, "dialect", None))
     try:
         df = connector.execute(
             f"SELECT DISTINCT {quoted} FROM {qualified} "
             f"WHERE {quoted} IS NOT NULL LIMIT {cap + 1}"
         )
     except Exception:
-        # Not fatal — the caller falls back to most-common-values from the row
-        # sample it already holds. Logged so a systematically failing probe is
-        # discoverable rather than silently degrading every description.
-        logger.debug(
-            "distinct-value probe failed for %s.%s", qualified, col_name, exc_info=True
-        )
         return None
     if df is None or df.empty:
         return None
-    values = [_stringify(v, integral) for v in df.iloc[:, 0].tolist()]
+    values = [str(v) for v in df.iloc[:, 0].tolist()]
     if len(values) > cap:
         return None
     return values
-
-
-def _table_row_count(connector: "SQLDatabase", qualified: str) -> int | None:
-    """Total rows in a table, or ``None`` when the count cannot be taken."""
-    try:
-        df = connector.execute(f"SELECT COUNT(*) AS n FROM {qualified}")
-    except Exception:
-        logger.debug("row-count query failed for %s", qualified, exc_info=True)
-        return None
-    if df is None or df.empty:
-        return None
-    try:
-        return int(df.iloc[0]["n"])
-    except (KeyError, TypeError, ValueError):
-        return None
-
-
-def _exact_cardinality(
-    connector: "SQLDatabase", qualified: str, col_name: str
-) -> tuple[int, int] | None:
-    """``(non_null_count, distinct_count)`` for a column, or ``None`` on failure.
-
-    Unlike the row-sample profile, this sees the whole column, which is what
-    makes it safe to tell the model a column is a key: of 148 columns the
-    1000-row sample called unique, 25 were not unique over the full table — one
-    of them an 11-value enum that happened to arrive distinct in the sample.
-    """
-    quoted = _quote_identifier(col_name)
-    try:
-        df = connector.execute(
-            f"SELECT COUNT({quoted}) AS n, COUNT(DISTINCT {quoted}) AS nd "
-            f"FROM {qualified}"
-        )
-    except Exception:
-        logger.debug(
-            "cardinality probe failed for %s.%s", qualified, col_name, exc_info=True
-        )
-        return None
-    if df is None or df.empty:
-        return None
-    row = df.iloc[0]
-    try:
-        return int(row["n"]), int(row["nd"])
-    except (KeyError, TypeError, ValueError):
-        return None
 
 
 def calculate_columns_profiling(
@@ -328,29 +174,30 @@ def calculate_columns_profiling(
 
     Runs ``SELECT * ... LIMIT 1000`` and, for every column, computes an
     ``is_unique`` flag (all non-null values distinct) and the 5 most-common
-    values.
+    values. For non-unique text columns whose sample yields fewer than 5
+    distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
+    values that the row prefix may have missed.
 
-    Persists to Neo4j Column nodes: ``is_unique`` and ``exhaustive`` for every
-    column, and ``sample_values`` for every column except those whose declared
-    type is a date/time/uuid (individual values longer than
-    ``MAX_SAMPLE_VALUE_LEN`` are dropped).
+    Persists to catalog columns: ``is_unique`` for every column, ``format``
+    for columns whose sampled values share one notation — whether declared as
+    a date/time type or as text, since loosely-typed sources such as SQLite
+    store dates as TEXT — and ``sample_values`` for every column except those
+    with a date format or a declared date/time/uuid type (individual string
+    values longer than 30 chars are dropped).
 
     Returns ``{column_name: {"sample_values": [...], "is_unique": bool,
-    "exhaustive": bool}}`` for *all* columns (values unfiltered — includes dates,
-    uuids and long strings). ``exhaustive`` is True when the values are the
-    column's complete distinct set rather than its most common few.
+    "format": str | None}}`` for *all* columns (values unfiltered —
+    includes dates, uuids and long strings).
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
-    qualified = _qualified_table(schema_name, table_name)
-
-    # Taken before the sample, so an empty table still records its size — that a
-    # table holds nothing is exactly what stops the model building a query around
-    # it. Cheap even on a large table: one COUNT(*), no per-column work, so it is
-    # not gated behind the exact-cardinality flag.
-    n_rows = _table_row_count(connector, qualified)
-    if n_rows is not None:
-        store_table_row_count(table["id"], n_rows)
+    dialect = getattr(connector, "dialect", None)
+    quoted_table = _quoted_identifier(table_name, dialect)
+    qualified = (
+        f"{_quoted_identifier(schema_name, dialect)}.{quoted_table}"
+        if schema_name
+        else quoted_table
+    )
 
     try:
         df = connector.execute(
@@ -372,20 +219,15 @@ def calculate_columns_profiling(
     profiling: dict[str, dict[str, Any]] = {}
     sample_values: dict[str, list] = {}
     uniqueness: dict[str, bool] = {}
-    exhaustiveness: dict[str, bool] = {}
-    cardinality: dict[str, int] = {}
     date_formats: dict[str, str] = {}
-    exact = exact_cardinality_enabled()
 
     for column in df.columns:
         col_name = str(column)
-        declared_type = type_by_column.get(col_name)
-        integral = _is_integral_type(declared_type)
         try:
             # Cast to string first: some columns hold unhashable values (e.g.
             # Postgres array columns come back as Python lists, JSON/JSONB as
             # dict/list), and both is_unique and value_counts hash values.
-            series = df[column].dropna().map(lambda v: _stringify(v, integral))
+            series = df[column].dropna().map(str)
 
             is_unique = bool(len(series) > 0 and series.is_unique)
             top5 = list(series.value_counts().head(_PROFILING_TOP_N).index)
@@ -398,133 +240,60 @@ def calculate_columns_profiling(
             )
             continue
 
-        # A date column stores no sample values, so its notation is the only
-        # thing that can tell the model what a predicate has to compare against.
-        # Inferred from the whole sampled series rather than the five most
-        # common values, since a day past the 12th may well be uncommon and it
-        # is what rules out a month-first reading.
-        date_format = infer_date_format(series) if is_date_type(declared_type) else None
-        if date_format:
-            date_formats[col_name] = date_format
+        declared_type = type_by_column.get(col_name)
 
-        # An exact count supersedes the sampled flag rather than sitting beside
-        # it: a description may only claim uniqueness it can prove. It is taken
-        # before the probe below because it also decides whether to run it.
-        n_distinct: int | None = None
-        if exact:
-            counts = _exact_cardinality(connector, qualified, col_name)
-            if counts is not None:
-                n_non_null, n_distinct = counts
-                is_unique = n_non_null > 0 and n_distinct == n_non_null
-                cardinality[col_name] = n_distinct
-
-        # For categorical columns, prefer the full distinct value set over the
-        # most-common values from the first-N-row sample. Rare enum values (e.g.
-        # 'Banned', or a boolean flag whose 1s all sit past the sampled row
-        # prefix) otherwise never make it into the embedded description.
+        # For categorical text columns that did not yield a full top-N set from
+        # the first-N-row sample, prefer the full distinct value set. Rare enum
+        # values (e.g. 'Banned') otherwise never make it into the embedded
+        # description when a dominant value fills the sampled row prefix.
+        # Skip the DISTINCT probe when the sample already produced _PROFILING_TOP_N
+        # values — that is enough for embedding and avoids a full-table scan
+        # per column on warehouses where DISTINCT + LIMIT does not early-stop.
         col_values = top5
-        # A low-cardinality probe returns *every* distinct value, which makes the
-        # list a closed enumeration rather than a handful of examples. Recording
-        # which it is lets a description state "one of: Active, Closed" instead of
-        # "samples: Active, Closed", turning a hint into a constraint.
-        is_exhaustive = False
-        categorical_candidate = _is_text_sample_type(
-            declared_type
-        ) or _is_numeric_sample_type(declared_type)
-        # The true distinct count decides this when it is known. Sampled
-        # uniqueness is a poor stand-in twice over: a column that is almost
-        # entirely NULL within the sampled row prefix holds one or two values
-        # there and is trivially "unique", which used to disqualify the very
-        # columns whose domain the sample fails to show; and a small dimension
-        # table's key genuinely is unique, yet its handful of values are exactly
-        # the literals a WHERE clause has to match. Uniqueness only stands in
-        # when no exact count was taken, preserving the old behaviour there.
-        if n_distinct is not None:
-            worth_probing = n_distinct <= _LOW_CARDINALITY_MAX
-        else:
-            worth_probing = not is_unique
-        if worth_probing and categorical_candidate:
+        if (
+            not is_unique
+            and len(top5) < _PROFILING_TOP_N
+            and _is_text_sample_type(declared_type)
+        ):
             distinct_vals = _distinct_values_if_low_cardinality(
-                connector, qualified, col_name, _LOW_CARDINALITY_MAX, integral
+                connector, qualified, col_name, _LOW_CARDINALITY_MAX
             )
             if distinct_vals is not None:
                 merged = list(top5)
                 for value in distinct_vals:
                     if value not in merged:
                         merged.append(value)
-                # Text keeps most-common-first ordering, which carries which
-                # values dominate. A numeric enum reads as a range instead, so
-                # "one of: 1, 2, ... 20" beats the frequency order.
-                col_values = (
-                    _sorted_numerically(merged)
-                    if _is_numeric_sample_type(declared_type)
-                    else merged
-                )
-                is_exhaustive = True
+                col_values = merged
+
+        # SQLite (and other loosely-typed sources) declare dates as TEXT, so the
+        # declared type alone misses them: infer from the values as well, which
+        # only yields a format when every sampled value shares one notation.
+        date_format = (
+            infer_date_format(series)
+            if is_date_type(declared_type) or _is_text_sample_type(declared_type)
+            else None
+        )
+        if date_format:
+            date_formats[col_name] = date_format
 
         uniqueness[col_name] = is_unique
         profiling[col_name] = {
             "sample_values": col_values,
             "is_unique": is_unique,
-            "exhaustive": is_exhaustive,
-            "n_distinct": n_distinct,
-            "date_format": date_format,
+            "format": date_format,
         }
 
-        if _is_excluded_sample_type(declared_type):
-            exhaustiveness[col_name] = False
+        if _is_excluded_sample_type(declared_type) or date_format:
             continue
-        filtered = [v for v in col_values if len(v) <= MAX_SAMPLE_VALUE_LEN]
-        # Dropping an over-length value leaves the stored list incomplete, so the
-        # persisted flag must stop claiming it is the column's full domain.
-        exhaustiveness[col_name] = is_exhaustive and len(filtered) == len(col_values)
+        filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
         if filtered:
             sample_values[col_name] = filtered
 
     table_id = table["id"]
     store_column_sample_values(table_id, sample_values)
     store_column_uniqueness(table_id, uniqueness)
-    store_column_exhaustiveness(table_id, exhaustiveness)
-    store_column_cardinality(table_id, cardinality)
     store_column_date_formats(table_id, date_formats)
 
-    return profiling
-
-
-def _profiling_from_columns(
-    columns: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """Rebuild the profiling dict from Column properties written at ingest.
-
-    Returns ``{}`` when the table carries no ``exhaustive`` property at all,
-    which means the graph predates it and the caller must profile live.
-
-    The values read back are the *stored* ones, so they omit what
-    ``calculate_columns_profiling`` declines to persist: date/time/uuid columns
-    and individual values over ``MAX_SAMPLE_VALUE_LEN``.
-    """
-    if not any(col.get("exhaustive") is not None for col in columns):
-        return {}
-    profiling: dict[str, dict[str, Any]] = {}
-    for col in columns:
-        name = col.get("name")
-        if not name:
-            continue
-        raw = col.get("sample_values")
-        try:
-            values = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        except ValueError:
-            values = []
-        n_distinct = col.get("n_distinct")
-        profiling[name] = {
-            "sample_values": [str(v) for v in values],
-            "is_unique": bool(col.get("is_unique")),
-            "exhaustive": bool(col.get("exhaustive")),
-            # Absent on a graph ingested without the exact probe, which is what
-            # keeps the description from claiming a cardinality it never measured.
-            "n_distinct": int(n_distinct) if n_distinct is not None else None,
-            "date_format": col.get("date_format"),
-        }
     return profiling
 
 
@@ -540,37 +309,31 @@ def process_table(
     table_id = table["id"]
     table_name = table["name"]
 
-    # Column profiles come from the Column nodes, where ingest already stored
-    # them. Only a graph built before those properties existed needs the live
-    # fallback, which costs a table scan plus a DISTINCT probe per categorical
-    # column. Either way the result maps each column to {"sample_values": [...],
-    # "is_unique": bool, "exhaustive": bool} for FK detection and descriptions.
-    columns_profiling_samples = _profiling_from_columns(ctx.get("columns", []))
-    if not columns_profiling_samples:
-        connector = _resolve_connector(database_name)
-        if connector is not None:
-            column_count = len(ctx.get("columns", []))
-            try:
-                with _step(
-                    table_name, f"Sampling column values ({column_count} columns)"
-                ):
-                    columns_profiling_samples = calculate_columns_profiling(
-                        table, ctx.get("columns", []), connector
-                    )
-            except Exception:
-                logger.warning(
-                    "[%s] column profiling failed — continuing without it",
-                    table_name,
-                    exc_info=True,
+    # Columns profiling — requires a live connector; skipped when unavailable.
+    # Persists sample_values, is_unique, and format onto Column nodes.
+    connector = _resolve_connector(database_name)
+    columns_profiling_samples: dict[str, dict[str, Any]] = {}
+    if connector is not None:
+        column_count = len(ctx.get("columns", []))
+        try:
+            with _step(table_name, f"Sampling column values ({column_count} columns)"):
+                columns_profiling_samples = calculate_columns_profiling(
+                    table, ctx.get("columns", []), connector
                 )
-        else:
-            logger.info(
-                "[%s] Skipping value sampling — no live connector for %r",
+        except Exception:
+            logger.warning(
+                "[%s] column profiling failed — continuing without it",
                 table_name,
-                database_name,
+                exc_info=True,
             )
+    else:
+        logger.info(
+            "[%s] Skipping value sampling — no live connector for %r",
+            table_name,
+            database_name,
+        )
 
-    # --- FK detection (LLM + declared); results not written to Neo4j ---
+    # --- FK detection (LLM + declared); results not written to the store ---
     declared_fks = ctx.get("fks", [])
     with _step(table_name, "Detecting foreign keys"):
         fk_suggestions = suggest_potential_foreign_keys(
@@ -608,7 +371,7 @@ def process_table(
         )
         return ProcessTableResult()
 
-    # Serialize: dedup check + Neo4j writes + VDB embed must be atomic
+    # Serialize: dedup check + the store writes + VDB embed must be atomic
     # so the next thread's VDB search sees this thread's newly embedded terms.
     result_term_names: list[str] = []
     result_attr_names: list[str] = []
@@ -640,7 +403,7 @@ def process_table(
             len(all_fk_names),
         )
 
-        # Fetch persisted terms — used for embedding and SQL attribute extraction
+        # Fetch persisted terms — used for embedding.
         try:
             terms, attrs = fetch_terms_and_attributes_for_table(table_id)
             for attr in attrs:
@@ -657,23 +420,9 @@ def process_table(
             except Exception:
                 logger.warning("[%s] inline embed failed", table_name)
 
-    # --- LLM: propose SqlAttributes (outside the lock — Term writes are complete) ---
-    result_sql_attr_names: list[str] = []
-    if database_name is not None and terms:
-        try:
-            with _step(table_name, "Extracting SQL attributes"):
-                result_sql_attr_names = _extract_sql_attrs_for_terms(
-                    table, ctx, terms, attrs_by_term, database_name
-                )
-        except Exception:
-            logger.warning(
-                "[%s] SqlAttribute extraction failed", table_name, exc_info=True
-            )
-
     return ProcessTableResult(
         term_names=result_term_names,
         attr_names=result_attr_names,
-        sql_attr_names=result_sql_attr_names,
     )
 
 
@@ -716,7 +465,7 @@ def _commit_terms(
     result_term_names: list[str],
     result_attr_names: list[str],
 ) -> None:
-    """Merge Terms and their ColumnAttributes into Neo4j."""
+    """Merge Terms and their ColumnAttributes into the store."""
     for term, assignments in persisted_terms:
         merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
         result_term_names.append(term.name)
@@ -731,38 +480,3 @@ def _commit_terms(
                 description=spec.description,
             )
             result_attr_names.append(spec.display_name)
-
-
-def _extract_sql_attrs_for_terms(
-    table: dict[str, Any],
-    ctx: dict[str, Any],
-    terms: list,
-    attrs_by_term: dict[str, list[dict]],
-    database_name: str,
-) -> list[str]:
-    """Propose SqlAttributes for each Term with at least two mapped columns."""
-    col_by_name = {c["name"]: c for c in ctx.get("columns", [])}
-    schema_name = table.get("schema_name")
-    names: list[str] = []
-
-    for term in terms:
-        term_name_str = term.get("name")
-        term_col_names = [
-            a["source_column"]
-            for a in attrs_by_term.get(term_name_str, [])
-            if a.get("source_column")
-        ]
-        filtered_cols = [col_by_name[n] for n in term_col_names if n in col_by_name]
-        if len(filtered_cols) < 2:
-            continue
-        names.extend(
-            _extract_sql_attributes_for_table(
-                table,
-                filtered_cols,
-                schema_name,
-                term.get("id"),
-                term_name_str,
-                database_name,
-            )
-        )
-    return names

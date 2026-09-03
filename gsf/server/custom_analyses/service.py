@@ -4,8 +4,8 @@
 
 """Data Access Layer — CustomAnalysis write orchestration.
 
-All direct Neo4j calls live in gsf/dal/custom_analyses.py.
-This module only keeps orchestration: SQL validation, Neo4j node
+All direct store access lives in gsf/dal/custom_analyses.py.
+This module only keeps orchestration: SQL validation, node
 persistence, and VDB embedding — the three concerns that can't be
 cleanly separated into a pure-graph layer.
 """
@@ -15,9 +15,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
-from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
+from gsf.catalog.store.queries import add_query
+from gsf.catalog.model import CatalogNode
+from gsf.catalog.constants import (
     Labels,
     Props,
 )
@@ -28,6 +28,7 @@ from gsf.dal.custom_analyses import (
     delete_custom_analysis_node,
     detach_existing_sql_edges,
     embed_custom_analyses,
+    fetch_database_name_for_analysis,
     find_analysis_by_name,
     find_analysis_by_sql,
     get_custom_analysis_by_id,
@@ -74,8 +75,34 @@ def validate_custom_analysis_sql(sql: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _embed_analysis(analysis_id: str) -> None:
+    """Embed an analysis scoped to the database whose tables it references.
+
+    Semantic search filters hits on ``database_name`` (see
+    :func:`gsf.retrieval.data_access.semantic_search.search_semantic_index`).
+    """
+    from gsf.utils import get_embed_params
+    from gsf.vdb import get_semantic_vdb
+
+    vdb = get_semantic_vdb()
+    database_name = fetch_database_name_for_analysis(analysis_id)
+    if database_name is None:
+        logger.warning(
+            "CustomAnalysis %s references no catalogued database; embedding it "
+            "unscoped, so retrieval's database filter will skip it",
+            analysis_id,
+        )
+
+    embed_custom_analyses(
+        embed_params=get_embed_params(),
+        vdb=vdb,
+        analysis_id=analysis_id,
+        database_name=database_name,
+    )
+
+
 def _persist_analysis_with_sql(
-    analysis_node: Neo4jNode,
+    analysis_node: CatalogNode,
     sql: str,
     query_obj: Any,
 ) -> dict[str, Any]:
@@ -105,6 +132,8 @@ def create_custom_analysis(
     name: str,
     description: str,
     sql: str,
+    *,
+    embed: bool = True,
 ) -> dict[str, Any]:
     """Create a fresh ``CustomAnalysis`` linked to its ``Sql`` node.
 
@@ -112,6 +141,20 @@ def create_custom_analysis(
     Raises :class:`CustomAnalysisSqlConflict` when ``sql`` is already attached.
     Raises :class:`CustomAnalysisSqlError` when the SQL can't be resolved.
     Returns ``{id, name, description, sql}``.
+
+    *embed* exists for bulk loaders, and defaults to the interactive
+    behaviour. Embedding inline is right when a user creates one analysis --
+    it has to be searchable when the request returns. It is wrong when a
+    seeder creates nineteen: each embed is its own network round trip, so the
+    load costs one latency per analysis (~2s each, ~40s for nineteen)
+    regardless of how little work the database does.
+
+    Passing ``embed=False`` makes the caller responsible for embedding, via
+    :func:`gsf.dal.custom_analyses.embed_custom_analyses` over the whole set.
+    A caller that batches must pass it: embedding here *and* batching
+    afterwards writes every analysis into the semantic index twice, and the
+    index has no uniqueness constraint to catch it -- retrieval simply starts
+    returning the same analysis in two of its top-k slots.
     """
     name_conflict = find_analysis_by_name(name, exclude_id=None)
     if name_conflict is not None:
@@ -128,7 +171,7 @@ def create_custom_analysis(
         )
 
     query_obj = validate_sql(sql, get_dialects(), get_schemas())
-    analysis_node = Neo4jNode(
+    analysis_node = CatalogNode(
         name=name,
         label=Labels.CUSTOM_ANALYSIS,
         props={"name": name, "description": description},
@@ -137,15 +180,8 @@ def create_custom_analysis(
 
     row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
 
-    from gsf.utils import get_embed_params
-    from gsf.vdb import get_semantic_vdb
-
-    vdb = get_semantic_vdb()
-    embed_custom_analyses(
-        embed_params=get_embed_params(),
-        vdb=vdb,
-        analysis_id=row["id"],
-    )
+    if embed:
+        _embed_analysis(row["id"])
 
     return row
 
@@ -185,7 +221,7 @@ def update_custom_analysis(
 
     detach_existing_sql_edges(analysis_id)
 
-    analysis_node = Neo4jNode(
+    analysis_node = CatalogNode(
         name=name,
         label=Labels.CUSTOM_ANALYSIS,
         props={"name": name, "description": description},
@@ -196,16 +232,10 @@ def update_custom_analysis(
 
     row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
 
-    from gsf.utils import get_embed_params
     from gsf.vdb import get_semantic_vdb
 
-    vdb = get_semantic_vdb()
-    vdb.delete_by_id(analysis_id)
-    embed_custom_analyses(
-        embed_params=get_embed_params(),
-        vdb=vdb,
-        analysis_id=analysis_id,
-    )
+    get_semantic_vdb().delete_by_id(analysis_id)
+    _embed_analysis(analysis_id)
 
     return row
 

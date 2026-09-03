@@ -18,6 +18,8 @@ from nemo_retriever.common.params.models import EmbedParams
 from gsf.utils.model_config import resolve
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
@@ -122,6 +124,40 @@ def get_embed_params() -> EmbedParams:
     )
 
 
+def batch_embed(
+    rows: "list[dict] | pd.DataFrame",
+    params: EmbedParams,
+) -> "pd.DataFrame":
+    """Embed *rows* in one batch and return the DataFrame with embeddings.
+
+    **This is the only place GSF touches ``_BatchEmbedActor``.** It is a private
+    library symbol, so the dependency is deliberately confined to the two lines
+    below rather than repeated at every call site — see
+
+    ``_BatchEmbedActor`` is an *archetype* operator: it resolves to a CPU or GPU
+    variant only when a :class:`~nemo_retriever.graph.Graph` executes it, so it
+    cannot be called directly the way ``CatalogEmbeddingRowsOp`` and
+    ``IngestVdbOperator`` can. Hence the one-node graph.
+
+    Returns an empty DataFrame when *rows* is empty or the embed step yields
+    nothing; the caller decides whether that is an error.
+    """
+    import pandas as pd
+
+    from nemo_retriever.graph import Graph
+    from nemo_retriever.operators.embed.operators import _BatchEmbedActor
+
+    frame = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
+    if frame.empty:
+        return pd.DataFrame()
+
+    results = (Graph() >> _BatchEmbedActor(params=params)).execute(frame)
+    embedded = results[0] if results else None
+    if embedded is None:
+        return pd.DataFrame()
+    return embedded
+
+
 def embed_docs_into_vdb(
     docs: list[dict],
     embed_params: "EmbedParams",
@@ -132,7 +168,10 @@ def embed_docs_into_vdb(
 
     Each doc must have at least ``id``, ``name``, ``label``, and ``text`` keys
     (the shape returned by ``fetch_sql_attribute_docs`` and
-    ``fetch_suggested_sql_attribute_docs``).
+    ``fetch_suggested_sql_attribute_docs``). An optional ``source`` key is
+    carried through to the metadata unchanged (empty string when absent) —
+    used by SqlAttribute docs so retrieval hits know their provenance
+    (``"sql"``, ``"bridgeTable"``, …) without an extra lookup.
 
     Returns the number of rows successfully embedded and ingested.
     Raises ``RuntimeError`` when the embedding call produces zero embedded rows
@@ -151,13 +190,14 @@ def embed_docs_into_vdb(
     rows = []
     for item in docs:
         node_id = item.get("id")
-        path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
+        path = f"gsf:{node_id}" if node_id is not None else "gsf:unknown"
         tabular_fields = {
             "id": node_id,
             "label": item.get("label", ""),
             "name": item.get("name", ""),
             "source_path": path,
             "database_name": database_name,
+            "source": item.get("source", ""),
         }
         extras = {
             key: item[key]

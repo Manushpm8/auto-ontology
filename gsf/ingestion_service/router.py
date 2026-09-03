@@ -9,23 +9,64 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
+from fastapi.responses import JSONResponse
+from gsf.ingestion_service.history import (
+    get_last_failure_if_most_recent,
+    get_last_successful_run,
+)
 from gsf.ingestion_service.ingest import (
     trigger_delete_ingest,
     trigger_ingest,
     trigger_reset_semantic,
 )
-from gsf.server.responses import StatusResponse
+from gsf.server.health.checks import check_schema, check_store
+from gsf.server.responses import (
+    HealthResponse,
+    SemanticRunningResponse,
+    StatusResponse,
+)
 
 router = APIRouter()
 
 
-@router.get("/health", response_model=StatusResponse)
-async def health() -> dict[str, str]:
-    """Liveness probe for the ingestion service.
+@router.get(
+    "/health",
+    include_in_schema=False,
+    responses={
+        200: {"model": HealthResponse, "description": "All dependencies reachable"},
+        503: {"model": HealthResponse, "description": "Postgres or schema unusable"},
+    },
+)
+async def health() -> JSONResponse:
+    """Readiness probe: can this service actually ingest right now?
 
-    Answers ``{"status": "ok"}`` as soon as the process is serving. It checks no
-    dependencies, so it reports nothing about whether an ingest can currently
-    succeed — only that the service is up.
+    Same path and same meaning as the API server's ``/api/health``, on purpose.
+    The two used to disagree — bare ``/health`` was liveness here and readiness
+    there — so the same-looking path meant opposite things and a probe config
+    copied between the two charts would have been silently wrong.
+
+    Reports the same two checks the API server does, from the same helpers,
+    because both services depend on the same database and the same migrated
+    schema and should not be able to disagree about them.
+    """
+    postgres = check_store()
+    migrations = check_schema()
+    ready = postgres["status"] == "ok" and migrations["status"] == "ok"
+    body: dict[str, Any] = {
+        "status": "ok" if ready else "degraded",
+        "postgres": postgres,
+        "migrations": migrations,
+    }
+    return JSONResponse(status_code=200 if ready else 503, content=body)
+
+
+@router.get("/health/live", include_in_schema=False, response_model=StatusResponse)
+async def liveness() -> dict[str, str]:
+    """Liveness only: no dependency is checked, and this must never fail.
+
+    Restarting the process cannot fix an unreachable database, so making this
+    depend on one converts a database blip into a rolling restart. Mirrors the
+    API server's ``/api/health/live`` exactly.
     """
     return {"status": "ok"}
 
@@ -85,6 +126,24 @@ async def semantic_compile(request: Request) -> dict[str, str]:
     if not scheduler.start():
         scheduler.trigger()
     return {"status": "accepted"}
+
+
+@router.get("/semantic/status", response_model=SemanticRunningResponse)
+async def semantic_status(request: Request) -> dict[str, bool | str | None]:
+    """Report whether a compilation pass is executing right now, when the last
+    one finished successfully, and when it last failed (if that's more recent
+    than the last success).
+
+    Backed by the ``semantic_compilation_history`` table (see ``history.py``),
+    which this service owns — the GSF API server relays this response rather
+    than reading that table itself.
+    """
+    scheduler = request.app.state.semantic_scheduler
+    return {
+        "running": scheduler.running,
+        "last_success_at": get_last_successful_run(),
+        "last_failure_at": get_last_failure_if_most_recent(),
+    }
 
 
 @router.post("/semantic/stop", status_code=202, response_model=StatusResponse)
