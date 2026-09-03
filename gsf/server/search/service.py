@@ -8,8 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
-
+from gsf.catalog.constants import Labels
 from gsf.dal import search as search_dal
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
 from gsf.server.search.constants import MIN_SEARCH_LENGTH, TEXT_MATCH_CONTAINS
@@ -132,12 +131,11 @@ def _normalize_item(
     }
 
 
-def _lucene_or_empty(search_term: str) -> str | None:
+def _tokens_or_empty(search_term: str) -> list[str] | None:
     stripped = search_term.strip()
     if len(stripped) < MIN_SEARCH_LENGTH:
         return None
-    lucene = search_dal.build_lucene_query(stripped)
-    return lucene or None
+    return search_dal.search_tokens(stripped) or None
 
 
 def _prepare_search(
@@ -145,20 +143,19 @@ def _prepare_search(
     search_term: str,
     text_match_option: str,
     objects: list[str] | None,
-) -> tuple[str, set[str], str, list[str]] | None:
+) -> tuple[list[str], set[str], str, list[str]] | None:
     """Validate and expand a query. ``None`` means nothing searchable."""
     if text_match_option != TEXT_MATCH_CONTAINS:
         raise SearchValidationError(
             f"Unsupported text_match_option {text_match_option!r}; "
             f"only {TEXT_MATCH_CONTAINS!r} is implemented"
         )
-    lucene = _lucene_or_empty(search_term)
-    if lucene is None:
+    tokens = _tokens_or_empty(search_term)
+    if tokens is None:
         return None
     types = resolve_object_types(objects)
-    search_dal.ensure_search_indexes()
     stripped = search_term.strip()
-    return lucene, types, stripped, search_dal.synonym_word_tokens(stripped)
+    return tokens, types, stripped, search_dal.synonym_word_tokens(stripped)
 
 
 def global_search(
@@ -177,9 +174,9 @@ def global_search(
     if prepared is None:
         return {"data": [], "count": 0}
 
-    lucene, types, stripped, synonym_tokens = prepared
+    tokens, types, stripped, synonym_tokens = prepared
     rows = search_dal.fetch_global_search(
-        lucene,
+        tokens,
         types,
         include_description=include_description,
         synonym_tokens=synonym_tokens,
@@ -206,9 +203,9 @@ def global_search_count(
     if prepared is None:
         return {"data": {}}
 
-    lucene, types, _stripped, synonym_tokens = prepared
+    tokens, types, _stripped, synonym_tokens = prepared
     counts = search_dal.count_global_search(
-        lucene,
+        tokens,
         types,
         include_description=include_description,
         synonym_tokens=synonym_tokens,

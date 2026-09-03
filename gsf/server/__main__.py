@@ -61,12 +61,6 @@ async def lifespan(_app: FastAPI):
     # very first chat request doesn't pay a cold start.
     get_pool()
     try:
-        from gsf.dal.search import ensure_search_indexes
-
-        ensure_search_indexes()
-    except Exception:
-        logger.exception("Failed to ensure global-search fulltext indexes")
-    try:
         yield
     finally:
         # Tear down warm subprocesses before exiting so we don't leak them.

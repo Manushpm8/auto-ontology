@@ -2033,7 +2033,7 @@
       },
       "GlobalSearchItem": {
         "additionalProperties": true,
-        "description": "One global-search hit: identity plus optional certified/parent path.\n\n``type`` is the Neo4j label (``Term``, ``Table``, ``ColumnAttribute``, \u2026).\n``table_type`` is set on ``Table`` nodes so the client can tell views apart.",
+        "description": "One global-search hit: identity plus optional certified/parent path.\n\n``type`` is the entity's label (``Term``, ``Table``, ``ColumnAttribute``, \u2026).\n``table_type`` is set on ``Table`` nodes so the client can tell views apart.",
         "properties": {
           "breadcrumbs": {
             "items": {

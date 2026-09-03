@@ -65,11 +65,8 @@ def test_rank_key_orders_synonym_after_name_before_description_only() -> None:
     ]
 
 
-def test_short_query_skips_neo4j_and_returns_empty() -> None:
-    with (
-        patch("gsf.server.search.service.search_dal.ensure_search_indexes") as ensure,
-        patch("gsf.server.search.service.search_dal.fetch_global_search") as fetch,
-    ):
+def test_short_query_skips_the_database_and_returns_empty() -> None:
+    with patch("gsf.server.search.service.search_dal.fetch_global_search") as fetch:
         result = global_search(
             search_term="a",
             text_match_option="contains",
@@ -77,7 +74,6 @@ def test_short_query_skips_neo4j_and_returns_empty() -> None:
             include_description=True,
         )
     assert result == {"data": [], "count": 0}
-    ensure.assert_not_called()
     fetch.assert_not_called()
 
 
@@ -103,11 +99,8 @@ def test_unsupported_match_option_raises() -> None:
         )
 
 
-@patch("gsf.server.search.service.search_dal.ensure_search_indexes")
 @patch("gsf.server.search.service.search_dal.fetch_global_search")
-def test_global_search_normalizes_and_ranks(
-    fetch: MagicMock, _ensure: MagicMock
-) -> None:
+def test_global_search_normalizes_and_ranks(fetch: MagicMock) -> None:
     fetch.return_value = [
         {
             "id": "1",
@@ -149,17 +142,14 @@ def test_global_search_normalizes_and_ranks(
     assert result["count"] == 2
     fetch.assert_called_once()
     kwargs = fetch.call_args
-    assert kwargs.args[0] == "*revenue*"
+    assert kwargs.args[0] == ["revenue"]
     assert kwargs.args[1] == {"Term", "Table"}
     assert kwargs.kwargs["include_description"] is True
     assert kwargs.kwargs["synonym_tokens"] == ["revenue"]
 
 
-@patch("gsf.server.search.service.search_dal.ensure_search_indexes")
 @patch("gsf.server.search.service.search_dal.fetch_global_search")
-def test_global_search_keeps_breadcrumb_ids(
-    fetch: MagicMock, _ensure: MagicMock
-) -> None:
+def test_global_search_keeps_breadcrumb_ids(fetch: MagicMock) -> None:
     fetch.return_value = [
         {
             "id": "col-1",
@@ -190,11 +180,8 @@ def test_global_search_keeps_breadcrumb_ids(
     assert result["data"][0]["parent_id"] == "tbl-1"
 
 
-@patch("gsf.server.search.service.search_dal.ensure_search_indexes")
 @patch("gsf.server.search.service.search_dal.count_global_search")
-def test_global_search_count_passes_object_filter(
-    count: MagicMock, _ensure: MagicMock
-) -> None:
+def test_global_search_count_passes_object_filter(count: MagicMock) -> None:
     count.return_value = {"Term": 2, "Column": 4}
     result = global_search_count(
         search_term="id",
@@ -207,11 +194,8 @@ def test_global_search_count_passes_object_filter(
     assert count.call_args.kwargs["synonym_tokens"] == ["id"]
 
 
-@patch("gsf.server.search.service.search_dal.ensure_search_indexes")
 @patch("gsf.server.search.service.search_dal.fetch_global_search")
-def test_global_search_keeps_matching_synonyms_only(
-    fetch: MagicMock, _ensure: MagicMock
-) -> None:
+def test_global_search_keeps_matching_synonyms_only(fetch: MagicMock) -> None:
     fetch.return_value = [
         {
             "id": "term-1",
@@ -235,11 +219,8 @@ def test_global_search_keeps_matching_synonyms_only(
     assert fetch.call_args.kwargs["synonym_tokens"] == ["bu"]
 
 
-@patch("gsf.server.search.service.search_dal.ensure_search_indexes")
 @patch("gsf.server.search.service.search_dal.fetch_global_search")
-def test_global_search_keeps_table_label_for_views(
-    fetch: MagicMock, _ensure: MagicMock
-) -> None:
+def test_global_search_keeps_table_label_for_views(fetch: MagicMock) -> None:
     fetch.return_value = [
         {
             "id": "v-1",
@@ -265,11 +246,8 @@ def test_global_search_keeps_table_label_for_views(
 
 
 @patch("gsf.server.search.service.search_dal.LIST_LIMIT", 3)
-@patch("gsf.server.search.service.search_dal.ensure_search_indexes")
 @patch("gsf.server.search.service.search_dal.fetch_global_search")
-def test_synonym_only_term_survives_list_cap(
-    fetch: MagicMock, _ensure: MagicMock
-) -> None:
+def test_synonym_only_term_survives_list_cap(fetch: MagicMock) -> None:
     fetch.return_value = [
         {
             "id": "col-1",
