@@ -155,8 +155,10 @@ reviews:
     # as a red job.
     ruff:
       enabled: true
+    # Off: `pnpm lint` in ci-client.yml is the authority on the frontend, and a
+    # second run here only repeats it on the diff.
     eslint:
-      enabled: true
+      enabled: false
     # Off: the frontend is prettier + eslint, and Biome's formatter would argue
     # with prettier over the same lines.
     biome:
