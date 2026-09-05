@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote, urlparse
@@ -19,6 +20,15 @@ from gsf.catalog.constants import TableTypes
 from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
+
+# SQLite has no server-side statement timeout, so the progress handler is the
+# only way to cap one. It fires every N virtual-machine instructions and a
+# non-zero return aborts the statement. Because the check sits in the VM's
+# inner loop it also interrupts the case that motivated the cap — a plan whose
+# nested scan produces no rows for minutes — which a row-counting guard would
+# never notice. N is a trade: small enough to react promptly, large enough that
+# the callback is not measurable against the query itself.
+_PROGRESS_INSTRUCTIONS = 10_000
 
 
 def _sqlite_path_from_connection_string(connection_string: str) -> Path:
@@ -43,6 +53,10 @@ class SQLiteDatabase(SQLDatabase):
             sqlite:////absolute/path/to/db.sqlite
             /absolute/path/to/db.sqlite
     """
+
+    # Advertises that ``execute`` honours ``timeout_s``; callers that want a cap
+    # check this rather than assuming every connector supports one.
+    supports_statement_timeout = True
 
     def __init__(self, connection_string: str) -> None:
         db_path = _sqlite_path_from_connection_string(connection_string)
@@ -89,8 +103,65 @@ class SQLiteDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._database_name
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        cur = self._conn.execute(sql, parameters or [])
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: int | None = None,
+    ) -> pd.DataFrame:
+        """Run *sql*, abandoning it after *timeout_s* seconds when one is given.
+
+        Ingestion and profiling leave the cap off, since a metadata scan over a
+        large database legitimately outlives anything a waiting chat turn would
+        tolerate. Only agent-issued SQL passes a cap (see
+        ``gsf.retrieval.text_to_sql.chat_sql``).
+        """
+        conn = self._conn
+        if timeout_s is None:
+            return self._to_frame(conn, sql, parameters)
+
+        deadline = time.monotonic() + timeout_s
+        # A flag rather than re-reading the clock in the handler: it says the
+        # abort was ours, so an unrelated error raised after the deadline is
+        # not relabelled as a timeout.
+        expired = False
+
+        def guard() -> int:
+            nonlocal expired
+            if time.monotonic() < deadline:
+                return 0
+            expired = True
+            return 1
+
+        conn.set_progress_handler(guard, _PROGRESS_INSTRUCTIONS)
+        try:
+            return self._to_frame(conn, sql, parameters)
+        except sqlite3.OperationalError:
+            if not expired:
+                raise
+            logger.warning(
+                "SQLite statement on %s cancelled after %ss.",
+                self._database_name,
+                timeout_s,
+            )
+            raise sqlite3.OperationalError(
+                f"Query cancelled after exceeding the {timeout_s}s statement timeout"
+            ) from None
+        finally:
+            conn.set_progress_handler(None, 0)
+
+    @staticmethod
+    def _to_frame(
+        conn: sqlite3.Connection, sql: str, parameters: Optional[list]
+    ) -> pd.DataFrame:
+        """Execute and materialize, both inside whatever guard the caller set.
+
+        Fetching has to stay under the guard: ``sqlite3`` steps a statement
+        lazily, so a scan-heavy query does most of its work here rather than in
+        ``execute``.
+        """
+        cur = conn.execute(sql, parameters or [])
         if cur.description is None:
             return pd.DataFrame()
         rows = cur.fetchall()
