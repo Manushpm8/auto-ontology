@@ -121,6 +121,28 @@ class World:
                 attribute_id=self.attribute, term_id=self.term
             )
         )
+        # An attribute has no page of its own, so these two are as unreachable
+        # as an unrepresented Term: one has no Term at all, the other's Term is
+        # itself hidden.
+        self.unlinked_attribute = _add(
+            s.column_attribute,
+            name=f"{p}_net_unlinked",
+            source_column=f"{p}_total_amount",
+            term_name=f"{p}_Nothing",
+            table_id=self.table,
+        )
+        self.hidden_term_attribute = _add(
+            s.column_attribute,
+            name=f"{p}_net_hidden",
+            source_column=f"{p}_total_amount",
+            term_name=f"{p}_Orphan",
+            table_id=self.table,
+        )
+        store().query_write(
+            s.column_attribute__term.insert().values(
+                attribute_id=self.hidden_term_attribute, term_id=self.orphan_term
+            )
+        )
 
 
 @pytest.fixture(scope="module")
@@ -139,7 +161,13 @@ def world() -> Iterator[World]:
         )
         store().query_write(
             s.column_attribute.delete().where(
-                s.column_attribute.c.id == built.attribute
+                s.column_attribute.c.id.in_(
+                    [
+                        built.attribute,
+                        built.unlinked_attribute,
+                        built.hidden_term_attribute,
+                    ]
+                )
             )
         )
         store().query_write(
@@ -282,6 +310,37 @@ def test_term_certification_is_the_three_state_string(world: World) -> None:
     assert [row["certified"] for row in hits] == ["certified"]
 
 
+def test_an_attribute_no_term_owns_is_hidden(world: World) -> None:
+    """The Term rule, for the entity that has no page except its Term's.
+
+    ``hrefForGlobalSearchItem`` has no ``parent_id`` to build a link from and
+    falls back to a bare ``/terms``, which cannot focus what was clicked.
+    """
+    names = _names(
+        _find(world, world.prefix, {LABEL_COLUMN_ATTRIBUTE}, include_description=False)
+    )
+    assert f"{world.prefix}_net_unlinked" not in names
+    assert f"{world.prefix}_net_total" in names
+
+
+def test_an_attribute_whose_term_is_hidden_is_hidden_too(world: World) -> None:
+    """A link is not enough — a hidden Term has no page to focus either."""
+    names = _names(
+        _find(world, world.prefix, {LABEL_COLUMN_ATTRIBUTE}, include_description=False)
+    )
+    assert f"{world.prefix}_net_hidden" not in names
+
+
+def test_unreachable_attributes_are_left_out_of_the_counts(world: World) -> None:
+    """The badge cannot promise attributes the list refuses to return."""
+    counts = search.count_global_search(
+        search.search_tokens(world.prefix),
+        {LABEL_COLUMN_ATTRIBUTE},
+        include_description=False,
+    )
+    assert counts[LABEL_COLUMN_ATTRIBUTE] == 1
+
+
 def test_attribute_certification_stays_a_boolean(world: World) -> None:
     hits = _find(
         world,
@@ -335,6 +394,80 @@ def test_a_term_matching_name_and_synonym_is_one_hit(world: World) -> None:
     )
     ids = [row["id"] for row in hits]
     assert ids.count(world.term) == 1
+
+
+def _aliased_term(world: World, name: str, alias: str) -> str:
+    """A visible Term called *name* whose only alias is *alias*, no description."""
+    term_id = _add(
+        s.term, name=name, source=SEMANTIC_SOURCE, synonyms=[alias], description=None
+    )
+    store().query_write(
+        s.table__term.insert().values(table_id=world.table, term_id=term_id)
+    )
+    return term_id
+
+
+def test_the_alias_cap_is_spent_on_terms_the_text_match_missed(world: World) -> None:
+    """*synonym_limit* has to buy rescues, not duplicates of the page.
+
+    The alias branch and the text branch both see a Term that matches its name
+    *and* its alias. If the branches overlap, ``_list_rank`` puts that Term
+    first in the alias branch too — it is a name hit — so a cap of one is spent
+    re-fetching a row the page already has, the id pass drops it as a duplicate,
+    and the Term that had nothing but an alias is lost.
+    """
+    needle = f"{world.prefix}kw"
+    alias = f"{needle} alias"
+    created: list[str] = []
+    try:
+        with write_transaction():
+            created.append(_aliased_term(world, f"{needle}_named_term", alias))
+            created.append(
+                _aliased_term(world, f"{world.prefix}_zzz_alias_only", alias)
+            )
+        hits = search.fetch_global_search(
+            search.search_tokens(needle),
+            {LABEL_TERM},
+            include_description=False,
+            synonym_tokens=search.synonym_word_tokens(needle),
+            synonym_limit=1,
+        )
+        assert _names(hits) == {
+            f"{needle}_named_term",
+            f"{world.prefix}_zzz_alias_only",
+        }
+    finally:
+        with write_transaction():
+            store().query_write(s.term.delete().where(s.term.c.id.in_(created)))
+
+
+def test_an_alias_only_term_with_no_description_still_comes_back(
+    world: World,
+) -> None:
+    """The alias branch negates the text match, and ``description`` is nullable.
+
+    An unmatched name over a NULL description makes the text match NULL, not
+    false, so a bare ``NOT`` is NULL and the WHERE clause drops the row. Every
+    alias-only Term without a description would vanish, and only when the
+    caller asked for descriptions — which is the default in the UI's All tab.
+    """
+    needle = f"{world.prefix}nd"
+    created: list[str] = []
+    try:
+        with write_transaction():
+            created.append(
+                _aliased_term(world, f"{world.prefix}_zzz_nulldesc", f"{needle} alias")
+            )
+        hits = search.fetch_global_search(
+            search.search_tokens(needle),
+            {LABEL_TERM},
+            include_description=True,
+            synonym_tokens=search.synonym_word_tokens(needle),
+        )
+        assert f"{world.prefix}_zzz_nulldesc" in _names(hits)
+    finally:
+        with write_transaction():
+            store().query_write(s.term.delete().where(s.term.c.id.in_(created)))
 
 
 # --------------------------------------------------------------------------
@@ -401,6 +534,108 @@ def test_counts_group_by_type_and_split_views_out(world: World) -> None:
     assert counts[Labels.COLUMN] == 1
     assert counts[LABEL_TERM] == 1
     assert counts[LABEL_COLUMN_ATTRIBUTE] == 1
+
+
+def test_list_limit_ranks_before_cutting_so_later_union_branches_survive(
+    world: World,
+) -> None:
+    """The cap is the best *limit* hits, not the first *limit* UNION ALL branches.
+
+    Table/View are last in ``_hit_selects``. Database and Schema come first, so
+    an unordered ``LIMIT 2`` on this fixture would keep those two and drop the
+    table even though its name is shorter — the same shape as All omitting
+    tables while the Tables tab still has a count.
+    """
+    hits = search.fetch_global_search(
+        search.search_tokens(world.prefix),
+        ALL_TYPES,
+        include_description=False,
+        limit=2,
+    )
+    assert [row["name"] for row in hits] == [
+        f"{world.prefix}_public",
+        f"{world.prefix}_rental",
+    ]
+
+
+def test_list_limit_keeps_name_hits_ahead_of_earlier_description_matches(
+    world: World,
+) -> None:
+    """A Column branch full of description hits must not crowd Table/View out of All."""
+    extra_ids: list[str] = []
+    term = f"{world.prefix}_rental"
+    try:
+        with write_transaction():
+            for i in range(5):
+                extra_ids.append(
+                    _add(
+                        s.catalog_column,
+                        table_id=world.table,
+                        name=f"{world.prefix}_zzzz_col_{i}",
+                        description=f"mentions {term} in passing",
+                    )
+                )
+        hits = search.fetch_global_search(
+            search.search_tokens(term),
+            ALL_TYPES,
+            include_description=True,
+            limit=2,
+        )
+        assert [row["name"] for row in hits] == [
+            f"{world.prefix}_rental",
+            f"{world.prefix}_rental_summary",
+        ]
+    finally:
+        if extra_ids:
+            with write_transaction():
+                store().query_write(
+                    s.catalog_column.delete().where(
+                        s.catalog_column.c.id.in_(extra_ids)
+                    )
+                )
+
+
+def test_an_unrelated_alias_does_not_outrank_a_description_hit(world: World) -> None:
+    """The middle rank bucket is a *matching* synonym, not merely having one.
+
+    Almost every Term carries aliases, so ranking on their presence hands the
+    bucket to Terms whose aliases have nothing to do with the query — and the
+    cap then drops the description hits the count tab still reports. Both rows
+    here match on description alone, so the shorter name has to win.
+    """
+    needle = f"{world.prefix}zneedle"
+    extra_term: str | None = None
+    extra_column: str | None = None
+    try:
+        with write_transaction():
+            extra_term = _add(
+                s.term,
+                name=f"{world.prefix}_zzz_aliased_term",
+                source=SEMANTIC_SOURCE,
+                synonyms=[f"{world.prefix} Unrelated Alias"],
+                description=f"mentions {needle} in passing",
+            )
+            store().query_write(
+                s.table__term.insert().values(table_id=world.table, term_id=extra_term)
+            )
+            extra_column = _add(
+                s.catalog_column,
+                table_id=world.table,
+                name=f"{world.prefix}_c",
+                description=f"mentions {needle} in passing",
+            )
+        hits = _find(world, needle, include_description=True, limit=1)
+        assert [row["name"] for row in hits] == [f"{world.prefix}_c"]
+    finally:
+        with write_transaction():
+            if extra_column is not None:
+                store().query_write(
+                    s.catalog_column.delete().where(
+                        s.catalog_column.c.id == extra_column
+                    )
+                )
+            if extra_term is not None:
+                store().query_write(s.term.delete().where(s.term.c.id == extra_term))
 
 
 def test_counts_are_not_capped_by_the_list_limit(world: World) -> None:

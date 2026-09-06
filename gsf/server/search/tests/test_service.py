@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from gsf.server.search.constants import MIN_SEARCH_LENGTH
 from gsf.server.search.service import (
     SearchValidationError,
     global_search,
@@ -51,6 +53,21 @@ def test_rank_key_prefers_names_containing_the_term_then_shorter() -> None:
     ]
 
 
+def test_rank_key_uses_tokens_not_the_raw_query() -> None:
+    """Matching splits ``created-at``; ranking must too or every hit is bucket 2."""
+    items = [
+        {"name": "zz"},
+        {"name": "created_at_timestamp"},
+        {"name": "created_at"},
+    ]
+    items.sort(key=rank_key("created-at"))
+    assert [row["name"] for row in items] == [
+        "created_at",
+        "created_at_timestamp",
+        "zz",
+    ]
+
+
 def test_rank_key_orders_synonym_after_name_before_description_only() -> None:
     items = [
         {"name": "other"},
@@ -75,6 +92,18 @@ def test_short_query_skips_the_database_and_returns_empty() -> None:
         )
     assert result == {"data": [], "count": 0}
     fetch.assert_not_called()
+
+
+def test_min_length_query_reaches_the_database() -> None:
+    with patch("gsf.server.search.service.search_dal.fetch_global_search") as fetch:
+        fetch.return_value = []
+        global_search(
+            search_term="x" * MIN_SEARCH_LENGTH,
+            text_match_option="contains",
+            objects=None,
+            include_description=True,
+        )
+    fetch.assert_called_once()
 
 
 def test_specials_only_query_is_treated_as_empty() -> None:
@@ -304,3 +333,137 @@ def test_synonym_only_term_survives_list_cap(fetch: MagicMock) -> None:
     assert "term-syn" in ids
     assert len(result["data"]) == 3
     assert result["data"][0]["id"] != "term-syn"
+
+
+def _synonym_only_term(index: int) -> dict[str, Any]:
+    return {
+        "id": f"term-{index}",
+        "name": f"Cluster Passport {index}",
+        "label": "Term",
+        "table_type": None,
+        "description": None,
+        "certified": "pending",
+        "parent_id": None,
+        "breadcrumbs": [],
+        "synonyms": ["Customer"],
+    }
+
+
+def _name_hit_column(index: int) -> dict[str, Any]:
+    return {
+        "id": f"col-{index}",
+        "name": f"customer_{index}",
+        "label": "Column",
+        "table_type": None,
+        "description": None,
+        "certified": None,
+        "parent_id": None,
+        "breadcrumbs": [],
+        "synonyms": [],
+    }
+
+
+@patch("gsf.server.search.service.search_dal.LIST_LIMIT", 4)
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
+def test_synonym_rescue_cannot_evict_the_whole_page(fetch: MagicMock) -> None:
+    """Aliases get a bounded share of the page, not all of it.
+
+    Unbounded, the rescue swaps one name hit out per alias-only Term and walks
+    the page from the worst-ranked end to index 0 — so the exact match the user
+    typed disappears behind a page of Terms whose names look nothing like it.
+    """
+    fetch.return_value = [
+        {
+            "id": "col-exact",
+            "name": "customer",
+            "label": "Column",
+            "table_type": None,
+            "description": None,
+            "certified": None,
+            "parent_id": None,
+            "breadcrumbs": [],
+            "synonyms": [],
+        },
+        *(_name_hit_column(index) for index in range(3)),
+        *(_synonym_only_term(index) for index in range(6)),
+    ]
+    result = global_search(
+        search_term="Customer",
+        text_match_option="contains",
+        objects=None,
+        include_description=True,
+    )
+    ids = [item["id"] for item in result["data"]]
+    assert len(ids) == 4
+    assert ids[0] == "col-exact"
+    assert sum(1 for item in result["data"] if item["synonyms"]) == 1
+
+
+@patch("gsf.server.search.service.search_dal.LIST_LIMIT", 20)
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
+def test_synonym_rescue_claims_only_its_share_of_the_page(fetch: MagicMock) -> None:
+    """The bound is a share of the page, not the one slot ``max`` guarantees.
+
+    At a page of four the budget floors at 1 either way, so that size cannot
+    tell a proportion from a constant. Twenty can: 25 name hits and 10
+    alias-only Terms have to come back as 18 and 2.
+    """
+    fetch.return_value = [
+        *(_name_hit_column(index) for index in range(25)),
+        *(_synonym_only_term(index) for index in range(10)),
+    ]
+    result = global_search(
+        search_term="Customer",
+        text_match_option="contains",
+        objects=None,
+        include_description=True,
+    )
+    assert len(result["data"]) == 20
+    assert result["data"][0]["id"] == "col-0"
+    assert sum(1 for item in result["data"] if item["synonyms"]) == 2
+
+
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
+def test_an_unmatched_alias_does_not_claim_the_middle_rank(fetch: MagicMock) -> None:
+    """``rank_key``'s middle bucket is a *matching* alias, not the presence of one.
+
+    ``rank_key`` tests ``item["synonyms"]`` for truth, which reads like "has any
+    alias". It is not, and only because ``_normalize_item`` has already reduced
+    that list to the aliases this query matched. That reduction is the whole
+    reason this function agrees with ``search._list_rank``, which asks Postgres
+    for ``synonym_hit``. Lose it and every aliased Term outranks every
+    description hit here while Postgres still ranks them below — and the cap
+    then drops rows the count tab reports.
+
+    Both rows below match on description alone, so the shorter name has to win.
+    """
+    fetch.return_value = [
+        {
+            "id": "term-aliased",
+            "name": "zzzzzzzz",
+            "label": "Term",
+            "table_type": None,
+            "description": "mentions customer in passing",
+            "certified": "pending",
+            "breadcrumbs": [],
+            "synonyms": ["Totally Unrelated"],
+        },
+        {
+            "id": "col-short",
+            "name": "zz",
+            "label": "Column",
+            "table_type": None,
+            "description": "mentions customer in passing",
+            "certified": None,
+            "breadcrumbs": [],
+            "synonyms": [],
+        },
+    ]
+    result = global_search(
+        search_term="Customer",
+        text_match_option="contains",
+        objects=None,
+        include_description=True,
+    )
+    assert [item["id"] for item in result["data"]] == ["col-short", "term-aliased"]
+    assert result["data"][1]["synonyms"] == []

@@ -55,7 +55,7 @@ def post_global_search(payload: GlobalSearchRequest) -> dict:
 
     Requires at least two characters after trimming. ``contains`` is the only
     match option. Results are capped at 200 and ranked so names that contain
-    the original term sort first.
+    every token sort first.
     """
     return _run(payload, count=False)
 

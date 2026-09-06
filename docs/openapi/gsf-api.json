@@ -4417,7 +4417,7 @@
     },
     "/api/search/global-search": {
       "post": {
-        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nthe original term sort first.",
+        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nevery token sort first.",
         "operationId": "post_api_search_global_search",
         "requestBody": {
           "content": {

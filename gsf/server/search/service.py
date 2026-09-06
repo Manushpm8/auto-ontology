@@ -34,12 +34,26 @@ def resolve_object_types(objects: list[str] | None) -> set[str]:
 
 
 def rank_key(search_term: str) -> Any:
-    """Sort key: name contains, then synonym whole-word, then shorter names."""
-    needle = search_term.lower()
+    """Sort key: name contains every token, then synonym whole-word, then shorter names.
+
+    Matching is per-token (``created-at`` → ``created`` and ``at``), so the
+    name bucket must be too: the raw query as one needle would never be a
+    substring of ``created_at`` and every hit would sort by length alone.
+
+    The middle bucket reads as "has any alias" and is not one. By the time a row
+    reaches here :func:`_normalize_item` has replaced ``synonyms`` with
+    :func:`_matching_synonyms` of it, so a non-empty list means an alias matched
+    *this* query. That is what makes this agree with ``search._list_rank``,
+    which asks Postgres for ``synonym_hit`` and not for the presence of aliases:
+    ranking a Term by aliases it merely has would put every aliased Term above
+    every description hit, and the cap would then drop rows the count tab still
+    reports.
+    """
+    tokens = search_dal.search_tokens(search_term)
 
     def _key(item: dict[str, Any]) -> tuple[int, int, str]:
         name = (item.get("name") or "").lower()
-        if needle in name:
+        if tokens and all(token in name for token in tokens):
             bucket = 0
         elif item.get("synonyms"):
             bucket = 1
@@ -50,6 +64,29 @@ def rank_key(search_term: str) -> Any:
     return _key
 
 
+#: The largest share of one page the synonym rescue may claim.
+#:
+#: The rescue evicts from the worst-ranked end first, and every swap it makes is
+#: a name or description hit the user loses. Unbounded -- and the set of Terms
+#: an alias reaches is unbounded, which is why the DAL is asked to stop at this
+#: many -- a query matching a few hundred of them walks the page down to index 0
+#: and takes the exact name match with it.
+_SYNONYM_RESCUE_SHARE = 0.1
+
+
+def _synonym_rescue_budget(limit: int) -> int:
+    """How many alias-only Terms one page of *limit* rows may seat.
+
+    Read twice -- once to tell the DAL how many to fetch, once to bound the
+    eviction in :func:`_fit_list_limit` -- and it has to be one definition.
+    Fetching more than can be seated spends a breadcrumb lookup and a
+    normalisation on rows that are then thrown away; fetching fewer under-fills
+    the rescue, and does it silently, because a short page and a page with
+    nothing left to rescue look identical from here.
+    """
+    return max(1, int(limit * _SYNONYM_RESCUE_SHARE))
+
+
 def _fit_list_limit(
     items: list[dict[str, Any]], *, search_term: str
 ) -> list[dict[str, Any]]:
@@ -58,6 +95,12 @@ def _fit_list_limit(
     Fulltext already filled the 200 slots with name/description hits, so a
     Term that matched only via ``synonyms`` would otherwise be sliced away
     on the All tab even though the count tab still includes it.
+
+    Rescuing them costs a name hit each, so it is bounded by
+    :func:`_synonym_rescue_budget` -- aliases stay visible without becoming the
+    whole page. The DAL is capped at the same number, so ``extras`` is normally
+    already that short; the slice is what keeps the bound true of any caller,
+    including one that passes no ``synonym_limit``.
     """
     key = rank_key(search_term)
     items.sort(key=key)
@@ -74,7 +117,7 @@ def _fit_list_limit(
     if not extras:
         return kept
     replaceable = [index for index, item in enumerate(kept) if not item.get("synonyms")]
-    for extra in extras:
+    for extra in extras[: _synonym_rescue_budget(limit)]:
         if not replaceable:
             break
         kept[replaceable.pop()] = extra
@@ -181,6 +224,7 @@ def global_search(
         include_description=include_description,
         synonym_tokens=synonym_tokens,
         limit=search_dal.LIST_LIMIT,
+        synonym_limit=_synonym_rescue_budget(search_dal.LIST_LIMIT),
     )
     items = [_normalize_item(row, synonym_tokens=synonym_tokens) for row in rows]
     items = _fit_list_limit(items, search_term=stripped)
