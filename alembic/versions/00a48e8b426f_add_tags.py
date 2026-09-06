@@ -21,7 +21,7 @@ A duplicate would fail here rather than be dropped, because picking which of
 two Terms to keep is not a decision a migration can make.
 
 Revision ID: 00a48e8b426f
-Revises: 57abbbf6ff90
+Revises: 8c3d5b17a204
 Create Date: 2026-09-03 15:57:08.113113
 
 """
@@ -33,7 +33,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "00a48e8b426f"
-down_revision: Union[str, Sequence[str], None] = "57abbbf6ff90"
+down_revision: Union[str, Sequence[str], None] = "8c3d5b17a204"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
