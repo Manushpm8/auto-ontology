@@ -38,6 +38,7 @@ import {
 	stagedTagIds,
 	syncTags,
 } from '@/lib/tags';
+import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
@@ -887,6 +888,9 @@ export const TermsView = () => {
 			const primaryColumn = attr.primary_column ?? null;
 			const referencedColumns = attr.referenced_columns ?? [];
 			const userZoneIds: string[] | null = null;
+			// Sample values live on the owning Column, so its declared SQL type is
+			// what decides whether they can be edited here.
+			const samplesEditable = sampleValuesEditable(attr.datatype);
 
 			return {
 				header: {
@@ -909,7 +913,8 @@ export const TermsView = () => {
 						id: 'sample_values',
 						title: 'Sample Values',
 						values: Array.isArray(attr.sample_values) ? attr.sample_values : [],
-						editable: true,
+						editable: samplesEditable,
+						hint: samplesEditable ? undefined : sampleValuesReadOnlyHint(attr.datatype),
 					},
 					{
 						type: ComposerSectionKind.ZONES_CHIPS,

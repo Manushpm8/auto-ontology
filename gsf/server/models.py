@@ -507,14 +507,15 @@ class ForeignKeyRef(ApiModel):
     """One foreign-key column pair behind an exploration edge.
 
     ``source_column`` always names a column on the edge's ``source``. The
-    sample values come straight off the Column node, unparsed — profiling
-    stores them as a JSON string, a catalog PATCH stores a list.
+    sample values are rendered through ``stringify_sample_values`` before
+    reaching this model, so the types a column stores arrive here as a plain
+    string list.
     """
 
     source_column: str | None = None
     target_column: str | None = None
-    source_sample_values: list[str] | str | None = None
-    target_sample_values: list[str] | str | None = None
+    source_sample_values: list[str] | None = None
+    target_sample_values: list[str] | None = None
 
 
 class ExplorationEdge(ApiModel):

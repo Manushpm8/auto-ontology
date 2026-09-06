@@ -1943,7 +1943,7 @@
       },
       "ForeignKeyRef": {
         "additionalProperties": true,
-        "description": "One foreign-key column pair behind an exploration edge.\n\n``source_column`` always names a column on the edge's ``source``. The\nsample values come straight off the Column node, unparsed \u2014 profiling\nstores them as a JSON string, a catalog PATCH stores a list.",
+        "description": "One foreign-key column pair behind an exploration edge.\n\n``source_column`` always names a column on the edge's ``source``. The\nsample values are rendered through ``stringify_sample_values`` before\nreaching this model, so the types a column stores arrive here as a plain\nstring list.",
         "properties": {
           "source_column": {
             "anyOf": [
@@ -1963,9 +1963,6 @@
                   "type": "string"
                 },
                 "type": "array"
-              },
-              {
-                "type": "string"
               },
               {
                 "type": "null"
@@ -1991,9 +1988,6 @@
                   "type": "string"
                 },
                 "type": "array"
-              },
-              {
-                "type": "string"
               },
               {
                 "type": "null"
