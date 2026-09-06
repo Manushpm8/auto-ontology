@@ -5362,6 +5362,71 @@
           "tag": ["manage"]
         },
         "x-gsf-proxied": true
+      },
+      "patch": {
+        "description": "tagsApi.update — rename a tag (admin only). `manage` rather than the\n`catalog: ['edit']` the attach routes use: renaming rewrites the vocabulary\nitself, and the new name reaches every object already carrying the tag.",
+        "operationId": "patch_api_tags_tag_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Tag_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "tagsApi.update — rename a tag (admin only).",
+        "tags": ["tags"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/tags/[tag_id]/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
       }
     },
     "/api/tags/{tag_id}/targets": {
@@ -10164,6 +10229,18 @@
         ],
         "title": "TagTargetType",
         "type": "string"
+      },
+      "TagUpdate": {
+        "description": "A rename. The name is the only part of a tag there is to edit.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": ["name"],
+        "title": "TagUpdate",
+        "type": "object"
       },
       "Term": {
         "additionalProperties": true,

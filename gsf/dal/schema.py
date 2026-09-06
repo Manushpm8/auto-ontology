@@ -724,10 +724,11 @@ tag = Table(
         server_default=func.now(),
     ),
     # Set by the database on insert and by SQLAlchemy's ``onupdate`` on every
-    # UPDATE the DAL issues, so no caller has to remember to touch it. Equal to
-    # ``created`` until something edits the tag -- there is no rename endpoint
-    # yet -- which is why the settings page renders it as "Never" rather than
-    # repeating the creation date as if the tag had been changed.
+    # UPDATE the DAL issues, so no caller has to remember to touch it -- a
+    # rename advances it without `update_tag` naming this column at all. Equal
+    # to ``created`` until a tag is first renamed, which is why the settings
+    # page renders it as "Never" rather than repeating the creation date as if
+    # the tag had been changed.
     Column(
         "modified",
         DateTime(timezone=True),

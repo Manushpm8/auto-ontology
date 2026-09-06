@@ -31,6 +31,12 @@ class TagCreate(BaseModel):
     name: str
 
 
+class TagUpdate(BaseModel):
+    """A rename. The name is the only part of a tag there is to edit."""
+
+    name: str
+
+
 class TagTarget(BaseModel):
     """The object to label: what kind it is, and which one."""
 
@@ -62,14 +68,15 @@ def get_tag(tag_id: str) -> dict:
     return {"data": {**tag, "items": dal.list_tag_targets(tag_id)}}
 
 
-@router.post("/tags", status_code=201, response_model=TagResponse)
-def create_tag(body: TagCreate) -> dict:
-    """Create a tag.
+def _validated_name(raw: str) -> str:
+    """*raw* trimmed, or a 400 saying what is wrong with it.
 
-    Surrounding whitespace is trimmed before anything else, so the name that is
-    length-checked, uniqueness-checked and stored is the one a reader sees.
+    Shared by create and rename so one name is acceptable on both, rather than
+    a tag being creatable under a name a rename would reject. Trimming happens
+    before anything else, so the name that is length-checked,
+    uniqueness-checked and stored is the one a reader sees.
     """
-    name = body.name.strip()
+    name = raw.strip()
     if name == "":
         raise HTTPException(status_code=400, detail="Tag name is required")
     if len(name) > MAX_TAG_NAME_LENGTH:
@@ -77,11 +84,42 @@ def create_tag(body: TagCreate) -> dict:
             status_code=400,
             detail=f"Tag name must be at most {MAX_TAG_NAME_LENGTH} characters",
         )
+    return name
 
+
+@router.post("/tags", status_code=201, response_model=TagResponse)
+def create_tag(body: TagCreate) -> dict:
+    """Create a tag."""
     try:
-        row = dal.create_tag(name=name)
+        row = dal.create_tag(name=_validated_name(body.name))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"data": row}
+
+
+@router.patch("/tags/{tag_id}", response_model=TagResponse)
+def update_tag(tag_id: str, body: TagUpdate) -> dict:
+    """Rename a tag.
+
+    Answers with the whole tag rather than an echo of the name, because the
+    rename has also advanced ``modified`` — so the settings page redraws the
+    row it just edited from this one response instead of re-reading the list to
+    find out what the timestamp became.
+
+    404 for an unknown id and 409 for a name another tag holds, as create and
+    delete answer: the page renames from a list it has already read, so either
+    means that list is stale.
+
+    A rename to the tag's own name is not a 409 — see ``update_tag`` in the DAL
+    — and neither is one that only changes case, which is the ordinary way to
+    fix a tag that was created shouting.
+    """
+    try:
+        row = dal.update_tag(tag_id=tag_id, name=_validated_name(body.name))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
     return {"data": row}
 
 

@@ -159,7 +159,8 @@
     "fetch_tags_map": "(kind: 'str', item_ids: 'list[str]') -> 'dict[str, list[dict[str, Any]]]'",
     "get_tag": "(tag_id: 'str') -> 'dict[str, Any] | None'",
     "list_tag_targets": "(tag_id: 'str') -> 'list[dict[str, Any]]'",
-    "list_tags": "() -> 'list[dict[str, Any]]'"
+    "list_tags": "() -> 'list[dict[str, Any]]'",
+    "update_tag": "(*, tag_id: 'str', name: 'str') -> 'dict[str, Any] | None'"
   },
   "terms": {
     "build_term_table_maps": "(pairs: 'list[dict[str, Any]]') -> 'tuple[dict[str, set[str]], dict[str, set[str]]]'",

@@ -13,5 +13,10 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 // it, and that whole section is admin-only already.
 export const GET = withPermission({ tag: ['manage'] })((req) => proxyToBackend(req));
 
+// tagsApi.update — rename a tag (admin only). `manage` rather than the
+// `catalog: ['edit']` the attach routes use: renaming rewrites the vocabulary
+// itself, and the new name reaches every object already carrying the tag.
+export const PATCH = withPermission({ tag: ['manage'] })((req) => proxyToBackend(req));
+
 // tagsApi.delete — remove a tag (admin only).
 export const DELETE = withPermission({ tag: ['manage'] })((req) => proxyToBackend(req));

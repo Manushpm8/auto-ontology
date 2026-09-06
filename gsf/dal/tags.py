@@ -8,11 +8,11 @@ One thing here is less obvious than it looks: **a tag name is unique
 case-insensitively on the trimmed name**, and unlike ``zone.name`` that rule is
 a real database constraint — ``uq_tag_name_lower`` in ``gsf/dal/schema.py``.
 
-The duplicate check in :func:`create_tag` therefore exists for its error
-message rather than for correctness. The index is what holds when two requests
-create the same name at once, and the check is what turns the ordinary case
-into a readable 409 instead of a driver error. Both raise the same
-``ValueError``, so a caller has one behaviour to handle rather than two.
+The duplicate checks in :func:`create_tag` and :func:`update_tag` therefore
+exist for their error message rather than for correctness. The index is what
+holds when two requests take the same name at once, and the check is what turns
+the ordinary case into a readable 409 instead of a driver error. Both raise the
+same ``ValueError``, so a caller has one behaviour to handle rather than two.
 
 Membership is read in both directions, and the two reads are shaped for their
 callers rather than for each other. :func:`list_tag_targets` unions the five
@@ -134,12 +134,18 @@ def _target_column(kind: str) -> Column:
         ) from None
 
 
-def _name_taken(name: str) -> bool:
-    return bool(
-        store().query_read(
-            select(s.tag.c.id).where(_FOLDED_NAME == name.strip().lower())
-        )
-    )
+def _name_taken(name: str, *, exclude_id: str | None = None) -> bool:
+    """Whether a tag already folds to *name* under ``uq_tag_name_lower``.
+
+    *exclude_id* leaves one tag out, which is what a rename passes: a tag
+    always collides with its own row, and the index would let the same write
+    through for the same reason. Without it, re-typing a tag's own name -- or
+    changing only its case -- would be reported as a name somebody else holds.
+    """
+    statement = select(s.tag.c.id).where(_FOLDED_NAME == name.strip().lower())
+    if exclude_id is not None:
+        statement = statement.where(s.tag.c.id != exclude_id)
+    return bool(store().query_read(statement))
 
 
 def list_tags() -> list[dict[str, Any]]:
@@ -448,6 +454,51 @@ def create_tag(*, name: str) -> dict[str, Any]:
         raise ValueError(f"Tag with name {name!r} already exists") from exc
 
     return rows[0]
+
+
+def update_tag(*, tag_id: str, name: str) -> dict[str, Any] | None:
+    """Rename a tag and return it. ``None`` when no tag has that id.
+
+    The name is a tag's only editable part, so this takes it as a plain
+    argument rather than a dict of updates: there is no second field for a
+    caller to leave out, and no distinction between "not provided" and "set to
+    nothing" to model. *name* is stored as given, as on :func:`create_tag` --
+    the caller is expected to have trimmed it.
+
+    Raises ``ValueError`` when **another** tag holds the name, from the check or
+    from ``uq_tag_name_lower`` underneath it. A tag's own name is not a
+    collision: :func:`_name_taken` is asked to leave this row out, so re-typing
+    it, or changing only its case, is an ordinary rename rather than a 409.
+
+    ``modified`` is not written here. ``onupdate`` on the column advances it for
+    any UPDATE the DAL issues, which is what makes it the *last edit* rather
+    than the last edit somebody remembered to record, and ``created`` is left
+    alone -- so the two differing is exactly "this tag has been renamed", which
+    is what the settings page renders.
+
+    The rows it labels are untouched: membership is keyed by id, so a rename
+    reaches every object carrying the tag without a single ``tag_target`` row
+    being written.
+    """
+    if _name_taken(name, exclude_id=tag_id):
+        raise ValueError(f"Tag with name {name!r} already exists")
+
+    try:
+        rows = store().query_write(
+            s.tag.update()
+            .where(s.tag.c.id == tag_id)
+            .values(name=name)
+            .returning(*_COLUMNS)
+        )
+    except IntegrityError as exc:
+        # Translated for the reason `create_tag` translates it, and only the
+        # name rule: this statement sets one column, so nothing else here can
+        # fail on a constraint this function models.
+        if "uq_tag_name_lower" not in str(exc.orig):
+            raise
+        raise ValueError(f"Tag with name {name!r} already exists") from exc
+
+    return rows[0] if rows else None
 
 
 def delete_tag(tag_id: str) -> bool:

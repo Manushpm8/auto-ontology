@@ -523,12 +523,21 @@ export const TermsView = () => {
 		}
 
 		if (nextTagIds != null) {
-			const { error: tagError } = await syncTags({
+			const { error: tagError, tags } = await syncTags({
 				type: TagItemType.SqlAttribute,
 				itemId: focusedSqlAttr.id,
 				current: focusedSqlAttr.tags ?? [],
 				nextIds: nextTagIds,
 			});
+			// What the attribute carries now, which is what the *next* save has
+			// to diff against. Applied here rather than left to the refetch
+			// below, which lands a round trip later: re-opening Edit before it
+			// does would otherwise measure the change against the tags this
+			// save already replaced. On a partial failure this is whatever
+			// landed, so it holds either way.
+			setSqlAttrs((prev) =>
+				prev.map((attr) => (attr.id === focusedSqlAttr.id ? { ...attr, tags } : attr)),
+			);
 			if (tagError != null) {
 				setSqlAttrsEpoch((prev) => prev + 1);
 				return { error: true, message: tagError };
@@ -596,12 +605,17 @@ export const TermsView = () => {
 		}
 
 		if (nextTagIds != null) {
-			const { error: tagError } = await syncTags({
+			const { error: tagError, tags } = await syncTags({
 				type: TagItemType.ColumnAttribute,
 				itemId: focusedColAttr.id,
 				current: focusedColAttr.tags ?? [],
 				nextIds: nextTagIds,
 			});
+			// As on the SQL attribute above: the baseline the next save diffs
+			// against cannot wait for the refetch.
+			setColumnAttrs((prev) =>
+				prev.map((attr) => (attr.id === focusedColAttr.id ? { ...attr, tags } : attr)),
+			);
 			if (tagError != null) {
 				setColumnAttrsEpoch((prev) => prev + 1);
 				return { error: true, message: tagError };
@@ -649,12 +663,17 @@ export const TermsView = () => {
 		}
 
 		if (nextTagIds != null) {
-			const { error: tagError } = await syncTags({
+			const { error: tagError, tags } = await syncTags({
 				type: TagItemType.Term,
 				itemId: focusId,
 				current: (focusedTermDetail?.id === focusId ? focusedTermDetail.tags : null) ?? [],
 				nextIds: nextTagIds,
 			});
+			// The baseline the next save diffs against, for the reason on the
+			// attribute handlers above. Not through `patchTerm`, which patches
+			// both copies of a `Term`: only the detail read resolves tags, so
+			// the list card has no `tags` to bring up to date.
+			setFocusedTermDetail((prev) => (prev?.id === focusId ? { ...prev, tags } : prev));
 			if (tagError != null) {
 				// Some of the writes may have landed, and the text edit — if
 				// there was one — is already saved, so the refetch has to

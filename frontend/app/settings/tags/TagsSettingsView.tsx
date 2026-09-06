@@ -30,6 +30,15 @@ const byName = (left: Tag, right: Tag): number =>
 	left.name.toLowerCase().localeCompare(right.name.toLowerCase());
 
 /**
+ * The open name dialog, and which tag it renames.
+ *
+ * One dialog serves both actions: the field, its length cap and the
+ * duplicate-name check are the same for a new name and a changed one, and the
+ * only difference is which request the submit button makes.
+ */
+type NameDialog = { mode: 'create' } | { mode: 'rename'; tag: Tag };
+
+/**
  * Both timestamps are serialised from one row by one serialiser, so an
  * untouched tag has them byte-identical and no date parsing is needed to tell.
  * Rendering the creation date twice would read as an edit that never happened.
@@ -42,7 +51,7 @@ const TagsList = () => {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
-	const [modalOpen, setModalOpen] = useState(false);
+	const [dialog, setDialog] = useState<NameDialog | null>(null);
 	const [name, setName] = useState('');
 	const [submitting, setSubmitting] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
@@ -70,45 +79,65 @@ const TagsList = () => {
 	}, []);
 
 	const trimmedName = name.trim();
+	const renaming = dialog?.mode === 'rename' ? dialog.tag : null;
 	// The backend owns this rule and answers 409; checking here too is what puts
 	// the message under the field while typing instead of after a round trip.
+	// The tag being renamed is left out of it, because it collides with nothing
+	// but itself and the backend takes its own name back — which is what makes
+	// fixing a tag that was created shouting a rename rather than a duplicate.
 	const nameTaken = tags.some(
-		(tag) => tag.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+		(tag) =>
+			tag.id !== renaming?.id && tag.name.trim().toLowerCase() === trimmedName.toLowerCase(),
 	);
-	const canSubmit = !submitting && trimmedName.length > 0 && !nameTaken;
+	// A rename has to change something. Submitting the identical name would
+	// advance `modified` and leave the row reading as edited when it was not.
+	const unchanged = renaming != null && trimmedName === renaming.name;
+	const canSubmit = !submitting && trimmedName.length > 0 && !nameTaken && !unchanged;
 
 	const openCreateModal = () => {
 		setName('');
 		setSubmitError(null);
-		setModalOpen(true);
+		setDialog({ mode: 'create' });
 	};
 
-	const closeCreateModal = () => {
+	// Opens on the tag's current name rather than empty: a rename is usually an
+	// edit of what is there, and it is also what `unchanged` measures against.
+	const openRenameModal = (tag: Tag) => {
+		setName(tag.name);
+		setSubmitError(null);
+		setDialog({ mode: 'rename', tag });
+	};
+
+	const closeDialog = () => {
 		if (submitting) return;
-		setModalOpen(false);
+		setDialog(null);
 		setSubmitError(null);
 	};
 
 	const handleSubmit = async () => {
-		if (!canSubmit) return;
+		if (!canSubmit || dialog == null) return;
 		setSubmitting(true);
 		setSubmitError(null);
 
-		const response = await tagsApi.create({ name: trimmedName });
+		const creating = dialog.mode === 'create';
+		const response = creating
+			? await tagsApi.create({ name: trimmedName })
+			: await tagsApi.update(dialog.tag.id, { name: trimmedName });
 		setSubmitting(false);
 
 		if (response.error) {
-			setSubmitError(response.message ?? 'Failed to create tag.');
+			setSubmitError(response.message ?? `Failed to ${creating ? 'create' : 'rename'} tag.`);
 			return;
 		}
 
-		const created = response.data;
-		if (created != null) {
-			setTags((prev) =>
-				[...prev.filter((tag) => tag.id !== created.id), created].sort(byName),
-			);
+		// Both requests answer with the whole tag — a rename with the `modified`
+		// it has just advanced — so the row is replaced by the server's version
+		// rather than patched with the name that was typed.
+		const saved = response.data;
+		if (saved != null) {
+			setTags((prev) => [...prev.filter((tag) => tag.id !== saved.id), saved].sort(byName));
 		}
-		setModalOpen(false);
+		setDialog(null);
 	};
 
 	const handleRequestDelete = (tag: Tag) => {
@@ -219,6 +248,16 @@ const TagsList = () => {
 										<PopoverMenu
 											items={[
 												{
+													label: 'Rename Tag',
+													icon: (
+														<Icon
+															name={IconName.Pencil}
+															className="h-3.5 w-3.5"
+														/>
+													),
+													onClick: () => openRenameModal(tag),
+												},
+												{
 													label: 'Delete Tag',
 													icon: (
 														<Icon
@@ -268,10 +307,10 @@ const TagsList = () => {
 			</div>
 
 			<ModalCreateNewItem
-				open={modalOpen}
-				onClose={closeCreateModal}
-				title="Create New Tag"
-				submitLabel="Create"
+				open={dialog !== null}
+				onClose={closeDialog}
+				title={renaming == null ? 'Create New Tag' : 'Rename Tag'}
+				submitLabel={renaming == null ? 'Create' : 'Save'}
 				canSubmit={canSubmit}
 				onSubmit={handleSubmit}
 				className="w-[520px] max-w-full"

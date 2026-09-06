@@ -17,6 +17,11 @@ export type TagCreateInput = {
 	name: string;
 };
 
+/** A rename — the name is the only part of a tag there is to edit. */
+export type TagUpdateInput = {
+	name: string;
+};
+
 /**
  * A tag as rendered beside the object it labels.
  *
