@@ -23,20 +23,35 @@ from gsf.retrieval.text_to_sql import main  # noqa: E402
 
 
 class _FailAfterGenerationApp:
+    """Graph double that fails after one node has produced SQL.
+
+    ``stream_agent_response`` asks for ``stream_mode=["updates", "custom"]``,
+    which makes LangGraph yield ``(mode, chunk)`` tuples rather than bare
+    node updates — a node's start announcement on ``custom``, then its state
+    update on ``updates``. Mirrored here so the double matches the real call.
+    """
+
     def stream(
-        self, state: dict[str, Any], config: dict[str, Any]
-    ) -> Iterator[dict[str, Any]]:
-        yield {
-            "validate_intent": {
-                "path_state": {
-                    "sql_generation_result": SimpleNamespace(
-                        sql_code="SELECT 1",
-                        response="ok",
-                        thought="generated before downstream failure",
-                    )
+        self,
+        state: dict[str, Any],
+        stream_mode: list[str] | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> Iterator[tuple[str, Any]]:
+        yield ("custom", {"type": "step_start", "node": "validate_intent"})
+        yield (
+            "updates",
+            {
+                "validate_intent": {
+                    "path_state": {
+                        "sql_generation_result": SimpleNamespace(
+                            sql_code="SELECT 1",
+                            response="ok",
+                            thought="generated before downstream failure",
+                        )
+                    }
                 }
-            }
-        }
+            },
+        )
         raise KeyError("intent_valid")
 
 
@@ -72,3 +87,60 @@ def test_nonstreaming_error_exposes_partial_answer(
 
     assert caught.value.node == "validate_intent"
     assert caught.value.partial_answer["sql_code"] == "SELECT 1"
+
+
+class _FailInsideFirstNodeApp:
+    """Graph double whose first node raises before it ever returns."""
+
+    def stream(
+        self,
+        state: dict[str, Any],
+        stream_mode: list[str] | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> Iterator[tuple[str, Any]]:
+        yield ("custom", {"type": "step_start", "node": "retrieve_candidates"})
+        raise TimeoutError("retriever unavailable")
+
+
+def test_error_inside_a_node_names_that_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A node that raises produces no update, so completions alone can't name
+    it — the failure would be attributed to whichever node last succeeded, or
+    to ``graph_start`` when it is the first one. The start announcement is
+    what makes the report point at the node that was actually running.
+    """
+    monkeypatch.setattr(main, "_build_state", lambda payload: {"path_state": {}})
+    monkeypatch.setattr(main, "app", _FailInsideFirstNodeApp())
+
+    events = list(main.stream_agent_response({"question": "q"}))
+
+    assert events[-1]["node"] == "retrieve_candidates"
+    assert events[-1]["error_type"] == "TimeoutError"
+    assert "graph_start" not in events[-1]["message"]
+
+
+def test_error_after_a_node_completes_names_the_running_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once the next node has announced itself, it — not the one that just
+    finished — is what the failure is attributed to."""
+
+    class _FailInSecondNode:
+        def stream(
+            self,
+            state: dict[str, Any],
+            stream_mode: list[str] | None = None,
+            config: dict[str, Any] | None = None,
+        ) -> Iterator[tuple[str, Any]]:
+            yield ("custom", {"type": "step_start", "node": "validate_sql_query"})
+            yield ("updates", {"validate_sql_query": {"path_state": {}}})
+            yield ("custom", {"type": "step_start", "node": "execute_sql_query"})
+            raise RuntimeError("connector died")
+
+    monkeypatch.setattr(main, "_build_state", lambda payload: {"path_state": {}})
+    monkeypatch.setattr(main, "app", _FailInSecondNode())
+
+    events = list(main.stream_agent_response({"question": "q"}))
+
+    assert events[-1]["node"] == "execute_sql_query"
