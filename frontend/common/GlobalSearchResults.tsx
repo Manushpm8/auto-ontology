@@ -18,6 +18,7 @@ import { SkeletonVariant } from '@/enums/skeleton';
 import { CertificationStatus } from '@/enums/certification';
 import { SearchObjectType } from '@/enums/search';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
+import { searchTokens, synonymWordTokens } from '@/lib/searchTokens';
 import type { GlobalSearchItem } from '@/types/search';
 
 const parentTermName = (item: GlobalSearchItem): string | null => {
@@ -75,31 +76,38 @@ const certificationStatus = (
 
 const DESCRIPTION_LEAD_LENGTH = 50;
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const tokenHighlightRegex = (tokens: string[]): RegExp => {
+	const escaped = [...tokens]
+		.sort((left, right) => right.length - left.length)
+		.map(escapeRegExp)
+		.join('|');
+	return new RegExp(`(${escaped})`, 'gi');
+};
+
 const descriptionWithVisibleMatch = (description: string, query: string): string => {
-	const needle = query.trim();
-	if (needle === '') return description;
+	const tokens = searchTokens(query);
+	if (tokens.length === 0) return description;
 
-	const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const parts = description.split(new RegExp(`(${escaped})`, 'gi'));
-	if (parts.length < 2) return description;
-
-	const prefix = parts[0] ?? '';
-	if (prefix.length <= DESCRIPTION_LEAD_LENGTH) return description;
+	const match = tokenHighlightRegex(tokens).exec(description);
+	if (match == null || match.index <= DESCRIPTION_LEAD_LENGTH) return description;
 
 	const lead = description.slice(0, DESCRIPTION_LEAD_LENGTH).trimEnd();
-	return `${lead}... ${parts.slice(1).join('')}`;
+	return `${lead}... ${description.slice(match.index)}`;
 };
 
 const HighlightedText = ({ text, query }: { text: string; query: string }) => {
-	const needle = query.trim();
-	if (needle === '') return <>{text}</>;
-	const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+	const tokens = searchTokens(query);
+	if (tokens.length === 0) return <>{text}</>;
+
+	const needle = new Set(tokens);
+	const parts = text.split(tokenHighlightRegex(tokens));
 
 	return (
 		<>
 			{parts.map((part, index) =>
-				part.toLowerCase() === needle.toLowerCase() ? (
+				needle.has(part.toLowerCase()) ? (
 					<mark
 						key={`${part}-${index}`}
 						className="rounded-sm bg-[#76b900]/25 text-inherit"
@@ -115,9 +123,9 @@ const HighlightedText = ({ text, query }: { text: string; query: string }) => {
 };
 
 const HighlightedWholeWords = ({ text, query }: { text: string; query: string }) => {
-	const tokens = [...new Set(query.toLowerCase().match(/[a-z0-9]+/g) ?? [])];
+	const tokens = synonymWordTokens(query);
 	if (tokens.length === 0) return <>{text}</>;
-	const escaped = tokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+	const escaped = tokens.map(escapeRegExp).join('|');
 	const matcher = new RegExp(`(^|[^a-z0-9])(${escaped})(?=[^a-z0-9]|$)`, 'gi');
 	const nodes: ReactNode[] = [];
 	let cursor = 0;

@@ -22,7 +22,11 @@ import {
 } from '@/common/GlobalSearchTabs';
 import { Modal } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
-import { GLOBAL_SEARCH_ALL_TAB, GLOBAL_SEARCH_LIST_LIMIT } from '@/constants/search';
+import {
+	GLOBAL_SEARCH_ALL_TAB,
+	GLOBAL_SEARCH_LIST_LIMIT,
+	GLOBAL_SEARCH_MIN_QUERY_LENGTH,
+} from '@/constants/search';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { TextMatchOption } from '@/enums/search';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
@@ -120,15 +124,16 @@ export const GlobalSearch = () => {
 	const debouncedQuery = useDebouncedValue(query, 1000);
 	const trimmedQuery = debouncedQuery.trim();
 	const liveQuery = query.trim();
-	const searching = open && trimmedQuery.length >= 2;
+	const searching = open && trimmedQuery.length >= GLOBAL_SEARCH_MIN_QUERY_LENGTH;
 	const listKey = `${trimmedQuery}::${selectedTab}`;
 	const loading = searching && resultKey !== listKey;
-	const queryChanging = open && liveQuery.length >= 2 && liveQuery !== trimmedQuery;
+	const queryChanging =
+		open && liveQuery.length >= GLOBAL_SEARCH_MIN_QUERY_LENGTH && liveQuery !== trimmedQuery;
 	const awaitingSearch = queryChanging || loading;
 	const countsReady = searching && countsKey === trimmedQuery;
 
 	useEffect(() => {
-		if (!open || trimmedQuery.length < 2) return;
+		if (!open || trimmedQuery.length < GLOBAL_SEARCH_MIN_QUERY_LENGTH) return;
 
 		const abort = new AbortController();
 		const objects =
@@ -155,7 +160,7 @@ export const GlobalSearch = () => {
 	}, [open, trimmedQuery, selectedTab, attempt]);
 
 	useEffect(() => {
-		if (!open || trimmedQuery.length < 2) return;
+		if (!open || trimmedQuery.length < GLOBAL_SEARCH_MIN_QUERY_LENGTH) return;
 
 		const abort = new AbortController();
 		void searchApi
@@ -193,7 +198,7 @@ export const GlobalSearch = () => {
 	const handleQueryChange = (value: string) => {
 		setQuery(value);
 		setSelectedTab(GLOBAL_SEARCH_ALL_TAB);
-		if (value.trim().length < 2) resetResults();
+		if (value.trim().length < GLOBAL_SEARCH_MIN_QUERY_LENGTH) resetResults();
 	};
 
 	const handleClose = () => {
@@ -203,7 +208,7 @@ export const GlobalSearch = () => {
 		resetResults();
 	};
 
-	const queryActive = liveQuery.length >= 2;
+	const queryActive = liveQuery.length >= GLOBAL_SEARCH_MIN_QUERY_LENGTH;
 	const searchSettled = searching && !awaitingSearch && queryActive;
 	const visibleItems = searchSettled ? items : [];
 	const visibleError = searchSettled ? listError : null;
