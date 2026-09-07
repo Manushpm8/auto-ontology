@@ -865,3 +865,16 @@ def test_a_statement_timeout_still_gets_its_own_session(
     # One for the shared connection, one dedicated to the capped statement.
     assert len(kwargs_seen) == 2
     assert kwargs_seen[1]["session_configuration"] == {"statement_timeout": 30}
+
+
+def test_qualify_prepends_the_bound_catalog() -> None:
+    # Unity Catalog is three-level and ``database_name`` is the catalog here,
+    # so the two-level base default would drop it.
+    database = DatabricksDatabase(_connection_string())
+    assert database.qualify("analytics", "events") == "`main`.`analytics`.`events`"
+
+
+def test_qualify_rejects_a_missing_schema() -> None:
+    # `main`.`e` would be read as schema.table, not catalog.table.
+    with pytest.raises(ValueError, match="requires a schema"):
+        DatabricksDatabase(_connection_string()).qualify(None, "e")

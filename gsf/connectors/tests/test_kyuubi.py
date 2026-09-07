@@ -527,3 +527,28 @@ def test_invalid_uploaded_keystore_is_rejected_clearly() -> None:
 
     with pytest.raises(ValueError, match="not valid base64"):
         _write_temp_jks("not!base64!")
+
+
+# ----------------------------------------------------------------------
+# Qualification
+# ----------------------------------------------------------------------
+
+
+def test_qualify_prepends_the_bound_catalog() -> None:
+    # Spark resolves a bare schema.table against spark_catalog, not the Iceberg
+    # catalog this connection binds, so dropping the catalog made every
+    # profiling probe fail with TABLE_OR_VIEW_NOT_FOUND.
+    assert _database().qualify("raw", "events") == "`nvdp`.`raw`.`events`"
+
+
+def test_qualify_rejects_a_missing_schema() -> None:
+    # `nvdp`.`events` would not mean "catalog nvdp": Spark reads a two-part
+    # name as schema.table, so the catalog would land in the schema position.
+    with pytest.raises(ValueError, match="requires a schema"):
+        _database().qualify(None, "events")
+
+
+def test_qualify_quotes_names_with_spaces() -> None:
+    assert _database().qualify("my schema", "my table") == (
+        "`nvdp`.`my schema`.`my table`"
+    )
