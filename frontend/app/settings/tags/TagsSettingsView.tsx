@@ -16,15 +16,13 @@ import { Icon, IconName } from '@/common/icons';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { SkeletonRows } from '@/common/Skeleton';
+import { MAX_TAG_NAME_LENGTH } from '@/constants/tags';
 import { ButtonTheme, Size } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import type { Tag } from '@/types/tags';
 
 import { TagDetailView } from './TagDetailView';
 import { FOCUS_PARAM, TAGS_PANEL_CLASSNAME, tagPath } from './tags-path';
-
-/** Mirrors `MAX_TAG_NAME_LENGTH` in `gsf/server/tags/router.py`, which rejects longer. */
-const MAX_TAG_NAME_LENGTH = 25;
 
 const byName = (left: Tag, right: Tag): number =>
 	left.name.toLowerCase().localeCompare(right.name.toLowerCase());

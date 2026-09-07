@@ -15,11 +15,22 @@
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
-export async function proxyToBackend(req: Request): Promise<Response> {
+/**
+ * `extraHeaders` is how a route sends the backend something the incoming
+ * request cannot be trusted for. Nothing from the caller's own headers is
+ * forwarded — only the ones built here — so a header the backend trusts cannot
+ * be set by whoever called the route. The identity header is the case that
+ * needs it: see `buildInternalIdentityHeaders`, and `app/api/rules/route.ts`
+ * for a route that attributes a write to `ctx.user`.
+ */
+export async function proxyToBackend(
+	req: Request,
+	extraHeaders: Record<string, string> = {},
+): Promise<Response> {
 	const incoming = new URL(req.url);
 	const target = `${PYTHON_API_URL}${incoming.pathname}${incoming.search}`;
 
-	const headers: Record<string, string> = { Accept: 'application/json' };
+	const headers: Record<string, string> = { Accept: 'application/json', ...extraHeaders };
 	const contentType = req.headers.get('content-type');
 	if (contentType) headers['Content-Type'] = contentType;
 
