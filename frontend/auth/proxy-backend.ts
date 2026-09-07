@@ -18,6 +18,21 @@ import { buildInternalIdentityHeaders } from '@/lib/internalIdentity';
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
 /**
+ * What every proxied answer is allowed to be kept in, which is nothing shared.
+ *
+ * Every route that reaches this proxy is behind `withPermission`, so every
+ * answer it relays is scoped to the caller who asked for it — `/api/tags` most
+ * literally, since it carries author names only for a caller who may manage
+ * tags. Next does not cache Route Handlers, so this is about the browser: a GET
+ * that states no policy is left to heuristic freshness, and none of these
+ * answers may be handed to the next person to use the machine.
+ *
+ * Exported because a wrapper that rebuilds one of these responses has to carry
+ * it through rather than decide it again — see `withTagAuthors`.
+ */
+export const PROXY_CACHE_CONTROL = 'private, no-store';
+
+/**
  * `userId` names the caller to the backend, for routes that record who did
  * something (a tag's `created_by`, for instance). Opt-in rather than always
  * forwarded, so a route that has no use for an identity does not imply one.
@@ -46,6 +61,9 @@ export async function proxyToBackend(
 	const respBody = await upstream.text();
 	return new Response(respBody, {
 		status: upstream.status,
-		headers: { 'Content-Type': upstream.headers.get('content-type') ?? 'application/json' },
+		headers: {
+			'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
+			'Cache-Control': PROXY_CACHE_CONTROL,
+		},
 	});
 }
