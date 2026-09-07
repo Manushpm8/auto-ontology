@@ -3,6 +3,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
+ * Query param asking `/api/tags` to resolve `created_by` / `modified_by` to the
+ * accounts they name.
+ *
+ * Opt-in rather than given to everyone who could see it. The same list is read
+ * by the tag picker on every catalog and glossary detail page — on each
+ * navigation, and again after each save — and the picker wants a name and an id
+ * to put on a chip. Resolving authors for it would be a user lookup per page
+ * open whose result nothing reads.
+ */
+export const AUTHORS_PARAM = 'authors';
+
+/** The value {@link AUTHORS_PARAM} is asked with. */
+export const AUTHORS_PARAM_ON = '1';
+
+/**
  * The `created_by` / `modified_by` a tag carries when no person asked for it.
  * Mirrors `SYSTEM_ACTOR` in `gsf/dal/tags.py`.
  *

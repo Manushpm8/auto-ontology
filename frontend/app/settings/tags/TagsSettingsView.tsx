@@ -110,7 +110,9 @@ const TagsList = () => {
 
 	useEffect(() => {
 		let cancelled = false;
-		tagsApi.getAll().then((response) => {
+		// The one caller that asks for authors: this is the page with the two
+		// columns that show them.
+		tagsApi.getAll({ authors: true }).then((response) => {
 			if (cancelled) return;
 			if (response.error) {
 				setError(response.message ?? 'Failed to load tags.');

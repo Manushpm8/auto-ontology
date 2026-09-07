@@ -18,7 +18,27 @@
  */
 
 import { getPrisma } from '@/lib/prisma';
-import { SYSTEM_ACTOR } from '@/constants/tags';
+import { userCan } from '@/auth/permissions';
+import { PROXY_CACHE_CONTROL } from '@/auth/proxy-backend';
+import type { ResolvedUser } from '@/auth/resolve-user';
+import { AUTHORS_PARAM, AUTHORS_PARAM_ON, SYSTEM_ACTOR } from '@/constants/tags';
+
+/**
+ * Whether this read should carry authors: the caller asked for them, and may
+ * have them.
+ *
+ * Both halves are needed and neither implies the other. The param is what keeps
+ * the work off the tag picker's path, which reads the same list on every detail
+ * page and throws authors away. The permission is what stops a viewer from
+ * helping themselves to the names by appending the param — only the settings
+ * page shows who curated the vocabulary, and only admins can open it.
+ *
+ * One function rather than a check per route, so the two read routes cannot
+ * come to disagree about who sees authors.
+ */
+export const authorsRequested = (req: Request, user: ResolvedUser): boolean =>
+	new URL(req.url).searchParams.get(AUTHORS_PARAM) === AUTHORS_PARAM_ON &&
+	userCan(user, { tag: ['manage'] });
 
 /** Only what a row needs: a name to print, and an email to fall back to. */
 const authorSelect = { id: true, name: true, email: true } as const;
@@ -39,10 +59,22 @@ const tagsIn = (payload: Row): Row[] => {
 const lookupId = (value: unknown): string | null =>
 	typeof value === 'string' && value !== '' && value !== SYSTEM_ACTOR ? value : null;
 
+/**
+ * The upstream answer, rebuilt around a body this module may have rewritten.
+ *
+ * The cache policy is *carried* rather than decided again. This wrapper sits on
+ * top of `proxyToBackend`, which is where a proxied answer's policy is set, and
+ * rebuilding a response is exactly where such a header goes missing — the enriched
+ * branch of `/api/tags` would then be the one reply on that route with no policy
+ * at all, while carrying the most caller-specific body of the two.
+ */
 const respond = (body: string, upstream: Response): Response =>
 	new Response(body, {
 		status: upstream.status,
-		headers: { 'Content-Type': upstream.headers.get('content-type') ?? 'application/json' },
+		headers: {
+			'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
+			'Cache-Control': upstream.headers.get('cache-control') ?? PROXY_CACHE_CONTROL,
+		},
 	});
 
 /**

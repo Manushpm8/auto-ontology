@@ -36,6 +36,12 @@ export const TAGS_SECTION_ID = 'tags';
  * object's own fetch — the section is then built from one snapshot, and a tag
  * created elsewhere appears on the next refetch rather than needing its own
  * subscription.
+ *
+ * That refetch is what keeps the picker current, and it is why this asks for no
+ * authors and holds no cache. It runs on every detail page open and again after
+ * every save, so anything the answer carries is paid for on each of them — and
+ * a cached list would show a vocabulary that no longer matches the one the
+ * settings page has just been edited in.
  */
 export const fetchTagOptions = async (): Promise<TagChip[]> => {
 	const res = await tagsApi.getAll();

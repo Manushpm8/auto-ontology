@@ -5276,7 +5276,7 @@
     },
     "/api/tags": {
       "get": {
-        "description": "tagsApi.getAll — list tags. Viewers too, unlike the rest of this file: the\ntag picker on every detail page offers the whole vocabulary, and a tag's name\nand id say nothing about the catalog.",
+        "description": "tagsApi.getAll — list tags. Viewers too, unlike the rest of this file: the\ntag picker on every detail page offers the whole vocabulary, and a tag's name\nand id say nothing about the catalog.\n\nAuthor names are added only when asked for — see `authorsRequested`. This is\nthe hottest tag route there is, read on every navigation the picker survives,\nand the settings page is the only caller with anything to show them in.",
         "operationId": "get_api_tags",
         "responses": {
           "200": {
@@ -5298,6 +5298,18 @@
         },
         "summary": "tagsApi.getAll — list tags.",
         "tags": ["tags"],
+        "parameters": [
+          {
+            "name": "authors",
+            "in": "query",
+            "required": false,
+            "description": "Resolve `created_by` / `modified_by` to the accounts they name, adding `created_by_user` and `modified_by_user` beside them. Ignored for a caller who may not manage tags, and left off by default: the tag picker reads this list on every detail page and has nothing to show an author in.",
+            "schema": {
+              "type": "string",
+              "const": "1"
+            }
+          }
+        ],
         "security": [
           {
             "ApiToken": []
@@ -5310,7 +5322,7 @@
         "x-gsf-proxied": true
       },
       "post": {
-        "description": "tagsApi.create — add a tag (admin only).",
+        "description": "tagsApi.create — add a tag (admin only). The identity goes down so the\nbackend can record who created it, and comes back resolved to a name\nunconditionally: this answer only ever redraws the row on the settings page,\nwhich is the page that shows authors.",
         "operationId": "post_api_tags",
         "requestBody": {
           "content": {
@@ -5350,7 +5362,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Create Tag",
+        "summary": "tagsApi.create — add a tag (admin only).",
         "tags": ["tags"],
         "security": [
           {
@@ -5366,7 +5378,7 @@
     },
     "/api/tags/{tag_id}": {
       "delete": {
-        "description": "tagsApi.delete — remove a tag (admin only).",
+        "description": "tagsApi.delete — remove a tag (admin only). Nothing survives the delete to\nrecord an author on, so no identity is forwarded.",
         "operationId": "delete_api_tags_tag_id_",
         "parameters": [
           {
@@ -5407,7 +5419,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Delete Tag",
+        "summary": "tagsApi.delete — remove a tag (admin only).",
         "tags": ["tags"],
         "security": [
           {
@@ -5421,7 +5433,7 @@
         "x-gsf-proxied": true
       },
       "get": {
-        "description": "tagsApi.getById — one tag with the objects it labels.\n\n`manage` rather than the `read` that guards the tag *list*: this answer names\ncatalog objects and spells out where they sit, and it is not scoped to the\ncaller's zones the way the catalog reads are. Only the settings page asks for\nit, and that whole section is admin-only already.",
+        "description": "tagsApi.getById — one tag with the objects it labels.\n\n`manage` rather than the `read` that guards the tag *list*: this answer names\ncatalog objects and spells out where they sit, and it is not scoped to the\ncaller's zones the way the catalog reads are. Only the settings page asks for\nit, and that whole section is admin-only already.\nAuthors on request, by the same rule as the list: the detail view renders a\ntag's name and the objects carrying it, so nothing here reads them today, and\na route that resolved them anyway would be work with no reader.",
         "operationId": "get_api_tags_tag_id_",
         "parameters": [
           {
@@ -5431,6 +5443,16 @@
             "schema": {
               "title": "Tag Id",
               "type": "string"
+            }
+          },
+          {
+            "name": "authors",
+            "in": "query",
+            "required": false,
+            "description": "Resolve `created_by` / `modified_by` to the accounts they name, adding `created_by_user` and `modified_by_user` beside them. Off by default: this view renders a tag's name and the objects carrying it, and reads no author.",
+            "schema": {
+              "type": "string",
+              "const": "1"
             }
           }
         ],
@@ -5476,7 +5498,7 @@
         "x-gsf-proxied": true
       },
       "patch": {
-        "description": "tagsApi.update — rename a tag (admin only). `manage` rather than the\n`catalog: ['edit']` the attach routes use: renaming rewrites the vocabulary\nitself, and the new name reaches every object already carrying the tag.",
+        "description": "tagsApi.update — rename a tag (admin only). `manage` rather than the\n`catalog: ['edit']` the attach routes use: renaming rewrites the vocabulary\nitself, and the new name reaches every object already carrying the tag.\n\nThe identity goes down for the backend's `modified_by`, and the renamed tag\ncomes back with both authors resolved.",
         "operationId": "patch_api_tags_tag_id_",
         "parameters": [
           {
@@ -10344,12 +10366,23 @@
       },
       "Tag": {
         "additionalProperties": true,
-        "description": "A tag, as both the list and the create endpoint return it.\n\nEvery field is required here, unlike most of this module: each column is\n``NOT NULL`` and ``gsf.dal.tags`` selects all four on both paths.\n\n``created`` and ``modified`` are the first timestamps this module carries,\nso they set the convention: a timezone-aware ``datetime``, which Pydantic\nserialises as ISO 8601 and the client parses directly. They are read from\nthe database rather than the application clock, so a client comparing two\ntags is comparing one clock.",
+        "description": "A tag, as both the list and the create endpoint return it.\n\nThe four columns describing *when* are required, unlike most of this\nmodule: each is ``NOT NULL`` and ``gsf.dal.tags`` selects them on every\npath.\n\n``created`` and ``modified`` are the first timestamps this module carries,\nso they set the convention: a timezone-aware ``datetime``, which Pydantic\nserialises as ISO 8601 and the client parses directly. They are read from\nthe database rather than the application clock, so a client comparing two\ntags is comparing one clock.\n\nThe two describing *who* are nullable, and each null says something\ndifferent. ``created_by`` is null for a tag made by a caller that reached\nFastAPI without the gateway's identity header. ``modified_by`` is\nadditionally null for a tag nobody has renamed, which is the same fact\n``modified == created`` states.\n\nBoth are opaque Better Auth user ids. Resolving one to a name is the\ngateway's job -- the accounts live in a schema this service does not own --\nso this API deliberately answers with the id it stored.",
         "properties": {
           "created": {
             "format": "date-time",
             "title": "Created",
             "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
           },
           "id": {
             "title": "Id",
@@ -10359,6 +10392,17 @@
             "format": "date-time",
             "title": "Modified",
             "type": "string"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
           },
           "name": {
             "title": "Name",
@@ -10406,6 +10450,17 @@
             "title": "Created",
             "type": "string"
           },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -10421,6 +10476,17 @@
             "format": "date-time",
             "title": "Modified",
             "type": "string"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
           },
           "name": {
             "title": "Name",
@@ -10527,7 +10593,7 @@
         "type": "object"
       },
       "TagTargetType": {
-        "description": "Which of the five things a tag points at.\n\nThe members take their values from the DAL's ``TARGET_*`` constants rather\nthan repeating the strings, so the vocabulary this API speaks and the one\n``tag_target`` has columns for cannot drift apart.\n\nUsed on both sides of tagging: it is the ``type`` of a :class:`TagItem` a\ntag's page reads, and the ``type`` the attach and detach routes validate\nagainst — which is what makes an unknown kind a 422 from FastAPI's own\nvalidation, listing the five it does accept.",
+        "description": "Which of the five things a tag points at.\n\nUsed on both sides of tagging: it is the ``type`` of a :class:`TagItem` a\ntag's page reads, and the ``type`` the attach and detach routes validate\nagainst — which is what makes an unknown kind a 422 from FastAPI's own\nvalidation, listing the five it does accept.\n\nThe five strings are also the keys ``gsf.dal.tags`` resolves to a\n``tag_target`` column, and they are spelled out here rather than imported\nfrom it: this module is the shape of the API, and pulling a five-string\nvocabulary out of the DAL made every importer of it load SQLAlchemy and the\nwhole table metadata too. ``gsf/server/tests/test_tag_target_type.py`` is\nwhat keeps the two spellings identical, since a kind the DAL has no column\nfor would answer 500 rather than the 422 this enum exists to produce.",
         "enum": [
           "term",
           "table",

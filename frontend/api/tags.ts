@@ -4,6 +4,7 @@
 
 import { requests } from './requests';
 import type { ApiResponse, ResponseWithError } from './types';
+import { AUTHORS_PARAM, AUTHORS_PARAM_ON } from '@/constants/tags';
 import type { TagItemType } from '@/enums/tags';
 import type {
 	Tag,
@@ -15,7 +16,16 @@ import type {
 } from '@/types/tags';
 
 export const tagsApi = {
-	getAll: (): Promise<ApiResponse<Tag[]>> => requests.get('tags'),
+	/**
+	 * Every tag.
+	 *
+	 * `authors` asks the route to resolve `created_by` / `modified_by` to
+	 * accounts, and only the settings page wants it — see `AUTHORS_PARAM`. The
+	 * tag picker calls this on every detail page it is shown on, so the default
+	 * is the cheaper answer.
+	 */
+	getAll: ({ authors = false }: { authors?: boolean } = {}): Promise<ApiResponse<Tag[]>> =>
+		requests.get('tags', authors ? { [AUTHORS_PARAM]: AUTHORS_PARAM_ON } : {}),
 
 	/**
 	 * One tag with everything it labels.
