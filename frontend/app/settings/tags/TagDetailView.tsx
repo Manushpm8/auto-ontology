@@ -22,8 +22,6 @@ import type { TagDetail, TagItem } from '@/types/tags';
 import { tagItemPath } from './tag-item-path';
 import { TAGS_PATH } from './tags-path';
 
-// Both keyed by the enum, so teaching the backend a fifth kind of taggable
-// object fails to compile here until this page can name and draw it.
 const TYPE_LABELS: Record<TagItemType, string> = {
 	[TagItemType.Term]: 'Term',
 	[TagItemType.Table]: 'Table',
