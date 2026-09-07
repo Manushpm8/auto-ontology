@@ -31,18 +31,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# The only import from the DAL here, and it is a vocabulary rather than a
-# query: `TagTargetType` below is the API's name for the five columns
-# `tag_target` has, so taking the strings from where they are defined is what
-# keeps the two from drifting.
-from gsf.dal.tags import (
-    TARGET_COLUMN,
-    TARGET_COLUMN_ATTRIBUTE,
-    TARGET_SQL_ATTRIBUTE,
-    TARGET_TABLE,
-    TARGET_TERM,
-)
-
 __all__ = [
     "ApiModel",
     "ColumnAttribute",
@@ -330,21 +318,25 @@ class Tag(ApiModel):
 class TagTargetType(StrEnum):
     """Which of the five things a tag points at.
 
-    The members take their values from the DAL's ``TARGET_*`` constants rather
-    than repeating the strings, so the vocabulary this API speaks and the one
-    ``tag_target`` has columns for cannot drift apart.
-
     Used on both sides of tagging: it is the ``type`` of a :class:`TagItem` a
     tag's page reads, and the ``type`` the attach and detach routes validate
     against — which is what makes an unknown kind a 422 from FastAPI's own
     validation, listing the five it does accept.
+
+    The five strings are also the keys ``gsf.dal.tags`` resolves to a
+    ``tag_target`` column, and they are spelled out here rather than imported
+    from it: this module is the shape of the API, and pulling a five-string
+    vocabulary out of the DAL made every importer of it load SQLAlchemy and the
+    whole table metadata too. ``gsf/server/tests/test_tag_target_type.py`` is
+    what keeps the two spellings identical, since a kind the DAL has no column
+    for would answer 500 rather than the 422 this enum exists to produce.
     """
 
-    TERM = TARGET_TERM
-    TABLE = TARGET_TABLE
-    COLUMN = TARGET_COLUMN
-    COLUMN_ATTRIBUTE = TARGET_COLUMN_ATTRIBUTE
-    SQL_ATTRIBUTE = TARGET_SQL_ATTRIBUTE
+    TERM = "term"
+    TABLE = "table"
+    COLUMN = "column"
+    COLUMN_ATTRIBUTE = "column_attribute"
+    SQL_ATTRIBUTE = "sql_attribute"
 
 
 class TagItem(ApiModel):

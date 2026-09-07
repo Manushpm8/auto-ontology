@@ -78,7 +78,11 @@ _COLUMNS = (
 SYSTEM_ACTOR = "system"
 
 #: ``type`` on a tagged item: which of the five things the row points at.
-#: Mirrored by ``TagItemType`` in the frontend, which labels the row from it.
+#:
+#: Spelled again by ``TagTargetType`` in ``gsf/server/models.py``, which is the
+#: enum an API caller sends, and by ``TagItemType`` in the frontend, which
+#: labels the row from it. The API's copy is pinned to these by
+#: ``gsf/server/tests/test_tag_target_type.py``.
 TARGET_TERM = "term"
 TARGET_TABLE = "table"
 TARGET_COLUMN = "column"

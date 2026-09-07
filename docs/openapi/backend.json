@@ -4353,7 +4353,7 @@
         "type": "object"
       },
       "TagTargetType": {
-        "description": "Which of the five things a tag points at.\n\nThe members take their values from the DAL's ``TARGET_*`` constants rather\nthan repeating the strings, so the vocabulary this API speaks and the one\n``tag_target`` has columns for cannot drift apart.\n\nUsed on both sides of tagging: it is the ``type`` of a :class:`TagItem` a\ntag's page reads, and the ``type`` the attach and detach routes validate\nagainst \u2014 which is what makes an unknown kind a 422 from FastAPI's own\nvalidation, listing the five it does accept.",
+        "description": "Which of the five things a tag points at.\n\nUsed on both sides of tagging: it is the ``type`` of a :class:`TagItem` a\ntag's page reads, and the ``type`` the attach and detach routes validate\nagainst \u2014 which is what makes an unknown kind a 422 from FastAPI's own\nvalidation, listing the five it does accept.\n\nThe five strings are also the keys ``gsf.dal.tags`` resolves to a\n``tag_target`` column, and they are spelled out here rather than imported\nfrom it: this module is the shape of the API, and pulling a five-string\nvocabulary out of the DAL made every importer of it load SQLAlchemy and the\nwhole table metadata too. ``gsf/server/tests/test_tag_target_type.py`` is\nwhat keeps the two spellings identical, since a kind the DAL has no column\nfor would answer 500 rather than the 422 this enum exists to produce.",
         "enum": [
           "term",
           "table",
