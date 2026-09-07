@@ -1269,6 +1269,19 @@
         "title": "DataResponse[PublicConnection]",
         "type": "object"
       },
+      "DataResponse_Rule_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Rule"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[Rule]",
+        "type": "object"
+      },
       "DataResponse_SemanticExplorationGraph_": {
         "additionalProperties": true,
         "properties": {
@@ -2060,6 +2073,7 @@
         "type": "object"
       },
       "GlobalSearchFilters": {
+        "description": "What a query is matched against, and which kinds of object it may hit.\n\nThe two text flags widen the match beyond an object's name: ``description``\nadds its description, ``synonyms`` adds a Term's aliases.\n\nTheir defaults differ, which is deliberate rather than an oversight.\n``description`` is off because matching prose is the narrower, more\nsurprising behaviour to opt into. ``synonyms`` is on because alias matching\nis what this endpoint did for its whole life before the flag existed, and\ndefaulting it off would quietly take Terms away from every caller that does\nnot send the flag.",
         "properties": {
           "description": {
             "default": false,
@@ -2079,6 +2093,11 @@
               }
             ],
             "title": "Objects"
+          },
+          "synonyms": {
+            "default": true,
+            "title": "Synonyms",
+            "type": "boolean"
           }
         },
         "title": "GlobalSearchFilters",
@@ -2383,6 +2402,28 @@
           "count"
         ],
         "title": "ListResponse[PublicConnection]",
+        "type": "object"
+      },
+      "ListResponse_Rule_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[Rule]",
         "type": "object"
       },
       "ListResponse_SqlAttribute_": {
@@ -2792,6 +2833,189 @@
           "database_name"
         ],
         "title": "PublicConnection",
+        "type": "object"
+      },
+      "Rule": {
+        "additionalProperties": true,
+        "description": "A saved search, and the tags to apply to everything it matches.\n\n``search_term``, ``text_match_option`` and ``filters`` are the global-search\nrequest the rule replays; together they are what the rule *is*, which is why\nthey are required rather than optional like most of this module \u2014 a rule\nmissing any of the three matches nothing.\n\n``tags`` are chips: the name to show and the id to act by. A write may send\nwhole tag objects instead \u2014 see ``RuleTagRef`` in\n``gsf/server/rules/router.py`` \u2014 but only their ids are read, and the names\nhere come from the tag table, so a rule cannot name a tag that does not\nexist or show one under a name it has since lost.\n\n``created_by`` is the id of the user who saved it, read from the trusted\ngateway header rather than from the request body \u2014 see\n``gsf/server/chat/identity.py``.\n\n``created`` and ``modified`` follow the convention :class:`Tag` sets: a\ntimezone-aware ``datetime`` serialised as ISO 8601, from one clock.",
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/RuleFilters"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "modified": {
+            "format": "date-time",
+            "title": "Modified",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "search_term": {
+            "title": "Search Term",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "text_match_option": {
+            "title": "Text Match Option",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "search_term",
+          "text_match_option",
+          "filters",
+          "created_by",
+          "created",
+          "modified"
+        ],
+        "title": "Rule",
+        "type": "object"
+      },
+      "RuleCreate": {
+        "description": "A rule as the create dialog sends it.\n\n``search_term``, ``text_match_option`` and ``filters`` are the\n``/search/global-search`` request being saved, spelled the way that route\ntakes it.",
+        "properties": {
+          "filters": {
+            "$ref": "#/components/schemas/GlobalSearchFilters"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "search_term": {
+            "title": "Search Term",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/RuleTagRef"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "text_match_option": {
+            "default": "contains",
+            "title": "Text Match Option",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "search_term",
+          "tags"
+        ],
+        "title": "RuleCreate",
+        "type": "object"
+      },
+      "RuleFilters": {
+        "additionalProperties": true,
+        "description": "The global-search filters a rule replays.\n\nThe same fields ``GlobalSearchFilters`` in ``gsf/server/search/router.py``\naccepts, and deliberately no others: a rule *is* a saved search, so a\nfilter stored here that the search cannot honour would be a rule that never\nreproduces the results it was created from.\n\n``synonyms`` defaults on for the reason it does there \u2014 it is what the\nsearch did before the flag existed \u2014 and ``objects`` records which tab the\nrule was saved from, since that is what the count it promises to tag was\nscoped to.",
+        "properties": {
+          "description": {
+            "default": false,
+            "title": "Description",
+            "type": "boolean"
+          },
+          "objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objects"
+          },
+          "synonyms": {
+            "default": true,
+            "title": "Synonyms",
+            "type": "boolean"
+          }
+        },
+        "title": "RuleFilters",
+        "type": "object"
+      },
+      "RuleTagRef": {
+        "additionalProperties": true,
+        "description": "One tag a rule applies, as a caller names it.\n\nWhole objects rather than bare ids, so a client can post the tags it is\nalready holding without reducing them first. Only ``id`` is required, and\nonly ``id`` is authoritative: :func:`_resolved_tags` reads the name from the\ntag table rather than believing the one that arrived, because a client's\ncopy is a snapshot and a rule that recorded a stale name would show a tag\nunder a name it no longer has.\n\n``extra=\"allow\"`` so the fields a caller happens to carry -- a created\ntimestamp, a label -- are accepted and ignored instead of turning a\nperfectly good tag into a 422. Ignored rather than stored: they describe the\ntag, which has its own table and its own endpoints, and a second copy of\nthem inside a rule would be one that nothing keeps up to date.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "RuleTagRef",
+        "type": "object"
+      },
+      "RuleUpdate": {
+        "description": "The parts of a rule an edit may change.\n\nThe name and the tags, and not the search: what a rule matched is what it\nwas created from, and re-pointing it at another search would silently\nchange which objects it labels. That is a new rule.\n\nBoth optional, so an edit sends only what it changes. Sending neither\nchanges nothing, which the storing version will refuse; today every edit is\na 404 for want of a rule to apply it to.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RuleTagRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "title": "RuleUpdate",
         "type": "object"
       },
       "SchemaSummary": {
@@ -7050,6 +7274,203 @@
         ]
       }
     },
+    "/api/rules": {
+      "get": {
+        "description": "Return every rule.\n\nEmpty while there is nowhere to keep one. That is the same answer a\ndeployment where nobody has created a rule yet would give, so the Rules\nsettings page renders its ordinary empty state and needs no special case\nfor the store being absent.",
+        "operationId": "list_rules_api_rules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Rule_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Rules",
+        "tags": [
+          "rules"
+        ]
+      },
+      "post": {
+        "description": "Save a rule, and answer with it.\n\nValidates the body in full and stores nothing -- see the module docstring\nfor why that is the shape of this router today. The answer is the rule as a\nstored one would read back, so the dialog that posted it needs no second\nrequest and no change once rules persist.\n\n400 for a body that could never be a rule: a blank name, a search term\nshorter than global search accepts, a match option it does not implement,\nor no tags at all. 404 for a tag id that is not a tag. 401 when the request\ncarries no identity to attribute the rule to.",
+        "operationId": "create_rule_api_rules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Rule_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Rule",
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/api/rules/{rule_id}": {
+      "delete": {
+        "description": "Delete one rule by id.\n\n404 for every id today -- see :func:`_not_stored`. Which is also what the\nstoring version owes an id it does not hold, rather than a silent 204: the\nsettings page deletes from a list it has already read, so a missing rule\nmeans that list is stale and the row would be left on screen with nothing\nto explain it.",
+        "operationId": "delete_rule_api_rules__rule_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Rule",
+        "tags": [
+          "rules"
+        ]
+      },
+      "get": {
+        "description": "Return one rule.\n\n404 for every id today -- see :func:`_not_stored`.",
+        "operationId": "get_rule_api_rules__rule_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Rule_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Rule",
+        "tags": [
+          "rules"
+        ]
+      },
+      "patch": {
+        "description": "Edit a rule's name or the tags it applies.\n\nAnswers with the whole rule rather than an echo of the fields that changed,\nthe way renaming a tag does: the edit also advances ``modified``, so the\nrow a caller just edited is redrawn from this one response.\n\n404 for every id today -- see :func:`_not_stored`. The body is declared\nrather than ignored because it is the contract the storing version will\nvalidate; nothing reads it here, since there is no rule to apply it to.",
+        "operationId": "update_rule_api_rules__rule_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Rule_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Rule",
+        "tags": [
+          "rules"
+        ]
+      }
+    },
     "/api/schemas/{db_id}": {
       "get": {
         "description": "Schemas for a database.",
@@ -7104,7 +7525,7 @@
     },
     "/api/search/global-search": {
       "post": {
-        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nevery token sort first.",
+        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nevery token sort first, then Terms an alias matched.\n\n``filters.synonyms`` turns that alias matching off, which drops the Terms\nreached only by one and empties the ``synonyms`` reported on every hit --\nwith it off, no alias caused a hit, so there is none to name.",
         "operationId": "post_global_search_api_search_global_search_post",
         "requestBody": {
           "content": {

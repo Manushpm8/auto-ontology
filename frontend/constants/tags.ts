@@ -2,6 +2,9 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+/** Mirrors `MAX_TAG_NAME_LENGTH` in `gsf/server/tags/router.py`, which rejects longer. */
+export const MAX_TAG_NAME_LENGTH = 25;
+
 /**
  * Query param asking `/api/tags` to resolve `created_by` / `modified_by` to the
  * accounts they name.

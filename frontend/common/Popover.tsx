@@ -21,6 +21,12 @@ type PopoverProps = {
 	/** The panel's own width and padding — its surface and position are set here. */
 	panelClassName?: string;
 	className?: string;
+	/**
+	 * Told whether the panel is showing, for a caller that has to react to it —
+	 * dimming what the panel covers, say. Reported for every way the panel
+	 * closes, not only the trigger.
+	 */
+	onOpenChange?: (open: boolean) => void;
 };
 
 /**
@@ -40,6 +46,7 @@ export const Popover = ({
 	align = PopoverAlign.Right,
 	panelClassName = '',
 	className = '',
+	onOpenChange,
 }: PopoverProps) => {
 	// Coordinates are captured together with the open state so the panel never
 	// paints a frame at a previous trigger's position.
@@ -47,6 +54,16 @@ export const Popover = ({
 	const anchorRef = useRef<HTMLDivElement>(null);
 	const panelRef = useRef<HTMLDivElement>(null);
 	const open = position != null;
+
+	// Held in a ref so an inline callback does not re-report on every render.
+	const onOpenChangeRef = useRef(onOpenChange);
+	useEffect(() => {
+		onOpenChangeRef.current = onOpenChange;
+	}, [onOpenChange]);
+
+	useEffect(() => {
+		onOpenChangeRef.current?.(open);
+	}, [open]);
 
 	useEffect(() => {
 		if (!open) return;

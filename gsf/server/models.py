@@ -53,6 +53,8 @@ __all__ = [
     "NodeUpdateResult",
     "PqlAnalysis",
     "PublicConnection",
+    "Rule",
+    "RuleFilters",
     "SchemaSummary",
     "SemanticExplorationGraph",
     "SemanticGraphNode",
@@ -376,6 +378,63 @@ class TagDetail(Tag):
     """
 
     items: list[TagItem] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Rules
+# ---------------------------------------------------------------------------
+
+
+class RuleFilters(ApiModel):
+    """The global-search filters a rule replays.
+
+    The same fields ``GlobalSearchFilters`` in ``gsf/server/search/router.py``
+    accepts, and deliberately no others: a rule *is* a saved search, so a
+    filter stored here that the search cannot honour would be a rule that never
+    reproduces the results it was created from.
+
+    ``synonyms`` defaults on for the reason it does there — it is what the
+    search did before the flag existed — and ``objects`` records which tab the
+    rule was saved from, since that is what the count it promises to tag was
+    scoped to.
+    """
+
+    description: bool = False
+    synonyms: bool = True
+    objects: list[str] | None = None
+
+
+class Rule(ApiModel):
+    """A saved search, and the tags to apply to everything it matches.
+
+    ``search_term``, ``text_match_option`` and ``filters`` are the global-search
+    request the rule replays; together they are what the rule *is*, which is why
+    they are required rather than optional like most of this module — a rule
+    missing any of the three matches nothing.
+
+    ``tags`` are chips: the name to show and the id to act by. A write may send
+    whole tag objects instead — see ``RuleTagRef`` in
+    ``gsf/server/rules/router.py`` — but only their ids are read, and the names
+    here come from the tag table, so a rule cannot name a tag that does not
+    exist or show one under a name it has since lost.
+
+    ``created_by`` is the id of the user who saved it, read from the trusted
+    gateway header rather than from the request body — see
+    ``gsf/server/chat/identity.py``.
+
+    ``created`` and ``modified`` follow the convention :class:`Tag` sets: a
+    timezone-aware ``datetime`` serialised as ISO 8601, from one clock.
+    """
+
+    id: str
+    name: str
+    search_term: str
+    text_match_option: str
+    filters: RuleFilters
+    tags: list[TagChip] = Field(default_factory=list)
+    created_by: str
+    created: datetime
+    modified: datetime
 
 
 # ---------------------------------------------------------------------------

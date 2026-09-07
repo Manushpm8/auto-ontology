@@ -38,6 +38,7 @@ from gsf.server.models import (
     IdRef,
     PqlAnalysis,
     PublicConnection,
+    Rule,
     SchemaSummary,
     SemanticExplorationGraph,
     SqlAttribute,
@@ -95,6 +96,8 @@ __all__ = [
     "PagedListResponse",
     "PqlAnalysisListResponse",
     "PqlAnalysisResponse",
+    "RuleListResponse",
+    "RuleResponse",
     "SchemasPayload",
     "SemanticExplorationGraphResponse",
     "SemanticRunningResponse",
@@ -293,6 +296,10 @@ TagDetailResponse = DataResponse[TagDetail]
 # The attach and detach routes answer with the *object's* tags after the change,
 # which is what the page redraws from — not with the tag that was moved.
 TagChipListResponse = ListResponse[TagChip]
+
+# Rules
+RuleResponse = DataResponse[Rule]
+RuleListResponse = ListResponse[Rule]
 
 # Catalog
 DatabaseListResponse = ListResponse[DatabaseSummary]
