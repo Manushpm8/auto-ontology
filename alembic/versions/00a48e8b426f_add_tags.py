@@ -9,6 +9,15 @@ tables to one Term per attribute.
 per-entity ``UNIQUE(tag_id, <entity>_id)`` so the same Tag lands on a target
 once.
 
+``tag.created_by`` and ``tag.modified_by`` hold the Better Auth user ids the
+Next.js gateway forwards. Plain nullable ``text`` and not foreign keys: the
+accounts live in ``frontend."user"``, a schema Prisma owns and Alembic does not
+manage, so there is nothing here to reference -- and a tag has to outlive the
+account that made it, which a FK with any ``ondelete`` would either forbid or
+quietly rewrite. Nullable because the gateway's header is not guaranteed:
+FastAPI is reachable directly on the private network, and a caller that skips
+the gateway still creates tags, with no author to record.
+
 ``UNIQUE(attribute_id)`` on the PROPERTY_OF link tables makes a database rule
 out of a convention the writers keep. Both tables key on
 ``(attribute_id, term_id)``, which only forbids the same pair twice -- one
@@ -61,6 +70,8 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
+        sa.Column("created_by", sa.Text(), nullable=True),
+        sa.Column("modified_by", sa.Text(), nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_tag")),
     )
     op.create_index(

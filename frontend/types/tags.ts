@@ -4,6 +4,18 @@
 
 import type { TagItemType } from '@/enums/tags';
 
+/**
+ * Whoever a tag's `created_by` / `modified_by` names, as the `/api/tags` route
+ * resolves it — the ids are stored in the catalog and the accounts live in the
+ * `frontend` schema, so nothing but the gateway can put the two together.
+ */
+export type TagAuthor = {
+	id: string;
+	name: string;
+	/** What to print for an account with no name set, as elsewhere in the app. */
+	email: string;
+};
+
 export type Tag = {
 	id: string;
 	name: string;
@@ -11,6 +23,27 @@ export type Tag = {
 	created: string;
 	/** ISO 8601. Equal to `created` until something edits the tag. */
 	modified: string;
+	/**
+	 * Who made the tag and who last renamed it, as opaque user ids.
+	 *
+	 * Each null means something of its own. `created_by` is null for a tag made
+	 * by a caller that reached the backend without the gateway; `modified_by` is
+	 * additionally null for a tag nobody has renamed, which is the same fact
+	 * `modified === created` states. `SYSTEM_ACTOR` in `constants/tags.ts` is the
+	 * one value neither resolves to an account, for a tag no person asked for.
+	 */
+	created_by: string | null;
+	modified_by: string | null;
+	/**
+	 * The accounts those ids name, added by the `/api/tags` route.
+	 *
+	 * Absent — rather than null — for a caller who may read the vocabulary but
+	 * not manage it, since only the settings page shows authors. Null when the
+	 * id names nobody: it was never recorded, it is the system sentinel, or the
+	 * account has since been deleted.
+	 */
+	created_by_user?: TagAuthor | null;
+	modified_by_user?: TagAuthor | null;
 };
 
 export type TagCreateInput = {

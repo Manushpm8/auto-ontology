@@ -736,6 +736,27 @@ tag = Table(
         server_default=func.now(),
         onupdate=func.now(),
     ),
+    # Who created the tag and who last edited it, as Better Auth user ids --
+    # the `id` of a row in `frontend."user"`, which Prisma owns.
+    #
+    # Deliberately not foreign keys. That table is in another schema Alembic
+    # does not manage, so there is nothing here to reference; and a tag must
+    # outlive the account that made it, which a FK with any `ondelete` would
+    # either forbid or quietly rewrite.
+    #
+    # Nullable because the gateway's identity header is not guaranteed: FastAPI
+    # is reachable directly on the private network, so a caller that skips the
+    # gateway creates a tag with nobody to record. The settings page reads that
+    # as "Unknown" rather than inventing an author.
+    #
+    # `modified_by` is additionally null for a tag nothing has edited yet, which
+    # is the same fact `modified == created` states -- the page renders those
+    # two together as an edit that never happened.
+    #
+    # `SYSTEM_ACTOR` in `gsf/dal/tags.py` is the one value either column may
+    # hold that is not a user id, for a tag no person asked for.
+    Column("created_by", Text, nullable=True),
+    Column("modified_by", Text, nullable=True),
     # The tag name rule as a constraint rather than a convention. Unlike
     # `zone.name` -- whose rule is scoped to the databases a zone's items live
     # in, which no index can express -- a tag name is unique across the whole

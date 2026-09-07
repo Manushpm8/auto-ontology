@@ -298,20 +298,33 @@ class TableColumns(ApiModel):
 class Tag(ApiModel):
     """A tag, as both the list and the create endpoint return it.
 
-    Every field is required here, unlike most of this module: each column is
-    ``NOT NULL`` and ``gsf.dal.tags`` selects all four on both paths.
+    The four columns describing *when* are required, unlike most of this
+    module: each is ``NOT NULL`` and ``gsf.dal.tags`` selects them on every
+    path.
 
     ``created`` and ``modified`` are the first timestamps this module carries,
     so they set the convention: a timezone-aware ``datetime``, which Pydantic
     serialises as ISO 8601 and the client parses directly. They are read from
     the database rather than the application clock, so a client comparing two
     tags is comparing one clock.
+
+    The two describing *who* are nullable, and each null says something
+    different. ``created_by`` is null for a tag made by a caller that reached
+    FastAPI without the gateway's identity header. ``modified_by`` is
+    additionally null for a tag nobody has renamed, which is the same fact
+    ``modified == created`` states.
+
+    Both are opaque Better Auth user ids. Resolving one to a name is the
+    gateway's job -- the accounts live in a schema this service does not own --
+    so this API deliberately answers with the id it stored.
     """
 
     id: str
     name: str
     created: datetime
     modified: datetime
+    created_by: str | None = None
+    modified_by: str | None = None
 
 
 class TagTargetType(StrEnum):

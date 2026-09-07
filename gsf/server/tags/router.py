@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from gsf.dal import tags as dal
+from gsf.server.identity import resolve_internal_user
 from gsf.server.models import TagTargetType
 from gsf.server.responses import (
     IdResponse,
@@ -88,23 +89,39 @@ def _validated_name(raw: str) -> str:
 
 
 @router.post("/tags", status_code=201, response_model=TagResponse)
-def create_tag(body: TagCreate) -> dict:
-    """Create a tag."""
+def create_tag(request: Request, body: TagCreate) -> dict:
+    """Create a tag.
+
+    The author is read from the gateway's identity header rather than taken
+    from the body: the Next.js route in front of this one has already resolved
+    the session, so the header is the one account that can be credited, and a
+    body field would let a caller name somebody else.
+
+    ``required=False`` because the identity is audit rather than authorization
+    -- the route's permission gate is the gateway's -- so a direct call on the
+    private network still creates the tag, with no author recorded.
+    """
     try:
-        row = dal.create_tag(name=_validated_name(body.name))
+        row = dal.create_tag(
+            name=_validated_name(body.name),
+            created_by=resolve_internal_user(request, required=False),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"data": row}
 
 
 @router.patch("/tags/{tag_id}", response_model=TagResponse)
-def update_tag(tag_id: str, body: TagUpdate) -> dict:
+def update_tag(request: Request, tag_id: str, body: TagUpdate) -> dict:
     """Rename a tag.
 
     Answers with the whole tag rather than an echo of the name, because the
-    rename has also advanced ``modified`` — so the settings page redraws the
-    row it just edited from this one response instead of re-reading the list to
-    find out what the timestamp became.
+    rename has also advanced ``modified`` and recorded a ``modified_by`` — so
+    the settings page redraws the row it just edited from this one response
+    instead of re-reading the list to find out what they became.
+
+    The editor is read from the gateway's identity header, for the reason
+    ``create_tag`` reads the author from it.
 
     404 for an unknown id and 409 for a name another tag holds, as create and
     delete answer: the page renames from a list it has already read, so either
@@ -115,7 +132,11 @@ def update_tag(tag_id: str, body: TagUpdate) -> dict:
     fix a tag that was created shouting.
     """
     try:
-        row = dal.update_tag(tag_id=tag_id, name=_validated_name(body.name))
+        row = dal.update_tag(
+            tag_id=tag_id,
+            name=_validated_name(body.name),
+            modified_by=resolve_internal_user(request, required=False),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if row is None:

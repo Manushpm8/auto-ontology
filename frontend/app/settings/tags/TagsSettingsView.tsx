@@ -16,9 +16,10 @@ import { Icon, IconName } from '@/common/icons';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { SkeletonRows } from '@/common/Skeleton';
+import { SYSTEM_ACTOR, SYSTEM_ACTOR_LABEL, UNKNOWN_ACTOR_LABEL } from '@/constants/tags';
 import { ButtonTheme, Size } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
-import type { Tag } from '@/types/tags';
+import type { Tag, TagAuthor } from '@/types/tags';
 
 import { TagDetailView } from './TagDetailView';
 import { FOCUS_PARAM, TAGS_PANEL_CLASSNAME, tagPath } from './tags-path';
@@ -45,6 +46,53 @@ type NameDialog = { mode: 'create' } | { mode: 'rename'; tag: Tag };
  */
 const modifiedLabel = (tag: Tag): string =>
 	tag.modified === tag.created ? 'Never' : formatDate(tag.modified);
+
+/**
+ * The footprint of an author column, in one place because three things have to
+ * agree on it: the header, the cell, and the blank one a never-edited tag gets.
+ *
+ * `pl-6` is what separates an author column from the date column before it. The
+ * dates are right-aligned, so their text ends at the column edge and the row's
+ * `gap-3` alone leaves it almost touching the next avatar — the padding turns
+ * the four columns into the two pairs they read as.
+ */
+const AUTHOR_COLUMN = 'w-40 shrink-0 pl-6';
+
+/**
+ * Who an author column names, with the initial the rest of the app draws a
+ * person as.
+ *
+ * `actorId` is what the tag stored and `author` is what the API resolved it to,
+ * and both are needed: a tag the deployment generated itself names no account
+ * on purpose, which is a different statement from an author nobody recorded —
+ * or one whose account has since been deleted, since these ids are not foreign
+ * keys and outlive the user.
+ */
+const TagAuthorCell = ({
+	actorId,
+	author,
+}: {
+	actorId: string | null;
+	author: TagAuthor | null | undefined;
+}) => {
+	const system = actorId === SYSTEM_ACTOR;
+	const name = author?.name || author?.email || '';
+	const label = system ? SYSTEM_ACTOR_LABEL : name || UNKNOWN_ACTOR_LABEL;
+
+	return (
+		<span className={`flex min-w-0 items-center gap-2 ${AUTHOR_COLUMN}`}>
+			<span
+				aria-hidden="true"
+				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${name === '' ? 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white'}`}
+			>
+				{label.charAt(0).toUpperCase()}
+			</span>
+			<span className="min-w-0 truncate text-xs text-zinc-500 dark:text-zinc-400">
+				{label}
+			</span>
+		</span>
+	);
+};
 
 const TagsList = () => {
 	const [tags, setTags] = useState<Tag[]>([]);
@@ -208,8 +256,10 @@ const TagsList = () => {
 					<div className="rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
 						<div className="flex items-center gap-3 border-b border-zinc-200/90 px-4 py-2 text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:border-zinc-700/90 dark:text-zinc-400">
 							<span className="min-w-0 flex-1">Name</span>
-							<span className="w-28 shrink-0 text-right">Created</span>
-							<span className="w-28 shrink-0 text-right">Modified</span>
+							<span className={AUTHOR_COLUMN}>Created By</span>
+							<span className="w-28 shrink-0 text-right">Created Date</span>
+							<span className={AUTHOR_COLUMN}>Modified By</span>
+							<span className="w-28 shrink-0 text-right">Modified Date</span>
 							{/* The action button's exact footprint (`Size.SMALL`,
 							    `iconOnly`), so the date columns line up with these
 							    headers and nothing pads the right edge. */}
@@ -237,9 +287,24 @@ const TagsList = () => {
 										<span className="min-w-0 flex-1 truncate text-sm text-zinc-800 dark:text-zinc-200">
 											{tag.name}
 										</span>
+										<TagAuthorCell
+											actorId={tag.created_by}
+											author={tag.created_by_user}
+										/>
 										<span className="w-28 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
 											{formatDate(tag.created)}
 										</span>
+										{/* Blank rather than "Unknown" for a tag nothing has
+										    edited: there is no editor to be unsure about, which
+										    is the same thing the date column says as "Never". */}
+										{tag.modified === tag.created ? (
+											<span className={AUTHOR_COLUMN} />
+										) : (
+											<TagAuthorCell
+												actorId={tag.modified_by}
+												author={tag.modified_by_user}
+											/>
+										)}
 										<span className="w-28 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
 											{modifiedLabel(tag)}
 										</span>

@@ -204,6 +204,42 @@ def test_renaming_a_tag_that_is_not_there_reports_it(prefix) -> None:
     assert update_tag(tag_id=f"{prefix}-no-such-id", name=f"{prefix}-pii") is None
 
 
+def test_create_records_its_author_and_no_editor(prefix) -> None:
+    """A tag that has only been created has not been edited by anybody."""
+    tag = create_tag(name=f"{prefix}-pii", created_by="user-1")
+
+    assert tag["created_by"] == "user-1"
+    assert tag["modified_by"] is None
+
+
+def test_create_without_an_identity_records_nobody(prefix) -> None:
+    """A direct call that skipped the gateway still creates the tag."""
+    tag = create_tag(name=f"{prefix}-pii")
+
+    assert tag["created_by"] is None
+
+
+def test_a_rename_records_its_editor_and_keeps_the_author(prefix) -> None:
+    tag = create_tag(name=f"{prefix}-pii", created_by="user-1")
+
+    renamed = update_tag(tag_id=tag["id"], name=f"{prefix}-gdpr", modified_by="user-2")
+
+    assert renamed is not None
+    assert renamed["created_by"] == "user-1"
+    assert renamed["modified_by"] == "user-2"
+
+
+def test_a_rename_naming_nobody_clears_the_previous_editor(prefix) -> None:
+    """Otherwise this edit reads as the work of whoever made the last one."""
+    tag = create_tag(name=f"{prefix}-pii", created_by="user-1")
+    update_tag(tag_id=tag["id"], name=f"{prefix}-gdpr", modified_by="user-2")
+
+    renamed = update_tag(tag_id=tag["id"], name=f"{prefix}-ccpa")
+
+    assert renamed is not None
+    assert renamed["modified_by"] is None
+
+
 def test_a_rename_onto_another_tags_name_is_rejected(prefix) -> None:
     create_tag(name=f"{prefix}-pii")
     other = create_tag(name=f"{prefix}-gdpr")

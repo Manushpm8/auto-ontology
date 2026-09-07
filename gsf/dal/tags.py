@@ -58,7 +58,24 @@ _FOLDED_NAME = func.lower(func.trim(s.tag.c.name))
 
 #: Every column the API returns for a tag, in one place so the list and the
 #: create path cannot drift into returning different shapes.
-_COLUMNS = (s.tag.c.id, s.tag.c.name, s.tag.c.created, s.tag.c.modified)
+_COLUMNS = (
+    s.tag.c.id,
+    s.tag.c.name,
+    s.tag.c.created,
+    s.tag.c.modified,
+    s.tag.c.created_by,
+    s.tag.c.modified_by,
+)
+
+#: ``created_by``/``modified_by`` for a tag no person asked for.
+#:
+#: Nothing writes it yet -- every tag today comes from the settings page, which
+#: carries the caller's identity. It is reserved and rendered ("Auto Generated")
+#: so that a future ingestion or rules path has an author to record that is not
+#: a null, which already means "written before these columns existed".
+#:
+#: Safe as a literal: Better Auth generates its ids, so no account can hold it.
+SYSTEM_ACTOR = "system"
 
 #: ``type`` on a tagged item: which of the five things the row points at.
 #: Mirrored by ``TagItemType`` in the frontend, which labels the row from it.
@@ -431,19 +448,29 @@ def fetch_tags_map(kind: str, item_ids: list[str]) -> dict[str, list[dict[str, A
     return tags
 
 
-def create_tag(*, name: str) -> dict[str, Any]:
+def create_tag(*, name: str, created_by: str | None = None) -> dict[str, Any]:
     """Create a tag and return it.
 
     *name* is stored as given; the caller is expected to have trimmed it. Raises
     ``ValueError`` when the name is already taken, whether that is caught by the
     check or by the unique index underneath it.
+
+    *created_by* is the Better Auth user id the router read from the gateway's
+    header, or :data:`SYSTEM_ACTOR`. It is optional because the header is not
+    guaranteed -- FastAPI is reachable directly on the private network -- and
+    ``None`` records that nobody was named rather than failing the create over
+    an audit field.
+
+    ``modified_by`` is deliberately *not* set alongside it. It answers "who last
+    edited this", and a tag that has only ever been created has not been edited
+    -- the same reason ``modified`` equalling ``created`` reads as "Never".
     """
     if _name_taken(name):
         raise ValueError(f"Tag with name {name!r} already exists")
 
     try:
         rows = store().query_write(
-            s.tag.insert().values(name=name).returning(*_COLUMNS)
+            s.tag.insert().values(name=name, created_by=created_by).returning(*_COLUMNS)
         )
     except IntegrityError as exc:
         # Only the name rule is translated. A different constraint failing means
@@ -456,7 +483,9 @@ def create_tag(*, name: str) -> dict[str, Any]:
     return rows[0]
 
 
-def update_tag(*, tag_id: str, name: str) -> dict[str, Any] | None:
+def update_tag(
+    *, tag_id: str, name: str, modified_by: str | None = None
+) -> dict[str, Any] | None:
     """Rename a tag and return it. ``None`` when no tag has that id.
 
     The name is a tag's only editable part, so this takes it as a plain
@@ -476,6 +505,12 @@ def update_tag(*, tag_id: str, name: str) -> dict[str, Any] | None:
     alone -- so the two differing is exactly "this tag has been renamed", which
     is what the settings page renders.
 
+    ``modified_by`` has no such mechanism and so is written explicitly, from the
+    identity the gateway forwarded. It is optional for the reason ``created_by``
+    is on :func:`create_tag`, and it is set on *every* rename including one that
+    names nobody: leaving the previous editor in place would credit this edit to
+    whoever made the last one.
+
     The rows it labels are untouched: membership is keyed by id, so a rename
     reaches every object carrying the tag without a single ``tag_target`` row
     being written.
@@ -487,13 +522,13 @@ def update_tag(*, tag_id: str, name: str) -> dict[str, Any] | None:
         rows = store().query_write(
             s.tag.update()
             .where(s.tag.c.id == tag_id)
-            .values(name=name)
+            .values(name=name, modified_by=modified_by)
             .returning(*_COLUMNS)
         )
     except IntegrityError as exc:
         # Translated for the reason `create_tag` translates it, and only the
-        # name rule: this statement sets one column, so nothing else here can
-        # fail on a constraint this function models.
+        # name rule: nothing else this statement writes is constrained, so
+        # nothing else here can fail on a rule this function models.
         if "uq_tag_name_lower" not in str(exc.orig):
             raise
         raise ValueError(f"Tag with name {name!r} already exists") from exc

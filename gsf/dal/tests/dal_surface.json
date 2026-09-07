@@ -163,14 +163,14 @@
   },
   "tags": {
     "attach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str') -> 'list[dict[str, Any]] | None'",
-    "create_tag": "(*, name: 'str') -> 'dict[str, Any]'",
+    "create_tag": "(*, name: 'str', created_by: 'str | None' = None) -> 'dict[str, Any]'",
     "delete_tag": "(tag_id: 'str') -> 'bool'",
     "detach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str') -> 'list[dict[str, Any]] | None'",
     "fetch_tags_map": "(kind: 'str', item_ids: 'list[str]') -> 'dict[str, list[dict[str, Any]]]'",
     "get_tag": "(tag_id: 'str') -> 'dict[str, Any] | None'",
     "list_tag_targets": "(tag_id: 'str') -> 'list[dict[str, Any]]'",
     "list_tags": "() -> 'list[dict[str, Any]]'",
-    "update_tag": "(*, tag_id: 'str', name: 'str') -> 'dict[str, Any] | None'"
+    "update_tag": "(*, tag_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
   "terms": {
     "build_term_table_maps": "(pairs: 'list[dict[str, Any]]') -> 'tuple[dict[str, set[str]], dict[str, set[str]]]'",

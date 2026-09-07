@@ -4103,12 +4103,23 @@
       },
       "Tag": {
         "additionalProperties": true,
-        "description": "A tag, as both the list and the create endpoint return it.\n\nEvery field is required here, unlike most of this module: each column is\n``NOT NULL`` and ``gsf.dal.tags`` selects all four on both paths.\n\n``created`` and ``modified`` are the first timestamps this module carries,\nso they set the convention: a timezone-aware ``datetime``, which Pydantic\nserialises as ISO 8601 and the client parses directly. They are read from\nthe database rather than the application clock, so a client comparing two\ntags is comparing one clock.",
+        "description": "A tag, as both the list and the create endpoint return it.\n\nThe four columns describing *when* are required, unlike most of this\nmodule: each is ``NOT NULL`` and ``gsf.dal.tags`` selects them on every\npath.\n\n``created`` and ``modified`` are the first timestamps this module carries,\nso they set the convention: a timezone-aware ``datetime``, which Pydantic\nserialises as ISO 8601 and the client parses directly. They are read from\nthe database rather than the application clock, so a client comparing two\ntags is comparing one clock.\n\nThe two describing *who* are nullable, and each null says something\ndifferent. ``created_by`` is null for a tag made by a caller that reached\nFastAPI without the gateway's identity header. ``modified_by`` is\nadditionally null for a tag nobody has renamed, which is the same fact\n``modified == created`` states.\n\nBoth are opaque Better Auth user ids. Resolving one to a name is the\ngateway's job -- the accounts live in a schema this service does not own --\nso this API deliberately answers with the id it stored.",
         "properties": {
           "created": {
             "format": "date-time",
             "title": "Created",
             "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
           },
           "id": {
             "title": "Id",
@@ -4118,6 +4129,17 @@
             "format": "date-time",
             "title": "Modified",
             "type": "string"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
           },
           "name": {
             "title": "Name",
@@ -4175,6 +4197,17 @@
             "title": "Created",
             "type": "string"
           },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -4190,6 +4223,17 @@
             "format": "date-time",
             "title": "Modified",
             "type": "string"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
           },
           "name": {
             "title": "Name",
@@ -7613,7 +7657,7 @@
         ]
       },
       "post": {
-        "description": "Create a tag.",
+        "description": "Create a tag.\n\nThe author is read from the gateway's identity header rather than taken\nfrom the body: the Next.js route in front of this one has already resolved\nthe session, so the header is the one account that can be credited, and a\nbody field would let a caller name somebody else.\n\n``required=False`` because the identity is audit rather than authorization\n-- the route's permission gate is the gateway's -- so a direct call on the\nprivate network still creates the tag, with no author recorded.",
         "operationId": "create_tag_api_tags_post",
         "requestBody": {
           "content": {
@@ -7737,7 +7781,7 @@
         ]
       },
       "patch": {
-        "description": "Rename a tag.\n\nAnswers with the whole tag rather than an echo of the name, because the\nrename has also advanced ``modified`` \u2014 so the settings page redraws the\nrow it just edited from this one response instead of re-reading the list to\nfind out what the timestamp became.\n\n404 for an unknown id and 409 for a name another tag holds, as create and\ndelete answer: the page renames from a list it has already read, so either\nmeans that list is stale.\n\nA rename to the tag's own name is not a 409 \u2014 see ``update_tag`` in the DAL\n\u2014 and neither is one that only changes case, which is the ordinary way to\nfix a tag that was created shouting.",
+        "description": "Rename a tag.\n\nAnswers with the whole tag rather than an echo of the name, because the\nrename has also advanced ``modified`` and recorded a ``modified_by`` \u2014 so\nthe settings page redraws the row it just edited from this one response\ninstead of re-reading the list to find out what they became.\n\nThe editor is read from the gateway's identity header, for the reason\n``create_tag`` reads the author from it.\n\n404 for an unknown id and 409 for a name another tag holds, as create and\ndelete answer: the page renames from a list it has already read, so either\nmeans that list is stale.\n\nA rename to the tag's own name is not a 409 \u2014 see ``update_tag`` in the DAL\n\u2014 and neither is one that only changes case, which is the ordinary way to\nfix a tag that was created shouting.",
         "operationId": "update_tag_api_tags__tag_id__patch",
         "parameters": [
           {
