@@ -84,8 +84,9 @@ _COLUMNS = (
 #: ``created_by``/``modified_by`` yet; it is reserved there for the same reason.
 #:
 #: Distinct from a null, which means the row was written before there was a
-#: column to record a source in. Both read as "not a person", but only one of
-#: them is a statement about the label.
+#: column to record a source in, and the pages keep them apart: this one reads
+#: as "Auto Generated", a null as "Unknown". Both are "not a person", but only
+#: this one is a statement about the label rather than the lack of one.
 #:
 #: Safe as a literal: Better Auth generates its ids, so no account can hold it.
 SYSTEM_ACTOR = "system"

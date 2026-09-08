@@ -371,7 +371,9 @@ class TagItem(ApiModel):
     gateway for the reason :class:`Tag`'s authors are: the accounts live in a
     schema this service does not own. It is ``system`` for a label the
     deployment applied itself, which resolves to no account on purpose and is
-    rendered as "Auto Generated".
+    rendered as "Auto Generated" — the one value that says nobody was asked.
+    A null, or an id no account answers to, reads as "Unknown" instead: those
+    are the absence of a source rather than a claim about one.
 
     The four id fields are the same relationships as ids, which is what a link
     to the object's own page is built from: a Table and a Column are addressed

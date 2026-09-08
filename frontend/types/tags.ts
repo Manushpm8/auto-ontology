@@ -101,9 +101,10 @@ export type TagItem = {
 	 * the label predates either being recorded.
 	 *
 	 * `tagged_by` is a stored account id; `tagged_by_user` is the account the
-	 * `/api/tags/{id}/targets` route resolved it to. It is null for
-	 * `SYSTEM_ACTOR`, which names no account, so the two render alike as "Auto
-	 * Generated".
+	 * `/api/tags/{id}/targets` route resolved it to. Null for `SYSTEM_ACTOR`,
+	 * which names no account by design and shows as "Auto Generated" — and null
+	 * again for an id whose account is gone, which shows as "Unknown", so read
+	 * `tagged_by` rather than this to tell those apart.
 	 */
 	tagged_by: string | null;
 	tagged_by_user?: TagAuthor | null;

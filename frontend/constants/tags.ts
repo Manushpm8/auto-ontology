@@ -26,13 +26,13 @@ export const AUTHORS_PARAM_ON = '1';
  * label's `tagged_by`.
  *
  * Distinct from a null, which means the actor was never recorded — a row
- * written before there was a column for it. Both are rendered, and the tag
- * list tells them apart: one says the deployment made the tag, the other says
- * nothing at all.
+ * written before there was a column for it. Every screen tells the two apart:
+ * one says the deployment did this, the other says nothing at all, and only
+ * the first is something to show a reader as an answer.
  */
 export const SYSTEM_ACTOR = 'system';
 
-/** Shown for `SYSTEM_ACTOR`, and for a label with no account behind it. */
+/** Shown for `SYSTEM_ACTOR`, and only for it. */
 export const SYSTEM_ACTOR_LABEL = 'Auto Generated';
 
 /**

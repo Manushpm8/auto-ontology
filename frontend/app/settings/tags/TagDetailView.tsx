@@ -15,7 +15,7 @@ import { Icon, IconName } from '@/common/icons';
 import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
-import { SYSTEM_ACTOR_LABEL } from '@/constants/tags';
+import { SYSTEM_ACTOR, SYSTEM_ACTOR_LABEL, UNKNOWN_ACTOR_LABEL } from '@/constants/tags';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { TagItemType } from '@/enums/tags';
 import { useInfiniteList } from '@/hooks/useInfiniteList';
@@ -52,12 +52,14 @@ const TYPE_ICONS: Record<TagItemType, IconName> = {
  * "which rule" is the answer to why this row is here at all.
  *
  * Otherwise the account, with the initial the rest of the app draws a person
- * as. Failing that, "Auto Generated" — for `SYSTEM_ACTOR`, which is what a
- * label nobody asked for records, and for a label that names no account at all:
- * one applied before the source was recorded, or by an account since deleted,
- * since these ids are not foreign keys and outlive the user. All three are one
- * statement to a reader — no person did this — and pretending to tell them
- * apart would be reading meaning into a null the row does not carry.
+ * as — and where there is none, one of two answers rather than one, the same
+ * two the tag list gives an author. "Auto Generated" only for `SYSTEM_ACTOR`,
+ * which is the deployment saying it labelled this itself. "Unknown" for
+ * everything else: a label written before its source was recorded, or one
+ * naming an account since deleted, since these ids are not foreign keys and
+ * outlive the user. Both of those are the absence of an answer, and calling
+ * them "Auto Generated" would claim something about the label that nothing
+ * recorded.
  */
 const TaggedByCell = ({ item }: { item: TagItem }) => {
 	if (item.rule != null) {
@@ -72,7 +74,8 @@ const TaggedByCell = ({ item }: { item: TagItem }) => {
 	}
 
 	const name = item.tagged_by_user?.name || item.tagged_by_user?.email || '';
-	const label = name || SYSTEM_ACTOR_LABEL;
+	const label =
+		item.tagged_by === SYSTEM_ACTOR ? SYSTEM_ACTOR_LABEL : name || UNKNOWN_ACTOR_LABEL;
 
 	return (
 		<span className="flex min-w-0 items-center gap-2" title={label}>
