@@ -19,6 +19,22 @@ export const FOCUS_PARAM = 'focus';
 export const tagPath = (tagId: string): string =>
 	`${TAGS_PATH}?${FOCUS_PARAM}=${encodeURIComponent(tagId)}`;
 
-/** The settings panel's own frame, shared by the list and the detail view. */
-export const TAGS_PANEL_CLASSNAME =
-	'min-h-0 min-w-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]';
+/** What separates the panel's content from its edges, wherever it is applied. */
+export const TAGS_PANEL_PADDING = 'px-7 py-6 sm:px-10 sm:py-7';
+
+const TAGS_PANEL_FRAME =
+	'min-h-0 min-w-0 flex-1 bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]';
+
+/** The settings panel around the tag list, which scrolls as one piece. */
+export const TAGS_PANEL_CLASSNAME = `${TAGS_PANEL_FRAME} overflow-y-auto ${TAGS_PANEL_PADDING}`;
+
+/**
+ * The same panel around the detail view, which does **not** scroll itself.
+ *
+ * The detail view's list is read a page at a time, and the element that scrolls
+ * is what its `IntersectionObserver` is rooted on — so it has to be the one
+ * `InfiniteScroll` renders. A scrolling panel around a scrolling list would
+ * leave the sentinel permanently inside its root's box, which reads as "the end
+ * is in view" and would pull every page at once.
+ */
+export const TAGS_DETAIL_PANEL_CLASSNAME = `${TAGS_PANEL_FRAME} flex flex-col`;

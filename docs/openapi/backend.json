@@ -1386,19 +1386,6 @@
         "title": "DataResponse[TableExplorationDetails]",
         "type": "object"
       },
-      "DataResponse_TagDetail_": {
-        "additionalProperties": true,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/TagDetail"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "DataResponse[TagDetail]",
-        "type": "object"
-      },
       "DataResponse_Tag_": {
         "additionalProperties": true,
         "properties": {
@@ -2404,28 +2391,6 @@
         "title": "ListResponse[PublicConnection]",
         "type": "object"
       },
-      "ListResponse_Rule_": {
-        "additionalProperties": true,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/Rule"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": [
-          "data",
-          "count"
-        ],
-        "title": "ListResponse[Rule]",
-        "type": "object"
-      },
       "ListResponse_SqlAttribute_": {
         "additionalProperties": true,
         "properties": {
@@ -2708,6 +2673,33 @@
         "title": "PagedListResponse[ColumnAttribute]",
         "type": "object"
       },
+      "PagedListResponse_Rule_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "count",
+          "total"
+        ],
+        "title": "PagedListResponse[Rule]",
+        "type": "object"
+      },
       "PagedListResponse_SqlAttribute_": {
         "additionalProperties": true,
         "properties": {
@@ -2733,6 +2725,33 @@
           "total"
         ],
         "title": "PagedListResponse[SqlAttribute]",
+        "type": "object"
+      },
+      "PagedListResponse_TagItem_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TagItem"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "count",
+          "total"
+        ],
+        "title": "PagedListResponse[TagItem]",
         "type": "object"
       },
       "PqlAnalysis": {
@@ -2837,7 +2856,7 @@
       },
       "Rule": {
         "additionalProperties": true,
-        "description": "A saved search, and the tags to apply to everything it matches.\n\n``search_term``, ``text_match_option`` and ``filters`` are the global-search\nrequest the rule replays; together they are what the rule *is*, which is why\nthey are required rather than optional like most of this module \u2014 a rule\nmissing any of the three matches nothing.\n\n``tags`` are chips: the name to show and the id to act by. A write may send\nwhole tag objects instead \u2014 see ``RuleTagRef`` in\n``gsf/server/rules/router.py`` \u2014 but only their ids are read, and the names\nhere come from the tag table, so a rule cannot name a tag that does not\nexist or show one under a name it has since lost.\n\n``created_by`` is the id of the user who saved it, read from the trusted\ngateway header rather than from the request body \u2014 see\n``gsf/server/chat/identity.py``.\n\n``created`` and ``modified`` follow the convention :class:`Tag` sets: a\ntimezone-aware ``datetime`` serialised as ISO 8601, from one clock.",
+        "description": "A saved search, and the tags to apply to everything it matches.\n\n``search_term``, ``text_match_option`` and ``filters`` are the global-search\nrequest the rule replays; together they are what the rule *is*, which is why\nthey are required rather than optional like most of this module \u2014 a rule\nmissing any of the three matches nothing.\n\n``tags`` carry at least the name to show and the id to act by, and whatever\nelse the write that saved them sent: a caller posting whole tag objects gets\nwhole tag objects back \u2014 see ``RuleTagRef`` in\n``gsf/server/rules/router.py``. Only the ids are checked, against the tag\ntable, so a rule cannot apply a tag that does not exist.\n\n``created_by`` is the id of the user who saved it, read from the trusted\ngateway header rather than from the request body \u2014 see\n``gsf/server/chat/identity.py``. ``modified_by`` is the same for whoever\nlast renamed it, and null until somebody has \u2014 which is the same fact as\n``modified`` still equalling ``created``, and null again for a rename whose\nrequest carried no identity to record.\n\n``created`` and ``modified`` follow the convention :class:`Tag` sets: a\ntimezone-aware ``datetime`` serialised as ISO 8601, from one clock.",
         "properties": {
           "created": {
             "format": "date-time",
@@ -2859,6 +2878,17 @@
             "format": "date-time",
             "title": "Modified",
             "type": "string"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
           },
           "name": {
             "title": "Name",
@@ -2894,7 +2924,7 @@
         "type": "object"
       },
       "RuleCreate": {
-        "description": "A rule as the create dialog sends it.\n\n``search_term``, ``text_match_option`` and ``filters`` are the\n``/search/global-search`` request being saved, spelled the way that route\ntakes it.",
+        "description": "A rule as the create dialog sends it.\n\n``search_term``, ``text_match_option`` and ``filters`` are the\n``/search/global-search`` request being saved, spelled the way that route\ntakes it.\n\n``filters.objects`` is the search's tab rather than a switch anybody set:\nthe dialog opens over a result list, and saving from *Tables* means the rule\nlabels tables. Omitted for the *All* tab, and stored omitted -- see\n:func:`create_rule` -- because \"no kind was picked\" and \"the kinds picked\nwere none\" are not the same rule.",
         "properties": {
           "filters": {
             "$ref": "#/components/schemas/GlobalSearchFilters"
@@ -2962,7 +2992,7 @@
       },
       "RuleTagRef": {
         "additionalProperties": true,
-        "description": "One tag a rule applies, as a caller names it.\n\nWhole objects rather than bare ids, so a client can post the tags it is\nalready holding without reducing them first. Only ``id`` is required, and\nonly ``id`` is authoritative: :func:`_resolved_tags` reads the name from the\ntag table rather than believing the one that arrived, because a client's\ncopy is a snapshot and a rule that recorded a stale name would show a tag\nunder a name it no longer has.\n\n``extra=\"allow\"`` so the fields a caller happens to carry -- a created\ntimestamp, a label -- are accepted and ignored instead of turning a\nperfectly good tag into a 422. Ignored rather than stored: they describe the\ntag, which has its own table and its own endpoints, and a second copy of\nthem inside a rule would be one that nothing keeps up to date.",
+        "description": "One tag a rule applies, as a caller names it.\n\nWhole objects rather than bare ids, so a client can post the tags it is\nalready holding without reducing them first. Only ``id`` is required, and\nonly ``id`` is checked: :func:`_resolved_tags` looks it up in the tag table,\nbecause a rule applying a tag that does not exist would label nothing while\nclaiming otherwise.\n\n``extra=\"allow\"`` so the fields a caller happens to carry -- a created\ntimestamp, a label, whatever its own tag model holds -- survive the round\ntrip instead of turning a perfectly good tag into a 422. They come back on\nthe created rule exactly as they arrived: the answer is the tag the caller\nposted, so a client redraws its chips from the response without having to\nmerge it against the objects it already had.\n\n``name`` is the one field this fills in when it is missing, from the tag\ntable, so every tag in the answer has something to render.",
         "properties": {
           "id": {
             "title": "Id",
@@ -2987,34 +3017,16 @@
         "type": "object"
       },
       "RuleUpdate": {
-        "description": "The parts of a rule an edit may change.\n\nThe name and the tags, and not the search: what a rule matched is what it\nwas created from, and re-pointing it at another search would silently\nchange which objects it labels. That is a new rule.\n\nBoth optional, so an edit sends only what it changes. Sending neither\nchanges nothing, which the storing version will refuse; today every edit is\na 404 for want of a rule to apply it to.",
+        "description": "The part of a rule an edit may change: its name.\n\nNot the search, and not the tags either. Both of those are what a rule *is*\n-- change one and the rule labels a different set of objects, while the\nlabels it already wrote stay where they are, explaining nothing and\nre-applied by nobody. That is a new rule and a deleted one, which is two\noperations this API already has.\n\nA name, by contrast, is only how the settings list refers to the rule: the\nlabels it wrote name it by id, so renaming reaches all of them without a\nsingle ``tag_target`` row being written.",
         "properties": {
           "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "tags": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/RuleTagRef"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tags"
+            "title": "Name",
+            "type": "string"
           }
         },
+        "required": [
+          "name"
+        ],
         "title": "RuleUpdate",
         "type": "object"
       },
@@ -4424,70 +4436,9 @@
         "title": "TagCreate",
         "type": "object"
       },
-      "TagDetail": {
-        "additionalProperties": true,
-        "description": "A tag together with everything it labels.\n\n``items`` is empty for a tag nothing carries \u2014 a freshly created tag, or one\nwhose last object was untagged \u2014 which the page renders as its empty state\nrather than as a failed read.",
-        "properties": {
-          "created": {
-            "format": "date-time",
-            "title": "Created",
-            "type": "string"
-          },
-          "created_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created By"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/TagItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "modified": {
-            "format": "date-time",
-            "title": "Modified",
-            "type": "string"
-          },
-          "modified_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Modified By"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "created",
-          "modified"
-        ],
-        "title": "TagDetail",
-        "type": "object"
-      },
       "TagItem": {
         "additionalProperties": true,
-        "description": "One object carrying a tag, whichever of the five kinds it is.\n\n``type`` is what tells them apart, as :class:`TagTargetType` spells the five.\n\n``path`` says where the object sits \u2014 ``database.schema`` for a Table,\n``database.schema.table`` for a Column, and the owning Term for either kind\nof attribute, which are properties of one in the same sense and so are\ndescribed the same way. Null only for a Term, which is a glossary entry\nrather than a catalog object and sits under nothing.\n\nThe four id fields are the same relationships as ids, which is what a link\nto the object's own page is built from: a Table and a Column are addressed\nby their whole catalog chain, an attribute by the Term whose page lists it,\nand a Term by its own id alone. Each kind fills only the ones it has.",
+        "description": "One object carrying a tag, whichever of the five kinds it is.\n\n``type`` is what tells them apart, as :class:`TagTargetType` spells the five.\n\n``path`` says where the object sits \u2014 ``database.schema`` for a Table,\n``database.schema.table`` for a Column, and the owning Term for either kind\nof attribute, which are properties of one in the same sense and so are\ndescribed the same way. Null only for a Term, which is a glossary entry\nrather than a catalog object and sits under nothing.\n\n``tagged_by`` and ``rule`` are where the label came from, for the page's\n\"Tagged By\" column: the account that applied it by hand, or the rule that\nmatched. At most one is set \u2014 a label has one source \u2014 and both are null for\none applied before either was recorded, which reads as unknown.\n\n``tagged_by`` is an opaque Better Auth user id, resolved to a name by the\ngateway for the reason :class:`Tag`'s authors are: the accounts live in a\nschema this service does not own. It is ``system`` for a label the\ndeployment applied itself, which resolves to no account on purpose and is\nrendered as \"Auto Generated\".\n\nThe four id fields are the same relationships as ids, which is what a link\nto the object's own page is built from: a Table and a Column are addressed\nby their whole catalog chain, an attribute by the Term whose page lists it,\nand a Term by its own id alone. Each kind fills only the ones it has.",
         "properties": {
           "database_id": {
             "anyOf": [
@@ -4519,6 +4470,16 @@
             ],
             "title": "Path"
           },
+          "rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagItemRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "schema_id": {
             "anyOf": [
               {
@@ -4546,6 +4507,17 @@
             "title": "Tagged",
             "type": "string"
           },
+          "tagged_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tagged By"
+          },
           "term_id": {
             "anyOf": [
               {
@@ -4568,6 +4540,26 @@
           "tagged"
         ],
         "title": "TagItem",
+        "type": "object"
+      },
+      "TagItemRule": {
+        "additionalProperties": true,
+        "description": "The rule that applied a label, named so a reader can recognise it.\n\nThe id as well as the name because a rule can be renamed: the name is what\nto print, and the id is what still refers to the same rule afterwards.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "TagItemRule",
         "type": "object"
       },
       "TagTarget": {
@@ -7276,18 +7268,81 @@
     },
     "/api/rules": {
       "get": {
-        "description": "Return every rule.\n\nEmpty while there is nowhere to keep one. That is the same answer a\ndeployment where nobody has created a rule yet would give, so the Rules\nsettings page renders its ordinary empty state and needs no special case\nfor the store being absent.",
+        "description": "Return rules, with the tags each applies.\n\n*q*, when given, keeps the rules whose name contains it, and those applying\na tag whose name does -- the two things the settings list shows, so a search\nthat hides a row can be explained by what is on screen.\n\nRules come back ordered by name, case-insensitively, and *skip*/*limit*\nselect one page of that order; ``total`` counts every match so a caller\nknows when to stop asking. Omitting *limit* returns every matching rule.\n\nEmpty for a deployment where nobody has saved one, which the Rules settings\npage shows as its ordinary empty state.",
         "operationId": "list_rules_api_rules_get",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring filter on the rule name or on the name of a tag it applies.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring filter on the rule name or on the name of a tag it applies.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListResponse_Rule_"
+                  "$ref": "#/components/schemas/PagedListResponse_Rule_"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Rules",
@@ -7296,7 +7351,7 @@
         ]
       },
       "post": {
-        "description": "Save a rule, and answer with it.\n\nValidates the body in full and stores nothing -- see the module docstring\nfor why that is the shape of this router today. The answer is the rule as a\nstored one would read back, so the dialog that posted it needs no second\nrequest and no change once rules persist.\n\n400 for a body that could never be a rule: a blank name, a search term\nshorter than global search accepts, a match option it does not implement,\nor no tags at all. 404 for a tag id that is not a tag. 401 when the request\ncarries no identity to attribute the rule to.",
+        "description": "Save a rule, and answer with its id.\n\nThe id alone: the dialog that posted the rule closes on success and the\nsettings list re-reads, so a whole rule in the answer would be a copy\nnothing renders. Everything else about a stored rule -- the timestamps, the\nauthor, the tag names -- comes from :func:`list_rules`, read from the row\nrather than from what was posted.\n\nThe filters are stored as the caller sent them, ``exclude_none`` and not a\nfull dump: a filter that was not sent is absent from the stored JSON rather\nthan present as ``null``. It reads back the same either way -- the response\nmodel fills the default -- but the row then says which filters a rule\nactually carries, instead of recording every filter the search has ever\noffered against every rule ever saved.\n\nSaving the rule also *applies* it: the search is replayed and the tags are\nattached to everything it matches, recorded as this rule's doing so a tag's\npage can name the rule that labelled each object. One transaction with the\ninsert, so a rule that could not label the catalog is not left saved and\ninert -- the create either produces a rule with its labels or nothing at\nall. See ``rules.service.apply_rule``.\n\n400 for a body that could never be a rule: a blank name, a search term\nshorter than global search accepts, a match option it does not implement,\nor no tags at all. 404 for a tag id that is not a tag. 409 for a name\nanother rule already holds, as renaming answers. 401 when the request\ncarries no identity to attribute the rule to.",
         "operationId": "create_rule_api_rules_post",
         "requestBody": {
           "content": {
@@ -7313,7 +7368,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Rule_"
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
                 }
               }
             },
@@ -7338,7 +7393,7 @@
     },
     "/api/rules/{rule_id}": {
       "delete": {
-        "description": "Delete one rule by id.\n\n404 for every id today -- see :func:`_not_stored`. Which is also what the\nstoring version owes an id it does not hold, rather than a silent 204: the\nsettings page deletes from a list it has already read, so a missing rule\nmeans that list is stale and the row would be left on screen with nothing\nto explain it.",
+        "description": "Delete one rule by id.\n\n**This also takes back every tag the rule applied.** The labels it wrote\ncascade with it -- see ``rules_dal.delete_rule`` -- while labels people\napplied by hand stay, including on an object the rule had also matched,\nbecause those rows record no rule to cascade from. A rule goes on labelling\nthe catalog as the catalog grows, so leaving its labels behind would leave\ntags nothing on screen could explain and nothing could re-apply.\n\n404 rather than a silent 204 for an id that is not there: the settings page\ndeletes from a list it has already read, so a missing rule means that list\nis stale and the row would be left on screen with nothing to explain it.\n\nAnswers with the id, as deleting a tag does, so a caller has the row it just\nremoved without holding on to what it sent.",
         "operationId": "delete_rule_api_rules__rule_id__delete",
         "parameters": [
           {
@@ -7379,7 +7434,7 @@
         ]
       },
       "get": {
-        "description": "Return one rule.\n\n404 for every id today -- see :func:`_not_stored`.",
+        "description": "Return one rule, with the tags it applies.\n\nThe same shape one entry of :func:`list_rules` has, read through the same\ncolumns, so a caller renders a rule the same way whichever it came from.\n\n404 for an id that is not stored.",
         "operationId": "get_rule_api_rules__rule_id__get",
         "parameters": [
           {
@@ -7420,7 +7475,7 @@
         ]
       },
       "patch": {
-        "description": "Edit a rule's name or the tags it applies.\n\nAnswers with the whole rule rather than an echo of the fields that changed,\nthe way renaming a tag does: the edit also advances ``modified``, so the\nrow a caller just edited is redrawn from this one response.\n\n404 for every id today -- see :func:`_not_stored`. The body is declared\nrather than ignored because it is the contract the storing version will\nvalidate; nothing reads it here, since there is no rule to apply it to.",
+        "description": "Rename a rule.\n\nThe name is all an edit changes -- see :class:`RuleUpdate` for why the\nsearch and the tags are not editable. What the rule has already labelled is\nuntouched: those rows name the rule by id, so the new name appears against\nevery object it labelled under the old one.\n\nAnswers with the whole rule rather than an echo of the name, the way\nrenaming a tag does: the edit also advances ``modified`` and records a\n``modified_by``, so the row the caller just edited is redrawn from this one\nresponse instead of from a re-read.\n\n400 for a blank name. 409 for a name another rule holds -- rule names are\nunique, so that the list's own way of referring to a rule identifies one.\nA rename to the rule's own name is not a conflict, and neither is one that\nonly changes case, which is how a rule created shouting gets fixed. 404 for\nan id that is not stored -- the settings page edits a row from a list it has\nalready read, so a missing rule means that list is stale.\n\nNo 401, unlike the create: an edit is recorded against whoever made it when\nthe request says, and a request that names nobody still renames the rule\nsomebody else created. ``modified_by`` is nullable for exactly that.",
         "operationId": "update_rule_api_rules__rule_id__patch",
         "parameters": [
           {
@@ -8173,7 +8228,7 @@
         ]
       },
       "get": {
-        "description": "Return one tag with every object it labels.\n\n404 for an unknown id, rather than an empty tag: the page opens this from a\nrow it has already read, so a missing tag means the row is stale, and a\nblank page titled with nothing would look like a tag with no items.\n\nAn *existing* tag with nothing tagged is the opposite case and answers 200\nwith ``items: []``, which the page renders as its empty state.",
+        "description": "Return one tag.\n\nThe tag alone: what it labels is a list of its own, read a page at a time\nfrom :func:`list_tag_targets` below. A tag can label the whole catalog --\nthat is what a rule does to one -- so a detail that carried every object\nwould grow without bound while the page it feeds shows a screenful.\n\n404 for an unknown id, rather than an empty tag: the page opens this from a\nrow it has already read, so a missing tag means the row is stale, and a\nblank page titled with nothing would look like a tag with no items.",
         "operationId": "get_tag_api_tags__tag_id__get",
         "parameters": [
           {
@@ -8191,7 +8246,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataResponse_TagDetail_"
+                  "$ref": "#/components/schemas/DataResponse_Tag_"
                 }
               }
             },
@@ -8266,8 +8321,82 @@
       }
     },
     "/api/tags/{tag_id}/targets": {
+      "get": {
+        "description": "Return the objects this tag labels, as one page across the five kinds.\n\nOrdered by name, case-insensitively, with *skip*/*limit* selecting one\nwindow of that order; ``total`` counts everything the tag labels, so a\ncaller knows when to stop asking. Omitting *limit* returns every object,\nwhich is what a caller wanting the whole list in one answer asks for.\n\nEach row says where its label came from -- the account that applied it or\nthe rule that matched -- which is the \"Tagged By\" column on the tag's page.\n\n404 for an unknown tag rather than an empty page: the page reads this beside\n:func:`get_tag`, and a tag that is gone should say so once rather than draw\nas a tag with nothing tagged. An *existing* tag with nothing tagged is the\nopposite case and answers 200 with an empty ``data``, which the page renders\nas its empty state.",
+        "operationId": "list_tag_targets_api_tags__tag_id__targets_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedListResponse_TagItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tag Targets",
+        "tags": [
+          "tags"
+        ]
+      },
       "post": {
-        "description": "Label one object with this tag.\n\nBoth write routes live here rather than on ``/terms/{id}/tags`` and its two\nattribute equivalents, because ``tag_target`` is one polymorphic table and\nsix routes over three routers would spread that polymorphism across the\ncodebase to say the same thing.\n\nAnswers with the **object's** tags, so the page that added a chip redraws\nits whole set from one response instead of trusting its own optimistic\nedit. Labelling something that already carries the tag is a 201 with the\nsame body: two clicks on one tag are one intention.\n\n409 for a column or SQL attribute that is not a property of any term: it\nexists, so a 404 would be a lie, but it is unreachable \u2014 every list of\nattributes goes through the term that owns them \u2014 and a tag on it could\nnever be seen or taken off again.",
+        "description": "Label one object with this tag.\n\nBoth write routes live here rather than on ``/terms/{id}/tags`` and its two\nattribute equivalents, because ``tag_target`` is one polymorphic table and\nsix routes over three routers would spread that polymorphism across the\ncodebase to say the same thing.\n\nAnswers with the **object's** tags, so the page that added a chip redraws\nits whole set from one response instead of trusting its own optimistic\nedit. Labelling something that already carries the tag is a 201 with the\nsame body: two clicks on one tag are one intention.\n\nWho applied the label is read from the gateway's identity header, for the\nreason ``create_tag`` reads an author from it, and shows in the \"Tagged By\"\ncolumn on the tag's page. ``required=False`` for the same reason too: it is\naudit rather than authorization, so a direct call on the private network\nstill labels the object -- recorded as the deployment's own doing, which\nthat column names \"Auto Generated\". See ``attach_tag`` in the DAL.\n\nRe-labelling something keeps the source it already had, so this does not\ntake a label away from the rule that applied it -- see ``attach_tag`` in the\nDAL.\n\n409 for a column or SQL attribute that is not a property of any term: it\nexists, so a 404 would be a lie, but it is unreachable \u2014 every list of\nattributes goes through the term that owns them \u2014 and a tag on it could\nnever be seen or taken off again.",
         "operationId": "attach_tag_api_tags__tag_id__targets_post",
         "parameters": [
           {

@@ -7,42 +7,38 @@
 A rule is a saved global search plus the tags to apply to everything it
 matches -- now, and again as the catalog grows.
 
-**There is no store behind this router yet.** The ``rule`` table and its DAL
-are the next piece of work; this exists ahead of them so the create dialog has
-a real endpoint to post to and the OpenAPI spec carries the shape both sides
-have agreed on. Route by route, that means:
+Rules are stored: ``rule`` and ``rule__tag`` in ``gsf/dal/schema.py``, written
+and read through ``gsf.dal.rules``:
 
-* :func:`create_rule` validates the whole body -- including resolving the tag
-  ids against the tag table, which does exist -- and answers with the rule it
-  would have stored, ``id``, ``created_by`` and the timestamps filled in as the
-  stored one would carry them.
-* :func:`list_rules` answers an empty list.
-* The three routes that address an *already stored* rule answer 404, because
-  none is. :func:`_not_stored` is the single place that says so.
+* :func:`create_rule` validates the body, checks the tag ids against the tag
+  table, saves the rule, applies it -- see ``service.apply_rule`` -- and answers
+  with its id.
+* :func:`list_rules` returns a page of rules with their tags, filtered by an
+  optional query, and :func:`get_rule` returns one of them by id.
+* :func:`update_rule` renames a rule, and renames only -- its search and its
+  tags are what it *is*, so changing either is a new rule rather than an edit.
+* :func:`delete_rule` removes one rule **and the labels it applied**, which is
+  the whole of what un-applying a rule means.
 
-Nothing here fabricates a store to soften that. An in-memory dict would make
-the list and the reads agree with each other for as long as one worker lived
-and disagree with the next request that landed on another, which is harder to
-reason about than a list that is honestly empty.
-
-The validation is not throwaway, though, and that is the point of writing it
-now: it is the half of the contract that does not depend on where a rule is
-kept, so the version that persists rules keeps every check below and adds the
-write underneath it.
+The tag ids are checked here rather than left to the foreign key underneath
+``rule__tag``: the dialog picked them from a list it had already read, so an id
+that is gone is worth a 404 naming it rather than a constraint violation.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from gsf.dal import rules as rules_dal
 from gsf.dal import tags as tags_dal
+from gsf.dal.session import write_transaction
 from gsf.server.identity import resolve_internal_user
-from gsf.server.responses import IdResponse, RuleListResponse, RuleResponse
+from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
+from gsf.server.responses import IdResponse, RulePageResponse, RuleResponse
+from gsf.server.rules import service as rule_service
 
 # A rule's search *is* a global search, so both come from the search router
 # rather than being restated here: the filters a rule saves and the filters a
@@ -58,16 +54,19 @@ class RuleTagRef(BaseModel):
 
     Whole objects rather than bare ids, so a client can post the tags it is
     already holding without reducing them first. Only ``id`` is required, and
-    only ``id`` is authoritative: :func:`_resolved_tags` reads the name from the
-    tag table rather than believing the one that arrived, because a client's
-    copy is a snapshot and a rule that recorded a stale name would show a tag
-    under a name it no longer has.
+    only ``id`` is checked: :func:`_resolved_tags` looks it up in the tag table,
+    because a rule applying a tag that does not exist would label nothing while
+    claiming otherwise.
 
     ``extra="allow"`` so the fields a caller happens to carry -- a created
-    timestamp, a label -- are accepted and ignored instead of turning a
-    perfectly good tag into a 422. Ignored rather than stored: they describe the
-    tag, which has its own table and its own endpoints, and a second copy of
-    them inside a rule would be one that nothing keeps up to date.
+    timestamp, a label, whatever its own tag model holds -- survive the round
+    trip instead of turning a perfectly good tag into a 422. They come back on
+    the created rule exactly as they arrived: the answer is the tag the caller
+    posted, so a client redraws its chips from the response without having to
+    merge it against the objects it already had.
+
+    ``name`` is the one field this fills in when it is missing, from the tag
+    table, so every tag in the answer has something to render.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -82,6 +81,12 @@ class RuleCreate(BaseModel):
     ``search_term``, ``text_match_option`` and ``filters`` are the
     ``/search/global-search`` request being saved, spelled the way that route
     takes it.
+
+    ``filters.objects`` is the search's tab rather than a switch anybody set:
+    the dialog opens over a result list, and saving from *Tables* means the rule
+    labels tables. Omitted for the *All* tab, and stored omitted -- see
+    :func:`create_rule` -- because "no kind was picked" and "the kinds picked
+    were none" are not the same rule.
     """
 
     name: str
@@ -92,19 +97,20 @@ class RuleCreate(BaseModel):
 
 
 class RuleUpdate(BaseModel):
-    """The parts of a rule an edit may change.
+    """The part of a rule an edit may change: its name.
 
-    The name and the tags, and not the search: what a rule matched is what it
-    was created from, and re-pointing it at another search would silently
-    change which objects it labels. That is a new rule.
+    Not the search, and not the tags either. Both of those are what a rule *is*
+    -- change one and the rule labels a different set of objects, while the
+    labels it already wrote stay where they are, explaining nothing and
+    re-applied by nobody. That is a new rule and a deleted one, which is two
+    operations this API already has.
 
-    Both optional, so an edit sends only what it changes. Sending neither
-    changes nothing, which the storing version will refuse; today every edit is
-    a 404 for want of a rule to apply it to.
+    A name, by contrast, is only how the settings list refers to the rule: the
+    labels it wrote name it by id, so renaming reaches all of them without a
+    single ``tag_target`` row being written.
     """
 
-    name: str | None = None
-    tags: list[RuleTagRef] | None = None
+    name: str
 
 
 def _validated_name(raw: str) -> str:
@@ -157,15 +163,21 @@ def _validated_match_option(option: str) -> str:
 
 
 def _resolved_tags(tags: list[RuleTagRef]) -> list[dict[str, Any]]:
-    """The chips for *tags*, or a 404 naming the first id that is not a tag.
+    """*tags* as they arrived, or a 404 naming the first id that is not a tag.
 
-    Read rather than taken on trust, which is why a caller sending whole tag
-    objects gets the same answer as one sending bare ids. The tags are the half
-    of a rule that already has a table, so this is checkable today, and a rule
-    applying a tag that does not exist would label nothing while claiming
-    otherwise.
+    Every field a caller sent is echoed, not just ``id`` and ``name``: the tags
+    are the part of the rule the client picked, and answering with a narrower
+    copy of them would make the response something it has to merge rather than
+    something it can render. Only ``name`` is supplied here, and only when the
+    caller left it out, since it is the one field there is nothing to draw
+    without.
 
-    Order follows the request, so the chips come back in the order they were
+    The ids are read against the tag table rather than taken on trust. The tags
+    are the half of a rule that already has a table, so this is checkable today,
+    and a rule applying a tag that does not exist would label nothing while
+    claiming otherwise.
+
+    Order follows the request, so the tags come back in the order they were
     picked. Repeats collapse: two clicks on one tag are one intention, the way
     ``attach_tag`` treats labelling something twice.
 
@@ -182,7 +194,7 @@ def _resolved_tags(tags: list[RuleTagRef]) -> list[dict[str, Any]]:
         )
 
     known = {tag["id"]: tag for tag in tags_dal.list_tags()}
-    chips: list[dict[str, Any]] = []
+    resolved: list[dict[str, Any]] = []
     seen: set[str] = set()
     for ref in tags:
         tag_id = ref.id
@@ -195,8 +207,11 @@ def _resolved_tags(tags: list[RuleTagRef]) -> list[dict[str, Any]]:
             # a list it had already read, so an id that is gone means that list
             # is stale.
             raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
-        chips.append({"id": tag["id"], "name": tag["name"]})
-    return chips
+        sent = ref.model_dump()
+        if sent.get("name") is None:
+            sent["name"] = tag["name"]
+        resolved.append(sent)
+    return resolved
 
 
 def _author(request: Request) -> str:
@@ -219,127 +234,189 @@ def _author(request: Request) -> str:
     return user_id
 
 
-def _not_stored(rule_id: str) -> HTTPException:
-    """The 404 every route that addresses a stored rule answers with.
+def _no_such_rule(rule_id: str) -> HTTPException:
+    """The 404 for a rule id nothing names.
 
-    One function so the reason is stated once: nothing is stored, so no id can
-    name a rule. A 404 rather than a 501 because it is what the storing version
-    answers for an id it does not hold, and it is the case a caller has to
-    handle either way -- a page reading a rule that is not there behaves the
-    same whether it was deleted or never persisted.
+    One function so the three routes that take an id are the same about it: a
+    settings page reads a list and then acts on a row from it, so "gone" is the
+    answer every one of them owes when that list has gone stale, and a client
+    handling it should not have to read three wordings to recognise it.
     """
     return HTTPException(status_code=404, detail=f"Rule {rule_id!r} not found")
 
 
-def _created_rule(
-    *,
-    name: str,
-    search_term: str,
-    text_match_option: str,
-    filters: GlobalSearchFilters,
-    tags: list[dict[str, Any]],
-    created_by: str,
-) -> dict[str, Any]:
-    """The rule a create would have stored, shaped as the response carries it.
+def _name_conflict(exc: ValueError) -> HTTPException:
+    """The 409 for a name another rule holds, worded by the DAL.
 
-    The one place this router stands in for the store, and the only thing that
-    moves when the store arrives: ``id`` and the timestamps come from here
-    instead of from a ``RETURNING`` clause.
-
-    Both timestamps are the same instant, which is what ``created`` and
-    ``modified`` mean on a freshly created tag -- they differ only once
-    something has edited the row.
-
-    The clock is the application's. ``gsf.dal.tags`` takes its timestamps from
-    Postgres, and a stored rule will too, so two rules created against
-    different workers cannot be ordered by these the way two tags can. Worth
-    knowing for as long as this stands in.
+    Only one ``ValueError`` reaches either caller -- ``rules_dal`` raises it for
+    the name and nothing else -- so this does not have to tell them apart, and
+    the message names the rule the way the tag routes' 409 names the tag.
     """
-    now = datetime.now(tz=UTC)
-    return {
-        "id": str(uuid4()),
-        "name": name,
-        "search_term": search_term,
-        "text_match_option": text_match_option,
-        "filters": filters.model_dump(),
-        "tags": tags,
-        "created_by": created_by,
-        "created": now,
-        "modified": now,
-    }
+    return HTTPException(status_code=409, detail=str(exc))
 
 
-@router.post("/rules", status_code=201, response_model=RuleResponse)
+@router.post("/rules", status_code=201, response_model=IdResponse)
 def create_rule(request: Request, body: RuleCreate) -> dict:
-    """Save a rule, and answer with it.
+    """Save a rule, and answer with its id.
 
-    Validates the body in full and stores nothing -- see the module docstring
-    for why that is the shape of this router today. The answer is the rule as a
-    stored one would read back, so the dialog that posted it needs no second
-    request and no change once rules persist.
+    The id alone: the dialog that posted the rule closes on success and the
+    settings list re-reads, so a whole rule in the answer would be a copy
+    nothing renders. Everything else about a stored rule -- the timestamps, the
+    author, the tag names -- comes from :func:`list_rules`, read from the row
+    rather than from what was posted.
+
+    The filters are stored as the caller sent them, ``exclude_none`` and not a
+    full dump: a filter that was not sent is absent from the stored JSON rather
+    than present as ``null``. It reads back the same either way -- the response
+    model fills the default -- but the row then says which filters a rule
+    actually carries, instead of recording every filter the search has ever
+    offered against every rule ever saved.
+
+    Saving the rule also *applies* it: the search is replayed and the tags are
+    attached to everything it matches, recorded as this rule's doing so a tag's
+    page can name the rule that labelled each object. One transaction with the
+    insert, so a rule that could not label the catalog is not left saved and
+    inert -- the create either produces a rule with its labels or nothing at
+    all. See ``rules.service.apply_rule``.
 
     400 for a body that could never be a rule: a blank name, a search term
     shorter than global search accepts, a match option it does not implement,
-    or no tags at all. 404 for a tag id that is not a tag. 401 when the request
+    or no tags at all. 404 for a tag id that is not a tag. 409 for a name
+    another rule already holds, as renaming answers. 401 when the request
     carries no identity to attribute the rule to.
     """
     created_by = _author(request)
-    return {
-        "data": _created_rule(
-            name=_validated_name(body.name),
-            search_term=_validated_search_term(body.search_term),
-            text_match_option=_validated_match_option(body.text_match_option),
-            filters=body.filters,
-            tags=_resolved_tags(body.tags),
-            created_by=created_by,
+    name = _validated_name(body.name)
+    search_term = _validated_search_term(body.search_term)
+    text_match_option = _validated_match_option(body.text_match_option)
+    filters = body.filters.model_dump(exclude_none=True)
+    tags = _resolved_tags(body.tags)
+
+    with write_transaction():
+        try:
+            rule_id = rules_dal.create_rule(
+                name=name,
+                search_term=search_term,
+                text_match_option=text_match_option,
+                filters=filters,
+                tags=tags,
+                created_by=created_by,
+            )
+        except ValueError as exc:
+            raise _name_conflict(exc) from exc
+        rule_service.apply_rule(
+            rule_id=rule_id,
+            search_term=search_term,
+            text_match_option=text_match_option,
+            filters=filters,
+            tag_ids=[tag["id"] for tag in tags],
         )
-    }
+    return {"data": {"id": rule_id}}
 
 
-@router.get("/rules", response_model=RuleListResponse)
-def list_rules() -> dict:
-    """Return every rule.
+@router.get("/rules", response_model=RulePageResponse)
+def list_rules(
+    q: str | None = Query(
+        default=None,
+        description=(
+            "Case-insensitive substring filter on the rule name or on the name "
+            "of a tag it applies."
+        ),
+    ),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """Return rules, with the tags each applies.
 
-    Empty while there is nowhere to keep one. That is the same answer a
-    deployment where nobody has created a rule yet would give, so the Rules
-    settings page renders its ordinary empty state and needs no special case
-    for the store being absent.
+    *q*, when given, keeps the rules whose name contains it, and those applying
+    a tag whose name does -- the two things the settings list shows, so a search
+    that hides a row can be explained by what is on screen.
+
+    Rules come back ordered by name, case-insensitively, and *skip*/*limit*
+    select one page of that order; ``total`` counts every match so a caller
+    knows when to stop asking. Omitting *limit* returns every matching rule.
+
+    Empty for a deployment where nobody has saved one, which the Rules settings
+    page shows as its ordinary empty state.
     """
-    return {"data": [], "count": 0}
+    rules = rules_dal.list_rules(search=q, skip=skip, limit=limit)
+    # The count is a second read, so it is worth skipping for the request that
+    # asked for everything: a whole unpaged list already is its own total.
+    total = rules_dal.count_rules(search=q) if skip or limit is not None else len(rules)
+    return {"data": rules, "count": len(rules), "total": total}
 
 
 @router.get("/rules/{rule_id}", response_model=RuleResponse)
 def get_rule(rule_id: str) -> dict:
-    """Return one rule.
+    """Return one rule, with the tags it applies.
 
-    404 for every id today -- see :func:`_not_stored`.
+    The same shape one entry of :func:`list_rules` has, read through the same
+    columns, so a caller renders a rule the same way whichever it came from.
+
+    404 for an id that is not stored.
     """
-    raise _not_stored(rule_id)
+    rule = rules_dal.get_rule(rule_id)
+    if rule is None:
+        raise _no_such_rule(rule_id)
+    return {"data": rule}
 
 
 @router.patch("/rules/{rule_id}", response_model=RuleResponse)
-def update_rule(rule_id: str, body: RuleUpdate) -> dict:
-    """Edit a rule's name or the tags it applies.
+def update_rule(request: Request, rule_id: str, body: RuleUpdate) -> dict:
+    """Rename a rule.
 
-    Answers with the whole rule rather than an echo of the fields that changed,
-    the way renaming a tag does: the edit also advances ``modified``, so the
-    row a caller just edited is redrawn from this one response.
+    The name is all an edit changes -- see :class:`RuleUpdate` for why the
+    search and the tags are not editable. What the rule has already labelled is
+    untouched: those rows name the rule by id, so the new name appears against
+    every object it labelled under the old one.
 
-    404 for every id today -- see :func:`_not_stored`. The body is declared
-    rather than ignored because it is the contract the storing version will
-    validate; nothing reads it here, since there is no rule to apply it to.
+    Answers with the whole rule rather than an echo of the name, the way
+    renaming a tag does: the edit also advances ``modified`` and records a
+    ``modified_by``, so the row the caller just edited is redrawn from this one
+    response instead of from a re-read.
+
+    400 for a blank name. 409 for a name another rule holds -- rule names are
+    unique, so that the list's own way of referring to a rule identifies one.
+    A rename to the rule's own name is not a conflict, and neither is one that
+    only changes case, which is how a rule created shouting gets fixed. 404 for
+    an id that is not stored -- the settings page edits a row from a list it has
+    already read, so a missing rule means that list is stale.
+
+    No 401, unlike the create: an edit is recorded against whoever made it when
+    the request says, and a request that names nobody still renames the rule
+    somebody else created. ``modified_by`` is nullable for exactly that.
     """
-    raise _not_stored(rule_id)
+    try:
+        rule = rules_dal.update_rule(
+            rule_id=rule_id,
+            name=_validated_name(body.name),
+            modified_by=resolve_internal_user(request, required=False),
+        )
+    except ValueError as exc:
+        raise _name_conflict(exc) from exc
+    if rule is None:
+        raise _no_such_rule(rule_id)
+    return {"data": rule}
 
 
 @router.delete("/rules/{rule_id}", response_model=IdResponse)
 def delete_rule(rule_id: str) -> dict:
     """Delete one rule by id.
 
-    404 for every id today -- see :func:`_not_stored`. Which is also what the
-    storing version owes an id it does not hold, rather than a silent 204: the
-    settings page deletes from a list it has already read, so a missing rule
-    means that list is stale and the row would be left on screen with nothing
-    to explain it.
+    **This also takes back every tag the rule applied.** The labels it wrote
+    cascade with it -- see ``rules_dal.delete_rule`` -- while labels people
+    applied by hand stay, including on an object the rule had also matched,
+    because those rows record no rule to cascade from. A rule goes on labelling
+    the catalog as the catalog grows, so leaving its labels behind would leave
+    tags nothing on screen could explain and nothing could re-apply.
+
+    404 rather than a silent 204 for an id that is not there: the settings page
+    deletes from a list it has already read, so a missing rule means that list
+    is stale and the row would be left on screen with nothing to explain it.
+
+    Answers with the id, as deleting a tag does, so a caller has the row it just
+    removed without holding on to what it sent.
     """
-    raise _not_stored(rule_id)
+    if not rules_dal.delete_rule(rule_id):
+        raise _no_such_rule(rule_id)
+    return {"data": {"id": rule_id}}

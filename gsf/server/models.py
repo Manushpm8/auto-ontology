@@ -69,7 +69,6 @@ __all__ = [
     "TableSummary",
     "Tag",
     "TagChip",
-    "TagDetail",
     "TagItem",
     "TagTargetType",
     "Term",
@@ -341,6 +340,17 @@ class TagTargetType(StrEnum):
     SQL_ATTRIBUTE = "sql_attribute"
 
 
+class TagItemRule(ApiModel):
+    """The rule that applied a label, named so a reader can recognise it.
+
+    The id as well as the name because a rule can be renamed: the name is what
+    to print, and the id is what still refers to the same rule afterwards.
+    """
+
+    id: str
+    name: str
+
+
 class TagItem(ApiModel):
     """One object carrying a tag, whichever of the five kinds it is.
 
@@ -351,6 +361,17 @@ class TagItem(ApiModel):
     of attribute, which are properties of one in the same sense and so are
     described the same way. Null only for a Term, which is a glossary entry
     rather than a catalog object and sits under nothing.
+
+    ``tagged_by`` and ``rule`` are where the label came from, for the page's
+    "Tagged By" column: the account that applied it by hand, or the rule that
+    matched. At most one is set — a label has one source — and both are null for
+    one applied before either was recorded, which reads as unknown.
+
+    ``tagged_by`` is an opaque Better Auth user id, resolved to a name by the
+    gateway for the reason :class:`Tag`'s authors are: the accounts live in a
+    schema this service does not own. It is ``system`` for a label the
+    deployment applied itself, which resolves to no account on purpose and is
+    rendered as "Auto Generated".
 
     The four id fields are the same relationships as ids, which is what a link
     to the object's own page is built from: a Table and a Column are addressed
@@ -363,21 +384,12 @@ class TagItem(ApiModel):
     type: TagTargetType
     path: str | None = None
     tagged: datetime
+    tagged_by: str | None = None
+    rule: TagItemRule | None = None
     database_id: str | None = None
     schema_id: str | None = None
     table_id: str | None = None
     term_id: str | None = None
-
-
-class TagDetail(Tag):
-    """A tag together with everything it labels.
-
-    ``items`` is empty for a tag nothing carries — a freshly created tag, or one
-    whose last object was untagged — which the page renders as its empty state
-    rather than as a failed read.
-    """
-
-    items: list[TagItem] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -412,15 +424,18 @@ class Rule(ApiModel):
     they are required rather than optional like most of this module — a rule
     missing any of the three matches nothing.
 
-    ``tags`` are chips: the name to show and the id to act by. A write may send
-    whole tag objects instead — see ``RuleTagRef`` in
-    ``gsf/server/rules/router.py`` — but only their ids are read, and the names
-    here come from the tag table, so a rule cannot name a tag that does not
-    exist or show one under a name it has since lost.
+    ``tags`` carry at least the name to show and the id to act by, and whatever
+    else the write that saved them sent: a caller posting whole tag objects gets
+    whole tag objects back — see ``RuleTagRef`` in
+    ``gsf/server/rules/router.py``. Only the ids are checked, against the tag
+    table, so a rule cannot apply a tag that does not exist.
 
     ``created_by`` is the id of the user who saved it, read from the trusted
     gateway header rather than from the request body — see
-    ``gsf/server/chat/identity.py``.
+    ``gsf/server/chat/identity.py``. ``modified_by`` is the same for whoever
+    last renamed it, and null until somebody has — which is the same fact as
+    ``modified`` still equalling ``created``, and null again for a rename whose
+    request carried no identity to record.
 
     ``created`` and ``modified`` follow the convention :class:`Tag` sets: a
     timezone-aware ``datetime`` serialised as ISO 8601, from one clock.
@@ -433,6 +448,7 @@ class Rule(ApiModel):
     filters: RuleFilters
     tags: list[TagChip] = Field(default_factory=list)
     created_by: str
+    modified_by: str | None = None
     created: datetime
     modified: datetime
 

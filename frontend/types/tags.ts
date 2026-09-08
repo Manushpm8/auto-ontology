@@ -73,6 +73,12 @@ export type TagTarget = {
 	id: string;
 };
 
+/** The rule that applied a label, for the "Tagged By" column to name. */
+export type TagItemRule = {
+	id: string;
+	name: string;
+};
+
 /**
  * One object carrying a tag.
  *
@@ -89,6 +95,20 @@ export type TagItem = {
 	/** ISO 8601. When the tag was applied to this object. */
 	tagged: string;
 	/**
+	 * Where the label came from: the account that applied it by hand, the
+	 * `rule` that matched, or `SYSTEM_ACTOR` for one the deployment applied
+	 * itself. At most one of `tagged_by` and `rule` is set, and both null means
+	 * the label predates either being recorded.
+	 *
+	 * `tagged_by` is a stored account id; `tagged_by_user` is the account the
+	 * `/api/tags/{id}/targets` route resolved it to. It is null for
+	 * `SYSTEM_ACTOR`, which names no account, so the two render alike as "Auto
+	 * Generated".
+	 */
+	tagged_by: string | null;
+	tagged_by_user?: TagAuthor | null;
+	rule: TagItemRule | null;
+	/**
 	 * The same relationships as `path`, as ids — what a link to the object's own
 	 * page is built from, since those pages are keyed by id and the names in
 	 * `path` are not unique enough to look one up by.
@@ -102,15 +122,4 @@ export type TagItem = {
 	schema_id: string | null;
 	table_id: string | null;
 	term_id: string | null;
-};
-
-/**
- * A tag with everything it labels.
- *
- * `items` is empty for a tag nothing carries — a freshly created one, or one
- * whose last object was untagged — which the detail page renders as its empty
- * state.
- */
-export type TagDetail = Tag & {
-	items: TagItem[];
 };

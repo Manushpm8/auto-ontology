@@ -4,7 +4,7 @@
 
 import type { SearchObjectType } from '@/enums/search';
 import type { GlobalSearchRequest } from '@/types/search';
-import type { TagChip } from '@/types/tags';
+import type { TagAuthor, TagChip } from '@/types/tags';
 
 /**
  * A rule as its dialog has it, before anything is saved.
@@ -29,20 +29,29 @@ export type RuleTagDraft = {
 export type RuleCreateInput = GlobalSearchRequest & {
 	name: string;
 	/**
-	 * The chips the dialog holds, sent whole.
+	 * The chips the dialog holds, sent whole and answered with whole.
 	 *
-	 * Only `id` is read: a chip's name is a snapshot of the tag table, so the
-	 * backend resolves the names itself and answers with the ones it read. The
-	 * name travels anyway because a caller already has it and reducing the chips
-	 * to ids would only hide what was sent.
+	 * Only `id` is checked, against the tag table; every other field a caller
+	 * sends is echoed back on the created rule, so the tags in the answer are the
+	 * tags that were picked rather than a narrower copy of them to merge.
 	 */
 	tags: TagChip[];
 };
 
-/** The name and the tags, which are the only parts of a rule an edit changes. */
+/**
+ * A rule edit, which is a rename and nothing else.
+ *
+ * Not the search and not the tags: those are what the rule *is*, and changing
+ * either would move which objects it labels while leaving the labels it already
+ * wrote in place. A name only says how this list refers to the rule — the
+ * labels name it by id, so a rename reaches every one of them.
+ *
+ * Unique across rules, folded for case and surrounding space, as a tag name is:
+ * a name that named two rules would leave a reader unable to say which one they
+ * are deleting, and deleting takes back everything that rule labelled.
+ */
 export type RuleUpdateInput = {
-	name?: string;
-	tags?: TagChip[];
+	name: string;
 };
 
 /**
@@ -72,6 +81,22 @@ export type Rule = {
 	tags: TagChip[];
 	/** Id of the user who saved it. */
 	created_by: string;
+	/**
+	 * The account that id names, added by the `/api/rules` route — the same join
+	 * the tag list does, since the ids are stored in the catalog and the accounts
+	 * live in the `frontend` schema.
+	 *
+	 * Null when the id names nobody: the account has since been deleted, which
+	 * these ids outlive because they are not foreign keys.
+	 */
+	created_by_user?: TagAuthor | null;
+	/**
+	 * Id of the user who last renamed it, and null until somebody has — the same
+	 * fact as `modified` still equalling `created`.
+	 */
+	modified_by: string | null;
+	/** The account `modified_by` names, joined as `created_by_user` is. */
+	modified_by_user?: TagAuthor | null;
 	/** ISO 8601, from the backend clock. */
 	created: string;
 	/** ISO 8601. Equal to `created` until something edits the rule. */

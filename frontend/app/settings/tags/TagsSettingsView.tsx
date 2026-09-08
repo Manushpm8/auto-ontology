@@ -27,7 +27,12 @@ import { EmptyStateVariant } from '@/enums/emptyState';
 import type { Tag, TagAuthor } from '@/types/tags';
 
 import { TagDetailView } from './TagDetailView';
-import { FOCUS_PARAM, TAGS_PANEL_CLASSNAME, tagPath } from './tags-path';
+import {
+	FOCUS_PARAM,
+	TAGS_DETAIL_PANEL_CLASSNAME,
+	TAGS_PANEL_CLASSNAME,
+	tagPath,
+} from './tags-path';
 
 const byName = (left: Tag, right: Tag): number =>
 	left.name.toLowerCase().localeCompare(right.name.toLowerCase());
@@ -463,16 +468,16 @@ export const TagsSettingsSkeleton = () => (
  */
 export const TagsSettingsView = () => {
 	const focusId = useSearchParams().get(FOCUS_PARAM);
+	const focused = focusId != null && focusId !== '';
 
+	// Two frames for one panel, because the two views scroll differently: the
+	// detail view pages its list and owns the scroll container itself, for the
+	// reason `TAGS_DETAIL_PANEL_CLASSNAME` gives.
 	return (
-		<main className={TAGS_PANEL_CLASSNAME}>
+		<main className={focused ? TAGS_DETAIL_PANEL_CLASSNAME : TAGS_PANEL_CLASSNAME}>
 			{/* Keyed by the tag so switching tags remounts rather than leaving the
 			    previous tag on screen while the next one loads. */}
-			{focusId != null && focusId !== '' ? (
-				<TagDetailView key={focusId} tagId={focusId} />
-			) : (
-				<TagsList />
-			)}
+			{focused ? <TagDetailView key={focusId} tagId={focusId} /> : <TagsList />}
 		</main>
 	);
 };

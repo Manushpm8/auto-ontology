@@ -2,15 +2,15 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { requests } from './requests';
-import type { ApiResponse, ResponseWithError } from './types';
+import { pageQuery, requests } from './requests';
+import type { ApiPagedResponse, ApiResponse, PageParams, ResponseWithError } from './types';
 import { AUTHORS_PARAM, AUTHORS_PARAM_ON } from '@/constants/tags';
 import type { TagItemType } from '@/enums/tags';
 import type {
 	Tag,
 	TagChip,
 	TagCreateInput,
-	TagDetail,
+	TagItem,
 	TagTarget,
 	TagUpdateInput,
 } from '@/types/tags';
@@ -28,14 +28,34 @@ export const tagsApi = {
 		requests.get('tags', authors ? { [AUTHORS_PARAM]: AUTHORS_PARAM_ON } : {}),
 
 	/**
-	 * One tag with everything it labels.
+	 * One tag. What it labels is `getTargets`, a page at a time.
+	 *
+	 * Always asks for `authors`, unlike `getAll`: this is read once per detail
+	 * page rather than on every navigation, and the page shows who curated the
+	 * tag.
 	 *
 	 * 404 when the tag is gone, which — as for `delete` — means the list the
-	 * caller opened it from is stale. An *existing* tag labelling nothing
-	 * answers 200 with an empty `items`.
+	 * caller opened it from is stale.
 	 */
-	getById: (tagId: string): Promise<ResponseWithError<{ data: TagDetail }>> =>
-		requests.get(`tags/${tagId}`),
+	getById: (tagId: string): Promise<ResponseWithError<{ data: Tag }>> =>
+		requests.get(`tags/${tagId}`, { [AUTHORS_PARAM]: AUTHORS_PARAM_ON }),
+
+	/**
+	 * One page of the objects a tag labels, ordered by name, with `total`
+	 * counting everything it labels so a caller knows when to stop asking.
+	 *
+	 * Its own read rather than a field on the tag: a tag applied by a rule can
+	 * end up on the whole catalog, so this is the list the page scrolls.
+	 *
+	 * Every row carries the account or the rule that applied the label — the
+	 * "Tagged By" column — resolved by the route without being asked, since the
+	 * table has nowhere to put an unresolved id.
+	 *
+	 * 404 when the tag is gone; an existing tag labelling nothing answers 200
+	 * with an empty page, which is the caller's empty state.
+	 */
+	getTargets: (tagId: string, params?: PageParams): Promise<ApiPagedResponse<TagItem[]>> =>
+		requests.get(`tags/${tagId}/targets`, pageQuery(params)),
 
 	/** 409 when the name is taken — its `message` is the backend's own wording. */
 	create: (input: TagCreateInput): Promise<ResponseWithError<{ data: Tag }>> =>

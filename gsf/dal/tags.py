@@ -27,6 +27,13 @@ object's tags *after* the change rather than a bare success flag. That is what
 lets a caller redraw from one answer instead of re-reading, and it is also how
 each reports the case it cannot perform: ``None`` for an object or a tag that is
 not there, which the router owes a 404 rather than a silent success.
+
+A label also records **where it came from**: the account that applied it, or the
+rule that matched. :func:`attach_tags_by_rule` is the second of those, writing a
+whole rule's worth of labels in one statement per kind, and both reads carry the
+source back so a tag's page can say who tagged each object. Whichever source
+wrote a label first keeps it — the duplicate insert is absorbed rather than
+overwriting — so a rule re-applying itself never claims a hand-applied label.
 """
 
 from __future__ import annotations
@@ -38,6 +45,7 @@ from sqlalchemy import (
     ColumnElement,
     FromClause,
     Select,
+    Subquery,
     Table,
     Text,
     cast,
@@ -67,12 +75,17 @@ _COLUMNS = (
     s.tag.c.modified_by,
 )
 
-#: ``created_by``/``modified_by`` for a tag no person asked for.
+#: The actor for a tag, or a label, no person asked for -- rendered as
+#: "Auto Generated".
 #:
-#: Nothing writes it yet -- every tag today comes from the settings page, which
-#: carries the caller's identity. It is reserved and rendered ("Auto Generated")
-#: so that a future ingestion or rules path has an author to record that is not
-#: a null, which already means "written before these columns existed".
+#: :func:`attach_tag` writes it for a caller carrying no identity, which is the
+#: deployment labelling something itself rather than a person clicking. Tags
+#: still only ever come from the settings page, so nothing writes it to
+#: ``created_by``/``modified_by`` yet; it is reserved there for the same reason.
+#:
+#: Distinct from a null, which means the row was written before there was a
+#: column to record a source in. Both read as "not a person", but only one of
+#: them is a statement about the label.
 #:
 #: Safe as a literal: Better Auth generates its ids, so no account can hold it.
 SYSTEM_ACTOR = "system"
@@ -254,6 +267,12 @@ def _targets(
 
     *parents* names whichever of :data:`_PARENT_ID_FIELDS` this kind has;
     omitting it means none, which is a Term.
+
+    ``tagged_by`` and ``rule_id``/``rule_name`` are the source of the label, for
+    the "Tagged By" column: the account that applied it by hand, or the rule
+    that matched. The rule is joined outer here rather than resolved by the
+    caller, so one read answers the whole column -- a name per row fetched
+    separately would be a query per tagged object.
     """
     return (
         select(
@@ -262,9 +281,12 @@ def _targets(
             path,
             literal(kind, Text).label("type"),
             s.tag_target.c.tagged.label("tagged"),
+            s.tag_target.c.tagged_by.label("tagged_by"),
+            s.tag_target.c.rule_id.label("rule_id"),
+            s.rule.c.name.label("rule_name"),
             *_parent_ids(parents or {}),
         )
-        .select_from(joins)
+        .select_from(joins.outerjoin(s.rule, s.rule.c.id == s.tag_target.c.rule_id))
         .where(s.tag_target.c.tag_id == tag_id)
     )
 
@@ -397,18 +419,17 @@ def _sql_attribute_targets(tag_id: str) -> Select:
     )
 
 
-def list_tag_targets(tag_id: str) -> list[dict[str, Any]]:
-    """Every object carrying *tag_id*, as one list across the five kinds.
+def _all_targets(tag_id: str) -> Subquery:
+    """The five kinds as one relation, which both the page and its total read.
 
-    Ordered by name case-insensitively with the id as a tie-break, matching
-    :func:`list_tags`, so the order is total and does not depend on which
-    branch of the union a row came from.
-
-    An unknown *tag_id* yields ``[]`` rather than an error — the caller
-    distinguishes a missing tag with :func:`get_tag`, which is the only read
-    that can tell "no such tag" from "a tag with nothing tagged".
+    One function so :func:`list_tag_targets` and :func:`count_tag_targets`
+    cannot come to disagree about which rows exist. They must agree exactly: a
+    total larger than the rows a page can reach would have a caller asking for
+    a next page forever, and the union is where a row can go missing -- each
+    branch joins through to the object's name and its path, so an object whose
+    chain is broken is absent from both halves rather than counted in one.
     """
-    items = union_all(
+    return union_all(
         _term_targets(tag_id),
         _table_targets(tag_id),
         _column_targets(tag_id),
@@ -416,9 +437,68 @@ def list_tag_targets(tag_id: str) -> list[dict[str, Any]]:
         _sql_attribute_targets(tag_id),
     ).subquery()
 
-    return store().query_read(
-        select(items).order_by(func.lower(items.c.name), items.c.id)
+
+def list_tag_targets(
+    tag_id: str, *, skip: int = 0, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """One page of the objects carrying *tag_id*, across the five kinds.
+
+    Ordered by name case-insensitively with the id as a tie-break, matching
+    :func:`list_tags`, so the order is total and does not depend on which
+    branch of the union a row came from -- which is what makes it pageable at
+    all: two requests for two windows of an order the database was free to
+    reshuffle would repeat rows and skip others.
+
+    *skip* and *limit* select a window of that order, and *limit* omitted
+    returns every object. :func:`count_tag_targets` is the size of the whole
+    list, which is what tells a caller when to stop asking.
+
+    Each row carries the source of its label: ``tagged_by``, the account that
+    applied it by hand, and ``rule``, the rule that applied it instead. Exactly
+    one of the two is set on a row written since the columns existed; both are
+    null on an older one, which reads as a label of unknown origin.
+
+    An unknown *tag_id* yields ``[]`` rather than an error — the caller
+    distinguishes a missing tag with :func:`get_tag`, which is the only read
+    that can tell "no such tag" from "a tag with nothing tagged".
+    """
+    items = _all_targets(tag_id)
+    statement = (
+        select(items)
+        .order_by(func.lower(items.c.name), items.c.id)
+        .offset(skip or None)
     )
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    return [_with_rule(row) for row in store().query_read(statement)]
+
+
+def count_tag_targets(tag_id: str) -> int:
+    """How many objects carry *tag_id*, which is the unpaged size of the list.
+
+    Counted over the same union the page is taken from rather than over
+    ``tag_target`` directly: a label whose object cannot be joined through is
+    not a row the list can show, and counting it would leave a caller a page
+    short of a total it can never reach.
+    """
+    rows = store().query_read(
+        select(func.count().label("total")).select_from(_all_targets(tag_id))
+    )
+    return int(rows[0]["total"]) if rows else 0
+
+
+def _with_rule(row: dict[str, Any]) -> dict[str, Any]:
+    """*row* with its two rule columns folded into one nested rule, or null.
+
+    Nested rather than left as ``rule_id``/``rule_name`` because "no rule
+    applied this" is one fact, and two columns to check for it is two ways for
+    a reader to get it half right.
+    """
+    rule_id = row.pop("rule_id")
+    rule_name = row.pop("rule_name")
+    row["rule"] = None if rule_id is None else {"id": rule_id, "name": rule_name}
+    return row
 
 
 def fetch_tags_map(kind: str, item_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -582,16 +662,30 @@ def _attribute_without_a_term(kind: str, item_id: str) -> bool:
     return bool(rows) and not rows[0]["has_term"]
 
 
-def attach_tag(*, tag_id: str, kind: str, item_id: str) -> list[dict[str, Any]] | None:
+def attach_tag(
+    *, tag_id: str, kind: str, item_id: str, tagged_by: str | None = None
+) -> list[dict[str, Any]] | None:
     """Label the *kind* object *item_id* with *tag_id*.
 
     Returns the object's tags afterwards, in the order a page renders them, so
     a caller redraws from this answer rather than reading membership back.
 
+    *tagged_by* is the account doing it, recorded for the "Tagged By" column on
+    the tag's page. Optional, and omitting it stores :data:`SYSTEM_ACTOR` rather
+    than a null: a caller with no identity is the deployment labelling something
+    itself, which that column names "Auto Generated". Null is left to mean what
+    it already means -- a label applied before there was a column for its
+    source -- so the two are not conflated by a write.
+
     Labelling something twice is not an error: the unique constraint the second
     insert hits is absorbed, and the answer is the same list either way. That
     matters because two clicks on the same tag are one user intent, and a 409
     would ask the page to explain a state it is already in.
+
+    The absorbed write keeps the row already there, so the source of a label is
+    whoever applied it *first*: a person re-applying what a rule matched does
+    not take it over, and a rule matching what a person labelled does not take
+    it from them.
 
     ``None`` when the tag or the object does not exist. Both are foreign keys,
     so one round trip establishes it -- no existence check is needed on the path
@@ -611,7 +705,11 @@ def attach_tag(*, tag_id: str, kind: str, item_id: str) -> list[dict[str, Any]] 
     try:
         store().query_write(
             insert(s.tag_target)
-            .values(tag_id=tag_id, **{column.name: item_id})
+            .values(
+                tag_id=tag_id,
+                tagged_by=tagged_by or SYSTEM_ACTOR,
+                **{column.name: item_id},
+            )
             .on_conflict_do_nothing()
         )
     except IntegrityError as exc:
@@ -623,6 +721,60 @@ def attach_tag(*, tag_id: str, kind: str, item_id: str) -> list[dict[str, Any]] 
         return None
 
     return fetch_tags_map(kind, [item_id]).get(item_id, [])
+
+
+def attach_tags_by_rule(
+    *, rule_id: str, tag_ids: list[str], targets: list[tuple[str, str]]
+) -> int:
+    """Label every object in *targets* with every tag in *tag_ids*, as a rule.
+
+    *targets* is ``(kind, item_id)`` pairs, which is what replaying a rule's
+    search yields once the kinds it cannot label are dropped. Returns how many
+    labels this actually applied, which is the point of the ``RETURNING``: the
+    number a caller can log or report without reading membership back.
+
+    One statement per kind rather than one per label. A rule matching a few
+    hundred objects across a handful of tags is thousands of rows, and a round
+    trip each would make creating a rule a request that visibly hangs.
+
+    Already-labelled objects are skipped, not overwritten -- see
+    :func:`attach_tag` on why the first source of a label keeps it -- so
+    re-applying a rule as the catalog grows costs nothing for what it labelled
+    last time, and never takes a hand-applied label away from the person who
+    applied it.
+
+    ``tagged_by`` is left null: a rule is not an account, and ``rule_id`` is
+    what says a rule did this. The two are read together, so a row is never
+    ambiguous about which it was.
+
+    Attributes of no Term are not defended against, unlike :func:`attach_tag`:
+    every search that could produce one joins through the Term link, so a rule
+    replaying a search cannot see one to pass here.
+    """
+    if not tag_ids or not targets:
+        return 0
+
+    by_kind: dict[str, list[str]] = {}
+    for kind, item_id in targets:
+        by_kind.setdefault(kind, []).append(item_id)
+
+    applied = 0
+    for kind, item_ids in by_kind.items():
+        column = _target_column(kind)
+        rows = [
+            {"tag_id": tag_id, "rule_id": rule_id, column.name: item_id}
+            for tag_id in dict.fromkeys(tag_ids)
+            for item_id in dict.fromkeys(item_ids)
+        ]
+        applied += len(
+            store().query_write(
+                insert(s.tag_target)
+                .values(rows)
+                .on_conflict_do_nothing()
+                .returning(s.tag_target.c.id)
+            )
+        )
+    return applied
 
 
 def detach_tag(*, tag_id: str, kind: str, item_id: str) -> list[dict[str, Any]] | None:

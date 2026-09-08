@@ -21,17 +21,18 @@ export const AUTHORS_PARAM = 'authors';
 export const AUTHORS_PARAM_ON = '1';
 
 /**
- * The `created_by` / `modified_by` a tag carries when no person asked for it.
- * Mirrors `SYSTEM_ACTOR` in `gsf/dal/tags.py`.
+ * The actor a tag or a label carries when no person asked for it. Mirrors
+ * `SYSTEM_ACTOR` in `gsf/dal/tags.py`, which the attach path writes to a
+ * label's `tagged_by`.
  *
- * Distinct from a null, which means the author was never recorded — a tag made
- * by a caller that reached the backend without the gateway. Both are rendered,
- * and differently: one deployment made the tag, the other simply cannot say who
- * did.
+ * Distinct from a null, which means the actor was never recorded — a row
+ * written before there was a column for it. Both are rendered, and the tag
+ * list tells them apart: one says the deployment made the tag, the other says
+ * nothing at all.
  */
 export const SYSTEM_ACTOR = 'system';
 
-/** Shown for `SYSTEM_ACTOR`. */
+/** Shown for `SYSTEM_ACTOR`, and for a label with no account behind it. */
 export const SYSTEM_ACTOR_LABEL = 'Auto Generated';
 
 /**

@@ -32,6 +32,7 @@ import {
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { TextMatchOption } from '@/enums/search';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { notifyRulesChanged } from '@/hooks/useRulesChanged';
 import type { RuleTagDraft } from '@/types/rules';
 import type { GlobalSearchItem, GlobalSearchRequest } from '@/types/search';
 
@@ -240,6 +241,10 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 	 * are still there to make another one from. Failures come back as a message
 	 * for the panel to show rather than being handled here — the form is the only
 	 * copy of what was typed, so it is the form that has to survive them.
+	 *
+	 * A save is announced because this dialog opens from the top bar too, over
+	 * the Rules settings screen among others: the list behind it has no other
+	 * way to learn that it is now a rule short of what is stored.
 	 */
 	const handleCreateRule = async (draft: RuleTagDraft): Promise<string | null> => {
 		const response = await rulesApi.create({
@@ -247,7 +252,9 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 			name: draft.name,
 			tags: draft.tags,
 		});
-		return response.error ? (response.message ?? 'Failed to save the rule.') : null;
+		if (response.error) return response.message ?? 'Failed to save the rule.';
+		notifyRulesChanged();
+		return null;
 	};
 
 	const handleClose = () => {

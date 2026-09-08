@@ -819,14 +819,46 @@ tag_target = Table(
         nullable=True,
     ),
     # When the label was applied, for the "Tagged" column on the tag's page.
-    # No `tagged_by`: the attach endpoints carry no user identity, and a column
-    # no write path fills would read back null forever while looking like it
-    # meant "unknown".
     Column(
         "tagged",
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    ),
+    # Who applied it, for the "Tagged By" column beside it. A Better Auth user
+    # id from the gateway's identity header, and not a foreign key: the accounts
+    # live in the `frontend` schema Prisma owns, which this database has no
+    # table for -- the same arrangement as `tag.created_by`.
+    #
+    # `SYSTEM_ACTOR` in `gsf/dal/tags.py` for a label the deployment applied
+    # itself rather than a person -- a caller reaching the attach route without
+    # identity -- which the page renders as "Auto Generated".
+    #
+    # Null for a label a rule applied, where `rule_id` names the source instead,
+    # and for a row written before this column existed. Only the second is a
+    # gap: the page has nothing to say about who applied those.
+    Column("tagged_by", Text, nullable=True),
+    # The rule that applied it, when a rule did rather than a person. Null for a
+    # hand-applied label, and the two are exclusive: `tagged_by` is the account
+    # that clicked, `rule_id` the rule that matched.
+    #
+    # `ON DELETE CASCADE`, so deleting a rule takes back what it labelled. A
+    # rule-applied tag is the rule still holding, not a fact of its own -- it is
+    # re-applied as the catalog grows, and would otherwise outlive the only
+    # thing that could explain it.
+    #
+    # A one-per-(tag, object) row, so a rule cannot re-label what a person
+    # already labelled by hand, or the other way about: whichever came first
+    # keeps the row, and the unique constraints below absorb the second write.
+    #
+    # The target is named as a string because `rule` is declared further down
+    # this module -- the tables read in tag order, and a rule is a later idea
+    # than a tag.
+    Column(
+        "rule_id",
+        Text,
+        ForeignKey("rule.id", ondelete="CASCADE"),
+        nullable=True,
     ),
     CheckConstraint(
         "num_nonnulls(term_id, table_id, column_id, column_attribute_id, "
@@ -854,6 +886,114 @@ tag_target = Table(
     UniqueConstraint(
         "tag_id", "sql_attribute_id", name="uq_tag_target_tag_id_sql_attribute_id"
     ),
+)
+
+# ---------------------------------------------------------------------------
+# Rules
+# ---------------------------------------------------------------------------
+
+# A rule is a saved global search plus the tags to apply to everything it
+# matches. The three search columns are what the rule *replays*, so they are
+# spelled the way `/search/global-search` takes the request rather than
+# decomposed further -- a rule that cannot be handed back to the search is a
+# rule that never reproduces what it was created from.
+rule = Table(
+    "rule",
+    METADATA,
+    _id(),
+    # Uniqueness is `uq_rule_name_lower`, below, as a tag's is: the name is how
+    # the settings list refers to a rule, so two rules answering to one name
+    # leave a reader unable to say which one they are about to delete -- and a
+    # delete takes back everything that rule labelled.
+    Column("name", Text, nullable=False),
+    Column("search_term", Text, nullable=False),
+    # `contains` is the only match global search implements today, so the
+    # default is the whole vocabulary. Deliberately no CHECK constraint pinning
+    # it: the permitted set belongs to the search, which validates it in
+    # `gsf/server/rules/router.py`, and a constraint here would make adding a
+    # match option a schema migration.
+    Column(
+        "text_match_option", Text, nullable=False, server_default=text("'contains'")
+    ),
+    # The search filters, stored whole. JSONB rather than a column each because
+    # this is one value that travels together -- it is written by the create and
+    # read back to be handed to the search, never filtered or joined on -- and
+    # because `GlobalSearchFilters` gains fields as the search does, which would
+    # otherwise be a migration per flag.
+    #
+    # Only the filters a caller sent land here: the route dumps them with
+    # `exclude_none`, so a rule saved from the search's All tab has no `objects`
+    # key rather than a null one. A read fills the defaults back in, so the API
+    # answers the same shape either way.
+    Column("filters", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column(
+        "created",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    # Advanced by `onupdate` on every UPDATE the DAL issues, as `tag.modified`
+    # is, so it is the last edit rather than the last one somebody remembered to
+    # record.
+    Column(
+        "modified",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    ),
+    # NOT NULL, unlike `tag.created_by`, and not a foreign key for the same
+    # reasons that column is not: the accounts live in a schema Alembic does not
+    # manage, and a rule must outlive the account that saved it.
+    #
+    # Required because the route refuses a create it cannot attribute -- a rule
+    # goes on labelling the catalog long after it was saved, so "nobody" is not
+    # an author it may record.
+    Column("created_by", Text, nullable=False),
+    # Who last renamed the rule, as `tag.modified_by` records for a tag.
+    #
+    # Nullable, unlike `created_by`, and for a reason `created_by` cannot have:
+    # a rule that nobody has edited has no editor, which is the same fact as
+    # `modified == created`. It is set on every rename, including one carrying
+    # no identity -- leaving the previous editor would credit this edit to them.
+    Column("modified_by", Text, nullable=True),
+    # Case- and whitespace-insensitive uniqueness on the name, spelled exactly
+    # as `uq_tag_name_lower` is and for the reasons given there: an expression
+    # index states the rule the DAL checks, and closes the window between that
+    # check and the write which two concurrent creates would slip through.
+    Index("uq_rule_name_lower", text("lower(TRIM(BOTH FROM name))"), unique=True),
+)
+
+# The tags a rule applies. A link table rather than a list on `rule` so a tag
+# deleted from the vocabulary leaves the rules that used it by cascade, instead
+# of leaving them applying an id that no longer names anything.
+rule__tag = Table(
+    "rule__tag",
+    METADATA,
+    Column(
+        "rule_id",
+        Text,
+        ForeignKey(rule.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "tag_id",
+        Text,
+        ForeignKey(tag.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    # The order the tags were picked in, so a rule reads back as it was written.
+    # The composite primary key orders by id, which is not that.
+    Column("position", Integer, nullable=False),
+    # The tag object as the caller posted it, kept so a read answers with what
+    # was sent rather than a narrower copy of it -- see `RuleTagRef` in
+    # `gsf/server/rules/router.py`.
+    #
+    # `tag_id` beside it is the source of truth, not this: the id here is
+    # checked by the foreign key, the name is re-read from `tag` on every read,
+    # and everything else is a snapshot of somebody else's model that nothing
+    # keeps up to date. Null for a caller that sent a bare id.
+    Column("sent", JSONB, nullable=True),
 )
 
 # ---------------------------------------------------------------------------
@@ -931,6 +1071,16 @@ Index("ix_tag_target_table_id", tag_target.c.table_id)
 Index("ix_tag_target_column_id", tag_target.c.column_id)
 Index("ix_tag_target_column_attribute_id", tag_target.c.column_attribute_id)
 Index("ix_tag_target_sql_attribute_id", tag_target.c.sql_attribute_id)
+
+# The order the Rules settings page renders in, and the reverse read the
+# cascade needs: `rule__tag`'s primary key leads with `rule_id`, so deleting a
+# tag would scan the whole table for the rules that carry it without this.
+Index("ix_rule_name_lower", func.lower(rule.c.name))
+Index("ix_rule__tag_tag_id", rule__tag.c.tag_id)
+
+# The other side of that cascade: deleting a rule takes back every label it
+# applied, and nothing else leads with `tag_target.rule_id`.
+Index("ix_tag_target_rule_id", tag_target.c.rule_id)
 
 # imported_id is matched alongside id during model import; non-unique.
 for _table in (

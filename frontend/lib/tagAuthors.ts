@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Resolves the Better Auth user ids in a tag's `created_by` / `modified_by` to
- * the names the Tags settings page renders.
+ * Resolves the Better Auth user ids a tag read carries to the names the Tags
+ * settings pages render: a tag's own `created_by` / `modified_by`, and the
+ * `tagged_by` on each object a tag labels, which is a page of its own.
  *
  * Here, in the gateway, for two reasons. FastAPI cannot do it: the accounts live
  * in the `frontend` schema Prisma owns, which the backend has no model for and
@@ -45,10 +46,19 @@ const authorSelect = { id: true, name: true, email: true } as const;
 
 type Row = Record<string, unknown>;
 
-/** The tags in a `{ data }` envelope — one from a write, a list from a read. */
-const tagsIn = (payload: Row): Row[] => {
+const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
+
+/**
+ * The rows in a `{ data }` envelope — one from a write, a list from a read.
+ *
+ * Tags on the tag routes, and the objects a tag labels on its `targets` route.
+ * The two are read the same way here because they are enriched the same way:
+ * whichever author columns a row carries get resolved, and a row carrying none
+ * costs nothing.
+ */
+const rowsIn = (payload: Row): Row[] => {
 	const rows = Array.isArray(payload.data) ? payload.data : [payload.data];
-	return rows.filter((row): row is Row => typeof row === 'object' && row !== null);
+	return rows.filter(isRow);
 };
 
 /**
@@ -78,8 +88,8 @@ const respond = (body: string, upstream: Response): Response =>
 	});
 
 /**
- * The backend's answer with `created_by_user` / `modified_by_user` added beside
- * the ids it stored.
+ * The backend's answer with `created_by_user` / `modified_by_user` — and, on a
+ * page of tagged objects, `tagged_by_user` — added beside the ids it stored.
  *
  * Every branch that cannot add them answers with the body unchanged rather than
  * failing: an error response, a body that is not the expected envelope, or a
@@ -99,12 +109,18 @@ export const withTagAuthors = async (upstream: Response): Promise<Response> => {
 	if (typeof payload !== 'object' || payload === null) return respond(body, upstream);
 
 	// Mutated in place below, so the envelope keeps whatever else it carries —
-	// a list's `count`, a tag detail's `items`.
-	const rows = tagsIn(payload as Row);
+	// a list's `count`, a page's `total`.
+	const rows = rowsIn(payload as Row);
+	// One lookup for all three columns, since a tag curated and a label applied
+	// are commonly the same person and the union is what makes that one row read.
 	const ids = [
 		...new Set(
 			rows
-				.flatMap((row) => [lookupId(row.created_by), lookupId(row.modified_by)])
+				.flatMap((row) => [
+					lookupId(row.created_by),
+					lookupId(row.modified_by),
+					lookupId(row.tagged_by),
+				])
 				.filter((id): id is string => id !== null),
 		),
 	];
@@ -121,11 +137,21 @@ export const withTagAuthors = async (upstream: Response): Promise<Response> => {
 		return respond(body, upstream);
 	}
 
+	// Set only where the row has the column, so a tag does not gain a
+	// `tagged_by_user` and a tagged object does not gain an author it has no id
+	// for — a null there means "no account", which is a claim about a column
+	// this row does not carry.
 	for (const row of rows) {
-		const createdBy = lookupId(row.created_by);
-		const modifiedBy = lookupId(row.modified_by);
-		row.created_by_user = createdBy === null ? null : (authors.get(createdBy) ?? null);
-		row.modified_by_user = modifiedBy === null ? null : (authors.get(modifiedBy) ?? null);
+		if ('created_by' in row || 'modified_by' in row) {
+			const createdBy = lookupId(row.created_by);
+			const modifiedBy = lookupId(row.modified_by);
+			row.created_by_user = createdBy === null ? null : (authors.get(createdBy) ?? null);
+			row.modified_by_user = modifiedBy === null ? null : (authors.get(modifiedBy) ?? null);
+		}
+		if ('tagged_by' in row) {
+			const taggedBy = lookupId(row.tagged_by);
+			row.tagged_by_user = taggedBy === null ? null : (authors.get(taggedBy) ?? null);
+		}
 	}
 
 	return respond(JSON.stringify(payload), upstream);

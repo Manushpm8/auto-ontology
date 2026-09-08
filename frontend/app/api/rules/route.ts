@@ -4,6 +4,7 @@
 
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
+import { withTagAuthors } from '@/lib/tagAuthors';
 
 // rulesApi.getAll — list rules.
 //
@@ -11,7 +12,17 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 // search it replays, so the list of them describes the catalog the way a tag's
 // own page does. The only screen that asks for it is Settings → Rules, and that
 // whole section is admin-only already.
-export const GET = withPermission({ tag: ['manage'] })((req) => proxyToBackend(req));
+//
+// `withTagAuthors` despite the name: it resolves `created_by` / `modified_by` in
+// a `{ data }` envelope, and a rule stores those two columns for the same reason
+// a tag does — the accounts live in the `frontend` schema, which the backend has
+// no model for. Unconditionally, without the `?authors=` the tag list gates it
+// behind: that param exists because the tag picker reads the vocabulary on every
+// navigation and throws the names away, and nothing reads rules but the one page
+// that shows an owner on every card.
+export const GET = withPermission({ tag: ['manage'] })(async (req) =>
+	withTagAuthors(await proxyToBackend(req)),
+);
 
 // rulesApi.create — save a rule (admin only).
 //
