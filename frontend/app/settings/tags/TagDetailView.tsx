@@ -33,13 +33,14 @@ const TYPE_LABELS: Record<TagItemType, string> = {
 	[TagItemType.SqlAttribute]: 'SQL Attribute',
 };
 
-// A column attribute shares the Term icon because it is a property of one, and
-// the Type column beside it is what names the two apart.
+// The same icon each kind is drawn with in global search — see
+// `SEARCH_TYPE_ICON` — since these rows lead to the same objects, and a kind
+// that changed its mark between the two screens would read as another kind.
 const TYPE_ICONS: Record<TagItemType, IconName> = {
 	[TagItemType.Term]: IconName.Terms,
 	[TagItemType.Table]: IconName.Table,
 	[TagItemType.Column]: IconName.Column,
-	[TagItemType.ColumnAttribute]: IconName.Terms,
+	[TagItemType.ColumnAttribute]: IconName.Key,
 	[TagItemType.SqlAttribute]: IconName.CodeBracket,
 };
 
