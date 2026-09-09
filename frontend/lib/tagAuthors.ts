@@ -11,7 +11,7 @@
  * in the `frontend` schema Prisma owns, which the backend has no model for and
  * deliberately does not reach into. And the browser should not: the admin
  * `listUsers` call is a second round trip returning a *page* of users, so every
- * author past that page would render as "Unknown" — which is also what a
+ * author past that page would render as "Auto Generated" — which is also what a
  * deleted account renders as, making the two indistinguishable.
  *
  * The same join as the analytics report (`lib/apiSelects.ts`), for the same
@@ -22,7 +22,7 @@ import { getPrisma } from '@/lib/prisma';
 import { userCan } from '@/auth/permissions';
 import { PROXY_CACHE_CONTROL } from '@/auth/proxy-backend';
 import type { ResolvedUser } from '@/auth/resolve-user';
-import { AUTHORS_PARAM, AUTHORS_PARAM_ON, SYSTEM_ACTOR } from '@/constants/tags';
+import { AUTHORS_PARAM, AUTHORS_PARAM_ON } from '@/constants/tags';
 
 /**
  * Whether this read should carry authors: the caller asked for them, and may
@@ -62,12 +62,15 @@ const rowsIn = (payload: Row): Row[] => {
 };
 
 /**
- * The id to look up, or null when there is nothing to look up: no author
- * recorded, or `SYSTEM_ACTOR`, which names no account and is rendered from the
- * sentinel itself.
+ * The id to look up, or null when the column holds nothing to look one up by.
+ *
+ * An id that names no account is not filtered out here, and does not need to
+ * be: the lookup simply does not find it, which the pages render exactly as
+ * they render a null — "Auto Generated". That covers a deleted account and the
+ * legacy `system` an earlier version stored alike.
  */
 const lookupId = (value: unknown): string | null =>
-	typeof value === 'string' && value !== '' && value !== SYSTEM_ACTOR ? value : null;
+	typeof value === 'string' && value !== '' ? value : null;
 
 /**
  * The upstream answer, rebuilt around a body this module may have rewritten.
@@ -93,8 +96,8 @@ const respond = (body: string, upstream: Response): Response =>
  *
  * Every branch that cannot add them answers with the body unchanged rather than
  * failing: an error response, a body that is not the expected envelope, or a
- * failed user lookup. A tag whose author will not resolve still reads correctly
- * as "Unknown", whereas a 500 here would lose the whole list over a decoration.
+ * failed user lookup. A tag whose author will not resolve still reads as "Auto
+ * Generated", whereas a 500 here would lose the whole list over a decoration.
  */
 export const withTagAuthors = async (upstream: Response): Promise<Response> => {
 	const body = await upstream.text();

@@ -16,12 +16,7 @@ import { Icon, IconName } from '@/common/icons';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { SkeletonRows } from '@/common/Skeleton';
-import {
-	MAX_TAG_NAME_LENGTH,
-	SYSTEM_ACTOR,
-	SYSTEM_ACTOR_LABEL,
-	UNKNOWN_ACTOR_LABEL,
-} from '@/constants/tags';
+import { AUTO_GENERATED_LABEL, MAX_TAG_NAME_LENGTH } from '@/constants/tags';
 import { ButtonTheme, Size } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import type { Tag, TagAuthor } from '@/types/tags';
@@ -69,22 +64,15 @@ const AUTHOR_COLUMN = 'w-40 shrink-0 pl-6';
  * Who an author column names, with the initial the rest of the app draws a
  * person as.
  *
- * `actorId` is what the tag stored and `author` is what the API resolved it to,
- * and both are needed: a tag the deployment generated itself names no account
- * on purpose, which is a different statement from an author nobody recorded —
- * or one whose account has since been deleted, since these ids are not foreign
- * keys and outlive the user.
+ * The resolved account, or "Auto Generated" where there is none — which covers
+ * a tag the deployment generated itself, an author nobody recorded, and an id
+ * whose account has since been deleted, since these ids are not foreign keys
+ * and outlive the user. One answer for all three on purpose, as the note
+ * beside `AUTO_GENERATED_LABEL` in `constants/tags.ts` says.
  */
-const TagAuthorCell = ({
-	actorId,
-	author,
-}: {
-	actorId: string | null;
-	author: TagAuthor | null | undefined;
-}) => {
-	const system = actorId === SYSTEM_ACTOR;
+const TagAuthorCell = ({ author }: { author: TagAuthor | null | undefined }) => {
 	const name = author?.name || author?.email || '';
-	const label = system ? SYSTEM_ACTOR_LABEL : name || UNKNOWN_ACTOR_LABEL;
+	const label = name || AUTO_GENERATED_LABEL;
 
 	return (
 		<span className={`flex min-w-0 items-center gap-2 ${AUTHOR_COLUMN}`}>
@@ -296,23 +284,17 @@ const TagsList = () => {
 										<span className="min-w-0 flex-1 truncate text-sm text-zinc-800 dark:text-zinc-200">
 											{tag.name}
 										</span>
-										<TagAuthorCell
-											actorId={tag.created_by}
-											author={tag.created_by_user}
-										/>
+										<TagAuthorCell author={tag.created_by_user} />
 										<span className="w-28 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
 											{formatDate(tag.created)}
 										</span>
-										{/* Blank rather than "Unknown" for a tag nothing has
-										    edited: there is no editor to be unsure about, which
-										    is the same thing the date column says as "Never". */}
+										{/* Blank rather than an author for a tag nothing has
+										    edited: there is no editor at all, which is the same
+										    thing the date column says as "Never". */}
 										{tag.modified === tag.created ? (
 											<span className={AUTHOR_COLUMN} />
 										) : (
-											<TagAuthorCell
-												actorId={tag.modified_by}
-												author={tag.modified_by_user}
-											/>
+											<TagAuthorCell author={tag.modified_by_user} />
 										)}
 										<span className="w-28 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
 											{modifiedLabel(tag)}

@@ -364,16 +364,18 @@ class TagItem(ApiModel):
 
     ``tagged_by`` and ``rule`` are where the label came from, for the page's
     "Tagged By" column: the account that applied it by hand, or the rule that
-    matched. At most one is set — a label has one source — and both are null for
-    one applied before either was recorded, which reads as unknown.
+    matched. At most one is set — a label has one source — and both null is an
+    answer rather than a gap: it is what an attach carrying no identity records,
+    so the page reads it as "Auto Generated", the deployment having labelled
+    this itself. A row written before either column existed reads the same way,
+    since a label nobody claimed is a label nobody claimed.
 
     ``tagged_by`` is an opaque Better Auth user id, resolved to a name by the
     gateway for the reason :class:`Tag`'s authors are: the accounts live in a
-    schema this service does not own. It is ``system`` for a label the
-    deployment applied itself, which resolves to no account on purpose and is
-    rendered as "Auto Generated" — the one value that says nobody was asked.
-    A null, or an id no account answers to, reads as "Unknown" instead: those
-    are the absence of a source rather than a claim about one.
+    schema this service does not own. An id that resolves to nothing reads as
+    "Auto Generated" as well — these are not foreign keys, so an account can be
+    deleted and leave the label behind, and the column names a person or a rule
+    or neither rather than spelling out which kind of nobody this is.
 
     The four id fields are the same relationships as ids, which is what a link
     to the object's own page is built from: a Table and a Column are addressed

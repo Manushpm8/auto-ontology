@@ -21,24 +21,12 @@ export const AUTHORS_PARAM = 'authors';
 export const AUTHORS_PARAM_ON = '1';
 
 /**
- * The actor a tag or a label carries when no person asked for it. Mirrors
- * `SYSTEM_ACTOR` in `gsf/dal/tags.py`, which the attach path writes to a
- * label's `tagged_by`.
+ * Shown wherever a person would be named and there is none.
  *
- * Distinct from a null, which means the actor was never recorded — a row
- * written before there was a column for it. Every screen tells the two apart:
- * one says the deployment did this, the other says nothing at all, and only
- * the first is something to show a reader as an answer.
+ * The only alternative to an account, deliberately: a tag with no author, a
+ * label with no account and no rule, and an id whose account has since been
+ * deleted all read the same way. A reader can act on "a person or a rule did
+ * this" and can do nothing with which flavour of nobody it was, so no screen
+ * offers a second answer for it.
  */
-export const SYSTEM_ACTOR = 'system';
-
-/** Shown for `SYSTEM_ACTOR`, and only for it. */
-export const SYSTEM_ACTOR_LABEL = 'Auto Generated';
-
-/**
- * Shown for a null author, and for an id whose account is gone — the ids are
- * not foreign keys, so a deleted user leaves one behind that resolves to
- * nothing. Both are the same thing to a reader: there is a tag, and nobody left
- * to attribute it to.
- */
-export const UNKNOWN_ACTOR_LABEL = 'Unknown';
+export const AUTO_GENERATED_LABEL = 'Auto Generated';

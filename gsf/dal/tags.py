@@ -75,22 +75,6 @@ _COLUMNS = (
     s.tag.c.modified_by,
 )
 
-#: The actor for a tag, or a label, no person asked for -- rendered as
-#: "Auto Generated".
-#:
-#: :func:`attach_tag` writes it for a caller carrying no identity, which is the
-#: deployment labelling something itself rather than a person clicking. Tags
-#: still only ever come from the settings page, so nothing writes it to
-#: ``created_by``/``modified_by`` yet; it is reserved there for the same reason.
-#:
-#: Distinct from a null, which means the row was written before there was a
-#: column to record a source in, and the pages keep them apart: this one reads
-#: as "Auto Generated", a null as "Unknown". Both are "not a person", but only
-#: this one is a statement about the label rather than the lack of one.
-#:
-#: Safe as a literal: Better Auth generates its ids, so no account can hold it.
-SYSTEM_ACTOR = "system"
-
 #: ``type`` on a tagged item: which of the five things the row points at.
 #:
 #: Spelled again by ``TagTargetType`` in ``gsf/server/models.py``, which is the
@@ -541,10 +525,11 @@ def create_tag(*, name: str, created_by: str | None = None) -> dict[str, Any]:
     check or by the unique index underneath it.
 
     *created_by* is the Better Auth user id the router read from the gateway's
-    header, or :data:`SYSTEM_ACTOR`. It is optional because the header is not
-    guaranteed -- FastAPI is reachable directly on the private network -- and
-    ``None`` records that nobody was named rather than failing the create over
-    an audit field.
+    header. It is optional because the header is not guaranteed -- FastAPI is
+    reachable directly on the private network -- and ``None`` records that
+    nobody was named rather than failing the create over an audit field. The
+    pages read that as "Auto Generated": with no account to name, the
+    deployment is what is left.
 
     ``modified_by`` is deliberately *not* set alongside it. It answers "who last
     edited this", and a tag that has only ever been created has not been edited
@@ -672,11 +657,9 @@ def attach_tag(
     a caller redraws from this answer rather than reading membership back.
 
     *tagged_by* is the account doing it, recorded for the "Tagged By" column on
-    the tag's page. Optional, and omitting it stores :data:`SYSTEM_ACTOR` rather
-    than a null: a caller with no identity is the deployment labelling something
-    itself, which that column names "Auto Generated". Null is left to mean what
-    it already means -- a label applied before there was a column for its
-    source -- so the two are not conflated by a write.
+    the tag's page. Optional, and omitting it stores a null, which with a null
+    ``rule_id`` beside it is what that column reads as "Auto Generated": a
+    label no account and no rule is claiming came from the deployment itself.
 
     Labelling something twice is not an error: the unique constraint the second
     insert hits is absorbed, and the answer is the same list either way. That
@@ -708,7 +691,7 @@ def attach_tag(
             insert(s.tag_target)
             .values(
                 tag_id=tag_id,
-                tagged_by=tagged_by or SYSTEM_ACTOR,
+                tagged_by=tagged_by,
                 **{column.name: item_id},
             )
             .on_conflict_do_nothing()

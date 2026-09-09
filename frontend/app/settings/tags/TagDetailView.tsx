@@ -15,7 +15,7 @@ import { Icon, IconName } from '@/common/icons';
 import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
-import { SYSTEM_ACTOR, SYSTEM_ACTOR_LABEL, UNKNOWN_ACTOR_LABEL } from '@/constants/tags';
+import { AUTO_GENERATED_LABEL } from '@/constants/tags';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { TagItemType } from '@/enums/tags';
 import { useInfiniteList } from '@/hooks/useInfiniteList';
@@ -45,22 +45,22 @@ const TYPE_ICONS: Record<TagItemType, IconName> = {
 };
 
 /**
- * Who or what applied the label: the rule that matched, the person who clicked,
- * or the deployment itself.
+ * Who or what applied the label: the rule that matched, the person who
+ * clicked, or the deployment itself.
  *
- * The rule wins when there is one, and carries the same lightning mark the
- * Rules page draws a rule with — a rule labels objects nobody visited, so
- * "which rule" is the answer to why this row is here at all.
+ * The `rule` first, under the same lightning mark the Rules page draws a rule
+ * with — a rule labels objects nobody visited, so "which rule" is the answer
+ * to why this row is here at all. Then the account, with the initial the rest
+ * of the app draws a person as.
  *
- * Otherwise the account, with the initial the rest of the app draws a person
- * as — and where there is none, one of two answers rather than one, the same
- * two the tag list gives an author. "Auto Generated" only for `SYSTEM_ACTOR`,
- * which is the deployment saying it labelled this itself. "Unknown" for
- * everything else: a label written before its source was recorded, or one
- * naming an account since deleted, since these ids are not foreign keys and
- * outlive the user. Both of those are the absence of an answer, and calling
- * them "Auto Generated" would claim something about the label that nothing
- * recorded.
+ * Everything else is "Auto Generated", deliberately one answer rather than
+ * two. No rule and no account means an attach that carried no identity, or a
+ * row written before these columns existed, or an id whose account has since
+ * been deleted — these are not foreign keys, so a label outlives its user.
+ * A reader can act on "a person or a rule did this"; they can do nothing with
+ * the difference between an id that resolves to nobody and no id at all, so
+ * this column does not spend a word on it — nor does any other column in the
+ * app that names a person.
  */
 const TaggedByCell = ({ item }: { item: TagItem }) => {
 	if (item.rule != null) {
@@ -75,14 +75,14 @@ const TaggedByCell = ({ item }: { item: TagItem }) => {
 	}
 
 	const name = item.tagged_by_user?.name || item.tagged_by_user?.email || '';
-	const label =
-		item.tagged_by === SYSTEM_ACTOR ? SYSTEM_ACTOR_LABEL : name || UNKNOWN_ACTOR_LABEL;
+	const known = name !== '';
+	const label = known ? name : AUTO_GENERATED_LABEL;
 
 	return (
 		<span className="flex min-w-0 items-center gap-2" title={label}>
 			<span
 				aria-hidden="true"
-				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${name === '' ? 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white'}`}
+				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${known ? 'bg-[#76b900] text-white' : 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400'}`}
 			>
 				{label.charAt(0).toUpperCase()}
 			</span>

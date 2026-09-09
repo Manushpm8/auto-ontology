@@ -29,8 +29,8 @@ export type Tag = {
 	 * Each null means something of its own. `created_by` is null for a tag made
 	 * by a caller that reached the backend without the gateway; `modified_by` is
 	 * additionally null for a tag nobody has renamed, which is the same fact
-	 * `modified === created` states. `SYSTEM_ACTOR` in `constants/tags.ts` is the
-	 * one value neither resolves to an account, for a tag no person asked for.
+	 * `modified === created` states. Either may also hold an id that names no
+	 * account — one since deleted — and the list renders that as a null.
 	 */
 	created_by: string | null;
 	modified_by: string | null;
@@ -96,15 +96,16 @@ export type TagItem = {
 	tagged: string;
 	/**
 	 * Where the label came from: the account that applied it by hand, the
-	 * `rule` that matched, or `SYSTEM_ACTOR` for one the deployment applied
-	 * itself. At most one of `tagged_by` and `rule` is set, and both null means
-	 * the label predates either being recorded.
+	 * `rule` that matched, or neither — which the column shows as "Auto
+	 * Generated": an attach carrying no identity is the deployment labelling
+	 * something itself, and so is a row written before either column existed.
+	 * At most one of the two is set.
 	 *
 	 * `tagged_by` is a stored account id; `tagged_by_user` is the account the
-	 * `/api/tags/{id}/targets` route resolved it to. Null for `SYSTEM_ACTOR`,
-	 * which names no account by design and shows as "Auto Generated" — and null
-	 * again for an id whose account is gone, which shows as "Unknown", so read
-	 * `tagged_by` rather than this to tell those apart.
+	 * `/api/tags/{id}/targets` route resolved it to. Null when the id names an
+	 * account since deleted — these ids are not foreign keys, so a label
+	 * outlives its user — and the column shows "Auto Generated" for that too,
+	 * having no person and no rule to name.
 	 */
 	tagged_by: string | null;
 	tagged_by_user?: TagAuthor | null;

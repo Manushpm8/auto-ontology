@@ -58,7 +58,6 @@ from gsf.dal import schema as s  # noqa: E402
 from gsf.dal.rules import update_rule  # noqa: E402
 from gsf.dal.session import store  # noqa: E402
 from gsf.dal.tags import (  # noqa: E402
-    SYSTEM_ACTOR,
     TARGET_COLUMN,
     TARGET_COLUMN_ATTRIBUTE,
     TARGET_SQL_ATTRIBUTE,
@@ -992,11 +991,13 @@ def test_a_hand_applied_label_records_the_account(tagged) -> None:
     assert item["rule"] is None
 
 
-def test_a_label_with_no_identity_is_the_deployment_s_own(tagged) -> None:
-    """ "Auto Generated" rather than a null, which means "never recorded"."""
+def test_a_label_with_no_identity_names_nobody(tagged) -> None:
+    """Neither column set, which the page reads as "Auto Generated"."""
     attach_tag(tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term)
 
-    assert tagged.items()[TARGET_TERM]["tagged_by"] == SYSTEM_ACTOR
+    item = tagged.items()[TARGET_TERM]
+    assert item["tagged_by"] is None
+    assert item["rule"] is None
 
 
 def test_a_rule_applied_label_names_the_rule(tagged) -> None:
@@ -1078,8 +1079,8 @@ def test_a_rule_does_not_take_over_a_label_a_person_applied(tagged) -> None:
     assert item["rule"] is None
 
 
-def test_a_rule_applied_label_is_not_the_deployment_s_own(tagged) -> None:
-    """``SYSTEM_ACTOR`` is for "no source named", and a rule is a source."""
+def test_a_rule_applied_label_names_no_account(tagged) -> None:
+    """A rule is not an account, and ``rule_id`` is what says a rule did it."""
     attach_tags_by_rule(
         rule_id=tagged.rule("named"),
         tag_ids=[tagged.tag],

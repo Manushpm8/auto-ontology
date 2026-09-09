@@ -4,7 +4,7 @@
 
 'use client';
 
-import { UNKNOWN_ACTOR_LABEL } from '@/constants/tags';
+import { AUTO_GENERATED_LABEL } from '@/constants/tags';
 import type { TagAuthor } from '@/types/tags';
 
 /**
@@ -14,15 +14,16 @@ import type { TagAuthor } from '@/types/tags';
  * whoever saved it and whoever last renamed it — and they read identically. The
  * label above each is what says which is which.
  *
- * "Unknown" when the id resolved to nobody. For an author that means the
- * account has since been deleted, which these ids outlive because they are not
- * foreign keys; a rule always has one, since the backend refuses a create it
- * cannot attribute. For an editor it also covers a rename that carried no
- * identity to record, which nothing on the deployed path does.
+ * "Auto Generated" when the id resolved to nobody, as everywhere else in the
+ * app. For an author that means the account has since been deleted, which these
+ * ids outlive because they are not foreign keys; a rule always has one, since
+ * the backend refuses a create it cannot attribute. For an editor it also
+ * covers a rename that carried no identity to record, which nothing on the
+ * deployed path does.
  */
 export const RuleAuthor = ({ author }: { author?: TagAuthor | null }) => {
 	const name = author?.name || author?.email || '';
-	const label = name || UNKNOWN_ACTOR_LABEL;
+	const label = name || AUTO_GENERATED_LABEL;
 
 	return (
 		<span className="flex min-w-0 items-center gap-2">

@@ -747,14 +747,16 @@ tag = Table(
     # Nullable because the gateway's identity header is not guaranteed: FastAPI
     # is reachable directly on the private network, so a caller that skips the
     # gateway creates a tag with nobody to record. The settings page reads that
-    # as "Unknown" rather than inventing an author.
+    # as "Auto Generated" -- with no account to name, the deployment is what is
+    # left -- rather than inventing an author.
     #
     # `modified_by` is additionally null for a tag nothing has edited yet, which
     # is the same fact `modified == created` states -- the page renders those
     # two together as an edit that never happened.
     #
-    # `SYSTEM_ACTOR` in `gsf/dal/tags.py` is the one value either column may
-    # hold that is not a user id, for a tag no person asked for.
+    # Either may also hold an id no account answers to, since these are not
+    # foreign keys and an account can be deleted; the page reads that the same
+    # way it reads a null, having nobody to name either way.
     Column("created_by", Text, nullable=True),
     Column("modified_by", Text, nullable=True),
     # The tag name rule as a constraint rather than a convention. Unlike
@@ -830,13 +832,12 @@ tag_target = Table(
     # live in the `frontend` schema Prisma owns, which this database has no
     # table for -- the same arrangement as `tag.created_by`.
     #
-    # `SYSTEM_ACTOR` in `gsf/dal/tags.py` for a label the deployment applied
-    # itself rather than a person -- a caller reaching the attach route without
-    # identity -- which the page renders as "Auto Generated".
-    #
-    # Null for a label a rule applied, where `rule_id` names the source instead,
-    # and for a row written before this column existed. Only the second is a
-    # gap: the page has nothing to say about who applied those.
+    # Null for a label a rule applied, where `rule_id` names the source
+    # instead; for one the deployment applied itself, which is what an attach
+    # carrying no identity records; and for a row written before this column
+    # existed. The page reads the last two the same way, as "Auto Generated" --
+    # with no account and no rule claiming a label, the deployment is what is
+    # left, and an older row is a label nobody ever claimed either.
     Column("tagged_by", Text, nullable=True),
     # The rule that applied it, when a rule did rather than a person. Null for a
     # hand-applied label, and the two are exclusive: `tagged_by` is the account
