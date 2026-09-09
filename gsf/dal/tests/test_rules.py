@@ -37,11 +37,13 @@ on every rename including one that names nobody, so a rename cannot be credited
 to whoever made the last one. What a rename does to the *labels* the rule
 applied is covered in ``test_tags.py``, where the tagged objects are.
 
-The fifth is what a delete takes with it, which is more than the row: the tag
-links cascade, and so do the labels the rule applied -- that one is covered in
-``test_tags.py``, where the tagged objects are. What it must *not* take is the
-tags themselves, or another rule applying the same tag, so both have a test
-here.
+The fifth is what a delete takes with it, which is a good deal more than the
+row: the tag links cascade, and so do the labels the rule applied -- that one is
+covered in ``test_tags.py``, where the tagged objects are. A tag those labels
+were the whole of goes too, so the tests here draw the line around that. It is
+not taken when something else still labels it, when another rule still applies
+it -- deleting it would leave that rule tagless -- or when the caller asked to
+keep the labels, which empties nothing in the first place.
 
 Needs a migrated database and skips without one.
 """
@@ -67,7 +69,12 @@ from gsf.dal.rules import (  # noqa: E402
     update_rule,
 )
 from gsf.dal.session import store  # noqa: E402
-from gsf.dal.tags import create_tag  # noqa: E402
+from gsf.dal.tags import (  # noqa: E402
+    TARGET_TERM,
+    attach_tag,
+    attach_tags_by_rule,
+    create_tag,
+)
 
 FILTERS = {"description": False, "synonyms": True, "objects": None}
 
@@ -94,6 +101,7 @@ def prefix():
     yield value
     store().query_write(s.rule.delete().where(s.rule.c.name.like(f"%{value}%")))
     store().query_write(s.tag.delete().where(s.tag.c.name.like(f"%{value}%")))
+    store().query_write(s.term.delete().where(s.term.c.name.like(f"%{value}%")))
 
 
 def _saved(prefix: str, *, name: str | None = None, tags: list[dict]) -> str:
@@ -110,6 +118,18 @@ def _saved(prefix: str, *, name: str | None = None, tags: list[dict]) -> str:
 
 def _read(rule_id: str) -> dict:
     return next(rule for rule in list_rules() if rule["id"] == rule_id)
+
+
+def _term(prefix: str) -> str:
+    """Something for a tag to label, for the tests about emptying one.
+
+    A Term because it is the one target that hangs off nothing: the catalog
+    kinds would need a database, schema and table above them to be reached, and
+    what these tests care about is only whether a label exists.
+    """
+    return store().query_write(
+        s.term.insert().values(name=f"{prefix}-Order").returning(s.term.c.id)
+    )[0]["id"]
 
 
 def test_a_saved_rule_reads_back_with_what_it_was_given(prefix) -> None:
@@ -420,6 +440,11 @@ def test_deleting_an_id_that_is_not_a_rule_is_reported(prefix) -> None:
     assert delete_rule(str(uuid.uuid4())) is False
 
 
+def test_keeping_the_tags_of_an_id_that_is_not_a_rule_is_reported_too(prefix) -> None:
+    """The 404 does not depend on which of the two deletes was asked for."""
+    assert delete_rule(str(uuid.uuid4()), keep_tags=True) is False
+
+
 def test_deleting_a_rule_takes_its_tag_links_with_it(prefix) -> None:
     """``rule__tag`` cascades, so no link outlives the rule that held it."""
     tag = create_tag(name=f"{prefix}-pii")
@@ -433,11 +458,61 @@ def test_deleting_a_rule_takes_its_tag_links_with_it(prefix) -> None:
     )
 
 
-def test_deleting_a_rule_leaves_the_tags_themselves(prefix) -> None:
-    """The vocabulary is not the rule's to take: other rules and objects use it."""
+def test_deleting_a_rule_takes_a_tag_it_leaves_labelling_nothing(prefix) -> None:
+    """Emptying the tag is what the delete did, so it finishes the job."""
     tag = create_tag(name=f"{prefix}-pii")
 
     delete_rule(_saved(prefix, tags=[{"id": tag["id"]}]))
+
+    assert store().query_read(s.tag.select().where(s.tag.c.id == tag["id"])) == []
+
+
+def test_deleting_a_rule_takes_the_tag_it_had_labelled_with(prefix) -> None:
+    """The cascade empties the tag, and the tag then follows the labels."""
+    tag = create_tag(name=f"{prefix}-pii")
+    term = _term(prefix)
+    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    attach_tags_by_rule(
+        rule_id=rule_id, tag_ids=[tag["id"]], targets=[(TARGET_TERM, term)]
+    )
+
+    delete_rule(rule_id)
+
+    assert store().query_read(s.tag.select().where(s.tag.c.id == tag["id"])) == []
+
+
+def test_deleting_a_rule_leaves_a_tag_that_still_labels_something(prefix) -> None:
+    """The vocabulary is only the rule's to take back as far as it reached."""
+    tag = create_tag(name=f"{prefix}-pii")
+    term = _term(prefix)
+    attach_tag(tag_id=tag["id"], kind=TARGET_TERM, item_id=term, tagged_by="user-1")
+
+    delete_rule(_saved(prefix, tags=[{"id": tag["id"]}]))
+
+    assert store().query_read(s.tag.select().where(s.tag.c.id == tag["id"]))
+
+
+def test_deleting_a_rule_leaves_a_tag_another_rule_applies(prefix) -> None:
+    """Deleting it would strip that rule of the only tag it had."""
+    tag = create_tag(name=f"{prefix}-pii")
+    kept = _saved(prefix, name=f"{prefix}-two", tags=[{"id": tag["id"]}])
+
+    delete_rule(_saved(prefix, name=f"{prefix}-one", tags=[{"id": tag["id"]}]))
+
+    assert store().query_read(s.tag.select().where(s.tag.c.id == tag["id"]))
+    assert [applied["id"] for applied in _read(kept)["tags"]] == [tag["id"]]
+
+
+def test_keeping_the_tags_keeps_the_tag_itself(prefix) -> None:
+    """Nothing was emptied, so nothing is cleaned up: the labels are still on."""
+    tag = create_tag(name=f"{prefix}-pii")
+    term = _term(prefix)
+    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    attach_tags_by_rule(
+        rule_id=rule_id, tag_ids=[tag["id"]], targets=[(TARGET_TERM, term)]
+    )
+
+    delete_rule(rule_id, keep_tags=True)
 
     assert store().query_read(s.tag.select().where(s.tag.c.id == tag["id"]))
 

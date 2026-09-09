@@ -7393,7 +7393,7 @@
     },
     "/api/rules/{rule_id}": {
       "delete": {
-        "description": "Delete one rule by id.\n\n**This also takes back every tag the rule applied.** The labels it wrote\ncascade with it -- see ``rules_dal.delete_rule`` -- while labels people\napplied by hand stay, including on an object the rule had also matched,\nbecause those rows record no rule to cascade from. A rule goes on labelling\nthe catalog as the catalog grows, so leaving its labels behind would leave\ntags nothing on screen could explain and nothing could re-apply.\n\n404 rather than a silent 204 for an id that is not there: the settings page\ndeletes from a list it has already read, so a missing rule means that list\nis stale and the row would be left on screen with nothing to explain it.\n\nAnswers with the id, as deleting a tag does, so a caller has the row it just\nremoved without holding on to what it sent.",
+        "description": "Delete one rule by id.\n\n**This also takes back every tag the rule applied**, unless ``keep_tags``\nsays otherwise. The labels it wrote cascade with it -- see\n``rules_dal.delete_rule`` -- while labels people applied by hand stay,\nincluding on an object the rule had also matched, because those rows record\nno rule to cascade from. A rule goes on labelling the catalog as the catalog\ngrows, so by default its labels are not left behind for nothing on screen to\nexplain and nothing to re-apply.\n\n**And a tag left labelling nothing is deleted**, unless another rule applies\nit: emptying it is what this request just did, and a tag that describes no\npart of the catalog and that nothing will apply again is not vocabulary. One\nthat still labels anything -- another object, or the same one by a person's\nhand -- stays.\n\n``keep_tags`` is the other reading, and a defensible one: the labels are a\nclassification that happens to have come from a rule, worth keeping once the\nrule that suggested them is gone. They stay where they are, attributed to\nwhoever wrote the rule -- a rule is a person deciding a search's results\ndeserve a tag, so their own labels is what is left when the mechanism goes,\nand the tag's page names them there. Not the caller, who may be an admin\ndeleting somebody else's rule. Recreating the same rule afterwards does not\nadopt them -- an existing label is left alone rather than claimed, the same\nway a rule cannot take over a hand-applied one -- so this is a way to keep\nthe labels, not a way to detach and reattach them.\n\n404 rather than a silent 204 for an id that is not there: the settings page\ndeletes from a list it has already read, so a missing rule means that list\nis stale and the row would be left on screen with nothing to explain it.\n\nAnswers with the id, as deleting a tag does, so a caller has the row it just\nremoved without holding on to what it sent.",
         "operationId": "delete_rule_api_rules__rule_id__delete",
         "parameters": [
           {
@@ -7403,6 +7403,18 @@
             "schema": {
               "title": "Rule Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Leave the tags the rule applied on their objects, attributed to nothing, instead of removing them with the rule.",
+            "in": "query",
+            "name": "keep_tags",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Leave the tags the rule applied on their objects, attributed to nothing, instead of removing them with the rule.",
+              "title": "Keep Tags",
+              "type": "boolean"
             }
           }
         ],

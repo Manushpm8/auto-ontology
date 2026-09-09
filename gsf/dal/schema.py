@@ -848,6 +848,14 @@ tag_target = Table(
     # re-applied as the catalog grows, and would otherwise outlive the only
     # thing that could explain it.
     #
+    # A caller who wants the labels to outlive the rule anyway says so, and
+    # `rules.delete_rule` clears this column before deleting -- writing the
+    # rule's author into `tagged_by` as it goes, so the label reads as that
+    # person's rather than as nobody's -- and the cascade then has nothing of
+    # the rule's to take. That is a decision at the call site rather than a
+    # weaker constraint here: while a rule exists, a label naming it is the
+    # rule's.
+    #
     # A one-per-(tag, object) row, so a rule cannot re-label what a person
     # already labelled by hand, or the other way about: whichever came first
     # keeps the row, and the unique constraints below absorb the second write.

@@ -36,9 +36,11 @@ The third is where a label *came from*, since a tag's page now names it. Two
 sources write the same row — a person through ``attach_tag`` and a rule through
 ``attach_tags_by_rule`` — and the tests pin the rule that settles them: the
 first source keeps the label, in both orders, because the second insert is
-absorbed rather than applied. The cascade from ``rule`` gets its own pair, one
-each way: deleting a rule takes back what it labelled and leaves alone what a
-person did.
+absorbed rather than applied. Deleting a rule gets its own set: it takes back
+what it labelled, leaves alone what a person did, and — asked to keep the
+labels — hands them to whoever wrote the rule instead, read from the rule rather
+than from whoever is deleting it. They are that person's own labels from then
+on, which is why the next identical rule does not adopt them either.
 
 Needs a migrated database and skips without one.
 """
@@ -55,7 +57,7 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from gsf.dal import schema as s  # noqa: E402
-from gsf.dal.rules import update_rule  # noqa: E402
+from gsf.dal.rules import delete_rule, update_rule  # noqa: E402
 from gsf.dal.session import store  # noqa: E402
 from gsf.dal.tags import (  # noqa: E402
     TARGET_COLUMN,
@@ -413,18 +415,22 @@ class Tagged:
     def link(table, **values) -> None:
         store().query_write(table.insert().values(**values))
 
-    def rule(self, name: str) -> str:
+    def rule(self, name: str, *, created_by: str = "user-1") -> str:
         """A stored rule, for the labels a rule applies to carry an id.
 
         Inserted rather than created through ``gsf.dal.rules``: what a rule
         *searches* does not matter here — the search is replayed a layer up, in
         ``gsf.server.rules.service`` — and only its id reaches this table.
+
+        *created_by* is worth naming for the delete that keeps the labels: it
+        hands them to the rule's author, so a test needs to be able to make one
+        somebody in particular wrote.
         """
         return _add(
             s.rule,
             name=f"{self.prefix}-{name}",
             search_term=self.prefix,
-            created_by="user-1",
+            created_by=created_by,
         )
 
     def label(self, tag_id: str | None = None, **target) -> None:
@@ -1139,3 +1145,49 @@ def test_deleting_a_rule_leaves_a_hand_applied_label(tagged) -> None:
     store().query_write(s.rule.delete().where(s.rule.c.id == rule_id))
 
     assert [row["id"] for row in list_tag_targets(tagged.tag)] == [tagged.term]
+
+
+def test_a_rule_can_be_deleted_and_leave_its_labels_behind(tagged) -> None:
+    """``keep_tags``: handed to the rule's author, so the cascade finds none."""
+    rule_id = tagged.rule("suggestion")
+    attach_tags_by_rule(
+        rule_id=rule_id, tag_ids=[tagged.tag], targets=[(TARGET_TERM, tagged.term)]
+    )
+
+    assert delete_rule(rule_id, keep_tags=True) is True
+
+    item = tagged.items()[TARGET_TERM]
+    assert item["id"] == tagged.term
+    # The rule is gone and the person who wrote it is named instead -- these
+    # are that person's labels now, not nobody's.
+    assert item["rule"] is None
+    assert item["tagged_by"] == "user-1"
+
+
+def test_the_labels_kept_go_to_the_author_of_that_rule(tagged) -> None:
+    """Read from the rule, so a delete by an admin is not a claim of authorship."""
+    rule_id = tagged.rule("somebody-elses", created_by="user-2")
+    attach_tags_by_rule(
+        rule_id=rule_id, tag_ids=[tagged.tag], targets=[(TARGET_TERM, tagged.term)]
+    )
+
+    delete_rule(rule_id, keep_tags=True)
+
+    assert tagged.items()[TARGET_TERM]["tagged_by"] == "user-2"
+
+
+def test_a_label_left_behind_is_not_adopted_by_the_next_rule(tagged) -> None:
+    """It is a person's label now, and a rule claims no existing row."""
+    first = tagged.rule("first")
+    attach_tags_by_rule(
+        rule_id=first, tag_ids=[tagged.tag], targets=[(TARGET_TERM, tagged.term)]
+    )
+    delete_rule(first, keep_tags=True)
+
+    attach_tags_by_rule(
+        rule_id=tagged.rule("second"),
+        tag_ids=[tagged.tag],
+        targets=[(TARGET_TERM, tagged.term)],
+    )
+
+    assert tagged.items()[TARGET_TERM]["rule"] is None

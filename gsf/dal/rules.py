@@ -34,9 +34,11 @@ one rule in the shape a page holds it.
 what it *is*, and changing either would move which objects it labels while
 leaving the labels it has already written behind.
 
-:func:`delete_rule` is one statement and relies on the cascades to do the rest,
-including taking back the labels the rule applied -- see its docstring, because
-that consequence is the reason a rule is deletable at all.
+:func:`delete_rule` leans on the cascades and then cleans up after them: the
+labels the rule applied are taken back, and a tag those labels were the whole of
+goes with them. Read its docstring, because that reach is the reason a rule is
+deletable at all, and because a caller can ask for the labels to be kept
+instead.
 """
 
 from __future__ import annotations
@@ -332,24 +334,120 @@ def update_rule(
     return {**rows[0], "tags": _tags_by_rule([rule_id])[rule_id]}
 
 
-def delete_rule(rule_id: str) -> bool:
+def _delete_tags_left_labelling_nothing(tag_ids: list[str]) -> None:
+    """Delete whichever of *tag_ids* nothing holds any more.
+
+    Called after a rule is deleted, over the tags that rule applied. A tag it
+    was the only user of is left labelling nothing and named by no rule -- a
+    word in the vocabulary that describes no part of the catalog -- so it goes
+    with the rule that introduced it.
+
+    The two ``NOT EXISTS`` are the whole of "nothing holds it", because they are
+    the whole of what references a tag: ``tag_target`` for the objects carrying
+    it and ``rule__tag`` for the rules applying it. The second is not an
+    optimisation. Both cascade from ``tag``, so deleting a tag another rule
+    still applies would silently strip that rule of it, and a rule with no tags
+    applies nothing and could not have been created in the first place.
+
+    Postgres decides which rows those are, rather than a read followed by a
+    delete: the labels this rule wrote are gone by the time this runs, so the
+    condition is about the rows that are left, and asking the database keeps the
+    answer and the delete in one statement.
+    """
+    store().query_write(
+        s.tag.delete().where(
+            s.tag.c.id.in_(tag_ids),
+            ~select(literal(1)).where(s.tag_target.c.tag_id == s.tag.c.id).exists(),
+            ~select(literal(1)).where(s.rule__tag.c.tag_id == s.tag.c.id).exists(),
+        )
+    )
+
+
+def delete_rule(rule_id: str, *, keep_tags: bool = False) -> bool:
     """Delete one rule, and say whether there was one to delete.
 
     ``False`` rather than an exception for an id that is not there: the settings
     page deletes from a list it has already read, so the interesting fact is
     that its list is stale, which the route turns into a 404.
 
-    One statement, because everything else the delete has to do is a cascade
-    declared in ``gsf/dal/schema.py``. Its ``rule__tag`` rows go, and so do the
-    **labels the rule applied**: ``tag_target.rule_id`` cascades, so deleting a
-    rule takes back what it labelled and leaves hand-applied labels alone, which
-    have no ``rule_id`` to cascade from. That is the point of deleting a rule
-    rather than a property of how this is written -- a rule-applied tag is the
-    rule still holding, and it goes on re-applying as the catalog grows until
-    the rule is gone.
+    Most of what the delete does is a cascade declared in
+    ``gsf/dal/schema.py``. Its ``rule__tag`` rows go, and so do the **labels the
+    rule applied**: ``tag_target.rule_id`` cascades, so deleting a rule takes
+    back what it labelled and leaves hand-applied labels alone, which have no
+    ``rule_id`` to cascade from. That is the point of deleting a rule rather
+    than a property of how this is written -- a rule-applied tag is the rule
+    still holding, and it goes on re-applying as the catalog grows until the
+    rule is gone.
+
+    **A tag the rule leaves labelling nothing goes too**, unless another rule
+    applies it -- see :func:`_delete_tags_left_labelling_nothing`. Taking back
+    the labels is what empties it, so cleaning up after that is finishing the
+    same job: what is left otherwise is a word in the vocabulary that describes
+    no part of the catalog and that nothing will apply again. A tag with a label
+    anywhere else -- another object, another rule's doing, or a person's --
+    stays, because it still says something.
+
+    *keep_tags* is for a caller who wants the classification without the rule:
+    the labels are handed to whoever wrote the rule -- ``rule.created_by``
+    becomes their ``tagged_by`` and the ``rule_id`` is cleared, so the cascade
+    finds nothing of its own to take. They read from then on as that person's
+    own labels, which is the truest thing left to say about them: a rule is
+    somebody deciding a search's results deserve a tag, and keeping the labels
+    is standing by that decision after the mechanism is gone. No tag is emptied
+    this way, so none is deleted either.
+
+    Attributed rather than left to nobody because "nobody" reads as "Auto
+    Generated", which would be the one wrong answer: a person chose these, and
+    the record of who is right there in the rule as it is deleted. It is read
+    from the row rather than taken from the caller -- a delete can be made by
+    an admin who did not write the rule, and the labels were never theirs.
+
+    Not that this reattaches them: an identical rule created afterwards does not
+    pick them up, because :func:`gsf.dal.tags.attach_tags_by_rule` leaves an
+    existing row alone rather than claiming it -- the same rule that stops a
+    rule from overwriting a hand-applied label. Which these now are.
+
+    One transaction throughout. Half of this is worse than none of it: a failed
+    delete would otherwise leave the labels detached from a rule still on
+    screen, and a failed cleanup would leave the rule gone with tags nothing
+    can explain.
     """
-    return bool(
-        store().query_write(
-            s.rule.delete().where(s.rule.c.id == rule_id).returning(s.rule.c.id)
+    with write_transaction():
+        if keep_tags:
+            store().query_write(
+                s.tag_target.update()
+                .where(s.tag_target.c.rule_id == rule_id)
+                .values(
+                    rule_id=None,
+                    # A subquery rather than a read of its own: the rule is
+                    # still there for another statement or two, and this way
+                    # the author cannot be read from a row that changed
+                    # underneath.
+                    tagged_by=select(s.rule.c.created_by)
+                    .where(s.rule.c.id == rule_id)
+                    .scalar_subquery(),
+                )
+            )
+            return bool(
+                store().query_write(
+                    s.rule.delete().where(s.rule.c.id == rule_id).returning(s.rule.c.id)
+                )
+            )
+
+        # Read before the delete, which is the only moment the rule's tags can
+        # be known: `rule__tag` cascades, so afterwards there is nothing left
+        # saying which tags this rule was applying.
+        applied = [
+            row["tag_id"]
+            for row in store().query_read(
+                select(s.rule__tag.c.tag_id).where(s.rule__tag.c.rule_id == rule_id)
+            )
+        ]
+        deleted = bool(
+            store().query_write(
+                s.rule.delete().where(s.rule.c.id == rule_id).returning(s.rule.c.id)
+            )
         )
-    )
+        if deleted and applied:
+            _delete_tags_left_labelling_nothing(applied)
+        return deleted

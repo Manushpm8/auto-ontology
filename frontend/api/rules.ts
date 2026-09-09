@@ -71,11 +71,25 @@ export const rulesApi = {
 		requests.patch(`rules/${ruleId}`, input),
 
 	/**
-	 * Delete a rule, **and the tags it applied**: those labels exist because the
-	 * rule matched, so they go with it, while anything tagged by hand stays.
+	 * Delete a rule, and say what becomes of the tags it applied. Anything
+	 * tagged by hand is untouched either way: those rows name no rule.
+	 *
+	 * By default the labels go with the rule — they exist because it matched, so
+	 * without it they are claims nothing can explain — and a tag those labels
+	 * were the whole of goes too, unless another rule applies it. `keepTags`
+	 * leaves them where they are instead, attributed to whoever wrote the rule,
+	 * so the tag's page names that person rather than the rule; nothing is
+	 * emptied that way, so no tag is deleted either.
+	 *
+	 * Keeping them is not a detach-and-reattach: recreating the same rule will
+	 * not adopt the labels left behind, because a rule never claims a label that
+	 * is already there.
 	 *
 	 * 404 when the rule is already gone, which means the caller's list is stale.
 	 */
-	delete: (ruleId: string): Promise<ResponseWithError<{ data: { id: string } }>> =>
-		requests.delete(`rules/${ruleId}`),
+	delete: (
+		ruleId: string,
+		options?: { keepTags?: boolean },
+	): Promise<ResponseWithError<{ data: { id: string } }>> =>
+		requests.delete(`rules/${ruleId}${options?.keepTags ? '?keep_tags=true' : ''}`),
 };

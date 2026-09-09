@@ -4619,7 +4619,7 @@
     },
     "/api/rules/{rule_id}": {
       "delete": {
-        "description": "rulesApi.delete — remove a rule, and with it the tags it applied (admin\nonly). `tag: ['manage']` rather than the `catalog: ['edit']` that guards\napplying a single tag: this un-tags every object the rule matched in one\nrequest, which is a change to the vocabulary's reach rather than an edit of\nany one object.\n\nNo identity forwarded: nothing survives the delete to record an actor on.",
+        "description": "rulesApi.delete — remove a rule, and with it the tags it applied unless\n`?keep_tags=true` says to leave them (admin only). `tag: ['manage']` rather\nthan the `catalog: ['edit']` that guards applying a single tag: this un-tags\nevery object the rule matched in one request, and can remove a tag from the\nvocabulary outright when the rule was the whole of what used it — a change to\nthe vocabulary rather than an edit of any one object.\n\nNo identity forwarded: nothing survives the delete to record an actor on.",
         "operationId": "delete_api_rules_rule_id_",
         "parameters": [
           {
@@ -4629,6 +4629,18 @@
             "schema": {
               "title": "Rule Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Leave the tags the rule applied on their objects, attributed to nothing, instead of removing them with the rule.",
+            "in": "query",
+            "name": "keep_tags",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Leave the tags the rule applied on their objects, attributed to nothing, instead of removing them with the rule.",
+              "title": "Keep Tags",
+              "type": "boolean"
             }
           }
         ],
@@ -4660,7 +4672,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "rulesApi.delete — remove a rule, and with it the tags it applied (admin only).",
+        "summary": "Delete Rule",
         "tags": ["rules"],
         "security": [
           {

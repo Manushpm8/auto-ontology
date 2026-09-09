@@ -400,15 +400,42 @@ def update_rule(request: Request, rule_id: str, body: RuleUpdate) -> dict:
 
 
 @router.delete("/rules/{rule_id}", response_model=IdResponse)
-def delete_rule(rule_id: str) -> dict:
+def delete_rule(
+    rule_id: str,
+    keep_tags: bool = Query(
+        default=False,
+        description=(
+            "Leave the tags the rule applied on their objects, attributed to "
+            "nothing, instead of removing them with the rule."
+        ),
+    ),
+) -> dict:
     """Delete one rule by id.
 
-    **This also takes back every tag the rule applied.** The labels it wrote
-    cascade with it -- see ``rules_dal.delete_rule`` -- while labels people
-    applied by hand stay, including on an object the rule had also matched,
-    because those rows record no rule to cascade from. A rule goes on labelling
-    the catalog as the catalog grows, so leaving its labels behind would leave
-    tags nothing on screen could explain and nothing could re-apply.
+    **This also takes back every tag the rule applied**, unless ``keep_tags``
+    says otherwise. The labels it wrote cascade with it -- see
+    ``rules_dal.delete_rule`` -- while labels people applied by hand stay,
+    including on an object the rule had also matched, because those rows record
+    no rule to cascade from. A rule goes on labelling the catalog as the catalog
+    grows, so by default its labels are not left behind for nothing on screen to
+    explain and nothing to re-apply.
+
+    **And a tag left labelling nothing is deleted**, unless another rule applies
+    it: emptying it is what this request just did, and a tag that describes no
+    part of the catalog and that nothing will apply again is not vocabulary. One
+    that still labels anything -- another object, or the same one by a person's
+    hand -- stays.
+
+    ``keep_tags`` is the other reading, and a defensible one: the labels are a
+    classification that happens to have come from a rule, worth keeping once the
+    rule that suggested them is gone. They stay where they are, attributed to
+    whoever wrote the rule -- a rule is a person deciding a search's results
+    deserve a tag, so their own labels is what is left when the mechanism goes,
+    and the tag's page names them there. Not the caller, who may be an admin
+    deleting somebody else's rule. Recreating the same rule afterwards does not
+    adopt them -- an existing label is left alone rather than claimed, the same
+    way a rule cannot take over a hand-applied one -- so this is a way to keep
+    the labels, not a way to detach and reattach them.
 
     404 rather than a silent 204 for an id that is not there: the settings page
     deletes from a list it has already read, so a missing rule means that list
@@ -417,6 +444,6 @@ def delete_rule(rule_id: str) -> dict:
     Answers with the id, as deleting a tag does, so a caller has the row it just
     removed without holding on to what it sent.
     """
-    if not rules_dal.delete_rule(rule_id):
+    if not rules_dal.delete_rule(rule_id, keep_tags=keep_tags):
         raise _no_such_rule(rule_id)
     return {"data": {"id": rule_id}}

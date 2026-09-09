@@ -110,7 +110,7 @@
   "rules": {
     "count_rules": "(*, search: 'str | None' = None) -> 'int'",
     "create_rule": "(*, name: 'str', search_term: 'str', text_match_option: 'str', filters: 'dict[str, Any]', tags: 'list[dict[str, Any]]', created_by: 'str') -> 'str'",
-    "delete_rule": "(rule_id: 'str') -> 'bool'",
+    "delete_rule": "(rule_id: 'str', *, keep_tags: 'bool' = False) -> 'bool'",
     "get_rule": "(rule_id: 'str') -> 'dict[str, Any] | None'",
     "list_rules": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "update_rule": "(*, rule_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
