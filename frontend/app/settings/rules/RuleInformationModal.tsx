@@ -133,28 +133,18 @@ export const RuleInformationModal = ({
 					</Row>
 				</div>
 
+				{/* The search, as much of it as is worth reading back: the term it
+				    replays and the kinds of object it labels. The rest of what was
+				    saved with it — the match option, and whether descriptions and
+				    synonyms were searched — is how the search was run rather than
+				    anything about this rule, and reading it changes no decision
+				    anyone makes here. */}
 				<div className="space-y-2 px-5 py-4">
 					<Row icon={IconName.Exploration} label="Searched Word">
 						{`'${rule.search_term}'`}
 					</Row>
-					<Row icon={IconName.Settings} label="Match Type">
-						{rule.text_match_option}
-					</Row>
-				</div>
-
-				{/* The three that were true of the search when it was saved, and are
-				    true of it every time the rule replays it. Spelled out rather than
-				    shown only when set: "searched descriptions too" and "did not" are
-				    both worth knowing about a rule that labels on its own. */}
-				<div className="space-y-2 px-5 py-4">
 					<Row icon={IconName.Column} label="Applies To">
 						{scopeLabel(rule)}
-					</Row>
-					<Row icon={IconName.Terms} label="Search In Description">
-						{rule.filters.description ? 'True' : 'False'}
-					</Row>
-					<Row icon={IconName.Link} label="Search With Synonyms">
-						{rule.filters.synonyms ? 'True' : 'False'}
 					</Row>
 				</div>
 			</div>

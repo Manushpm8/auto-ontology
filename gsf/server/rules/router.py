@@ -27,10 +27,8 @@ that is gone is worth a 404 naming it rather than a constraint violation.
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from gsf.dal import rules as rules_dal
 from gsf.dal import tags as tags_dal
@@ -52,27 +50,19 @@ router = APIRouter()
 class RuleTagRef(BaseModel):
     """One tag a rule applies, as a caller names it.
 
-    Whole objects rather than bare ids, so a client can post the tags it is
-    already holding without reducing them first. Only ``id`` is required, and
-    only ``id`` is checked: :func:`_resolved_tags` looks it up in the tag table,
-    because a rule applying a tag that does not exist would label nothing while
-    claiming otherwise.
+    An object rather than a bare id, so a client can post the tags it is
+    already holding without reducing them first, and anything else it carries
+    -- a name, a timestamp, whatever its own tag model holds -- is ignored
+    rather than turning a perfectly good tag into a 422.
 
-    ``extra="allow"`` so the fields a caller happens to carry -- a created
-    timestamp, a label, whatever its own tag model holds -- survive the round
-    trip instead of turning a perfectly good tag into a 422. They come back on
-    the created rule exactly as they arrived: the answer is the tag the caller
-    posted, so a client redraws its chips from the response without having to
-    merge it against the objects it already had.
-
-    ``name`` is the one field this fills in when it is missing, from the tag
-    table, so every tag in the answer has something to render.
+    Ignored rather than stored, because the tag table already says all of it,
+    and better: a read joins to it, so a rule answers with each tag as it is
+    now rather than as it looked when the rule was saved. What is checked is
+    the id, in :func:`_resolved_tags` -- a rule applying a tag that does not
+    exist would label nothing while claiming otherwise.
     """
 
-    model_config = ConfigDict(extra="allow")
-
     id: str
-    name: str | None = None
 
 
 class RuleCreate(BaseModel):
@@ -162,20 +152,17 @@ def _validated_match_option(option: str) -> str:
     return option
 
 
-def _resolved_tags(tags: list[RuleTagRef]) -> list[dict[str, Any]]:
-    """*tags* as they arrived, or a 404 naming the first id that is not a tag.
+def _resolved_tags(tags: list[RuleTagRef]) -> list[str]:
+    """The ids in *tags*, or a 404 naming the first that is not a tag.
 
-    Every field a caller sent is echoed, not just ``id`` and ``name``: the tags
-    are the part of the rule the client picked, and answering with a narrower
-    copy of them would make the response something it has to merge rather than
-    something it can render. Only ``name`` is supplied here, and only when the
-    caller left it out, since it is the one field there is nothing to draw
-    without.
+    Ids alone are what a rule stores. Whatever else a caller posted about a tag
+    is the tag table's to say, and a read says it from there, so there is
+    nothing here to carry forward.
 
-    The ids are read against the tag table rather than taken on trust. The tags
-    are the half of a rule that already has a table, so this is checkable today,
-    and a rule applying a tag that does not exist would label nothing while
-    claiming otherwise.
+    The ids are read against that table rather than taken on trust. The tags are
+    the half of a rule that already has a table, so this is checkable today, and
+    a rule applying a tag that does not exist would label nothing while claiming
+    otherwise.
 
     Order follows the request, so the tags come back in the order they were
     picked. Repeats collapse: two clicks on one tag are one intention, the way
@@ -193,24 +180,20 @@ def _resolved_tags(tags: list[RuleTagRef]) -> list[dict[str, Any]]:
             status_code=400, detail="A rule must apply at least one tag"
         )
 
-    known = {tag["id"]: tag for tag in tags_dal.list_tags()}
-    resolved: list[dict[str, Any]] = []
+    known = {tag["id"] for tag in tags_dal.list_tags()}
+    resolved: list[str] = []
     seen: set[str] = set()
     for ref in tags:
         tag_id = ref.id
         if tag_id in seen:
             continue
         seen.add(tag_id)
-        tag = known.get(tag_id)
-        if tag is None:
+        if tag_id not in known:
             # 404 for the reason the tag routes give one: the dialog picked from
             # a list it had already read, so an id that is gone means that list
             # is stale.
             raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
-        sent = ref.model_dump()
-        if sent.get("name") is None:
-            sent["name"] = tag["name"]
-        resolved.append(sent)
+        resolved.append(tag_id)
     return resolved
 
 
@@ -309,7 +292,7 @@ def create_rule(request: Request, body: RuleCreate) -> dict:
             search_term=search_term,
             text_match_option=text_match_option,
             filters=filters,
-            tag_ids=[tag["id"] for tag in tags],
+            tag_ids=tags,
         )
     return {"data": {"id": rule_id}}
 

@@ -26,10 +26,9 @@ leave a reader unable to say which they are about to delete.
 ``rule__tag`` keys on ``(rule_id, tag_id)`` and cascades from both sides, so a
 tag deleted from the vocabulary leaves the rules that applied it rather than
 leaving them pointing at an id that names nothing. ``position`` records the
-order the tags were picked in, which the primary key does not. ``sent`` is the
-tag object as the caller posted it, kept so a read answers with the tag that
-was picked; ``tag_id`` beside it is the source of truth, and a read takes the
-name from ``tag``.
+order the tags were picked in, which the primary key does not, and is all the
+table holds beyond the two ids: everything else about a tag is read through the
+foreign key, so nothing here can disagree with the vocabulary.
 
 On ``tag_target``, ``tagged_by`` is the account that clicked, as a Better Auth
 user id from the gateway's identity header, and ``rule_id`` is the rule that
@@ -114,7 +113,6 @@ def upgrade() -> None:
         sa.Column("rule_id", sa.Text(), nullable=False),
         sa.Column("tag_id", sa.Text(), nullable=False),
         sa.Column("position", sa.Integer(), nullable=False),
-        sa.Column("sent", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.ForeignKeyConstraint(
             ["rule_id"],
             ["rule.id"],

@@ -993,16 +993,12 @@ rule__tag = Table(
     ),
     # The order the tags were picked in, so a rule reads back as it was written.
     # The composite primary key orders by id, which is not that.
-    Column("position", Integer, nullable=False),
-    # The tag object as the caller posted it, kept so a read answers with what
-    # was sent rather than a narrower copy of it -- see `RuleTagRef` in
-    # `gsf/server/rules/router.py`.
     #
-    # `tag_id` beside it is the source of truth, not this: the id here is
-    # checked by the foreign key, the name is re-read from `tag` on every read,
-    # and everything else is a snapshot of somebody else's model that nothing
-    # keeps up to date. Null for a caller that sent a bare id.
-    Column("sent", JSONB, nullable=True),
+    # The id and the position are the whole of what this table has to say. A
+    # tag's own columns are the `tag` table's, read through the foreign key on
+    # every read, so a renamed tag reads back renamed here and no copy of it
+    # can go stale beside the original.
+    Column("position", Integer, nullable=False),
 )
 
 # ---------------------------------------------------------------------------

@@ -9696,7 +9696,7 @@
       },
       "Rule": {
         "additionalProperties": true,
-        "description": "A saved search, and the tags to apply to everything it matches.\n\n``search_term``, ``text_match_option`` and ``filters`` are the global-search\nrequest the rule replays; together they are what the rule *is*, which is why\nthey are required rather than optional like most of this module — a rule\nmissing any of the three matches nothing.\n\n``tags`` carry at least the name to show and the id to act by, and whatever\nelse the write that saved them sent: a caller posting whole tag objects gets\nwhole tag objects back — see ``RuleTagRef`` in\n``gsf/server/rules/router.py``. Only the ids are checked, against the tag\ntable, so a rule cannot apply a tag that does not exist.\n\n``created_by`` is the id of the user who saved it, read from the trusted\ngateway header rather than from the request body — see\n``gsf/server/chat/identity.py``. ``modified_by`` is the same for whoever\nlast renamed it, and null until somebody has — which is the same fact as\n``modified`` still equalling ``created``, and null again for a rename whose\nrequest carried no identity to record.\n\n``created`` and ``modified`` follow the convention :class:`Tag` sets: a\ntimezone-aware ``datetime`` serialised as ISO 8601, from one clock.",
+        "description": "A saved search, and the tags to apply to everything it matches.\n\n``search_term``, ``text_match_option`` and ``filters`` are the global-search\nrequest the rule replays; together they are what the rule *is*, which is why\nthey are required rather than optional like most of this module — a rule\nmissing any of the three matches nothing.\n\n``tags`` carry the name to show and the id to act by, both read from the tag\ntable on every read rather than from what the write that saved them sent —\nso a renamed tag reads back renamed here, and a caller posting whole tag\nobjects is answered with the tags as they are rather than as it sent them.\nSee ``RuleTagRef`` in ``gsf/server/rules/router.py``. The ids are checked\nagainst that table, so a rule cannot apply a tag that does not exist.\n\n``created_by`` is the id of the user who saved it, read from the trusted\ngateway header rather than from the request body — see\n``gsf/server/chat/identity.py``. ``modified_by`` is the same for whoever\nlast renamed it, and null until somebody has — which is the same fact as\n``modified`` still equalling ``created``, and null again for a rename whose\nrequest carried no identity to record.\n\n``created`` and ``modified`` follow the convention :class:`Tag` sets: a\ntimezone-aware ``datetime`` serialised as ISO 8601, from one clock.",
         "properties": {
           "created": {
             "format": "date-time",
@@ -9827,23 +9827,11 @@
         "type": "object"
       },
       "RuleTagRef": {
-        "additionalProperties": true,
-        "description": "One tag a rule applies, as a caller names it.\n\nWhole objects rather than bare ids, so a client can post the tags it is\nalready holding without reducing them first. Only ``id`` is required, and\nonly ``id`` is checked: :func:`_resolved_tags` looks it up in the tag table,\nbecause a rule applying a tag that does not exist would label nothing while\nclaiming otherwise.\n\n``extra=\"allow\"`` so the fields a caller happens to carry -- a created\ntimestamp, a label, whatever its own tag model holds -- survive the round\ntrip instead of turning a perfectly good tag into a 422. They come back on\nthe created rule exactly as they arrived: the answer is the tag the caller\nposted, so a client redraws its chips from the response without having to\nmerge it against the objects it already had.\n\n``name`` is the one field this fills in when it is missing, from the tag\ntable, so every tag in the answer has something to render.",
+        "description": "One tag a rule applies, as a caller names it.\n\nAn object rather than a bare id, so a client can post the tags it is\nalready holding without reducing them first, and anything else it carries\n-- a name, a timestamp, whatever its own tag model holds -- is ignored\nrather than turning a perfectly good tag into a 422.\n\nIgnored rather than stored, because the tag table already says all of it,\nand better: a read joins to it, so a rule answers with each tag as it is\nnow rather than as it looked when the rule was saved. What is checked is\nthe id, in :func:`_resolved_tags` -- a rule applying a tag that does not\nexist would label nothing while claiming otherwise.",
         "properties": {
           "id": {
             "title": "Id",
             "type": "string"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
           }
         },
         "required": ["id"],

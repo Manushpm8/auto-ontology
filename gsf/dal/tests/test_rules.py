@@ -11,12 +11,10 @@ rule with no tags applies nothing, so the test that matters is not that the
 happy path inserts both — it is that a tag id the foreign key rejects leaves no
 rule behind at all.
 
-The second is what a read is allowed to believe. ``rule__tag.sent`` is whatever
-the caller posted, including fields from a model this schema knows nothing
-about, and it is kept so a read answers with the tag that was picked. It is not
-the source of truth: the id is the foreign key's, the name is the tag table's,
-and the tests pin both by posting a stale name and renaming a tag underneath a
-saved rule.
+The second is what a read is allowed to believe about a tag. ``rule__tag`` keeps
+an id and a position and nothing else, so every field a rule answers with comes
+from the ``tag`` table through the join -- which the tests pin by renaming a tag
+underneath a saved rule and by deleting one out from under it.
 
 The third is order and the page taken from it. The tags come back in the order
 they were picked, which the composite primary key does not give; the rules come
@@ -104,7 +102,7 @@ def prefix():
     store().query_write(s.term.delete().where(s.term.c.name.like(f"%{value}%")))
 
 
-def _saved(prefix: str, *, name: str | None = None, tags: list[dict]) -> str:
+def _saved(prefix: str, *, name: str | None = None, tags: list[str]) -> str:
     """A rule with *tags*, saved. Returns its id."""
     return create_rule(
         name=name or f"{prefix}-rule",
@@ -135,7 +133,7 @@ def _term(prefix: str) -> str:
 def test_a_saved_rule_reads_back_with_what_it_was_given(prefix) -> None:
     tag = create_tag(name=f"{prefix}-pii")
 
-    rule_id = _saved(prefix, tags=[{"id": tag["id"], "name": tag["name"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
 
     rule = _read(rule_id)
     assert rule["name"] == f"{prefix}-rule"
@@ -150,52 +148,24 @@ def test_the_timestamps_come_from_the_database(prefix) -> None:
     """Both from one clock, and a fresh rule has not been modified."""
     tag = create_tag(name=f"{prefix}-pii")
 
-    rule = _read(_saved(prefix, tags=[{"id": tag["id"]}]))
+    rule = _read(_saved(prefix, tags=[tag["id"]]))
 
     assert rule["created"].tzinfo is not None
     assert rule["modified"] == rule["created"]
 
 
-def test_everything_a_caller_sent_with_a_tag_survives(prefix) -> None:
-    """The point of ``sent``: a client's own fields come back untouched."""
+def test_a_tag_reads_back_as_the_vocabulary_has_it(prefix) -> None:
+    """An id and a name from the tag table, and nothing of the write's own."""
     tag = create_tag(name=f"{prefix}-pii")
 
-    rule_id = _saved(
-        prefix,
-        tags=[
-            {
-                "id": tag["id"],
-                "name": tag["name"],
-                "label": "tag",
-                "type": "tag",
-                "created_date": {"year": 2024},
-            }
-        ],
-    )
+    rule_id = _saved(prefix, tags=[tag["id"]])
 
-    assert _read(rule_id)["tags"] == [
-        {
-            "id": tag["id"],
-            "name": tag["name"],
-            "label": "tag",
-            "type": "tag",
-            "created_date": {"year": 2024},
-        }
-    ]
-
-
-def test_the_name_comes_from_the_tag_table_not_from_what_was_sent(prefix) -> None:
-    """A posted name is a snapshot, and the vocabulary outranks it."""
-    tag = create_tag(name=f"{prefix}-pii")
-
-    rule_id = _saved(prefix, tags=[{"id": tag["id"], "name": "whatever-was-cached"}])
-
-    assert _read(rule_id)["tags"][0]["name"] == f"{prefix}-pii"
+    assert _read(rule_id)["tags"] == [{"id": tag["id"], "name": tag["name"]}]
 
 
 def test_a_renamed_tag_reads_back_under_its_new_name(prefix) -> None:
     tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, tags=[{"id": tag["id"], "name": tag["name"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
 
     store().query_write(
         s.tag.update().where(s.tag.c.id == tag["id"]).values(name=f"{prefix}-gdpr")
@@ -208,7 +178,7 @@ def test_the_tags_keep_the_order_they_were_picked_in(prefix) -> None:
     """``position``'s whole job -- the primary key orders by id instead."""
     picked = [create_tag(name=f"{prefix}-{n}") for n in ("gamma", "alpha", "beta")]
 
-    rule_id = _saved(prefix, tags=[{"id": tag["id"]} for tag in picked])
+    rule_id = _saved(prefix, tags=[tag["id"] for tag in picked])
 
     assert [tag["id"] for tag in _read(rule_id)["tags"]] == [t["id"] for t in picked]
 
@@ -217,7 +187,7 @@ def test_a_deleted_tag_leaves_the_rules_that_applied_it(prefix) -> None:
     """The cascade, which is why the tags are a link table and not a blob."""
     kept = create_tag(name=f"{prefix}-kept")
     dropped = create_tag(name=f"{prefix}-dropped")
-    rule_id = _saved(prefix, tags=[{"id": kept["id"]}, {"id": dropped["id"]}])
+    rule_id = _saved(prefix, tags=[kept["id"], dropped["id"]])
 
     store().query_write(s.tag.delete().where(s.tag.c.id == dropped["id"]))
 
@@ -227,7 +197,7 @@ def test_a_deleted_tag_leaves_the_rules_that_applied_it(prefix) -> None:
 def test_a_tag_that_is_not_a_tag_saves_no_rule(prefix) -> None:
     """The transaction: a rule row that outlived its tags would apply nothing."""
     with pytest.raises(IntegrityError):
-        _saved(prefix, tags=[{"id": "not-a-tag"}])
+        _saved(prefix, tags=["not-a-tag"])
 
     assert [rule for rule in list_rules() if prefix in rule["name"]] == []
 
@@ -236,7 +206,7 @@ def test_the_listing_is_ordered_case_insensitively(prefix) -> None:
     """``ORDER BY name`` would put every capital ahead of every lowercase."""
     tag = create_tag(name=f"{prefix}-pii")
     for name in (f"{prefix}-beta", f"{prefix}-Alpha", f"{prefix}-gamma"):
-        _saved(prefix, name=name, tags=[{"id": tag["id"]}])
+        _saved(prefix, name=name, tags=[tag["id"]])
 
     names = [rule["name"] for rule in list_rules() if prefix in rule["name"]]
     assert names == [f"{prefix}-Alpha", f"{prefix}-beta", f"{prefix}-gamma"]
@@ -246,7 +216,7 @@ def test_a_page_is_a_window_on_one_order(prefix) -> None:
     """Two pages of one list: neither repeats a rule nor skips one."""
     tag = create_tag(name=f"{prefix}-pii")
     for name in (f"{prefix}-c", f"{prefix}-a", f"{prefix}-b"):
-        _saved(prefix, name=name, tags=[{"id": tag["id"]}])
+        _saved(prefix, name=name, tags=[tag["id"]])
 
     first = list_rules(search=prefix, skip=0, limit=2)
     second = list_rules(search=prefix, skip=2, limit=2)
@@ -258,7 +228,7 @@ def test_a_page_is_a_window_on_one_order(prefix) -> None:
 def test_the_total_counts_the_whole_match_not_the_page(prefix) -> None:
     tag = create_tag(name=f"{prefix}-pii")
     for name in (f"{prefix}-a", f"{prefix}-b", f"{prefix}-c"):
-        _saved(prefix, name=name, tags=[{"id": tag["id"]}])
+        _saved(prefix, name=name, tags=[tag["id"]])
 
     assert len(list_rules(search=prefix, limit=2)) == 2
     assert count_rules(search=prefix) == 3
@@ -266,8 +236,8 @@ def test_the_total_counts_the_whole_match_not_the_page(prefix) -> None:
 
 def test_a_search_matches_the_rule_name(prefix) -> None:
     tag = create_tag(name=f"{prefix}-pii")
-    _saved(prefix, name=f"{prefix}-customers", tags=[{"id": tag["id"]}])
-    _saved(prefix, name=f"{prefix}-orders", tags=[{"id": tag["id"]}])
+    _saved(prefix, name=f"{prefix}-customers", tags=[tag["id"]])
+    _saved(prefix, name=f"{prefix}-orders", tags=[tag["id"]])
 
     found = list_rules(search=f"{prefix}-CUSTOM")
 
@@ -279,8 +249,8 @@ def test_a_search_matches_the_name_of_a_tag_the_rule_applies(prefix) -> None:
     """The other half of what a card shows, so it is searchable too."""
     confidential = create_tag(name=f"{prefix}-confidential")
     public = create_tag(name=f"{prefix}-public")
-    _saved(prefix, name=f"{prefix}-one", tags=[{"id": confidential["id"]}])
-    _saved(prefix, name=f"{prefix}-two", tags=[{"id": public["id"]}])
+    _saved(prefix, name=f"{prefix}-one", tags=[confidential["id"]])
+    _saved(prefix, name=f"{prefix}-two", tags=[public["id"]])
 
     found = list_rules(search=f"{prefix}-confidential")
 
@@ -291,7 +261,7 @@ def test_a_rule_matching_on_several_tags_is_one_row(prefix) -> None:
     """The tag half is an ``EXISTS``; a join would return the rule per tag."""
     first = create_tag(name=f"{prefix}-pii-a")
     second = create_tag(name=f"{prefix}-pii-b")
-    _saved(prefix, tags=[{"id": first["id"]}, {"id": second["id"]}])
+    _saved(prefix, tags=[first["id"], second["id"]])
 
     assert len(list_rules(search=f"{prefix}-pii")) == 1
     assert count_rules(search=f"{prefix}-pii") == 1
@@ -302,8 +272,8 @@ def test_two_rules_do_not_borrow_each_other_s_tags(prefix) -> None:
     first = create_tag(name=f"{prefix}-first")
     second = create_tag(name=f"{prefix}-second")
 
-    one = _saved(prefix, name=f"{prefix}-one", tags=[{"id": first["id"]}])
-    two = _saved(prefix, name=f"{prefix}-two", tags=[{"id": second["id"]}])
+    one = _saved(prefix, name=f"{prefix}-one", tags=[first["id"]])
+    two = _saved(prefix, name=f"{prefix}-two", tags=[second["id"]])
 
     assert [tag["id"] for tag in _read(one)["tags"]] == [first["id"]]
     assert [tag["id"] for tag in _read(two)["tags"]] == [second["id"]]
@@ -317,7 +287,7 @@ def test_two_rules_do_not_borrow_each_other_s_tags(prefix) -> None:
 def test_one_rule_reads_the_same_as_its_row_in_the_list(prefix) -> None:
     """Two reads of one rule, so a caller renders it the same either way."""
     tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
 
     assert get_rule(rule_id) == _read(rule_id)
 
@@ -329,7 +299,7 @@ def test_reading_an_id_that_is_not_a_rule_is_nothing(prefix) -> None:
 def test_a_rename_changes_the_name_and_nothing_else(prefix) -> None:
     """A name labels the rule in the settings list; the search *is* the rule."""
     tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
     before = _read(rule_id)
 
     renamed = update_rule(rule_id=rule_id, name=f"{prefix}-renamed")
@@ -347,7 +317,7 @@ def test_a_rename_changes_the_name_and_nothing_else(prefix) -> None:
 def test_a_rename_records_who_made_it_and_that_it_happened(prefix) -> None:
     """``modified`` past ``created`` is the fact that this rule was renamed."""
     tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
 
     renamed = update_rule(
         rule_id=rule_id, name=f"{prefix}-renamed", modified_by="user-2"
@@ -361,7 +331,7 @@ def test_a_rename_records_who_made_it_and_that_it_happened(prefix) -> None:
 def test_a_rename_naming_nobody_does_not_credit_the_last_editor(prefix) -> None:
     """Written on every rename: the previous editor did not make this one."""
     tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
     update_rule(rule_id=rule_id, name=f"{prefix}-once", modified_by="user-2")
 
     renamed = update_rule(rule_id=rule_id, name=f"{prefix}-twice")
@@ -373,7 +343,7 @@ def test_a_rename_naming_nobody_does_not_credit_the_last_editor(prefix) -> None:
 def test_a_fresh_rule_has_no_editor(prefix) -> None:
     tag = create_tag(name=f"{prefix}-pii")
 
-    assert _read(_saved(prefix, tags=[{"id": tag["id"]}]))["modified_by"] is None
+    assert _read(_saved(prefix, tags=[tag["id"]]))["modified_by"] is None
 
 
 def test_renaming_an_id_that_is_not_a_rule_is_nothing(prefix) -> None:
@@ -383,8 +353,8 @@ def test_renaming_an_id_that_is_not_a_rule_is_nothing(prefix) -> None:
 def test_a_rename_onto_a_name_another_rule_holds_is_refused(prefix) -> None:
     """One name has to name one rule: a delete takes back what a rule labelled."""
     tag = create_tag(name=f"{prefix}-pii")
-    _saved(prefix, name=f"{prefix}-taken", tags=[{"id": tag["id"]}])
-    other = _saved(prefix, name=f"{prefix}-other", tags=[{"id": tag["id"]}])
+    _saved(prefix, name=f"{prefix}-taken", tags=[tag["id"]])
+    other = _saved(prefix, name=f"{prefix}-other", tags=[tag["id"]])
 
     with pytest.raises(ValueError):
         update_rule(rule_id=other, name=f"  {prefix}-TAKEN  ")
@@ -395,7 +365,7 @@ def test_a_rename_onto_a_name_another_rule_holds_is_refused(prefix) -> None:
 def test_a_rule_may_be_renamed_to_the_name_it_has(prefix) -> None:
     """Its own row is not a collision: re-typing a name is an ordinary rename."""
     tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, name=f"{prefix}-rule", tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, name=f"{prefix}-rule", tags=[tag["id"]])
 
     assert update_rule(rule_id=rule_id, name=f"{prefix}-rule") is not None
 
@@ -403,7 +373,7 @@ def test_a_rule_may_be_renamed_to_the_name_it_has(prefix) -> None:
 def test_a_rename_may_change_only_the_case_of_a_name(prefix) -> None:
     """How a rule created shouting gets fixed."""
     tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, name=f"{prefix}-RULE", tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, name=f"{prefix}-RULE", tags=[tag["id"]])
 
     renamed = update_rule(rule_id=rule_id, name=f"{prefix}-rule")
 
@@ -413,10 +383,10 @@ def test_a_rename_may_change_only_the_case_of_a_name(prefix) -> None:
 
 def test_a_second_rule_cannot_be_created_under_a_name_in_use(prefix) -> None:
     tag = create_tag(name=f"{prefix}-pii")
-    _saved(prefix, name=f"{prefix}-taken", tags=[{"id": tag["id"]}])
+    _saved(prefix, name=f"{prefix}-taken", tags=[tag["id"]])
 
     with pytest.raises(ValueError):
-        _saved(prefix, name=f"{prefix}-TAKEN ", tags=[{"id": tag["id"]}])
+        _saved(prefix, name=f"{prefix}-TAKEN ", tags=[tag["id"]])
 
     assert count_rules(search=prefix) == 1
 
@@ -428,7 +398,7 @@ def test_a_second_rule_cannot_be_created_under_a_name_in_use(prefix) -> None:
 
 def test_deleting_a_rule_removes_it_and_says_it_did(prefix) -> None:
     tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
 
     assert delete_rule(rule_id) is True
     assert [rule["id"] for rule in list_rules(search=prefix)] == []
@@ -448,7 +418,7 @@ def test_keeping_the_tags_of_an_id_that_is_not_a_rule_is_reported_too(prefix) ->
 def test_deleting_a_rule_takes_its_tag_links_with_it(prefix) -> None:
     """``rule__tag`` cascades, so no link outlives the rule that held it."""
     tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
 
     delete_rule(rule_id)
 
@@ -462,7 +432,7 @@ def test_deleting_a_rule_takes_a_tag_it_leaves_labelling_nothing(prefix) -> None
     """Emptying the tag is what the delete did, so it finishes the job."""
     tag = create_tag(name=f"{prefix}-pii")
 
-    delete_rule(_saved(prefix, tags=[{"id": tag["id"]}]))
+    delete_rule(_saved(prefix, tags=[tag["id"]]))
 
     assert store().query_read(s.tag.select().where(s.tag.c.id == tag["id"])) == []
 
@@ -471,7 +441,7 @@ def test_deleting_a_rule_takes_the_tag_it_had_labelled_with(prefix) -> None:
     """The cascade empties the tag, and the tag then follows the labels."""
     tag = create_tag(name=f"{prefix}-pii")
     term = _term(prefix)
-    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
     attach_tags_by_rule(
         rule_id=rule_id, tag_ids=[tag["id"]], targets=[(TARGET_TERM, term)]
     )
@@ -487,7 +457,7 @@ def test_deleting_a_rule_leaves_a_tag_that_still_labels_something(prefix) -> Non
     term = _term(prefix)
     attach_tag(tag_id=tag["id"], kind=TARGET_TERM, item_id=term, tagged_by="user-1")
 
-    delete_rule(_saved(prefix, tags=[{"id": tag["id"]}]))
+    delete_rule(_saved(prefix, tags=[tag["id"]]))
 
     assert store().query_read(s.tag.select().where(s.tag.c.id == tag["id"]))
 
@@ -495,9 +465,9 @@ def test_deleting_a_rule_leaves_a_tag_that_still_labels_something(prefix) -> Non
 def test_deleting_a_rule_leaves_a_tag_another_rule_applies(prefix) -> None:
     """Deleting it would strip that rule of the only tag it had."""
     tag = create_tag(name=f"{prefix}-pii")
-    kept = _saved(prefix, name=f"{prefix}-two", tags=[{"id": tag["id"]}])
+    kept = _saved(prefix, name=f"{prefix}-two", tags=[tag["id"]])
 
-    delete_rule(_saved(prefix, name=f"{prefix}-one", tags=[{"id": tag["id"]}]))
+    delete_rule(_saved(prefix, name=f"{prefix}-one", tags=[tag["id"]]))
 
     assert store().query_read(s.tag.select().where(s.tag.c.id == tag["id"]))
     assert [applied["id"] for applied in _read(kept)["tags"]] == [tag["id"]]
@@ -507,7 +477,7 @@ def test_keeping_the_tags_keeps_the_tag_itself(prefix) -> None:
     """Nothing was emptied, so nothing is cleaned up: the labels are still on."""
     tag = create_tag(name=f"{prefix}-pii")
     term = _term(prefix)
-    rule_id = _saved(prefix, tags=[{"id": tag["id"]}])
+    rule_id = _saved(prefix, tags=[tag["id"]])
     attach_tags_by_rule(
         rule_id=rule_id, tag_ids=[tag["id"]], targets=[(TARGET_TERM, term)]
     )
@@ -519,8 +489,8 @@ def test_keeping_the_tags_keeps_the_tag_itself(prefix) -> None:
 
 def test_deleting_one_rule_leaves_another_that_applies_the_same_tag(prefix) -> None:
     tag = create_tag(name=f"{prefix}-pii")
-    doomed = _saved(prefix, name=f"{prefix}-one", tags=[{"id": tag["id"]}])
-    kept = _saved(prefix, name=f"{prefix}-two", tags=[{"id": tag["id"]}])
+    doomed = _saved(prefix, name=f"{prefix}-one", tags=[tag["id"]])
+    kept = _saved(prefix, name=f"{prefix}-two", tags=[tag["id"]])
 
     delete_rule(doomed)
 

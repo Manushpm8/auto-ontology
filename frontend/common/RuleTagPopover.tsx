@@ -76,7 +76,15 @@ const RuleTagForm = ({ itemsCount, onSubmit, onNavigate, onDone }: RuleTagFormPr
 				setError(response.message ?? 'Failed to load tags.');
 				setOptions([]);
 			} else {
-				setOptions([...(response.data ?? [])].sort(byName));
+				// Reduced to what a chip is, rather than held whole: the rest of a
+				// tag — its dates, its author — is what this list happens to arrive
+				// with, not anything the rule has a use for, and the create posts
+				// these on.
+				setOptions(
+					(response.data ?? [])
+						.map((tag) => ({ id: tag.id, name: tag.name }))
+						.sort(byName),
+				);
 			}
 			setLoading(false);
 		});

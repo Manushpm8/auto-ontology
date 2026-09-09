@@ -11,13 +11,11 @@ itself. The tag *ids* are therefore the database's business: a tag deleted from
 the vocabulary takes its ``rule__tag`` rows with it by cascade, so no rule can
 be read applying a tag that is no longer there.
 
-``rule__tag.sent`` is the exception, and it is deliberately not authoritative.
-A caller may post whole tag objects rather than bare ids, carrying fields from
-its own model that this schema knows nothing about, and that payload is kept so
-a read answers with the tag that was picked rather than a narrower copy of it.
-The ``id`` and the ``name`` in a read come from the tag table regardless, so a
-renamed tag reads back under its new name and a stale snapshot cannot outvote
-the vocabulary.
+Ids and an order are all that table keeps. A tag's name and dates belong to the
+``tag`` table and are read through the join every time, so a renamed tag reads
+back renamed on every rule applying it and there is no second copy of the
+vocabulary to fall out of date. A caller posting whole tag objects is answered
+with the tags as they *are*, not as it sent them.
 
 :func:`create_rule` is one transaction over both tables: a rule with no tags
 applies nothing, so a half-written one is worse than none at all.
@@ -97,15 +95,15 @@ def create_rule(
     search_term: str,
     text_match_option: str,
     filters: dict[str, Any],
-    tags: list[dict[str, Any]],
+    tags: list[str],
     created_by: str,
 ) -> str:
     """Store a rule and its tags, and return the new rule's id.
 
-    Each entry in *tags* is a tag as the caller sent it and must carry an
-    ``id``; the whole entry is kept in ``rule__tag.sent`` and the id is what the
-    foreign key checks. Their order is recorded, so the rule reads back in the
-    order the tags were picked.
+    *tags* is tag ids, and only ids: a tag's name and dates are the ``tag``
+    table's to state, and a copy of them here would be a second version of the
+    same facts with nothing keeping it current. Their order is recorded, so the
+    rule reads back in the order the tags were picked.
 
     The id alone rather than the row: the route answers with it, and reading a
     rule back through the tag join to return what the caller just posted would
@@ -151,13 +149,8 @@ def create_rule(
         store().query_write(
             s.rule__tag.insert().values(
                 [
-                    {
-                        "rule_id": rule_id,
-                        "tag_id": tag["id"],
-                        "position": position,
-                        "sent": tag,
-                    }
-                    for position, tag in enumerate(tags)
+                    {"rule_id": rule_id, "tag_id": tag_id, "position": position}
+                    for position, tag_id in enumerate(tags)
                 ]
             )
         )
@@ -171,17 +164,13 @@ def _tags_by_rule(rule_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     One read for every rule rather than one per rule: the settings page lists
     them all, and the tags are joined to the vocabulary anyway.
 
-    Each tag is what the caller sent with the id and the name from the tag table
-    written over it — the two fields a client acts and renders by, which are the
-    two a snapshot taken at create time is most likely to be wrong about.
+    An id and a name, which is what a card renders and a client acts by, both
+    read from the ``tag`` table through the join. So a renamed tag reads back
+    renamed on every rule applying it, without a row of this table being
+    touched.
     """
     rows = store().query_read(
-        select(
-            s.rule__tag.c.rule_id,
-            s.rule__tag.c.tag_id,
-            s.rule__tag.c.sent,
-            s.tag.c.name,
-        )
+        select(s.rule__tag.c.rule_id, s.tag.c.id, s.tag.c.name)
         .select_from(s.rule__tag.join(s.tag, s.tag.c.id == s.rule__tag.c.tag_id))
         .where(s.rule__tag.c.rule_id.in_(rule_ids))
         .order_by(s.rule__tag.c.rule_id, s.rule__tag.c.position)
@@ -189,8 +178,7 @@ def _tags_by_rule(rule_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
 
     tags: dict[str, list[dict[str, Any]]] = {rule_id: [] for rule_id in rule_ids}
     for row in rows:
-        sent = dict(row["sent"] or {})
-        tags[row["rule_id"]].append({**sent, "id": row["tag_id"], "name": row["name"]})
+        tags[row["rule_id"]].append({"id": row["id"], "name": row["name"]})
     return tags
 
 

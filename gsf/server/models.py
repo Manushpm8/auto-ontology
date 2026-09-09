@@ -428,11 +428,12 @@ class Rule(ApiModel):
     they are required rather than optional like most of this module — a rule
     missing any of the three matches nothing.
 
-    ``tags`` carry at least the name to show and the id to act by, and whatever
-    else the write that saved them sent: a caller posting whole tag objects gets
-    whole tag objects back — see ``RuleTagRef`` in
-    ``gsf/server/rules/router.py``. Only the ids are checked, against the tag
-    table, so a rule cannot apply a tag that does not exist.
+    ``tags`` carry the name to show and the id to act by, both read from the tag
+    table on every read rather than from what the write that saved them sent —
+    so a renamed tag reads back renamed here, and a caller posting whole tag
+    objects is answered with the tags as they are rather than as it sent them.
+    See ``RuleTagRef`` in ``gsf/server/rules/router.py``. The ids are checked
+    against that table, so a rule cannot apply a tag that does not exist.
 
     ``created_by`` is the id of the user who saved it, read from the trusted
     gateway header rather than from the request body — see

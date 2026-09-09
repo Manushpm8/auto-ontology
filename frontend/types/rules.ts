@@ -29,11 +29,9 @@ export type RuleTagDraft = {
 export type RuleCreateInput = GlobalSearchRequest & {
 	name: string;
 	/**
-	 * The chips the dialog holds, sent whole and answered with whole.
-	 *
-	 * Only `id` is checked, against the tag table; every other field a caller
-	 * sends is echoed back on the created rule, so the tags in the answer are the
-	 * tags that were picked rather than a narrower copy of them to merge.
+	 * The chips the dialog holds. Only `id` is read: everything else about a tag
+	 * is the tag table's, and a rule answers with each tag as it is now — so a
+	 * renamed tag reads back renamed on every rule applying it.
 	 */
 	tags: TagChip[];
 };
