@@ -109,7 +109,7 @@ export default function RulesSettingsPage() {
 	const fetchRulesPage = useCallback(
 		async (skip: number, limit: number) => {
 			const response = await rulesApi.getAll({
-				...(debouncedQuery ? { q: debouncedQuery } : {}),
+				...(debouncedQuery ? { query: debouncedQuery } : {}),
 				skip,
 				limit,
 			});

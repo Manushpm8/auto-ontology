@@ -15,10 +15,14 @@ import type {
 	TagUpdateInput,
 } from '@/types/tags';
 
-/** One page of tags, optionally narrowed by `q`. */
+/** One page of tags, optionally narrowed by a search. */
 export type TagsListParams = PageParams & {
-	/** Case-insensitive substring, matched against a tag's name. */
-	q?: string;
+	/**
+	 * Case-insensitive substring, matched against a tag's name.
+	 *
+	 * Goes up as `?q=`, which is what the route calls it.
+	 */
+	query?: string;
 	/**
 	 * Resolve `created_by` / `modified_by` to the accounts they name — see
 	 * `AUTHORS_PARAM`. Only the settings list has columns to show them in.
@@ -38,7 +42,7 @@ export const tagsApi = {
 	 */
 	getAll: (params?: TagsListParams): Promise<ApiPagedResponse<Tag[]>> =>
 		requests.get('tags', {
-			...(params?.q ? { q: params.q } : {}),
+			...(params?.query ? { q: params.query } : {}),
 			...(params?.authors ? { [AUTHORS_PARAM]: AUTHORS_PARAM_ON } : {}),
 			...pageQuery(params),
 		}),

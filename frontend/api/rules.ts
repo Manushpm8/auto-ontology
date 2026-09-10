@@ -6,13 +6,15 @@ import { pageQuery, requests } from './requests';
 import type { ApiPagedResponse, PageParams, ResponseWithError } from './types';
 import type { Rule, RuleCreateInput, RuleUpdateInput } from '@/types/rules';
 
-/** One page of rules, optionally narrowed by `q`. */
+/** One page of rules, optionally narrowed by a search. */
 export type RulesListParams = PageParams & {
 	/**
 	 * Case-insensitive substring, matched against a rule's name and against the
 	 * names of the tags it applies — the two things a rule's card shows.
+	 *
+	 * Goes up as `?q=`, which is what the route calls it.
 	 */
-	q?: string;
+	query?: string;
 };
 
 /**
@@ -30,7 +32,7 @@ export const rulesApi = {
 	 */
 	getAll: (params?: RulesListParams): Promise<ApiPagedResponse<Rule[]>> =>
 		requests.get('rules', {
-			...(params?.q ? { q: params.q } : {}),
+			...(params?.query ? { q: params.query } : {}),
 			...pageQuery(params),
 		}),
 

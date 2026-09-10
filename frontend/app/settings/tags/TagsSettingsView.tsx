@@ -109,7 +109,7 @@ const TagsList = () => {
 			// The one caller that asks for authors: this is the page with the two
 			// columns that show them.
 			const response = await tagsApi.getAll({
-				...(debouncedQuery ? { q: debouncedQuery } : {}),
+				...(debouncedQuery ? { query: debouncedQuery } : {}),
 				authors: true,
 				skip,
 				limit,
