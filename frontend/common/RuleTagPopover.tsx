@@ -21,8 +21,18 @@ import type { RuleTagDraft } from '@/types/rules';
 import type { TagChip } from '@/types/tags';
 
 export type RuleTagPopoverProps = {
-	/** How many items the search matched, i.e. how many the rule would tag. */
+	/** How many items the rule would tag. */
 	itemsCount: number;
+	/**
+	 * How many the search matched in all, when that is more than the rule can
+	 * reach. Omitted — or equal to `itemsCount` — when the two are the same.
+	 *
+	 * They come apart because the count behind the tabs is uncapped while the
+	 * list a rule replays is capped at `GLOBAL_SEARCH_LIST_LIMIT`: a search
+	 * matching 1,500 objects labels the top 200 of them, and this panel is
+	 * where a person agrees to that.
+	 */
+	matchedCount?: number;
 	/**
 	 * Saves the finished rule, and resolves to what went wrong or to null when
 	 * it went through.
@@ -46,9 +56,27 @@ const byName = (left: TagChip, right: TagChip): number =>
 /** Placeholder chips, at tag-name widths so the box looks like what replaces it. */
 const SKELETON_TAG_WIDTHS = ['w-20', 'w-16', 'w-24', 'w-14', 'w-20'];
 
-type RuleTagFormProps = Pick<RuleTagPopoverProps, 'itemsCount' | 'onSubmit' | 'onNavigate'> & {
+type RuleTagFormProps = Pick<
+	RuleTagPopoverProps,
+	'itemsCount' | 'matchedCount' | 'onSubmit' | 'onNavigate'
+> & {
 	/** Dismisses the panel this form fills. */
 	onDone: () => void;
+};
+
+/**
+ * What the rule will label, and what the search matched when that is more.
+ *
+ * Naming only the second would promise a rule that tags everything found, which
+ * is what the cap stops it from doing; naming only the first leaves a reader
+ * wondering where the rest of their results went. "top" is the word the results
+ * list itself uses for the same cap — see `GlobalSearchLimitBanner`.
+ */
+const itemsToTagLabel = (count: number, matched: number | undefined): string => {
+	const noun = count === 1 ? 'item' : 'items';
+	return matched != null && matched > count
+		? `top ${count} of ${matched} ${noun} to tag`
+		: `${count} ${noun} to tag`;
 };
 
 /**
@@ -58,7 +86,13 @@ type RuleTagFormProps = Pick<RuleTagPopoverProps, 'itemsCount' | 'onSubmit' | 'o
  * which is what discards a half-filled rule on dismissal — there is no reset to
  * write, and the tags are read once per opening.
  */
-const RuleTagForm = ({ itemsCount, onSubmit, onNavigate, onDone }: RuleTagFormProps) => {
+const RuleTagForm = ({
+	itemsCount,
+	matchedCount,
+	onSubmit,
+	onNavigate,
+	onDone,
+}: RuleTagFormProps) => {
 	const [options, setOptions] = useState<TagChip[]>([]);
 	const [selected, setSelected] = useState<TagChip[]>([]);
 	const [search, setSearch] = useState('');
@@ -160,7 +194,7 @@ const RuleTagForm = ({ itemsCount, onSubmit, onNavigate, onDone }: RuleTagFormPr
 					Create a New Rule Based Tag
 				</h3>
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">
-					({itemsCount} {itemsCount === 1 ? 'item' : 'items'} to tag)
+					({itemsToTagLabel(itemsCount, matchedCount)})
 				</span>
 			</div>
 
@@ -323,6 +357,7 @@ const RuleTagForm = ({ itemsCount, onSubmit, onNavigate, onDone }: RuleTagFormPr
  */
 export const RuleTagPopover = ({
 	itemsCount,
+	matchedCount,
 	onSubmit,
 	onNavigate,
 	onOpenChange,
@@ -346,6 +381,7 @@ export const RuleTagPopover = ({
 		{({ close }) => (
 			<RuleTagForm
 				itemsCount={itemsCount}
+				matchedCount={matchedCount}
 				onSubmit={onSubmit}
 				onNavigate={onNavigate}
 				onDone={close}

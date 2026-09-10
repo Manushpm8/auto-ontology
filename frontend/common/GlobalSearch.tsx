@@ -295,6 +295,15 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 	// Appearance only. What actually holds these subtrees still is `inert`
 	// below, which the class cannot do and must not contradict.
 	const dimmedClassName = ruleOpen ? 'opacity-60' : '';
+	// What the search matched, and what a rule built from it would actually
+	// label. The two are not the same number: the count behind the tabs is
+	// uncapped on purpose — a badge has to report the real total — while
+	// a rule replays the *list*, which stops at `GLOBAL_SEARCH_LIST_LIMIT`
+	// so that a rule cannot label more than the person could see. Offering the
+	// matched count alone would have the panel promise 1,500 labels and write
+	// 200.
+	const matchedCount = countsReady && tabTotal > 0 ? tabTotal : visibleItems.length;
+	const taggableCount = Math.min(matchedCount, GLOBAL_SEARCH_LIST_LIMIT);
 
 	return (
 		<Modal
@@ -321,7 +330,8 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 				    offered once the search has matched something. */}
 				{visibleItems.length > 0 ? (
 					<RuleTagPopover
-						itemsCount={countsReady && tabTotal > 0 ? tabTotal : visibleItems.length}
+						itemsCount={taggableCount}
+						matchedCount={matchedCount}
 						onSubmit={handleCreateRule}
 						onNavigate={handleClose}
 						onOpenChange={setRuleOpen}
