@@ -115,6 +115,13 @@
     "delete_data_layer": "(database_name: 'str | None' = None) -> 'int'",
     "delete_semantic_layer": "(database_name: 'str | None' = None) -> 'int'"
   },
+  "rules": {
+    "count_rules": "(*, search: 'str | None' = None) -> 'int'",
+    "create_rule": "(*, name: 'str', search_term: 'str', text_match_option: 'str', filters: 'dict[str, Any]', tags: 'list[str]', created_by: 'str') -> 'str'",
+    "delete_rule": "(rule_id: 'str', *, keep_tags: 'bool' = False) -> 'bool'",
+    "list_rules": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
+    "update_rule": "(*, rule_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
+  },
   "schema": {},
   "schema_version": {
     "SchemaOutOfDateError": "class(RuntimeError)",
@@ -170,14 +177,18 @@
     "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
   },
   "tags": {
-    "attach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str') -> 'list[dict[str, Any]] | None'",
+    "attach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str', tagged_by: 'str | None' = None) -> 'list[dict[str, Any]] | None'",
+    "attach_tags_by_rule": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'list[tuple[str, str]]') -> 'int'",
+    "count_tag_targets": "(tag_id: 'str') -> 'int'",
+    "count_tags": "(*, search: 'str | None' = None) -> 'int'",
     "create_tag": "(*, name: 'str', created_by: 'str | None' = None) -> 'dict[str, Any]'",
     "delete_tag": "(tag_id: 'str') -> 'bool'",
     "detach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str') -> 'list[dict[str, Any]] | None'",
+    "existing_tag_ids": "(tag_ids: 'list[str]') -> 'set[str]'",
     "fetch_tags_map": "(kind: 'str', item_ids: 'list[str]') -> 'dict[str, list[dict[str, Any]]]'",
     "get_tag": "(tag_id: 'str') -> 'dict[str, Any] | None'",
-    "list_tag_targets": "(tag_id: 'str') -> 'list[dict[str, Any]]'",
-    "list_tags": "() -> 'list[dict[str, Any]]'",
+    "list_tag_targets": "(tag_id: 'str', *, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
+    "list_tags": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "update_tag": "(*, tag_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
   "terms": {
