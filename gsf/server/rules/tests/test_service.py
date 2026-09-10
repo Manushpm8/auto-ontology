@@ -4,9 +4,9 @@
 
 """Unit tests for applying a rule.
 
-Both halves of :func:`apply_rule` are mocked out -- the search it replays and
-the labelling it delegates -- because what is worth pinning here is the bit in
-between: which hits become labels, and as which kind.
+The search :func:`find_targets` replays is mocked out, and so is the DAL
+:func:`label_targets` delegates to, because what is worth pinning here is the
+bit in between: which hits become labels, and as which kind.
 
 Global search answers over ten kinds and only five accept a tag, so a rule saved
 from the *All* tab routinely matches objects it cannot label. Dropping those
@@ -25,26 +25,30 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from gsf.server.rules.service import apply_rule
+from gsf.server.rules.service import find_targets, label_targets
 
 TAG_IDS = ["tag-1"]
 
 
 def _apply(hits: list[dict], filters: dict | None = None) -> tuple:
-    """Apply a rule over *hits*, returning ``(applied, attach_kwargs, search)``."""
+    """Both halves over *hits*, returning ``(applied, attach_kwargs, search)``.
+
+    Run one after the other the way the route runs them -- the search outside a
+    transaction, the labelling inside one -- so what the first half found is
+    what the second half is asked to label.
+    """
     with (
         patch("gsf.server.rules.service.search_service.global_search") as search,
         patch("gsf.server.rules.service.tags_dal.attach_tags_by_rule") as attach,
     ):
         search.return_value = {"data": hits, "count": len(hits)}
         attach.return_value = len(hits)
-        applied = apply_rule(
-            rule_id="rule-1",
+        targets = find_targets(
             search_term="revenue",
             text_match_option="contains",
             filters={} if filters is None else filters,
-            tag_ids=TAG_IDS,
         )
+        applied = label_targets(rule_id="rule-1", tag_ids=TAG_IDS, targets=targets)
     return applied, attach.call_args.kwargs, search.call_args.kwargs
 
 

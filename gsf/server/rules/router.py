@@ -11,8 +11,8 @@ Rules are stored: ``rule`` and ``rule__tag`` in ``gsf/dal/schema.py``, written
 and read through ``gsf.dal.rules``:
 
 * :func:`create_rule` validates the body, checks the tag ids against the tag
-  table, saves the rule, applies it -- see ``service.apply_rule`` -- and answers
-  with its id.
+  table, saves the rule, applies it -- see ``service.find_targets`` and
+  ``service.label_targets`` -- and answers with its id.
 * :func:`list_rules` returns a page of rules with their tags, filtered by an
   optional query, and :func:`get_rule` returns one of them by id.
 * :func:`update_rule` renames a rule, and renames only -- its search and its
@@ -257,10 +257,12 @@ def create_rule(request: Request, body: RuleCreate) -> dict:
 
     Saving the rule also *applies* it: the search is replayed and the tags are
     attached to everything it matches, recorded as this rule's doing so a tag's
-    page can name the rule that labelled each object. One transaction with the
-    insert, so a rule that could not label the catalog is not left saved and
-    inert -- the create either produces a rule with its labels or nothing at
-    all. See ``rules.service.apply_rule``.
+    page can name the rule that labelled each object. The insert and those
+    labels are one transaction, so a rule that could not label the catalog is
+    not left saved and inert -- the create either produces a rule with its
+    labels or nothing at all. The search that finds them runs before that
+    transaction, holding no write connection and no locks while it does; see
+    ``rules.service.find_targets``.
 
     400 for a body that could never be a rule: a blank name, a search term
     shorter than global search accepts, a match option it does not implement,
@@ -275,6 +277,16 @@ def create_rule(request: Request, body: RuleCreate) -> dict:
     filters = body.filters.model_dump(exclude_none=True)
     tags = _resolved_tags(body.tags)
 
+    # Before the transaction, and so before the 409 a taken name would answer:
+    # a duplicate name pays for a search it did not need. That is work on a
+    # path that fails anyway, and the alternative is to spend the search inside
+    # the transaction on every path that succeeds.
+    targets = rule_service.find_targets(
+        search_term=search_term,
+        text_match_option=text_match_option,
+        filters=filters,
+    )
+
     with write_transaction():
         try:
             rule_id = rules_dal.create_rule(
@@ -287,13 +299,7 @@ def create_rule(request: Request, body: RuleCreate) -> dict:
             )
         except ValueError as exc:
             raise _name_conflict(exc) from exc
-        rule_service.apply_rule(
-            rule_id=rule_id,
-            search_term=search_term,
-            text_match_option=text_match_option,
-            filters=filters,
-            tag_ids=tags,
-        )
+        rule_service.label_targets(rule_id=rule_id, tag_ids=tags, targets=targets)
     return {"data": {"id": rule_id}}
 
 

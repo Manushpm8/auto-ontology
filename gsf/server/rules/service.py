@@ -5,11 +5,15 @@
 """Applying a rule: replaying its search, and labelling what the search finds.
 
 A rule is a saved global search plus the tags to apply to everything it matches,
-and this is the half that does the applying. :func:`apply_rule` replays the
+and this is the half that does the applying. :func:`find_targets` replays the
 search through the *same* service the ``/search/global-search`` route calls, so
 a rule labels exactly what the dialog that created it had on screen -- including
 the list cap, since a rule that labelled more than the person could see would be
-a rule they did not agree to.
+a rule they did not agree to. :func:`label_targets` writes the labels it found.
+
+Two functions because only the second one belongs inside the transaction that
+saves the rule, and the split is what keeps the search out of it. See each for
+why.
 
 Called once, when the rule is created. The tags it applies carry the rule's id
 rather than a user id (see ``gsf.dal.tags.attach_tags_by_rule``), which is what
@@ -81,27 +85,38 @@ def _taggable_targets(hits: list[dict[str, Any]]) -> list[tuple[str, str]]:
     return targets
 
 
-def apply_rule(
+def find_targets(
     *,
-    rule_id: str,
     search_term: str,
     text_match_option: str,
     filters: dict[str, Any],
-    tag_ids: list[str],
-) -> int:
-    """Label everything the rule's search matches, and say how many labels stuck.
+) -> list[tuple[str, str]]:
+    """Replay the rule's search and return what of it can carry a tag.
+
+    Read-only, and called *before* the transaction that saves the rule rather
+    than inside it. It needs nothing that transaction produces -- a rule is not
+    a searchable object, so the search reads the same catalog either way -- and
+    it is the slow half by an order of magnitude: measured against half a
+    million columns it takes 70-400 ms, where the insert and the labels together
+    take about 20 ms. A substring match has no index to use (the btree on
+    ``name`` cannot serve ``ilike '%x%'``), so that cost grows with the catalog.
+    Run inside the transaction, all of it was spent holding a pooled *write*
+    connection and the locks on the freshly inserted rule row.
+
+    Ordering the search first is not a weaker guarantee. The two writes still
+    commit together, which is the whole of what atomicity buys here, and a
+    ``SELECT`` takes no locks on what it finds: an object could already
+    disappear between being matched and being labelled, and the transaction
+    could only ever roll the labels back, not prevent it.
 
     *filters* is the stored JSON, read with the same defaults
     ``GlobalSearchFilters`` declares: it is written with ``exclude_none``, so a
     filter the dialog never sent is absent from the row rather than null, and
     reading it with ``.get`` is what keeps those two the same rule.
 
-    The count is of labels *applied*, not objects matched: an object already
-    carrying the tag is not counted, because nothing was done to it.
-
-    A search that matches nothing is not an error. A rule is a standing
-    instruction -- "label what this finds" -- and finding nothing today says
-    only that the catalog does not have it yet.
+    A search that matches nothing is not an error, and returns no targets. A
+    rule is a standing instruction -- "label what this finds" -- and finding
+    nothing today says only that the catalog does not have it yet.
     """
     found = search_service.global_search(
         search_term=search_term,
@@ -112,14 +127,31 @@ def apply_rule(
     )
     hits = found["data"]
     targets = _taggable_targets(hits)
+    logger.info(
+        "Rule search %r matched %d objects, %d taggable",
+        search_term,
+        len(hits),
+        len(targets),
+    )
+    return targets
+
+
+def label_targets(
+    *, rule_id: str, tag_ids: list[str], targets: list[tuple[str, str]]
+) -> int:
+    """Apply the rule's tags to *targets*, and say how many labels stuck.
+
+    The transactional half: called inside the block that inserts the rule, so
+    the rule and its labels are one unit of work and a rule that could not
+    label the catalog is not left saved and inert.
+
+    The count is of labels *applied*, not objects matched: an object already
+    carrying the tag is not counted, because nothing was done to it.
+    """
     applied = tags_dal.attach_tags_by_rule(
         rule_id=rule_id, tag_ids=tag_ids, targets=targets
     )
     logger.info(
-        "Rule %s matched %d objects, %d taggable, applied %d labels",
-        rule_id,
-        len(hits),
-        len(targets),
-        applied,
+        "Rule %s applied %d labels over %d targets", rule_id, applied, len(targets)
     )
     return applied
