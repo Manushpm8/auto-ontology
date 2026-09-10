@@ -9,7 +9,8 @@ Concentrated on the parts of a rule that are not a plain row.
 The first is that a rule spans two tables and is written in one transaction. A
 rule with no tags applies nothing, so the test that matters is not that the
 happy path inserts both — it is that a tag id the foreign key rejects leaves no
-rule behind at all.
+rule behind at all, and that no tags at all is refused before the write is
+attempted rather than left to whichever caller thought to check.
 
 The second is what a read is allowed to believe about a tag. ``rule__tag`` keeps
 an id and a position and nothing else, so every field a rule answers with comes
@@ -198,6 +199,20 @@ def test_a_tag_that_is_not_a_tag_saves_no_rule(prefix) -> None:
     """The transaction: a rule row that outlived its tags would apply nothing."""
     with pytest.raises(IntegrityError):
         _saved(prefix, tags=["not-a-tag"])
+
+    assert [rule for rule in list_rules() if prefix in rule["name"]] == []
+
+
+def test_a_rule_with_no_tags_is_refused_here_and_not_only_by_a_caller(prefix) -> None:
+    """Refused as invalid, rather than attempted as an empty insert.
+
+    The empty list used to reach the database as ``INSERT INTO rule__tag
+    DEFAULT VALUES`` and come back as a not-null violation about a row nobody
+    meant to write -- the same ``IntegrityError`` a bad tag id gives, so a
+    caller could not tell the two apart.
+    """
+    with pytest.raises(ValueError, match="at least one tag"):
+        _saved(prefix, tags=[])
 
     assert [rule for rule in list_rules() if prefix in rule["name"]] == []
 

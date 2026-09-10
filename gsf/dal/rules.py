@@ -18,7 +18,9 @@ vocabulary to fall out of date. A caller posting whole tag objects is answered
 with the tags as they *are*, not as it sent them.
 
 :func:`create_rule` is one transaction over both tables: a rule with no tags
-applies nothing, so a half-written one is worse than none at all.
+applies nothing, so a half-written one is worse than none at all. It refuses a
+tagless rule outright, for the same reason and without waiting for a caller to
+refuse it first.
 
 Rule names are unique, folded for case and surrounding space, exactly as tag
 names are -- ``uq_rule_name_lower`` in the schema, and :func:`_name_taken` in
@@ -117,10 +119,18 @@ def create_rule(
     from ``uq_rule_name_lower`` underneath it -- names are how the settings list
     refers to rules, and one name naming two of them makes a delete ambiguous.
 
+    Raises ``ValueError`` for an empty *tags*, before anything is written. This
+    module holds that a rule with no tags applies nothing, so the case is
+    invalid here rather than only at whichever caller happens to check: without
+    it the empty list compiles to ``INSERT INTO rule__tag DEFAULT VALUES`` and
+    the answer is a not-null violation on a row nobody meant to write.
+
     Raises ``IntegrityError`` for a tag id that is not a tag. The route checks
     the ids first, for the sake of the 404 it owes and the message on it; this
     is what holds when a tag is deleted between that check and this write.
     """
+    if not tags:
+        raise ValueError("A rule must apply at least one tag")
     if _name_taken(name):
         raise _taken(name)
 

@@ -231,9 +231,12 @@ def _no_such_rule(rule_id: str) -> HTTPException:
 def _name_conflict(exc: ValueError) -> HTTPException:
     """The 409 for a name another rule holds, worded by the DAL.
 
-    Only one ``ValueError`` reaches either caller -- ``rules_dal`` raises it for
-    the name and nothing else -- so this does not have to tell them apart, and
-    the message names the rule the way the tag routes' 409 names the tag.
+    The name is the only ``ValueError`` that can arrive here, so this does not
+    have to tell them apart, and the message names the rule the way the tag
+    routes' 409 names the tag. ``rules_dal.create_rule`` raises one more, for a
+    rule with no tags, and that one cannot reach this: :func:`_resolved_tags`
+    answers an empty list with a 400 before the write is attempted. The DAL
+    raises it anyway, because a tagless rule is invalid whoever asks for one.
     """
     return HTTPException(status_code=409, detail=str(exc))
 
