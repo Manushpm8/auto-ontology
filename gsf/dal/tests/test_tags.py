@@ -72,6 +72,7 @@ from gsf.dal.tags import (  # noqa: E402
     create_tag,
     delete_tag,
     detach_tag,
+    existing_tag_ids,
     fetch_tags_map,
     get_tag,
     list_tag_targets,
@@ -404,6 +405,18 @@ def test_get_tag_returns_what_the_listing_returned(prefix) -> None:
 def test_get_tag_for_an_unknown_id_reports_it(prefix) -> None:
     """What the router turns into a 404 rather than an empty tag page."""
     assert get_tag(f"{prefix}-no-such-id") is None
+
+
+def test_existing_ids_keeps_the_ones_that_are_tags_and_drops_the_rest(prefix) -> None:
+    """What a rule's tags are checked against before it is saved."""
+    tag = create_tag(name=f"{prefix}-pii")
+
+    assert existing_tag_ids([tag["id"], f"{prefix}-no-such-id"]) == {tag["id"]}
+
+
+def test_existing_ids_of_nothing_asks_the_database_nothing(prefix) -> None:
+    """``IN ()`` is not a query, and the empty answer needs no read."""
+    assert existing_tag_ids([]) == set()
 
 
 # --------------------------------------------------------------------------

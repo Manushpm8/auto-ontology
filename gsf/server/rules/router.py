@@ -168,9 +168,9 @@ def _resolved_tags(tags: list[RuleTagRef]) -> list[str]:
     picked. Repeats collapse: two clicks on one tag are one intention, the way
     ``attach_tag`` treats labelling something twice.
 
-    One read for the whole set rather than one per id. The tag vocabulary is
-    curated in settings and small by design, so reading it whole costs less
-    than a round trip per tag.
+    One read for the whole set rather than one per id, and one that reads only
+    the ids it was given -- see ``tags_dal.existing_tag_ids``. Checking a
+    handful of tags costs the same whatever the vocabulary has grown to.
 
     An empty list is a 400 -- a rule with no tags applies nothing, which the
     dialog also refuses to submit.
@@ -180,7 +180,7 @@ def _resolved_tags(tags: list[RuleTagRef]) -> list[str]:
             status_code=400, detail="A rule must apply at least one tag"
         )
 
-    known = {tag["id"] for tag in tags_dal.list_tags()}
+    known = tags_dal.existing_tag_ids([ref.id for ref in tags])
     resolved: list[str] = []
     seen: set[str] = set()
     for ref in tags:

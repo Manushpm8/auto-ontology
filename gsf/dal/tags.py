@@ -235,6 +235,27 @@ def get_tag(tag_id: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+def existing_tag_ids(tag_ids: list[str]) -> set[str]:
+    """Which of *tag_ids* name a tag, as a set.
+
+    For a caller holding ids that have to be checked before it acts on them --
+    saving a rule is the one -- so ids are all that comes back: a name or a
+    timestamp would be read to be thrown away.
+
+    Ids only, *and only the ones asked about*. Reading the vocabulary whole
+    answers the same question, and did, but it ties the cost of checking three
+    ids to how many tags a deployment has curated; this reads three rows by
+    primary key whatever that number grows to.
+
+    An empty list asks nothing and reads nothing: ``IN ()`` is not a query, and
+    the answer is already in hand.
+    """
+    if not tag_ids:
+        return set()
+    rows = store().query_read(select(s.tag.c.id).where(s.tag.c.id.in_(tag_ids)))
+    return {row["id"] for row in rows}
+
+
 def _parent_ids(parents: dict[str, ColumnElement]) -> list[ColumnElement]:
     """The four ``_PARENT_ID_FIELDS`` columns, in order, nulled where absent.
 

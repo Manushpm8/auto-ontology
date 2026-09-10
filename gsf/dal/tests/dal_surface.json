@@ -177,6 +177,7 @@
     "create_tag": "(*, name: 'str', created_by: 'str | None' = None) -> 'dict[str, Any]'",
     "delete_tag": "(tag_id: 'str') -> 'bool'",
     "detach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str') -> 'list[dict[str, Any]] | None'",
+    "existing_tag_ids": "(tag_ids: 'list[str]') -> 'set[str]'",
     "fetch_tags_map": "(kind: 'str', item_ids: 'list[str]') -> 'dict[str, list[dict[str, Any]]]'",
     "get_tag": "(tag_id: 'str') -> 'dict[str, Any] | None'",
     "list_tag_targets": "(tag_id: 'str', *, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
