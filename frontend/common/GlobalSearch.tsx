@@ -292,7 +292,9 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 		visibleItems.length > 0 &&
 		(visibleItems.length >= GLOBAL_SEARCH_LIST_LIMIT ||
 			(countsReady && tabTotal > GLOBAL_SEARCH_LIST_LIMIT));
-	const inertClassName = ruleOpen ? 'pointer-events-none opacity-60 select-none' : '';
+	// Appearance only. What actually holds these subtrees still is `inert`
+	// below, which the class cannot do and must not contradict.
+	const dimmedClassName = ruleOpen ? 'opacity-60' : '';
 
 	return (
 		<Modal
@@ -303,7 +305,7 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 			className="flex h-[min(40rem,80vh)] w-full flex-col overflow-hidden"
 		>
 			<div className="flex shrink-0 items-center gap-2 p-2">
-				<div className={`min-w-0 flex-1 ${inertClassName}`} aria-hidden={ruleOpen}>
+				<div className={`min-w-0 flex-1 ${dimmedClassName}`} inert={ruleOpen}>
 					<SearchInput
 						value={query}
 						onChange={handleQueryChange}
@@ -330,11 +332,15 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 			    the results are the rule's subject, so re-searching or opening one
 			    from under the panel would pull the ground out from under it. An
 			    outside click still closes the panel — the dismissal listens on the
-			    document, not on what is under the pointer. */}
-			<div
-				className={`flex min-h-0 flex-1 flex-col ${inertClassName}`}
-				aria-hidden={ruleOpen}
-			>
+			    document, not on what is under the pointer.
+
+			    `inert` rather than `aria-hidden` beside `pointer-events-none`,
+			    which is what this was: those two stop a pointer and hide the
+			    subtree from a screen reader, and leave the search field, its clear
+			    button and every result link in the tab order — so the one way left
+			    to move the ground under the panel was the keyboard, and it moved
+			    focus into content nothing was announcing. */}
+			<div className={`flex min-h-0 flex-1 flex-col ${dimmedClassName}`} inert={ruleOpen}>
 				<GlobalSearchTabsBar
 					showTabs={showTabs}
 					showSkeleton={showTabSkeleton}
