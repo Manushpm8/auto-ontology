@@ -13,7 +13,7 @@ import {
 } from '@/api/search';
 import { Placeholders } from '@/assets/images/placeholders';
 import { EmptyState } from '@/common/EmptyState';
-import { searchObjectTypeFromHit } from '@/common/globalSearchMeta';
+import { isTaggableSearchHit, searchObjectTypeFromHit } from '@/common/globalSearchMeta';
 import { GlobalSearchResults, GlobalSearchResultsSkeleton } from '@/common/GlobalSearchResults';
 import {
 	GlobalSearchTabs,
@@ -296,14 +296,19 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 	// below, which the class cannot do and must not contradict.
 	const dimmedClassName = ruleOpen ? 'opacity-60' : '';
 	// What the search matched, and what a rule built from it would actually
-	// label. The two are not the same number: the count behind the tabs is
-	// uncapped on purpose — a badge has to report the real total — while
-	// a rule replays the *list*, which stops at `GLOBAL_SEARCH_LIST_LIMIT`
-	// so that a rule cannot label more than the person could see. Offering the
-	// matched count alone would have the panel promise 1,500 labels and write
-	// 200.
+	// label. Two things separate them: the count behind the tabs is uncapped on
+	// purpose — a badge has to report the real total — while the list stops at
+	// `GLOBAL_SEARCH_LIST_LIMIT`, and of what the list holds only some kinds can
+	// carry a tag at all (see `isTaggableSearchHit`). Offering the matched count
+	// would have the panel promise 1,500 labels over a search that writes 160.
+	//
+	// Counted from the rows in hand rather than derived from the total, which
+	// makes it exact instead of an estimate: `items` came from
+	// `globalSearchRequest(trimmedQuery, selectedTab)`, the same request
+	// `handleCreateRule` saves, so this *is* the list the rule replays —
+	// ranking, cap and all — and these are the targets it will process.
 	const matchedCount = countsReady && tabTotal > 0 ? tabTotal : visibleItems.length;
-	const taggableCount = Math.min(matchedCount, GLOBAL_SEARCH_LIST_LIMIT);
+	const taggableCount = visibleItems.filter(isTaggableSearchHit).length;
 
 	return (
 		<Modal

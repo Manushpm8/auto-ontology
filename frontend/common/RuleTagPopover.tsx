@@ -27,10 +27,10 @@ export type RuleTagPopoverProps = {
 	 * How many the search matched in all, when that is more than the rule can
 	 * reach. Omitted — or equal to `itemsCount` — when the two are the same.
 	 *
-	 * They come apart because the count behind the tabs is uncapped while the
-	 * list a rule replays is capped at `GLOBAL_SEARCH_LIST_LIMIT`: a search
-	 * matching 1,500 objects labels the top 200 of them, and this panel is
-	 * where a person agrees to that.
+	 * They come apart for two reasons, and this panel is where a person agrees
+	 * to both: the list a rule replays is capped at `GLOBAL_SEARCH_LIST_LIMIT`
+	 * while the count behind the tabs is not, and a Database, a Schema or an
+	 * analysis cannot carry a tag however well it matched.
 	 */
 	matchedCount?: number;
 	/**
@@ -68,14 +68,15 @@ type RuleTagFormProps = Pick<
  * What the rule will label, and what the search matched when that is more.
  *
  * Naming only the second would promise a rule that tags everything found, which
- * is what the cap stops it from doing; naming only the first leaves a reader
- * wondering where the rest of their results went. "top" is the word the results
- * list itself uses for the same cap — see `GlobalSearchLimitBanner`.
+ * it cannot; naming only the first leaves a reader wondering where the rest of
+ * their results went. "N of M" rather than "top N of M" because the shortfall
+ * is not only the cap — an untaggable kind is dropped wherever it ranked, and
+ * "top" would read as a promise that the missing rows were the worst matches.
  */
 const itemsToTagLabel = (count: number, matched: number | undefined): string => {
 	const noun = count === 1 ? 'item' : 'items';
 	return matched != null && matched > count
-		? `top ${count} of ${matched} ${noun} to tag`
+		? `${count} of ${matched} ${noun} to tag`
 		: `${count} ${noun} to tag`;
 };
 
