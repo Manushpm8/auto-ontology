@@ -24,7 +24,8 @@ type PopoverProps = {
 	/**
 	 * Told whether the panel is showing, for a caller that has to react to it —
 	 * dimming what the panel covers, say. Reported for every way the panel
-	 * closes, not only the trigger.
+	 * closes: the trigger, an outside click, Escape, anything that moves the
+	 * trigger, and the popover itself being unmounted with the panel up.
 	 */
 	onOpenChange?: (open: boolean) => void;
 };
@@ -61,8 +62,20 @@ export const Popover = ({
 		onOpenChangeRef.current = onOpenChange;
 	}, [onOpenChange]);
 
+	// `true` on the way in and `false` from the cleanup, rather than reporting
+	// `open` itself. The cleanup also runs when this component goes away, which
+	// is the close a caller would otherwise never hear about: reporting `open`
+	// covers every dismissal the panel performs and none of the ones performed
+	// *on* it, leaving a caller that dims what the panel covers dimmed for good.
+	// `RuleTagPopover` is rendered only while the search has results, so an
+	// emptying result list is exactly that case.
 	useEffect(() => {
-		onOpenChangeRef.current?.(open);
+		if (!open) return;
+
+		onOpenChangeRef.current?.(true);
+		return () => {
+			onOpenChangeRef.current?.(false);
+		};
 	}, [open]);
 
 	useEffect(() => {

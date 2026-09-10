@@ -389,7 +389,7 @@ def delete_rule(
         default=False,
         description=(
             "Leave the tags the rule applied on their objects, attributed to "
-            "nothing, instead of removing them with the rule."
+            "whoever wrote the rule, instead of removing them with the rule."
         ),
     ),
 ) -> dict:

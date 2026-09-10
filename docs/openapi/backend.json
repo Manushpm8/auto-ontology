@@ -7399,13 +7399,13 @@
             }
           },
           {
-            "description": "Leave the tags the rule applied on their objects, attributed to nothing, instead of removing them with the rule.",
+            "description": "Leave the tags the rule applied on their objects, attributed to whoever wrote the rule, instead of removing them with the rule.",
             "in": "query",
             "name": "keep_tags",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Leave the tags the rule applied on their objects, attributed to nothing, instead of removing them with the rule.",
+              "description": "Leave the tags the rule applied on their objects, attributed to whoever wrote the rule, instead of removing them with the rule.",
               "title": "Keep Tags",
               "type": "boolean"
             }
