@@ -244,7 +244,17 @@ def get_connectors() -> list[SQLDatabase]:
         loaded: list[SQLDatabase] = []
         seen_database_names: set[str] = set()
         for cs, schemas in specs:
-            connector = create_connector(cs, schemas=schemas)
+            try:
+                connector = create_connector(cs, schemas=schemas)
+            except Exception:
+                # One unreachable connection (e.g. a stale catalog entry whose
+                # host only resolves inside docker) must not take down every
+                # consumer of the registry.
+                logger.exception(
+                    "Skipping connection %r: connector creation failed",
+                    cs.split("@")[-1] if "@" in cs else cs,
+                )
+                continue
             database_name = connector.database_name
             if database_name in seen_database_names:
                 logger.warning(

@@ -22,7 +22,8 @@ from gsf.utils.model_config import resolve
 logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
-LLM_INVOKE_TIMEOUT_S = 50
+# Reasoning models routinely exceed the 50s default; benchmarks override via env.
+LLM_INVOKE_TIMEOUT_S = float(os.environ.get("LLM_INVOKE_TIMEOUT_S", "50"))
 
 # Concurrent LLM requests are unbounded here by default. A process-wide cap used
 # to live at this call site, defaulting to 6, to stop semantic compilation's
