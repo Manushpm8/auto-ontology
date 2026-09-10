@@ -15,17 +15,33 @@ import type {
 	TagUpdateInput,
 } from '@/types/tags';
 
+/** One page of tags, optionally narrowed by `q`. */
+export type TagsListParams = PageParams & {
+	/** Case-insensitive substring, matched against a tag's name. */
+	q?: string;
+	/**
+	 * Resolve `created_by` / `modified_by` to the accounts they name — see
+	 * `AUTHORS_PARAM`. Only the settings list has columns to show them in.
+	 */
+	authors?: boolean;
+};
+
 export const tagsApi = {
 	/**
-	 * Every tag.
+	 * Tags, ordered by name, with `total` counting the whole match so a caller
+	 * knows when to stop asking.
 	 *
-	 * `authors` asks the route to resolve `created_by` / `modified_by` to
-	 * accounts, and only the settings page wants it — see `AUTHORS_PARAM`. The
-	 * tag picker calls this on every detail page it is shown on, so the default
-	 * is the cheaper answer.
+	 * Called both ways on purpose. The settings list passes `skip`/`limit` and
+	 * reads a window; the tag picker passes nothing and gets the whole
+	 * vocabulary, which is what it needs to narrow in the browser — so `total`
+	 * equals `count` for it, and paging costs it nothing.
 	 */
-	getAll: ({ authors = false }: { authors?: boolean } = {}): Promise<ApiResponse<Tag[]>> =>
-		requests.get('tags', authors ? { [AUTHORS_PARAM]: AUTHORS_PARAM_ON } : {}),
+	getAll: (params?: TagsListParams): Promise<ApiPagedResponse<Tag[]>> =>
+		requests.get('tags', {
+			...(params?.q ? { q: params.q } : {}),
+			...(params?.authors ? { [AUTHORS_PARAM]: AUTHORS_PARAM_ON } : {}),
+			...pageQuery(params),
+		}),
 
 	/**
 	 * One tag. What it labels is `getTargets`, a page at a time.

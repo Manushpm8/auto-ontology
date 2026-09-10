@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from gsf.dal import tags as dal
@@ -17,7 +17,7 @@ from gsf.server.responses import (
     IdResponse,
     TagChipListResponse,
     TagItemPageResponse,
-    TagListResponse,
+    TagPageResponse,
     TagResponse,
 )
 
@@ -46,11 +46,32 @@ class TagTarget(BaseModel):
     id: str
 
 
-@router.get("/tags", response_model=TagListResponse)
-def list_tags() -> dict:
-    """Return every tag."""
-    rows = dal.list_tags()
-    return {"data": rows, "count": len(rows)}
+@router.get("/tags", response_model=TagPageResponse)
+def list_tags(
+    q: str | None = Query(
+        default=None,
+        description="Case-insensitive substring filter on the tag name.",
+    ),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """Return tags, ordered by name.
+
+    *q*, when given, keeps the tags whose name contains it -- a name is the
+    whole of what the settings list shows, so there is nothing else to search
+    by.
+
+    *skip*/*limit* select one page of that order, and ``total`` counts every
+    match so a caller knows when to stop asking. Omitting *limit* returns every
+    matching tag, which is what the tag picker asks for: it offers the whole
+    vocabulary on every detail page and narrows it in the browser.
+    """
+    rows = dal.list_tags(search=q, skip=skip, limit=limit)
+    # The count is a second read, so it is worth skipping for the request that
+    # asked for everything: a whole unpaged list already is its own total. Same
+    # bargain the rule list and the targets list below make.
+    total = dal.count_tags(search=q) if skip or limit is not None else len(rows)
+    return {"data": rows, "count": len(rows), "total": total}
 
 
 @router.get("/tags/{tag_id}", response_model=TagResponse)

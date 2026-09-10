@@ -68,6 +68,7 @@ from gsf.dal.tags import (  # noqa: E402
     attach_tag,
     attach_tags_by_rule,
     count_tag_targets,
+    count_tags,
     create_tag,
     delete_tag,
     detach_tag,
@@ -154,6 +155,51 @@ def test_the_listing_is_ordered_case_insensitively(prefix) -> None:
 
     names = [row["name"] for row in list_tags() if prefix in row["name"]]
     assert names == [f"{prefix}-Alpha", f"{prefix}-beta", f"{prefix}-gamma"]
+
+
+def test_a_page_of_tags_is_a_window_on_one_order(prefix) -> None:
+    """Two pages of one list: neither repeats a tag nor skips one."""
+    for name in (f"{prefix}-c", f"{prefix}-a", f"{prefix}-b"):
+        create_tag(name=name)
+
+    first = list_tags(search=prefix, skip=0, limit=2)
+    second = list_tags(search=prefix, skip=2, limit=2)
+
+    assert [row["name"] for row in first] == [f"{prefix}-a", f"{prefix}-b"]
+    assert [row["name"] for row in second] == [f"{prefix}-c"]
+
+
+def test_an_unpaged_read_returns_every_match(prefix) -> None:
+    """What the tag picker asks for: the whole vocabulary, to filter locally."""
+    for name in (f"{prefix}-a", f"{prefix}-b", f"{prefix}-c"):
+        create_tag(name=name)
+
+    assert len(list_tags(search=prefix)) == 3
+
+
+def test_the_tag_total_counts_the_whole_match_not_the_page(prefix) -> None:
+    for name in (f"{prefix}-a", f"{prefix}-b", f"{prefix}-c"):
+        create_tag(name=name)
+
+    assert len(list_tags(search=prefix, limit=2)) == 2
+    assert count_tags(search=prefix) == 3
+
+
+def test_a_search_matches_the_name_ignoring_case(prefix) -> None:
+    create_tag(name=f"{prefix}-customers")
+    create_tag(name=f"{prefix}-orders")
+
+    found = list_tags(search=f"{prefix}-CUSTOM")
+
+    assert [row["name"] for row in found] == [f"{prefix}-customers"]
+    assert count_tags(search=f"{prefix}-CUSTOM") == 1
+
+
+def test_a_blank_search_filters_nothing(prefix) -> None:
+    """A cleared search box sends an empty string, not a missing parameter."""
+    create_tag(name=f"{prefix}-pii")
+
+    assert count_tags(search="   ") == count_tags()
 
 
 def test_create_stamps_both_timestamps(prefix) -> None:

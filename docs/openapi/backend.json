@@ -2457,28 +2457,6 @@
         "title": "ListResponse[TagChip]",
         "type": "object"
       },
-      "ListResponse_Tag_": {
-        "additionalProperties": true,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/Tag"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": [
-          "data",
-          "count"
-        ],
-        "title": "ListResponse[Tag]",
-        "type": "object"
-      },
       "ListResponse_Zone_": {
         "additionalProperties": true,
         "properties": {
@@ -2752,6 +2730,33 @@
           "total"
         ],
         "title": "PagedListResponse[TagItem]",
+        "type": "object"
+      },
+      "PagedListResponse_Tag_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "count",
+          "total"
+        ],
+        "title": "PagedListResponse[Tag]",
         "type": "object"
       },
       "PqlAnalysis": {
@@ -8125,18 +8130,81 @@
     },
     "/api/tags": {
       "get": {
-        "description": "Return every tag.",
+        "description": "Return tags, ordered by name.\n\n*q*, when given, keeps the tags whose name contains it -- a name is the\nwhole of what the settings list shows, so there is nothing else to search\nby.\n\n*skip*/*limit* select one page of that order, and ``total`` counts every\nmatch so a caller knows when to stop asking. Omitting *limit* returns every\nmatching tag, which is what the tag picker asks for: it offers the whole\nvocabulary on every detail page and narrows it in the browser.",
         "operationId": "list_tags_api_tags_get",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring filter on the tag name.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring filter on the tag name.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListResponse_Tag_"
+                  "$ref": "#/components/schemas/PagedListResponse_Tag_"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Tags",

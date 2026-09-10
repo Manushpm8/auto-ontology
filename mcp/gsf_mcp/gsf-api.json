@@ -5734,27 +5734,58 @@
       "get": {
         "description": "tagsApi.getAll — list tags. Viewers too, unlike the rest of this file: the\ntag picker on every detail page offers the whole vocabulary, and a tag's name\nand id say nothing about the catalog.\n\nAuthor names are added only when asked for — see `authorsRequested`. This is\nthe hottest tag route there is, read on every navigation the picker survives,\nand the settings page is the only caller with anything to show them in.",
         "operationId": "get_api_tags",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListResponse_Tag_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "No authenticated caller could be resolved"
-          },
-          "403": {
-            "description": "The caller lacks the required permission"
-          }
-        },
-        "summary": "tagsApi.getAll — list tags.",
-        "tags": ["tags"],
         "parameters": [
+          {
+            "description": "Case-insensitive substring filter on the tag name.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring filter on the tag name.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          },
           {
             "name": "authors",
             "in": "query",
@@ -5766,6 +5797,36 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedListResponse_Tag_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "tagsApi.getAll — list tags.",
+        "tags": ["tags"],
         "security": [
           {
             "ApiToken": []
@@ -9320,25 +9381,6 @@
         "title": "ListResponse[TableSummary]",
         "type": "object"
       },
-      "ListResponse_Tag_": {
-        "additionalProperties": true,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/Tag"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": ["data", "count"],
-        "title": "ListResponse[Tag]",
-        "type": "object"
-      },
       "ListResponse_TagChip_": {
         "additionalProperties": true,
         "properties": {
@@ -9577,6 +9619,29 @@
         },
         "required": ["data", "count", "total"],
         "title": "PagedListResponse[SqlAttribute]",
+        "type": "object"
+      },
+      "PagedListResponse_Tag_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["data", "count", "total"],
+        "title": "PagedListResponse[Tag]",
         "type": "object"
       },
       "PagedListResponse_TagItem_": {

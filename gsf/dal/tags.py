@@ -14,6 +14,11 @@ holds when two requests take the same name at once, and the check is what turns
 the ordinary case into a readable 409 instead of a driver error. Both raise the
 same ``ValueError``, so a caller has one behaviour to handle rather than two.
 
+The tag list is paged, and :func:`list_tags` and :func:`count_tags` take the
+same *search* so a page and its total describe one list. Paging is optional
+there, unlike on a rule: the tag picker reads the whole vocabulary to filter it
+in the browser, so an unpaged read is a first-class call rather than a fallback.
+
 Membership is read in both directions, and the two reads are shaped for their
 callers rather than for each other. :func:`list_tag_targets` unions the five
 kinds of taggable object into *one* list of uniform rows — id, name, path, type,
@@ -167,15 +172,57 @@ def _name_taken(name: str, *, exclude_id: str | None = None) -> bool:
     return bool(store().query_read(statement))
 
 
-def list_tags() -> list[dict[str, Any]]:
-    """Every tag, ordered as the settings page renders them.
+def _matching(search: str | None) -> list[ColumnElement[bool]]:
+    """The WHERE for *search*, or nothing at all when there is none.
+
+    A tag matches on its name, which is the whole of what a tag is -- the
+    settings list shows nothing else to search by, so there is nothing else a
+    query could match without hiding rows for a reason nothing on screen
+    explains.
+
+    Case-insensitive substring, as the rule list's ``q`` is. One function so
+    :func:`list_tags` and :func:`count_tags` cannot come to disagree about what
+    matches -- a page and a total taken from different filters would leave the
+    list asking for rows that are not there.
+    """
+    if search is None or search.strip() == "":
+        return []
+    return [s.tag.c.name.ilike(f"%{search.strip()}%")]
+
+
+def list_tags(
+    *, search: str | None = None, skip: int = 0, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """One page of tags, ordered as the settings page renders them.
 
     Sorted case-insensitively with the id as a tie-break, so the order is total
-    and a page does not reshuffle between two reads.
+    and two pages of one list cannot repeat or skip a tag because the database
+    reshuffled equal names between the requests.
+
+    *skip* and *limit* select a window of that order, and :func:`count_tags` is
+    the size of the whole match, which is what tells a caller when to stop
+    asking. *limit* omitted returns every matching tag: the tag picker offers
+    the whole vocabulary and filters it in the browser, so an unpaged read is
+    its ordinary call rather than a special case.
     """
-    return store().query_read(
-        select(*_COLUMNS).order_by(func.lower(s.tag.c.name), s.tag.c.id)
+    statement = (
+        select(*_COLUMNS)
+        .where(*_matching(search))
+        .order_by(func.lower(s.tag.c.name), s.tag.c.id)
+        .offset(skip or None)
     )
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    return store().query_read(statement)
+
+
+def count_tags(*, search: str | None = None) -> int:
+    """The unpaged size of :func:`list_tags`, from the same filter."""
+    rows = store().query_read(
+        select(func.count(s.tag.c.id).label("total")).where(*_matching(search))
+    )
+    return int(rows[0]["total"]) if rows else 0
 
 
 def get_tag(tag_id: str) -> dict[str, Any] | None:

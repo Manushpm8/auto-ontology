@@ -118,7 +118,7 @@ __all__ = [
     "TableZonesResponse",
     "TagChipListResponse",
     "TagItemPageResponse",
-    "TagListResponse",
+    "TagPageResponse",
     "TagResponse",
     "TermDetailResponse",
     "TermExplorationDetailsResponse",
@@ -291,7 +291,10 @@ ZoneListResponse = ListResponse[Zone]
 
 # Tags
 TagResponse = DataResponse[Tag]
-TagListResponse = ListResponse[Tag]
+# Paged, but optionally: the settings list reads a window of the vocabulary and
+# the tag picker reads all of it, so `total` is what tells the first when to stop
+# asking and equals `count` for the second.
+TagPageResponse = PagedListResponse[Tag]
 # What a tag labels, paged: a tag applied by a rule can carry the whole catalog,
 # so the objects are their own list rather than a field on the tag.
 TagItemPageResponse = PagedListResponse[TagItem]
