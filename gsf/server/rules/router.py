@@ -14,7 +14,9 @@ and read through ``gsf.dal.rules``:
   table, saves the rule, applies it -- see ``service.find_targets`` and
   ``service.label_targets`` -- and answers with its id.
 * :func:`list_rules` returns a page of rules with their tags, filtered by an
-  optional query, and :func:`get_rule` returns one of them by id.
+  optional query. There is no read of a single rule: every screen showing one
+  shows a row of that list, so a second shape for the same rule would be one
+  more thing to keep in step with it.
 * :func:`update_rule` renames a rule, and renames only -- its search and its
   tags are what it *is*, so changing either is a new rule rather than an edit.
 * :func:`delete_rule` removes one rule **and the labels it applied**, which is
@@ -336,21 +338,6 @@ def list_rules(
     # asked for everything: a whole unpaged list already is its own total.
     total = rules_dal.count_rules(search=q) if skip or limit is not None else len(rules)
     return {"data": rules, "count": len(rules), "total": total}
-
-
-@router.get("/rules/{rule_id}", response_model=RuleResponse)
-def get_rule(rule_id: str) -> dict:
-    """Return one rule, with the tags it applies.
-
-    The same shape one entry of :func:`list_rules` has, read through the same
-    columns, so a caller renders a rule the same way whichever it came from.
-
-    404 for an id that is not stored.
-    """
-    rule = rules_dal.get_rule(rule_id)
-    if rule is None:
-        raise _no_such_rule(rule_id)
-    return {"data": rule}
 
 
 @router.patch("/rules/{rule_id}", response_model=RuleResponse)

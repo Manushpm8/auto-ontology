@@ -4685,61 +4685,6 @@
         },
         "x-gsf-proxied": true
       },
-      "get": {
-        "description": "rulesApi.getById — one rule.",
-        "operationId": "get_api_rules_rule_id_",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rule_id",
-            "required": true,
-            "schema": {
-              "title": "Rule Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Rule_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "No authenticated caller could be resolved"
-          },
-          "403": {
-            "description": "The caller lacks the required permission"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Rule",
-        "tags": ["rules"],
-        "security": [
-          {
-            "ApiToken": []
-          }
-        ],
-        "x-gsf-source": "frontend/app/api/rules/[rule_id]/route.ts",
-        "x-gsf-permissions": {
-          "tag": ["manage"]
-        },
-        "x-gsf-proxied": true
-      },
       "patch": {
         "description": "rulesApi.update — rename a rule (admin only).\n\nThe identity goes with it, as it does with the create, but for the other\ncolumn: `created_by` is left alone so the rule stays attributed to whoever\nsaved it, and `modified_by` records who renamed it — which is what the\ninformation card reads to say who last edited the rule.",
         "operationId": "patch_api_rules_rule_id_",

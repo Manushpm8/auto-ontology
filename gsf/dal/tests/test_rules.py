@@ -63,7 +63,6 @@ from gsf.dal.rules import (  # noqa: E402
     count_rules,
     create_rule,
     delete_rule,
-    get_rule,
     list_rules,
     update_rule,
 )
@@ -295,20 +294,8 @@ def test_two_rules_do_not_borrow_each_other_s_tags(prefix) -> None:
 
 
 # --------------------------------------------------------------------------
-# get_rule and update_rule
+# update_rule
 # --------------------------------------------------------------------------
-
-
-def test_one_rule_reads_the_same_as_its_row_in_the_list(prefix) -> None:
-    """Two reads of one rule, so a caller renders it the same either way."""
-    tag = create_tag(name=f"{prefix}-pii")
-    rule_id = _saved(prefix, tags=[tag["id"]])
-
-    assert get_rule(rule_id) == _read(rule_id)
-
-
-def test_reading_an_id_that_is_not_a_rule_is_nothing(prefix) -> None:
-    assert get_rule(str(uuid.uuid4())) is None
 
 
 def test_a_rename_changes_the_name_and_nothing_else(prefix) -> None:

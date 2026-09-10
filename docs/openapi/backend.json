@@ -7438,47 +7438,6 @@
           "rules"
         ]
       },
-      "get": {
-        "description": "Return one rule, with the tags it applies.\n\nThe same shape one entry of :func:`list_rules` has, read through the same\ncolumns, so a caller renders a rule the same way whichever it came from.\n\n404 for an id that is not stored.",
-        "operationId": "get_rule_api_rules__rule_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rule_id",
-            "required": true,
-            "schema": {
-              "title": "Rule Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_Rule_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Rule",
-        "tags": [
-          "rules"
-        ]
-      },
       "patch": {
         "description": "Rename a rule.\n\nThe name is all an edit changes -- see :class:`RuleUpdate` for why the\nsearch and the tags are not editable. What the rule has already labelled is\nuntouched: those rows name the rule by id, so the new name appears against\nevery object it labelled under the old one.\n\nAnswers with the whole rule rather than an echo of the name, the way\nrenaming a tag does: the edit also advances ``modified`` and records a\n``modified_by``, so the row the caller just edited is redrawn from this one\nresponse instead of from a re-read.\n\n400 for a blank name. 409 for a name another rule holds -- rule names are\nunique, so that the list's own way of referring to a rule identifies one.\nA rename to the rule's own name is not a conflict, and neither is one that\nonly changes case, which is how a rule created shouting gets fixed. 404 for\nan id that is not stored -- the settings page edits a row from a list it has\nalready read, so a missing rule means that list is stale.\n\nNo 401, unlike the create: an edit is recorded against whoever made it when\nthe request says, and a request that names nobody still renames the rule\nsomebody else created. ``modified_by`` is nullable for exactly that.",
         "operationId": "update_rule_api_rules__rule_id__patch",

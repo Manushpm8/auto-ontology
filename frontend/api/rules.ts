@@ -22,8 +22,13 @@ export type RulesListParams = PageParams & {
  * matches.
  *
  * All of it is backed by the `rule` table. `update` is a rename and nothing
- * more — see `RuleUpdateInput` — and the three calls that take an id answer 404
- * when the rule is gone, which means the list the caller acted from is stale.
+ * more — see `RuleUpdateInput` — and both calls that take an id answer 404 when
+ * the rule is gone, which means the list the caller acted from is stale.
+ *
+ * There is no read of a single rule. Every screen that shows one shows a row of
+ * the list — the information card included — so a rule is rendered from the
+ * page it was listed on rather than fetched again, and the authors that page
+ * resolved come with it.
  */
 export const rulesApi = {
 	/**
@@ -35,9 +40,6 @@ export const rulesApi = {
 			...(params?.query ? { q: params.query } : {}),
 			...pageQuery(params),
 		}),
-
-	getById: (ruleId: string): Promise<ResponseWithError<{ data: Rule }>> =>
-		requests.get(`rules/${ruleId}`),
 
 	/**
 	 * Save a rule, and get back its id.

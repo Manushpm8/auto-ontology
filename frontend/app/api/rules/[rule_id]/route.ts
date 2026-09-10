@@ -5,9 +5,6 @@
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
 
-// rulesApi.getById — one rule.
-export const GET = withPermission({ tag: ['manage'] })((req) => proxyToBackend(req));
-
 // rulesApi.update — rename a rule (admin only).
 //
 // The identity goes with it, as it does with the create, but for the other

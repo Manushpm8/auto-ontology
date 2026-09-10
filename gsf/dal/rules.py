@@ -27,8 +27,10 @@ names are -- ``uq_rule_name_lower`` in the schema, and :func:`_name_taken` in
 front of it so the answer is a message rather than a constraint violation.
 
 The read side is paged, and :func:`list_rules` and :func:`count_rules` take the
-same *search* so a page and its total describe one list. :func:`get_rule` reads
-one rule in the shape a page holds it.
+same *search* so a page and its total describe one list. There is no read of one
+rule by id: a rule is only ever shown as a row of that list, and
+:func:`update_rule` answers with the renamed rule so even an edit needs no
+re-read.
 
 :func:`update_rule` renames, and renames only: a rule's search and its tags are
 what it *is*, and changing either would move which objects it labels while
@@ -261,19 +263,6 @@ def count_rules(*, search: str | None = None) -> int:
         select(func.count(s.rule.c.id).label("total")).where(*_matching(search))
     )
     return int(rows[0]["total"]) if rows else 0
-
-
-def get_rule(rule_id: str) -> dict[str, Any] | None:
-    """One rule with its tags. ``None`` when no rule has that id.
-
-    The same shape one page of :func:`list_rules` holds, tags included, because
-    it is read through the same columns and the same tag join -- a caller that
-    can render a row from the list can render this without a second branch.
-    """
-    rules = store().query_read(select(*_COLUMNS).where(s.rule.c.id == rule_id))
-    if not rules:
-        return None
-    return {**rules[0], "tags": _tags_by_rule([rule_id])[rule_id]}
 
 
 def update_rule(
