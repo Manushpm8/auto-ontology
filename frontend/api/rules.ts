@@ -48,9 +48,12 @@ export const rulesApi = {
 	 * everything else about the stored rule — the timestamps, the author, the tag
 	 * names — arrives from `getAll` rather than from an echo of what was posted.
 	 *
-	 * Tags go up as whole objects; only their ids are checked, against the tag
-	 * table, and the rest is kept beside them so a read answers with the tags
-	 * that were picked.
+	 * Tags go up as whole objects so a client can post the ones it is already
+	 * holding without reducing them to ids first. Only the ids are taken — see
+	 * `RuleTagRef`: a name or a timestamp sent beside one is ignored rather than
+	 * stored, because a rule reads its tags back through a join on the tag
+	 * table, which answers with them as they *are* rather than as they looked
+	 * when the rule was saved.
 	 *
 	 * 400 for a body that could never be a rule (a blank name, a search term
 	 * shorter than the search accepts, no tags); 409 when another rule already

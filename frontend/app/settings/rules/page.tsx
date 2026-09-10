@@ -28,7 +28,7 @@ import type { Rule } from '@/types/rules';
 import { RuleInformationModal } from './RuleInformationModal';
 import { RuleAuthor } from './RuleAuthor';
 
-/** What the terms page waits before acting on what was typed. */
+/** Long enough to type a word into the box. Every search in the app waits it. */
 const SEARCH_DEBOUNCE_MS = 1000;
 
 /** The radio the export form draws, which these are the only others of. */

@@ -414,8 +414,12 @@ def test_existing_ids_keeps_the_ones_that_are_tags_and_drops_the_rest(prefix) ->
     assert existing_tag_ids([tag["id"], f"{prefix}-no-such-id"]) == {tag["id"]}
 
 
-def test_existing_ids_of_nothing_asks_the_database_nothing(prefix) -> None:
-    """``IN ()`` is not a query, and the empty answer needs no read."""
+def test_existing_ids_of_nothing_asks_the_database_nothing() -> None:
+    """``IN ()`` is not a query, and the empty answer needs no read.
+
+    No ``prefix``: this one writes nothing, so it needs neither a name to write
+    under nor the cleanup that fixture exists for.
+    """
     assert existing_tag_ids([]) == set()
 
 
