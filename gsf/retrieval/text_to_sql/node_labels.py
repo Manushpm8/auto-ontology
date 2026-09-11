@@ -10,14 +10,17 @@ rather than in ``gsf.server.chat`` so the agent pipeline itself — e.g.
 ``thoughts`` summary — can use the same labels without depending on the
 server layer. ``gsf.server.chat.helpers`` re-exports this for the router.
 
-1-to-1 with the agent classes instantiated inside ``create_graph``. Unknown
-nodes fall through to the raw node_name in callers so we never display a
-blank thinking step.
+1-to-1 with the agent classes instantiated inside ``create_graph``, plus
+``question_decomposition``, which runs before the graph and decides how many
+times it runs (see ``main.stream_agent_response``) but is reported as a step so
+it lands in the same list as the rest. Unknown nodes fall through to the raw
+node_name in callers so we never display a blank thinking step.
 """
 
 from __future__ import annotations
 
 NODE_LABELS: dict[str, str] = {
+    "question_decomposition": "Planning the steps",
     "question_extraction": "Understanding the question",
     "classify_prediction": "Checking for a prediction",
     "prepare_prediction_graph": "Preparing prediction",

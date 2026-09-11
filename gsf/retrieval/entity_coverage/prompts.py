@@ -171,6 +171,153 @@ Example (Glossary contains "MRR: monthly recurring revenue"):
 """
 
 
+_DECOMPOSITION = """You split a user's request into the smallest ordered sequence of \
+single-step questions that answers it.
+
+A "single step" is one question answerable by one SQL query. Most requests are \
+already a single step — say so rather than inventing structure.
+
+## When to split
+
+Split only when a later part needs a value an earlier part computes:
+- A later part consumes a value an earlier part produces ("schools above this \
+average", "the districts whose total exceeds that figure").
+- It states a condition and then asks a question that only makes sense once the \
+condition is settled ("Is it true that X? If so, by how much?").
+
+Needing several *values* is not the same as needing several *steps*. Split on \
+dependency, never on how many things the request mentions.
+
+Do NOT split when:
+- The request asks for several things about the same rows — "the amount and the \
+status", "the score and the county", "the names along with the score". Those are \
+columns of one answer, not steps. Only the last sub-question's answer is returned, \
+so splitting them silently discards every value but the last.
+- The request is one question with several filters, joins, or qualifiers. Filters \
+are not steps.
+- Splitting would only restate the same question in smaller words.
+- A part is not answerable from the database on its own.
+
+## Rules for each sub-question
+
+- Write it as a complete, self-contained question. Do not use "it", "that", "this \
+value", or "the above" to point at an earlier step — name the thing.
+- Keep every literal, filter, and qualifier the original attached to that part. \
+Never invent a constraint the user did not state.
+- Order them so that anything a later step needs has already been computed. Earlier \
+answers are supplied to later steps as authoritative evidence, so a later step may \
+refer to an earlier result *by name* ("the lowest average salary found earlier").
+- The LAST sub-question must be the one whose answer is the answer to the whole \
+request. Everything before it exists to make it answerable.
+- Emit at most {max_sub_questions} sub-questions. If the request needs more, it is \
+too broad to decompose — return the original question unchanged as a single step.
+
+## Output
+
+Return a one-element list when the request is already a single step. That entry is \
+what gets answered, so restate the request as one self-contained question:
+
+- Preserve every filter, literal, qualifier, and requested output exactly. Never add \
+a constraint, never drop one, never change what is being asked for.
+- Make an implicit scope explicit when the request itself already determines it — \
+above all, which population an "average", "total", or "highest" is computed over. \
+"Teams with less than average passing" inside a question about 2014 normal-dribbling \
+teams means the average *among those teams*; say so.
+- Resolve pronouns and repair grammar or typos that obscure the meaning.
+- Do not otherwise reword. If nothing above applies, return the request verbatim.
+
+Examples:
+
+Input: Name movie titles released in year 1945. Sort the listing by the descending \
+order of movie popularity.
+sub_questions: ["Name movie titles released in year 1945. Sort the listing by the \
+descending order of movie popularity."]
+
+(The second sentence is an instruction about how to present the answer, not a second \
+thing to compute.)
+
+Input: State the most popular movie? When was it released and who is the director \
+for the movie?
+sub_questions: ["State the most popular movie? When was it released and who is the \
+director for the movie?"]
+
+(Three outputs — title, release year, director — all describing the same movie. One \
+query ordered by popularity returns all three. Splitting would return only the \
+director.)
+
+Input: How many movies were added to the list with the most number of movies? \
+Indicate whether the user was a paying subscriber or not when he created the list.
+sub_questions: ["How many movies were added to the list with the most number of \
+movies? Indicate whether the user was a paying subscriber or not when he created the \
+list."]
+
+(A count *and* a flag, both about the same list. The superlative is a filter on which \
+row to return, not an earlier step.)
+
+Input: For the teams with normal build-up play dribbling class in 2014, list the \
+names of the teams with less than average chance creation passing.
+sub_questions: ["What are the names of the teams with normal build-up play dribbling \
+class in 2014 whose chance creation passing is below the average chance creation \
+passing among teams with normal build-up play dribbling class in 2014?"]
+
+(One step, but the average is over the teams the question already named, not over \
+every team. Nothing was added — the scope was already there, just unsaid.)
+
+Input: List all the authors who wrote fewer pages than the average.
+sub_questions: [
+  "What is the average number of pages across all books?",
+  "Which authors wrote books with fewer pages than the average number of pages \
+across all books?"
+]
+
+Input: What is the total processed time of all solutions from the repository with \
+the most forks?
+sub_questions: [
+  "Which repository has the most forks?",
+  "What is the total processed time of all solutions belonging to the repository \
+with the most forks?"
+]
+
+(Also a superlative, but the request wants one value, and the second step needs the \
+first one's result to find it. That is a step, not a column.)
+"""
+
+
+def create_question_decomposition_prompt(
+    question: str,
+    glossary: list[dict[str, str]] | None = None,
+    *,
+    evidence: str | None = None,
+    max_sub_questions: int = 5,
+) -> str:
+    """Prompt the model to split *question* into ordered single-step questions.
+
+    Glossary and evidence are injected for the same reason extraction gets them:
+    a request whose multi-step shape is only visible once an abbreviation or a
+    domain formula is resolved would otherwise look like a single step.
+    """
+    glossary_section = format_glossary_section(glossary)
+    evidence_section = (
+        f"""## Evidence
+
+Domain context for reading the request. Use it to recognize that a term implies a
+computed intermediate value. Do not turn the evidence itself into sub-questions, and
+do not add steps it mentions that the user did not ask for.
+
+{evidence}
+
+"""
+        if evidence
+        else ""
+    )
+    body = _DECOMPOSITION.format(max_sub_questions=max_sub_questions)
+    return f"""{body}
+{glossary_section}{evidence_section}## Input
+
+{question}
+"""
+
+
 def create_question_extraction_prompt(
     question: str,
     glossary: list[dict[str, str]] | None = None,

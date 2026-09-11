@@ -15,12 +15,25 @@ from gsf.retrieval.text_to_sql.text_to_sql_graph import (
     _prediction_enabled,
     create_graph,
 )
+from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
+    _is_empty_db_result,
+)
 from gsf.retrieval.text_to_sql.connector_routing import (
     resolve_target_database_name,
+)
+from gsf.retrieval.text_to_sql.decomposition import (
+    MAX_SUB_QUESTIONS,
+    SubAnswer,
+    build_step_evidence,
+    is_decomposition_enabled,
+    summarize_sub_answer,
 )
 from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
+from gsf.retrieval.entity_coverage.agents.question_decomposition import (
+    QuestionDecompositionAgent,
+)
 from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
 from gsf.utils.llm_invoke import get_llm_client
 
@@ -50,6 +63,13 @@ except ValueError as e:
 
 graph = create_graph()
 app = graph.compile()
+
+# Node name for the decomposition step. Not a graph node -- it runs before the
+# graph and decides how many times the graph runs -- but it is reported as one
+# so a client renders it in the same step list as everything else.
+DECOMPOSITION_NODE = "question_decomposition"
+
+decomposition_agent = QuestionDecompositionAgent(max_sub_questions=MAX_SUB_QUESTIONS)
 
 # Whether the proactive value check sits between validation and execution.
 # Read off the graph that was actually built rather than re-reading
@@ -143,6 +163,78 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     return state
 
 
+def _state_for_step(
+    base_state: dict,
+    *,
+    question: str,
+    evidence: str,
+    initial_question: str | None = None,
+) -> dict:
+    """Derive a state that answers one step of a decomposed request.
+
+    Working memory is not carried between steps. ``path_state`` is rebuilt from
+    the pristine snapshot taken before the first pass rather than handed on from
+    the previous one, because almost everything a pass leaves behind —
+    ``failed_attempts``, ``sql_code``, ``relevant_tables``, ``final_response`` —
+    describes the question that pass answered and would mislead the next one.
+    What does carry forward travels through *evidence*, which is deliberate and
+    reviewable (see ``build_step_evidence``).
+
+    *initial_question* replaces what ``get_original_question`` reports, and the
+    two callers want opposite things from it. A genuine step passes its own
+    question, because intent validation would otherwise weigh one step's SQL
+    against the whole multi-part request and reject a correct partial answer.
+    A single-step restatement passes nothing and keeps the user's own words, so
+    that same comparison catches a restatement that lost a constraint.
+    """
+    path_state = dict(base_state["path_state"])
+    path_state["processing_question"] = question
+
+    state = dict(base_state)
+    state["path_state"] = path_state
+    state["evidence"] = evidence
+    if initial_question is not None:
+        state["initial_question"] = initial_question
+    # Index 0 is the system prompt built in ``_build_state``; the human turn is
+    # replaced so the graph sees this step, not the request it came from.
+    state["messages"] = [base_state["messages"][0], HumanMessage(content=question)]
+    state["decision"] = ""
+    return state
+
+
+def _whole_question(state: dict) -> str:
+    """The request as it will be asked when it is answered in a single pass."""
+    return state.get("path_state", {}).get("processing_question") or state.get(
+        "initial_question", ""
+    )
+
+
+def _plan_steps(state: dict) -> list[str]:
+    """Split the question into single-step questions, or return it unchanged.
+
+    Never raises and never returns empty: decomposition is an optimization, and
+    a request that cannot be split is simply answered in one pass, exactly as it
+    was before this existed.
+    """
+    try:
+        result = decomposition_agent.execute(state)
+    except Exception:  # noqa: BLE001 — planning must not take the run down
+        logger.exception("Question decomposition failed; answering in one pass")
+        return [_whole_question(state)]
+    sub_questions = (result.get("path_state") or {}).get("sub_questions") or []
+    return [str(s) for s in sub_questions] or [_whole_question(state)]
+
+
+def _planning_thought(sub_questions: list[str], whole_question: str) -> str | None:
+    """What the planner did, or ``None`` when it left the question alone."""
+    if len(sub_questions) > 1:
+        steps = "\n".join(f"{i}. {q}" for i, q in enumerate(sub_questions, 1))
+        return f"Answering in {len(sub_questions)} steps:\n{steps}"
+    if sub_questions and sub_questions[0] != whole_question:
+        return f"Read the question as: {sub_questions[0]}"
+    return None
+
+
 def _extract_answer(final_state: dict) -> dict:
     path_state = final_state.get("path_state", {})
     final_response = path_state.get("final_response")
@@ -228,36 +320,32 @@ def _extract_partial_answer(final_state: dict) -> dict:
     }
 
 
-def stream_agent_response(
-    payload: TextToSQLPayload,
-) -> Generator[dict, None, None]:
-    """Yield two ``{"type": "step", "node": ..., "phase": ...}`` events per
-    graph node — ``"start"`` as it begins (so a client can label the work in
-    progress) and ``"end"`` when it returns, carrying its ``thought`` — plus
-    ``{"type": "sql", "node": ..., "sql": ...}`` once a query has cleared
-    validation and is about to run (see ``_sql_about_to_run``), then
-    ``{"type": "result", "answer": ...}`` with the final answer (its
-    ``thoughts`` key summarizes every ``thought`` collected along the way).
-    On error yields ``{"type": "error", "message": ...}``."""
-    t0 = time.perf_counter()
+class _GraphPass:
+    """One run of the node graph, streamed event by event.
 
-    logger.info("Text-to-SQL agent started for question: %s", payload["question"])
+    Holds ``last_node`` and ``final_state`` as attributes rather than returning
+    them, so the caller can still build an error event out of a pass that
+    raised part-way through.
+    """
 
-    state = _build_state(payload)
-    final_state = dict(state)
-    # Last SQL surfaced to the client. A query can clear its final gate more
-    # than once (an empty result sends it back through validation unchanged),
-    # so dedupe rather than re-emitting the same query.
-    streamed_sql: str | None = None
+    def __init__(self, state: dict) -> None:
+        self._state = state
+        self.last_node: str | None = None
+        self.final_state: dict = dict(state)
 
-    last_node: str | None = None
-    try:
+    def stream(self, tags: dict | None = None) -> Generator[dict, None, None]:
+        tags = tags or {}
+        # Last SQL surfaced to the client. A query can clear its final gate more
+        # than once (an empty result sends it back through validation unchanged),
+        # so dedupe rather than re-emitting the same query.
+        streamed_sql: str | None = None
+
         # ``custom`` payloads stream the instant a node writes one (as it
         # begins); ``updates`` only arrive once it has returned. Reading
         # updates alone would label the screen with the previously finished
         # node, so a slow reconstruction looks like a hung validation.
         for mode, chunk in app.stream(
-            state,
+            self._state,
             stream_mode=["updates", "custom"],
             config={"recursion_limit": 45},
         ):
@@ -267,18 +355,19 @@ def stream_agent_response(
                     if started:
                         # A node that raises produces no update, so tracking
                         # completions alone would blame the node before it.
-                        last_node = started
+                        self.last_node = started
                         yield {
                             "type": "step",
                             "phase": "start",
                             "node": started,
                             "thought": None,
+                            **tags,
                         }
                 continue
 
             logger.info("--- AGENT STEP ---")
             for node_name, node_output in chunk.items():
-                last_node = node_name
+                self.last_node = node_name
                 logger.info("Node: %s", node_name)
 
                 # A node records its own thought (if any) at the tail of
@@ -299,6 +388,7 @@ def stream_agent_response(
                     "phase": "end",
                     "node": node_name,
                     "thought": thought,
+                    **tags,
                 }
 
                 # Surface the SQL once a node has cleared it for execution,
@@ -309,20 +399,157 @@ def stream_agent_response(
                 node_sql = _sql_about_to_run(node_name, node_output, node_path_state)
                 if node_sql and node_sql != streamed_sql:
                     streamed_sql = node_sql
-                    yield {"type": "sql", "node": node_name, "sql": node_sql}
+                    yield {"type": "sql", "node": node_name, "sql": node_sql, **tags}
 
                 if node_output:
                     if "path_state" in node_output:
-                        if "path_state" not in final_state:
-                            final_state["path_state"] = {}
-                        final_state["path_state"].update(node_output["path_state"])
+                        if "path_state" not in self.final_state:
+                            self.final_state["path_state"] = {}
+                        self.final_state["path_state"].update(node_output["path_state"])
                     for key, value in node_output.items():
                         if key != "path_state":
-                            final_state[key] = value
+                            self.final_state[key] = value
 
-        answer = _extract_answer(final_state)
-        thoughts_log = final_state.get("path_state", {}).get("thoughts_log") or []
-        thoughts_summary = _build_thoughts_summary(thoughts_log)
+
+def stream_agent_response(
+    payload: TextToSQLPayload,
+) -> Generator[dict, None, None]:
+    """Yield two ``{"type": "step", "node": ..., "phase": ...}`` events per
+    graph node — ``"start"`` as it begins (so a client can label the work in
+    progress) and ``"end"`` when it returns, carrying its ``thought`` — plus
+    ``{"type": "sql", "node": ..., "sql": ...}`` once a query has cleared
+    validation and is about to run (see ``_sql_about_to_run``), then
+    ``{"type": "result", "answer": ...}`` with the final answer (its
+    ``thoughts`` key summarizes every ``thought`` collected along the way).
+    On error yields ``{"type": "error", "message": ...}``.
+
+    A request the decomposer split into several steps runs the graph once per
+    step and emits the same events for each, additionally tagged with
+    ``step_index``, ``step_total`` and ``step_question``. Only the last step
+    produces a ``result``; the earlier ones exist to feed it (see
+    ``build_step_evidence``). Should those steps arrive at an empty result, the
+    whole request is answered once more in a single pass, tagged ``retry``, and
+    that pass supplies the ``result``. A single-step request — every request
+    when ``QUESTION_DECOMPOSITION`` is off — emits exactly what it always has.
+    """
+    t0 = time.perf_counter()
+
+    logger.info("Text-to-SQL agent started for question: %s", payload["question"])
+
+    base_state = _build_state(payload)
+    base_evidence = base_state.get("evidence") or ""
+
+    whole_question = _whole_question(base_state)
+
+    current: _GraphPass = _GraphPass(base_state)
+    try:
+        # Planning is skipped entirely, its events included, when the feature is
+        # off. A deployment that has not opted in sees the exact event stream it
+        # saw before multi-step answering existed.
+        if is_decomposition_enabled():
+            yield {
+                "type": "step",
+                "phase": "start",
+                "node": DECOMPOSITION_NODE,
+                "thought": None,
+            }
+            sub_questions = _plan_steps(base_state)
+            multi_step = len(sub_questions) > 1
+            yield {
+                "type": "step",
+                "phase": "end",
+                "node": DECOMPOSITION_NODE,
+                "thought": _planning_thought(sub_questions, whole_question),
+            }
+        else:
+            sub_questions = [whole_question]
+            multi_step = False
+
+        answered: list[SubAnswer] = []
+        combined_thoughts: list[dict] = []
+        answer: dict = {}
+
+        for index, sub_question in enumerate(sub_questions, 1):
+            if multi_step:
+                tags = {
+                    "step_index": index,
+                    "step_total": len(sub_questions),
+                    "step_question": sub_question,
+                }
+                state = _state_for_step(
+                    base_state,
+                    question=sub_question,
+                    evidence=build_step_evidence(base_evidence, answered),
+                    initial_question=sub_question,
+                )
+                combined_thoughts.append(
+                    {
+                        "node": DECOMPOSITION_NODE,
+                        "text": f"Step {index} of {len(sub_questions)}: {sub_question}",
+                    }
+                )
+            elif sub_question != whole_question:
+                # A one-step plan is still a restatement, and the useful part of
+                # it is an implicit scope made explicit — which population an
+                # "average" is taken over, say. Answer the restatement, but leave
+                # ``initial_question`` alone so intent validation still measures
+                # the SQL against what the user actually wrote.
+                tags = {}
+                state = _state_for_step(
+                    base_state, question=sub_question, evidence=base_evidence
+                )
+                combined_thoughts.append(
+                    {
+                        "node": DECOMPOSITION_NODE,
+                        "text": f"Read the question as: {sub_question}",
+                    }
+                )
+            else:
+                tags = {}
+                state = base_state
+
+            current = _GraphPass(state)
+            yield from current.stream(tags)
+
+            answer = _extract_answer(current.final_state)
+            combined_thoughts.extend(
+                current.final_state.get("path_state", {}).get("thoughts_log") or []
+            )
+            if multi_step:
+                answered.append(summarize_sub_answer(sub_question, answer))
+
+        # A step is resolved against its own population, which can be wider than
+        # the one the whole request implies: "the county of the lowest-scoring
+        # school" picks the lowest scorer over every score on file, including
+        # schools that have no county recorded, and the step that then asks for
+        # its county matches nothing. The graph cannot recover the constraint --
+        # it never saw the unsplit request -- but an empty result is a reliable
+        # symptom, and the question as asked still carries it.
+        if multi_step and _is_empty_db_result(answer.get("sql_response_from_db")):
+            logger.info("Decomposed answer was empty; re-answering in a single pass")
+            combined_thoughts.append(
+                {
+                    "node": DECOMPOSITION_NODE,
+                    "text": (
+                        "The steps returned no rows, so one of them likely "
+                        "narrowed the question too far; answering it whole "
+                        "instead."
+                    ),
+                }
+            )
+            stepped_answer = answer
+            try:
+                current = _GraphPass(base_state)
+                yield from current.stream({"retry": "single_pass"})
+                answer = _extract_answer(current.final_state)
+                combined_thoughts.extend(
+                    current.final_state.get("path_state", {}).get("thoughts_log") or []
+                )
+            except Exception:  # noqa: BLE001 — a fallback must not take the run down
+                logger.exception("Single-pass retry failed; keeping the stepped answer")
+                answer = stepped_answer
+
+        thoughts_summary = _build_thoughts_summary(combined_thoughts)
         if isinstance(answer, dict) and thoughts_summary:
             answer["thoughts"] = thoughts_summary
         elapsed = time.perf_counter() - t0
@@ -333,10 +560,10 @@ def stream_agent_response(
         logger.exception("Error during agent stream")
         yield {
             "type": "error",
-            "message": f"Agent failed after {last_node or 'graph_start'}: {exc}",
-            "node": last_node,
+            "message": f"Agent failed after {current.last_node or 'graph_start'}: {exc}",
+            "node": current.last_node,
             "error_type": type(exc).__name__,
-            "partial_answer": _extract_partial_answer(final_state),
+            "partial_answer": _extract_partial_answer(current.final_state),
         }
 
 
