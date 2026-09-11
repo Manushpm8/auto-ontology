@@ -138,16 +138,19 @@ def test_an_exception_inside_the_block_still_releases_the_bound() -> None:
     assert _bound() is None
 
 
-def test_timeout_defaults_when_env_is_unset(monkeypatch) -> None:
+def test_timeout_defaults_when_env_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LLM_INVOKE_TIMEOUT_S", raising=False)
-    assert llm_invoke._timeout_from_env() == llm_invoke._DEFAULT_INVOKE_TIMEOUT_S
+    assert llm_invoke._timeout_from_env() == 120.0
 
 
 @pytest.mark.parametrize(
     ("raw", "expected"), [("45", 45.0), ("0.5", 0.5), ("300.0", 300.0)]
 )
 def test_timeout_accepts_finite_positive_values(
-    monkeypatch, caplog, raw: str, expected: float
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    raw: str,
+    expected: float,
 ) -> None:
     monkeypatch.setenv("LLM_INVOKE_TIMEOUT_S", raw)
     with caplog.at_level(logging.WARNING, logger=llm_invoke.__name__):
@@ -157,10 +160,10 @@ def test_timeout_accepts_finite_positive_values(
 
 @pytest.mark.parametrize("raw", ["abc", "", "0", "-5", "nan", "-nan", "inf", "-inf"])
 def test_timeout_falls_back_and_warns_on_invalid_values(
-    monkeypatch, caplog, raw: str
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, raw: str
 ) -> None:
     """A bad value is parsed at import, so it must degrade, never raise."""
     monkeypatch.setenv("LLM_INVOKE_TIMEOUT_S", raw)
     with caplog.at_level(logging.WARNING, logger=llm_invoke.__name__):
-        assert llm_invoke._timeout_from_env() == llm_invoke._DEFAULT_INVOKE_TIMEOUT_S
+        assert llm_invoke._timeout_from_env() == 120.0
     assert any("LLM_INVOKE_TIMEOUT_S" in record.message for record in caplog.records)

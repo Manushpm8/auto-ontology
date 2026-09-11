@@ -246,7 +246,7 @@ def get_connectors() -> list[SQLDatabase]:
         for cs, schemas in specs:
             try:
                 connector = create_connector(cs, schemas=schemas)
-            except Exception:
+            except Exception as exc:
                 # One unreachable connection (e.g. a stale catalog entry whose
                 # host only resolves inside docker) must not take down every
                 # consumer of the registry.
@@ -254,7 +254,10 @@ def get_connectors() -> list[SQLDatabase]:
                 # parameters (Snowflake/Kyuubi keys and passphrases live
                 # there). urlparse itself can raise on a malformed string
                 # (the very failure that may have brought us here), and this
-                # handler must never throw.
+                # handler must never throw. The exception text (and so the
+                # traceback) can echo the raw connection string, so the
+                # ERROR line carries only the label and the error type; the
+                # full traceback is kept at DEBUG for local diagnosis.
                 try:
                     parsed = urlparse(cs)
                     label = (
@@ -263,9 +266,12 @@ def get_connectors() -> list[SQLDatabase]:
                     )
                 except ValueError:
                     label = "<unparseable connection string>"
-                logger.exception(
-                    "Skipping connection %s: connector creation failed", label
+                logger.error(
+                    "Skipping connection %s: connector creation failed (%s)",
+                    label,
+                    type(exc).__name__,
                 )
+                logger.debug("Connector creation traceback", exc_info=True)
                 continue
             database_name = connector.database_name
             if database_name in seen_database_names:

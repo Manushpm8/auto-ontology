@@ -12,6 +12,7 @@ credentials or query parameters that live in a connection string.
 from __future__ import annotations
 
 import logging
+from typing import Callable, Iterator
 
 import pytest
 
@@ -27,7 +28,9 @@ class _Connector:
 
 
 @pytest.fixture
-def connections(monkeypatch):
+def connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Callable[..., None]]:
     """Configure ``get_connectors`` from a plain list of connection strings.
 
     The catalog is emptied so discovery falls through to ``CONNECTION_STRINGS``,
@@ -46,20 +49,24 @@ def connections(monkeypatch):
     registry._connectors = None
 
 
-def _fail_matching(*needles: str):
-    """A ``create_connector`` stand-in that fails for strings containing a needle."""
+def _fail_matching(*needles: str) -> Callable[..., _Connector]:
+    """A ``create_connector`` stand-in that fails for strings containing a needle.
 
-    def create(connection_string: str, schemas=None) -> _Connector:
+    The error carries the raw connection string, as real drivers' errors can,
+    so the tests prove the skip log stays clean even then.
+    """
+
+    def create(connection_string: str, schemas: list[str] | None = None) -> _Connector:
         for needle in needles:
             if needle in connection_string:
-                raise ConnectionError(f"cannot reach {needle}")
+                raise ConnectionError(f"cannot reach {connection_string}")
         return _Connector(connection_string.rsplit("/", 1)[-1])
 
     return create
 
 
 def test_a_failed_connector_is_skipped_and_the_rest_survive(
-    connections, monkeypatch
+    connections: Callable[..., None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     connections("postgres://u:p@dead-host/one", "duckdb:///two", "mysql://u:p@h/three")
     monkeypatch.setattr(registry, "create_connector", _fail_matching("dead-host"))
@@ -67,7 +74,9 @@ def test_a_failed_connector_is_skipped_and_the_rest_survive(
     assert [c.database_name for c in registry.get_connectors()] == ["two", "three"]
 
 
-def test_every_connector_failing_yields_an_empty_list(connections, monkeypatch) -> None:
+def test_every_connector_failing_yields_an_empty_list(
+    connections: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+) -> None:
     connections("postgres://u:p@dead-host/one", "mysql://u:p@dead-host/two")
     monkeypatch.setattr(registry, "create_connector", _fail_matching("dead-host"))
 
@@ -75,7 +84,9 @@ def test_every_connector_failing_yields_an_empty_list(connections, monkeypatch) 
 
 
 def test_the_skip_log_names_the_connection_without_its_secrets(
-    connections, monkeypatch, caplog
+    connections: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     connections(
         "snowflake://alice:s3cr3t@dead-host/analytics"
@@ -88,14 +99,18 @@ def test_the_skip_log_names_the_connection_without_its_secrets(
 
     skip = [r for r in caplog.records if "Skipping connection" in r.getMessage()]
     assert len(skip) == 1
-    message = skip[0].getMessage()
-    assert "snowflake://dead-host/analytics" in message
+    assert "snowflake://dead-host/analytics" in skip[0].getMessage()
+    assert "ConnectionError" in skip[0].getMessage()
+    # Check the fully formatted output, not just the message: a traceback
+    # would carry the exception text, and with it the raw connection string.
     for secret in ("alice", "s3cr3t", "private_key", "PEMBYTES", "hunter2", "?"):
-        assert secret not in message
+        assert secret not in caplog.text
 
 
 def test_an_unparseable_connection_string_is_skipped_with_a_placeholder(
-    connections, monkeypatch, caplog
+    connections: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """urlparse raises on an unbalanced IPv6 bracket; the handler must not."""
     connections("postgres://[::1/one", "duckdb:///two")
@@ -108,4 +123,4 @@ def test_an_unparseable_connection_string_is_skipped_with_a_placeholder(
     skip = [r for r in caplog.records if "Skipping connection" in r.getMessage()]
     assert len(skip) == 1
     assert "<unparseable connection string>" in skip[0].getMessage()
-    assert "[::1" not in skip[0].getMessage()
+    assert "[::1" not in caplog.text
