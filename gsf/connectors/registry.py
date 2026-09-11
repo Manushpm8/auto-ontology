@@ -250,14 +250,21 @@ def get_connectors() -> list[SQLDatabase]:
                 # One unreachable connection (e.g. a stale catalog entry whose
                 # host only resolves inside docker) must not take down every
                 # consumer of the registry.
-                parsed = urlparse(cs)
-                # Log only scheme/host/port/db — never credentials or query
-                # parameters (Snowflake/Kyuubi keys and passphrases live there).
+                # Log only scheme/host/db — never credentials or query
+                # parameters (Snowflake/Kyuubi keys and passphrases live
+                # there). urlparse itself can raise on a malformed string
+                # (the very failure that may have brought us here), and this
+                # handler must never throw.
+                try:
+                    parsed = urlparse(cs)
+                    label = (
+                        f"{parsed.scheme or '?'}://"
+                        f"{parsed.hostname or '?'}{parsed.path or ''}"
+                    )
+                except ValueError:
+                    label = "<unparseable connection string>"
                 logger.exception(
-                    "Skipping connection %s://%s%s: connector creation failed",
-                    parsed.scheme or "?",
-                    parsed.hostname or "?",
-                    parsed.path or "",
+                    "Skipping connection %s: connector creation failed", label
                 )
                 continue
             database_name = connector.database_name
