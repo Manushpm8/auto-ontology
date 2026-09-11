@@ -947,6 +947,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
                 s.catalog_column.c.format,
+                s.catalog_column.c.sample_values,
             )
             .select_from(
                 _table_join().join(
@@ -989,6 +990,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "data_type": row["data_type"],
                     "description": row["column_description"],
                     "format": row["format"],
+                    "sample_values": stringify_sample_values(row["sample_values"]),
                 }
             )
     return list(tables.values())
