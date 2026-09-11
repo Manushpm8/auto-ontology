@@ -16,15 +16,37 @@ from typing import Iterator, Type, TypeVar
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from gsf.utils.model_config import resolve
 
 logger = logging.getLogger(__name__)
 
+
+class StrictLLMOutputModel(BaseModel):
+    """Base for LLM structured-output schemas.
+
+    Forbids genuine hallucinated fields (``extra="forbid"``) but first strips any
+    key starting with ``$`` — some models leak tool-calling metadata (e.g. a stray
+    ``$FUNCTION_NAME`` field echoing the tool name) into the arguments payload,
+    which would otherwise fail validation and burn all retry attempts even though
+    the real data is fine. Opt a schema into this by inheriting from it instead of
+    ``BaseModel``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_provider_artifact_keys(cls, data):
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if not k.startswith("$")}
+        return data
+
+
 RETRY_MAX_ATTEMPTS = 3
 
-_DEFAULT_INVOKE_TIMEOUT_S = 50.0
+_DEFAULT_INVOKE_TIMEOUT_S = 120.0
 
 
 def _timeout_from_env() -> float:
@@ -50,7 +72,6 @@ def _timeout_from_env() -> float:
     return value
 
 
-# Reasoning models routinely exceed the 50s default; benchmarks override via env.
 LLM_INVOKE_TIMEOUT_S = _timeout_from_env()
 
 # Concurrent LLM requests are unbounded here by default. A process-wide cap used
@@ -151,7 +172,42 @@ _RETRYABLE_TOKENS = (
     "503",
     "ResourceExhausted",
     "Service Unavailable",
+    "timed out",
+    "APITimeoutError",
+    "ReadTimeout",
+    # Azure / LiteLLM connection failures
+    "Connection error",
+    "APIConnectionError",
+    "AzureException",
+    "InternalServerError",
+    "litellm",
 )
+
+# Exception *type* names that are always transient/retryable regardless of
+# message text. Needed because str(exception) for openai's typed errors
+# (e.g. openai.InternalServerError) returns only the message body — never
+# the class name — so a message like "upstream connect error or
+# disconnect/reset before headers... Connection refused" silently fails
+# every _RETRYABLE_TOKENS substring check above even though
+# "InternalServerError" is right there in the token list. Matching on
+# type(e).__name__ catches these regardless of how the provider phrases
+# the underlying message.
+_RETRYABLE_EXCEPTION_TYPES = frozenset(
+    {
+        "InternalServerError",
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "ServiceUnavailableError",
+    }
+)
+
+
+def _is_retryable(e: Exception) -> bool:
+    """Whether *e* signals a transient, retryable server condition."""
+    return any(tok in str(e) for tok in _RETRYABLE_TOKENS) or (
+        type(e).__name__ in _RETRYABLE_EXCEPTION_TYPES
+    )
 
 
 class _TimeoutSession(_requests.Session):
@@ -337,6 +393,43 @@ def invoke_text(llm: BaseChatModel, prompt: str) -> str:
     return content if isinstance(content, str) else str(content)
 
 
+def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
+    """invoke_text with retry/backoff for 503/429 and the inflight semaphore."""
+    messages = [HumanMessage(content=prompt)]
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            with _inflight_guard():
+                response = llm.invoke(messages)
+            content = getattr(response, "content", response)
+            return content if isinstance(content, str) else str(content)
+        except _requests.exceptions.ReadTimeout:
+            logger.error(
+                "LLM invoke timed out after %ds on attempt %d/%d",
+                LLM_INVOKE_TIMEOUT_S,
+                attempt + 1,
+                RETRY_MAX_ATTEMPTS,
+            )
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                time.sleep(2 ** (attempt + 1) + random.uniform(0, 1))
+                continue
+            raise
+        except Exception as e:
+            is_retryable = _is_retryable(e)
+            if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                logger.warning(
+                    "Retryable LLM error on attempt %d/%d — retrying in %.1fs: %s",
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                    wait,
+                    str(e)[:120],
+                )
+                time.sleep(wait)
+                continue
+            raise
+    raise RuntimeError("safe_invoke_text exhausted retries")
+
+
 def safe_invoke_with_structured_output(
     llm: BaseChatModel,
     messages: list[BaseMessage],
@@ -367,16 +460,29 @@ def safe_invoke_with_structured_output(
             raise
         except ValidationError as e:
             if attempt < RETRY_MAX_ATTEMPTS - 1:
-                current_messages.append(
-                    SystemMessage(
-                        content=(
-                            "Your previous output did not validate. "
-                            f"Validation errors:\n{str(e)}\n"
-                            "Please return a **fully valid** object that satisfies the schema. "
-                            "Do not omit required fields. Do not include extra keys."
+                if attempt == 0:
+                    # First retry: append the error so the model can self-correct.
+                    current_messages.append(
+                        SystemMessage(
+                            content=(
+                                "Your previous output did not validate. "
+                                f"Validation errors:\n{str(e)}\n"
+                                "Please return a **fully valid** object that satisfies the schema. "
+                                "Do not omit required fields. Do not include extra keys."
+                            )
                         )
                     )
-                )
+                else:
+                    # Subsequent retries: the accumulated error context didn't help —
+                    # reset to fresh messages to avoid compounding the confusion.
+                    logger.warning(
+                        "Structured output still failing after error-context retry "
+                        "(attempt %d/%d) for %s — resetting to fresh messages",
+                        attempt + 1,
+                        RETRY_MAX_ATTEMPTS,
+                        schema_name,
+                    )
+                    current_messages = _ensure_non_system_message(messages.copy())
                 continue
             else:
                 logger.error(
@@ -384,7 +490,7 @@ def safe_invoke_with_structured_output(
                 )
                 raise
         except Exception as e:
-            is_retryable = any(tok in str(e) for tok in _RETRYABLE_TOKENS)
+            is_retryable = _is_retryable(e)
             if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 logger.warning(
@@ -411,6 +517,9 @@ def safe_invoke_with_structured_output(
                 attempt + 1,
                 RETRY_MAX_ATTEMPTS,
             )
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                time.sleep(wait)
             continue
         if isinstance(result, schema):
             return result
@@ -433,3 +542,55 @@ def invoke_with_structured_output(
             exc_info=True,
         )
         return None
+
+
+# ── Non-reasoning → reasoning fallback helpers ───────────────────────────────
+# These try the non-reasoning (fast/cheap) LLM first. If it exhausts all
+# retries (e.g. persistent Azure connection errors), they transparently fall
+# back to the reasoning LLM for that single call rather than crashing.
+
+
+def safe_invoke_text_nr(prompt: str) -> str:
+    """invoke_text using non-reasoning LLM; falls back to reasoning on persistent failure."""
+    try:
+        llm = get_non_reasoning_llm_client()
+        return safe_invoke_text(llm, prompt)
+    except Exception as e:
+        logger.warning(
+            "Non-reasoning LLM exhausted %d retries (%s: %s) — falling back to reasoning LLM",
+            RETRY_MAX_ATTEMPTS,
+            type(e).__name__,
+            str(e)[:120],
+        )
+        return safe_invoke_text(get_llm_client(), prompt)
+
+
+def safe_invoke_structured_nr(
+    messages: list[BaseMessage],
+    schema: Type[T],
+) -> T | None:
+    """invoke_with_structured_output using non-reasoning LLM; falls back to reasoning on persistent failure."""
+    try:
+        llm = get_non_reasoning_llm_client()
+        return safe_invoke_with_structured_output(llm, messages, schema)
+    except Exception as e:
+        schema_name = getattr(schema, "__name__", str(schema))
+        logger.warning(
+            "Non-reasoning LLM exhausted %d retries for %s (%s: %s) — falling back to reasoning LLM",
+            RETRY_MAX_ATTEMPTS,
+            schema_name,
+            type(e).__name__,
+            str(e)[:120],
+        )
+        try:
+            return safe_invoke_with_structured_output(
+                get_llm_client(), messages, schema
+            )
+        except Exception as e2:
+            logger.error(
+                "Reasoning LLM also failed for %s: %s: %s",
+                schema_name,
+                type(e2).__name__,
+                str(e2)[:120],
+            )
+            return None
