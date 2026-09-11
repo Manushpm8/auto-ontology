@@ -5,9 +5,12 @@
 """Tests for LLM invocation helpers."""
 
 import contextlib
+import logging
 import threading
 import time
 from typing import Any
+
+import pytest
 
 from gsf.utils import llm_invoke
 from gsf.utils.llm_invoke import _structured_output_kwargs
@@ -133,3 +136,31 @@ def test_an_exception_inside_the_block_still_releases_the_bound() -> None:
             assert _bound() == 3
             raise RuntimeError("boom")
     assert _bound() is None
+
+
+def test_timeout_defaults_when_env_is_unset(monkeypatch) -> None:
+    monkeypatch.delenv("LLM_INVOKE_TIMEOUT_S", raising=False)
+    assert llm_invoke._timeout_from_env() == llm_invoke._DEFAULT_INVOKE_TIMEOUT_S
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("45", 45.0), ("0.5", 0.5), ("300.0", 300.0)]
+)
+def test_timeout_accepts_finite_positive_values(
+    monkeypatch, caplog, raw: str, expected: float
+) -> None:
+    monkeypatch.setenv("LLM_INVOKE_TIMEOUT_S", raw)
+    with caplog.at_level(logging.WARNING, logger=llm_invoke.__name__):
+        assert llm_invoke._timeout_from_env() == expected
+    assert not caplog.records
+
+
+@pytest.mark.parametrize("raw", ["abc", "", "0", "-5", "nan", "-nan", "inf", "-inf"])
+def test_timeout_falls_back_and_warns_on_invalid_values(
+    monkeypatch, caplog, raw: str
+) -> None:
+    """A bad value is parsed at import, so it must degrade, never raise."""
+    monkeypatch.setenv("LLM_INVOKE_TIMEOUT_S", raw)
+    with caplog.at_level(logging.WARNING, logger=llm_invoke.__name__):
+        assert llm_invoke._timeout_from_env() == llm_invoke._DEFAULT_INVOKE_TIMEOUT_S
+    assert any("LLM_INVOKE_TIMEOUT_S" in record.message for record in caplog.records)
