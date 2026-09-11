@@ -30,7 +30,7 @@ def main_fixture(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     """
     monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: None)
     module = importlib.import_module("gsf.retrieval.text_to_sql.main")
-    monkeypatch.setattr(module, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", False)
+    monkeypatch.setattr(module, "_COMBINED_PRECHECK_IN_GRAPH", False)
     return module
 
 

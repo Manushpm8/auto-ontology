@@ -4,30 +4,138 @@
 
 """LLM client construction and structured-output invocation wrappers."""
 
+import contextlib
 import logging
 import os
 import random
 import threading
 import time
-from typing import Type, TypeVar
+from typing import Iterator, Type, TypeVar
 
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from gsf.utils.model_config import resolve
 
 logger = logging.getLogger(__name__)
 
-RETRY_MAX_ATTEMPTS = 3
-LLM_INVOKE_TIMEOUT_S = 50
 
-# Bound total concurrent LLM requests across all worker threads so the pipeline's
-# nested parallelism (tables × terms) doesn't saturate the hosted endpoint's
-# per-worker request cap (which surfaces as HTTP 503 ResourceExhausted).
-LLM_MAX_INFLIGHT = int(os.environ.get("LLM_MAX_INFLIGHT", "6"))
-_INFLIGHT = threading.BoundedSemaphore(LLM_MAX_INFLIGHT)
+class StrictLLMOutputModel(BaseModel):
+    """Base for LLM structured-output schemas.
+
+    Forbids genuine hallucinated fields (``extra="forbid"``) but first strips any
+    key starting with ``$`` — some models leak tool-calling metadata (e.g. a stray
+    ``$FUNCTION_NAME`` field echoing the tool name) into the arguments payload,
+    which would otherwise fail validation and burn all retry attempts even though
+    the real data is fine. Opt a schema into this by inheriting from it instead of
+    ``BaseModel``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_provider_artifact_keys(cls, data):
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if not k.startswith("$")}
+        return data
+
+
+RETRY_MAX_ATTEMPTS = 3
+LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
+
+# Concurrent LLM requests are unbounded here by default. A process-wide cap used
+# to live at this call site, defaulting to 6, to stop semantic compilation's
+# nested fan-out (tables x terms) from saturating the endpoint's per-worker
+# request cap and drawing HTTP 503s.
+#
+# The cost was paid by every caller. Callers that already bound their own
+# concurrency -- a server handling N requests, an eval running N questions --
+# gained nothing and hit a second, lower ceiling they could not see: measured on
+# a 60-question benchmark at 12 workers, lifting this cap cut wall clock 25%
+# with no change in error rate, because threads sat ~3s per node waiting on the
+# semaphore before reaching the network.
+#
+# Fan-out that needs a bound now asks for one with `limit_inflight`, which
+# applies it for the duration of a block. See `run_semantic_compilation`.
+LLM_MAX_INFLIGHT = int(os.environ.get("LLM_MAX_INFLIGHT", "0"))
+
+# The process-wide default, from the environment. None means unbounded. This is
+# what the guard falls back to whenever no `limit_inflight` block is active.
+_ENV_INFLIGHT: threading.BoundedSemaphore | None = (
+    threading.BoundedSemaphore(LLM_MAX_INFLIGHT) if LLM_MAX_INFLIGHT > 0 else None
+)
+
+# Every `limit_inflight` block currently open, as (max_inflight, semaphore).
+# Tracking the whole set rather than a save/restore of one global is what makes
+# overlapping blocks safe: two blocks that overlap without nesting exit in the
+# opposite order to a stack, and a save/restore would then have each one put
+# back the value *it* captured -- dropping the bound of a block still running,
+# and leaving a stale bound installed forever once both had exited.
+_ACTIVE: list[tuple[int, threading.BoundedSemaphore]] = []
+_ACTIVE_LOCK = threading.Lock()
+
+# The bound in force. Rebound only under _ACTIVE_LOCK by `_refresh_inflight`,
+# but read on the hot path without it: the read is a single attribute lookup,
+# and a caller that reads a semaphore just as its block ends simply waits on a
+# still-valid bound for that one invoke. That is a bounded staleness, not a
+# correctness problem, and it keeps the lock off every LLM call.
+_INFLIGHT: threading.BoundedSemaphore | None = _ENV_INFLIGHT
+
+
+def _refresh_inflight() -> None:
+    """Recompute the bound in force. Caller must hold ``_ACTIVE_LOCK``."""
+    global _INFLIGHT
+    # The most restrictive active block wins. Only one semaphore is ever
+    # acquired, so nested blocks cannot deadlock against each other.
+    _INFLIGHT = (
+        min(_ACTIVE, key=lambda entry: entry[0])[1] if _ACTIVE else _ENV_INFLIGHT
+    )
+
+
+@contextlib.contextmanager
+def limit_inflight(max_inflight: int) -> Iterator[None]:
+    """Bound concurrent LLM invokes to *max_inflight* for the duration of the block.
+
+    For call paths whose own parallelism multiplies -- semantic compilation runs
+    tables in parallel and fans out again within each -- where the resulting
+    request rate can exceed what the endpoint will serve and come back as 503.
+
+    The bound is process-wide, because the fan-out it exists to limit spans
+    worker threads the caller does not own. While several blocks overlap the
+    most restrictive one applies, in any nesting or interleaving; once the last
+    one exits the process returns to ``LLM_MAX_INFLIGHT``.
+
+    A value of 0 or less registers nothing and leaves any other block's bound
+    alone -- "I need no bound" must not mean "remove someone else's".
+    """
+    if max_inflight <= 0:
+        yield
+        return
+    entry = (max_inflight, threading.BoundedSemaphore(max_inflight))
+    with _ACTIVE_LOCK:
+        _ACTIVE.append(entry)
+        _refresh_inflight()
+    try:
+        yield
+    finally:
+        with _ACTIVE_LOCK:
+            # Removal is by identity of the semaphore, so concurrent blocks
+            # asking for the same size still remove their own entry.
+            for index, candidate in enumerate(_ACTIVE):
+                if candidate[1] is entry[1]:
+                    del _ACTIVE[index]
+                    break
+            _refresh_inflight()
+
+
+def _inflight_guard() -> "contextlib.AbstractContextManager[object]":
+    """The active concurrency bound, or a no-op when unbounded."""
+    semaphore = _INFLIGHT
+    return semaphore if semaphore is not None else contextlib.nullcontext()
+
 
 # Substrings that indicate a transient, retryable server condition.
 _RETRYABLE_TOKENS = (
@@ -36,7 +144,42 @@ _RETRYABLE_TOKENS = (
     "503",
     "ResourceExhausted",
     "Service Unavailable",
+    "timed out",
+    "APITimeoutError",
+    "ReadTimeout",
+    # Azure / LiteLLM connection failures
+    "Connection error",
+    "APIConnectionError",
+    "AzureException",
+    "InternalServerError",
+    "litellm",
 )
+
+# Exception *type* names that are always transient/retryable regardless of
+# message text. Needed because str(exception) for openai's typed errors
+# (e.g. openai.InternalServerError) returns only the message body — never
+# the class name — so a message like "upstream connect error or
+# disconnect/reset before headers... Connection refused" silently fails
+# every _RETRYABLE_TOKENS substring check above even though
+# "InternalServerError" is right there in the token list. Matching on
+# type(e).__name__ catches these regardless of how the provider phrases
+# the underlying message.
+_RETRYABLE_EXCEPTION_TYPES = frozenset(
+    {
+        "InternalServerError",
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "ServiceUnavailableError",
+    }
+)
+
+
+def _is_retryable(e: Exception) -> bool:
+    """Whether *e* signals a transient, retryable server condition."""
+    return any(tok in str(e) for tok in _RETRYABLE_TOKENS) or (
+        type(e).__name__ in _RETRYABLE_EXCEPTION_TYPES
+    )
 
 
 class _TimeoutSession(_requests.Session):
@@ -222,6 +365,43 @@ def invoke_text(llm: BaseChatModel, prompt: str) -> str:
     return content if isinstance(content, str) else str(content)
 
 
+def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
+    """invoke_text with retry/backoff for 503/429 and the inflight semaphore."""
+    messages = [HumanMessage(content=prompt)]
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            with _inflight_guard():
+                response = llm.invoke(messages)
+            content = getattr(response, "content", response)
+            return content if isinstance(content, str) else str(content)
+        except _requests.exceptions.ReadTimeout:
+            logger.error(
+                "LLM invoke timed out after %ds on attempt %d/%d",
+                LLM_INVOKE_TIMEOUT_S,
+                attempt + 1,
+                RETRY_MAX_ATTEMPTS,
+            )
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                time.sleep(2 ** (attempt + 1) + random.uniform(0, 1))
+                continue
+            raise
+        except Exception as e:
+            is_retryable = _is_retryable(e)
+            if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                logger.warning(
+                    "Retryable LLM error on attempt %d/%d — retrying in %.1fs: %s",
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                    wait,
+                    str(e)[:120],
+                )
+                time.sleep(wait)
+                continue
+            raise
+    raise RuntimeError("safe_invoke_text exhausted retries")
+
+
 def safe_invoke_with_structured_output(
     llm: BaseChatModel,
     messages: list[BaseMessage],
@@ -235,7 +415,7 @@ def safe_invoke_with_structured_output(
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
             model_llm = llm.with_structured_output(schema, **structured_kwargs)
-            with _INFLIGHT:
+            with _inflight_guard():
                 result = model_llm.invoke(current_messages)
         except _requests.exceptions.ReadTimeout:
             logger.error(
@@ -252,16 +432,29 @@ def safe_invoke_with_structured_output(
             raise
         except ValidationError as e:
             if attempt < RETRY_MAX_ATTEMPTS - 1:
-                current_messages.append(
-                    SystemMessage(
-                        content=(
-                            "Your previous output did not validate. "
-                            f"Validation errors:\n{str(e)}\n"
-                            "Please return a **fully valid** object that satisfies the schema. "
-                            "Do not omit required fields. Do not include extra keys."
+                if attempt == 0:
+                    # First retry: append the error so the model can self-correct.
+                    current_messages.append(
+                        SystemMessage(
+                            content=(
+                                "Your previous output did not validate. "
+                                f"Validation errors:\n{str(e)}\n"
+                                "Please return a **fully valid** object that satisfies the schema. "
+                                "Do not omit required fields. Do not include extra keys."
+                            )
                         )
                     )
-                )
+                else:
+                    # Subsequent retries: the accumulated error context didn't help —
+                    # reset to fresh messages to avoid compounding the confusion.
+                    logger.warning(
+                        "Structured output still failing after error-context retry "
+                        "(attempt %d/%d) for %s — resetting to fresh messages",
+                        attempt + 1,
+                        RETRY_MAX_ATTEMPTS,
+                        schema_name,
+                    )
+                    current_messages = _ensure_non_system_message(messages.copy())
                 continue
             else:
                 logger.error(
@@ -269,7 +462,7 @@ def safe_invoke_with_structured_output(
                 )
                 raise
         except Exception as e:
-            is_retryable = any(tok in str(e) for tok in _RETRYABLE_TOKENS)
+            is_retryable = _is_retryable(e)
             if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 logger.warning(
@@ -296,6 +489,9 @@ def safe_invoke_with_structured_output(
                 attempt + 1,
                 RETRY_MAX_ATTEMPTS,
             )
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                time.sleep(wait)
             continue
         if isinstance(result, schema):
             return result
@@ -318,3 +514,55 @@ def invoke_with_structured_output(
             exc_info=True,
         )
         return None
+
+
+# ── Non-reasoning → reasoning fallback helpers ───────────────────────────────
+# These try the non-reasoning (fast/cheap) LLM first. If it exhausts all
+# retries (e.g. persistent Azure connection errors), they transparently fall
+# back to the reasoning LLM for that single call rather than crashing.
+
+
+def safe_invoke_text_nr(prompt: str) -> str:
+    """invoke_text using non-reasoning LLM; falls back to reasoning on persistent failure."""
+    try:
+        llm = get_non_reasoning_llm_client()
+        return safe_invoke_text(llm, prompt)
+    except Exception as e:
+        logger.warning(
+            "Non-reasoning LLM exhausted %d retries (%s: %s) — falling back to reasoning LLM",
+            RETRY_MAX_ATTEMPTS,
+            type(e).__name__,
+            str(e)[:120],
+        )
+        return safe_invoke_text(get_llm_client(), prompt)
+
+
+def safe_invoke_structured_nr(
+    messages: list[BaseMessage],
+    schema: Type[T],
+) -> T | None:
+    """invoke_with_structured_output using non-reasoning LLM; falls back to reasoning on persistent failure."""
+    try:
+        llm = get_non_reasoning_llm_client()
+        return safe_invoke_with_structured_output(llm, messages, schema)
+    except Exception as e:
+        schema_name = getattr(schema, "__name__", str(schema))
+        logger.warning(
+            "Non-reasoning LLM exhausted %d retries for %s (%s: %s) — falling back to reasoning LLM",
+            RETRY_MAX_ATTEMPTS,
+            schema_name,
+            type(e).__name__,
+            str(e)[:120],
+        )
+        try:
+            return safe_invoke_with_structured_output(
+                get_llm_client(), messages, schema
+            )
+        except Exception as e2:
+            logger.error(
+                "Reasoning LLM also failed for %s: %s: %s",
+                schema_name,
+                type(e2).__name__,
+                str(e2)[:120],
+            )
+            return None

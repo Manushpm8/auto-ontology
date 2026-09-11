@@ -8,6 +8,7 @@
         "col_id": "<col:pagila.public.film.film_id>",
         "col_name": "film_id",
         "database_name": "pagila",
+        "datatype": "integer",
         "schema_name": "public",
         "table_id": "<table:pagila.public.film>",
         "table_name": "film",
@@ -6498,6 +6499,7 @@
       [
         {
           "column_name": "Name",
+          "datatype": "NVARCHAR(200)",
           "description": "The track's title.",
           "id": "<attr:Track/track name/Name>",
           "is_unique": null,
@@ -6511,6 +6513,7 @@
         },
         {
           "column_name": "amount",
+          "datatype": "numeric",
           "description": "Amount paid.",
           "id": "<attr:Payment/payment amount/amount>",
           "is_unique": null,
@@ -6524,6 +6527,7 @@
         },
         {
           "column_name": "customer_id",
+          "datatype": "integer",
           "description": "Primary key of customer.",
           "id": "<attr:Customer/customer id/customer_id>",
           "is_unique": null,
@@ -6537,6 +6541,7 @@
         },
         {
           "column_name": "email",
+          "datatype": "character varying",
           "description": "Contact address.",
           "id": "<attr:Customer/customer email/email>",
           "is_unique": null,
@@ -6550,6 +6555,7 @@
         },
         {
           "column_name": "film_id",
+          "datatype": "integer",
           "description": "Primary key of film.",
           "id": "<attr:Film/film id/film_id>",
           "is_unique": null,
@@ -6563,6 +6569,7 @@
         },
         {
           "column_name": "rating",
+          "datatype": "mpaa_rating",
           "description": "MPAA rating; an enum.",
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
@@ -6576,6 +6583,7 @@
         },
         {
           "column_name": "rental_date",
+          "datatype": "timestamp with time zone",
           "description": "When the rental started.",
           "id": "<attr:Rental/rental date/rental_date>",
           "is_unique": null,
@@ -6589,6 +6597,7 @@
         },
         {
           "column_name": "title",
+          "datatype": "text",
           "description": "The film's title.",
           "id": "<attr:Film/film title/title>",
           "is_unique": null,
@@ -6636,6 +6645,7 @@
       [
         {
           "column_name": "film_id",
+          "datatype": "integer",
           "description": "Primary key of film.",
           "id": "<attr:Film/film id/film_id>",
           "is_unique": null,
@@ -6649,6 +6659,7 @@
         },
         {
           "column_name": "rating",
+          "datatype": "mpaa_rating",
           "description": "MPAA rating; an enum.",
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
@@ -6662,6 +6673,7 @@
         },
         {
           "column_name": "title",
+          "datatype": "text",
           "description": "The film's title.",
           "id": "<attr:Film/film title/title>",
           "is_unique": null,
