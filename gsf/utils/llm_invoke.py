@@ -6,6 +6,7 @@
 
 import contextlib
 import logging
+import math
 import os
 import random
 import threading
@@ -22,8 +23,35 @@ from gsf.utils.model_config import resolve
 logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
+
+_DEFAULT_INVOKE_TIMEOUT_S = 50.0
+
+
+def _timeout_from_env() -> float:
+    """Finite positive timeout from ``LLM_INVOKE_TIMEOUT_S``, else the default.
+
+    Parsed defensively: this runs at import, so a bad value must degrade to
+    the default rather than break every importer of this module.
+    """
+    raw = os.environ.get("LLM_INVOKE_TIMEOUT_S")
+    if raw is None:
+        return _DEFAULT_INVOKE_TIMEOUT_S
+    try:
+        value = float(raw)
+    except ValueError:
+        value = float("nan")
+    if not math.isfinite(value) or value <= 0:
+        logger.warning(
+            "Ignoring invalid LLM_INVOKE_TIMEOUT_S=%r; using %.0fs",
+            raw,
+            _DEFAULT_INVOKE_TIMEOUT_S,
+        )
+        return _DEFAULT_INVOKE_TIMEOUT_S
+    return value
+
+
 # Reasoning models routinely exceed the 50s default; benchmarks override via env.
-LLM_INVOKE_TIMEOUT_S = float(os.environ.get("LLM_INVOKE_TIMEOUT_S", "50"))
+LLM_INVOKE_TIMEOUT_S = _timeout_from_env()
 
 # Concurrent LLM requests are unbounded here by default. A process-wide cap used
 # to live at this call site, defaulting to 6, to stop semantic compilation's

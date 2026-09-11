@@ -250,9 +250,14 @@ def get_connectors() -> list[SQLDatabase]:
                 # One unreachable connection (e.g. a stale catalog entry whose
                 # host only resolves inside docker) must not take down every
                 # consumer of the registry.
+                parsed = urlparse(cs)
+                # Log only scheme/host/port/db — never credentials or query
+                # parameters (Snowflake/Kyuubi keys and passphrases live there).
                 logger.exception(
-                    "Skipping connection %r: connector creation failed",
-                    cs.split("@")[-1] if "@" in cs else cs,
+                    "Skipping connection %s://%s%s: connector creation failed",
+                    parsed.scheme or "?",
+                    parsed.hostname or "?",
+                    parsed.path or "",
                 )
                 continue
             database_name = connector.database_name
