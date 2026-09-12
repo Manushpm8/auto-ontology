@@ -57,23 +57,6 @@ class QuestionExtractionModel(QuestionExtractionLiteModel):
     )
 
 
-class QuestionDecompositionModel(BaseModel):
-    """Break a multi-step request into single-step questions."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    sub_questions: list[str] = Field(
-        ...,
-        description=(
-            "Ordered single-step questions. Each one must be answerable by a "
-            "single SQL query and must be self-contained. The last entry is "
-            "the question the user ultimately wants answered. Return a "
-            "one-element list holding the original question when it is "
-            "already a single step."
-        ),
-    )
-
-
 class EntityCoverageResponse(BaseModel):
     """Final response for the entity-coverage pipeline."""
 
@@ -93,6 +76,5 @@ class EntityCoverageResponse(BaseModel):
 __all__ = [
     "QuestionExtractionLiteModel",
     "QuestionExtractionModel",
-    "QuestionDecompositionModel",
     "EntityCoverageResponse",
 ]

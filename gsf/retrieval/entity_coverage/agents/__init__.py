@@ -5,15 +5,11 @@
 """Agents for the entity-coverage LangGraph."""
 
 from gsf.retrieval.entity_coverage.agents.coverage import CoverageGradeAgent
-from gsf.retrieval.entity_coverage.agents.question_decomposition import (
-    QuestionDecompositionAgent,
-)
 from gsf.retrieval.entity_coverage.agents.question_extraction import (
     QuestionExtractionAgent,
 )
 
 __all__ = [
     "CoverageGradeAgent",
-    "QuestionDecompositionAgent",
     "QuestionExtractionAgent",
 ]

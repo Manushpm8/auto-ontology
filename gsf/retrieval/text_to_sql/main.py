@@ -31,7 +31,7 @@ from gsf.retrieval.text_to_sql.decomposition import (
 from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
-from gsf.retrieval.entity_coverage.agents.question_decomposition import (
+from gsf.retrieval.text_to_sql.agents.question_decomposition import (
     QuestionDecompositionAgent,
 )
 from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses

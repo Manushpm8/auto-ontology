@@ -13,12 +13,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gsf.retrieval.entity_coverage.agents import question_decomposition
-from gsf.retrieval.entity_coverage.agents.question_decomposition import (
+from gsf.retrieval.text_to_sql.agents import question_decomposition
+from gsf.retrieval.text_to_sql.agents.question_decomposition import (
     QuestionDecompositionAgent,
 )
-from gsf.retrieval.entity_coverage.models import QuestionDecompositionModel
-from gsf.retrieval.entity_coverage.prompts import (
+from gsf.retrieval.text_to_sql.models import QuestionDecompositionModel
+from gsf.retrieval.text_to_sql.prompts import (
     create_question_decomposition_prompt,
 )
 

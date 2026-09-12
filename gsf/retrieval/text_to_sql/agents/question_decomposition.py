@@ -4,10 +4,10 @@
 
 """Split a multi-step request into ordered single-step questions.
 
-Part of the question-extraction phase, but deliberately not a graph node: the
-sub-questions it produces drive a loop *around* the graph, and a node's output
-cannot steer the run that produced it. ``stream_agent_response`` calls this
-agent once, up front, then replays the whole node graph per sub-question.
+Runs before the graph and deliberately is not a node in it: the sub-questions
+it produces drive a loop *around* the graph, and a node's output cannot steer
+the run that produced it. ``stream_agent_response`` calls this agent once, up
+front, then replays the whole node graph per sub-question.
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ from typing import Any, Dict
 
 from langchain_core.messages import SystemMessage
 
-from gsf.retrieval.entity_coverage.models import QuestionDecompositionModel
-from gsf.retrieval.entity_coverage.prompts import (
+from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.models import QuestionDecompositionModel
+from gsf.retrieval.text_to_sql.prompts import (
     create_question_decomposition_prompt,
 )
-from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState, get_standalone_question
 from gsf.utils.llm_invoke import invoke_with_structured_output
 
