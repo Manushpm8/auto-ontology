@@ -71,9 +71,14 @@ def format_semantic_context(
         lines.append("")
         lines.append(
             "JOIN PATHS (AUTHORITATIVE — derived from the verified semantic model). "
-            "This is our most reliable knowledge of how these tables join: use these "
-            "exact join conditions almost always, and only deviate if they clearly "
-            "cannot answer the question. Use only the hops you need:"
+            "This is our most reliable knowledge of how these tables join. Use the "
+            "identity-field equalities. Drop extra equalities unless the question "
+            "or evidence requires them. A value used only to identify an "
+            "entity belongs in WHERE on that lookup table; do not copy it onto "
+            "later joins. When a key is composite, join on the entity identity "
+            "column only and leave out its period columns, unless the question "
+            "scopes the requested measure to that period. Use only the hops "
+            "you need:"
         )
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
