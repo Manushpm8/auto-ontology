@@ -43,14 +43,7 @@ create_sql_user_prompt = (
     "present in SELECT/GROUP BY.\n\n"
     "**Joins**\n"
     "- Join only when necessary; choose join type (INNER / LEFT / RIGHT) "
-    "based on the question's intent. Avoid fan-out from many-to-many joins.\n"
-    "- Join on a single identity field unless the question or evidence "
-    "directs otherwise. A value used only to identify an entity "
-    "belongs in WHERE on that lookup table; do not copy it onto later joins.\n"
-    "- When a key is composite, join on the entity identity column only and "
-    "leave out its period columns, unless the question scopes the requested "
-    "measure to that period. A question about an entity over its whole "
-    "history spans every period, so those columns stay out of ON.\n\n"
+    "based on the question's intent. Avoid fan-out from many-to-many joins.\n\n"
     "{join_paths}\n\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
@@ -81,13 +74,6 @@ create_sql_user_prompt = (
     "- Time windows: apply a date/year filter ONLY when the question's data "
     "request names a period; 'last week/month/year' then means the most "
     "recent completed calendar period, not a rolling window.\n"
-    "- Join keys: join on a single identity field unless the question or "
-    "evidence directs otherwise. Drop extra equalities from a suggested hop "
-    "unless required. A value used only to identify an entity "
-    "belongs in WHERE on that lookup table; do not copy it onto later joins. "
-    "When a key is composite, join on the entity identity column only and "
-    "leave out its period columns, unless the question scopes the requested "
-    "measure to that period.\n"
     "- Infer LIMIT from the question's intent: "
     "if a superlative (most/least/highest/lowest/best/worst/top/bottom) "
     "is paired with a number, add LIMIT with that number; "
@@ -271,12 +257,6 @@ ORDER BY total_sales DESC;"""
 
     return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
 
-Work in this order in the same response:
-1. From the question's intent, decide which joins to place: which tables,
-   and which single identity field each hop uses. Write that join plan in
-   thought first. Do not add extra ON equalities unless intent requires them.
-2. Then write sql_code from that plan, then response.
-
 {evidence_block}Key rules:
 {table_name_rule}
 - When SQL snippets are provided as reference, do NOT copy their aliases.
@@ -291,14 +271,6 @@ Work in this order in the same response:
   actually need:
 {join_template}
   Follow hops in order when the path spans more than one table.
-  Join on a single identity field unless the question or evidence directs
-  otherwise. Drop extra equalities from a suggested hop unless required.
-  A value used only to identify an entity belongs in WHERE on that
-  lookup table; do not copy it onto later joins. When a key is composite,
-  join on the entity identity column only and leave out its period columns,
-  unless the question scopes the requested measure to that period. A question
-  about an entity over its whole history spans every period, so those columns
-  stay out of ON.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,
   trimming only what does not apply. Do NOT copy its aliases.
@@ -327,8 +299,7 @@ Work in this order in the same response:
 Example:
 
 thought:
-Joins from intent: sales to customers on customer_id only.
-Then filter last full quarter, aggregate by country.
+Join sales and customers, filter last full quarter, aggregate by country.
 "Total sales" means gross SUM(sales_amount), with no refund adjustment
 since the question didn't ask for one.
 
@@ -387,15 +358,8 @@ solely for that reason.
 
 When AUTHORITATIVE JOIN PATHS are provided, they come from
 the verified semantic model. If the generated SQL uses a
-single-field identity hop from those paths, keep it and do
-NOT flag that join as invalid. Do flag extra ON equalities
-beyond a single identity field when the question or evidence
-did not require them. A value used only to identify
-an entity belongs in WHERE on that lookup table; flag it if
-copied onto later joins. A composite key does not license a
-period equality in ON: when the question does not scope the
-requested measure to that period, flag it and keep only the
-entity identity column.
+join condition from those paths, keep it and do NOT flag
+that join as invalid.
 
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
@@ -444,15 +408,8 @@ solely for that reason.
 
 When AUTHORITATIVE JOIN PATHS are provided, they come from
 the verified semantic model. If the generated SQL uses a
-single-field identity hop from those paths, keep it and do
-NOT flag that join as invalid. Do flag extra ON equalities
-beyond a single identity field when the question or evidence
-did not require them. A value used only to identify
-an entity belongs in WHERE on that lookup table; flag it if
-copied onto later joins. A composite key does not license a
-period equality in ON: when the question does not scope the
-requested measure to that period, flag it and keep only the
-entity identity column.
+join condition from those paths, keep it and do NOT flag
+that join as invalid.
 
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
@@ -680,12 +637,7 @@ def create_intent_validation_prompt(
         )
         authoritative_note = (
             "\nIf AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that follows "
-            "a single-field identity hop from those paths. Do flag extra ON equalities beyond a single "
-            "identity field when the question or evidence did not require them. A value used "
-            "only to identify an entity belongs in WHERE on that lookup table; flag it if copied onto "
-            "later joins. A composite key does not license a period equality in ON: when the question "
-            "does not scope the requested measure to that period, flag it and keep only the entity "
-            "identity column."
+            "one of those verified paths."
         )
     return f"""User's Question:
 {question_block}
