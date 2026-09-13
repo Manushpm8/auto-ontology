@@ -806,20 +806,29 @@ already a single step — say so rather than inventing structure.
 
 ## When to split
 
-Split only when a later part needs a value an earlier part computes:
-- A later part consumes a value an earlier part produces ("schools above this \
-average", "the districts whose total exceeds that figure").
-- It states a condition and then asks a question that only makes sense once the \
-condition is settled ("Is it true that X? If so, by how much?").
+Split only when a later part cannot be written as one SQL query with a subquery \
+or CTE for the earlier part:
+- The request branches: first settle whether something is true, then ask a \
+follow-up that only makes sense after that yes/no ("Is it true that X? If so, \
+by how much?").
+- An earlier part returns a set of rows that a later part must inspect as \
+text, not as a nested query (rare).
 
 Needing several *values* is not the same as needing several *steps*. Split on \
-dependency, never on how many things the request mentions.
+control flow, never on how many things the request mentions.
 
 Do NOT split when:
+- The intermediate is a scalar a subquery can compute: an average, a max/min, \
+"the fastest", "the most popular", "the winner of award X", "N% of the \
+average", "40% less than the heaviest". Keep those as one question. The SQL \
+must nest the aggregate — do not look the value up in a first step and paste \
+it into a second.
 - The request asks for several things about the same rows — "the amount and the \
 status", "the score and the county", "the names along with the score". Those are \
 columns of one answer, not steps. Only the last sub-question's answer is returned, \
 so splitting them silently discards every value but the last.
+- Two sentences are one fact: "which items are X? what percentage are they of \
+Y?" is one ratio, not a listing plus a ratio.
 - The request is one question with several filters, joins, or qualifiers. Filters \
 are not steps.
 - Splitting would only restate the same question in smaller words.
@@ -831,9 +840,7 @@ are not steps.
 value", or "the above" to point at an earlier step — name the thing.
 - Keep every literal, filter, and qualifier the original attached to that part. \
 Never invent a constraint the user did not state.
-- Order them so that anything a later step needs has already been computed. Earlier \
-answers are supplied to later steps as authoritative evidence, so a later step may \
-refer to an earlier result *by name* ("the lowest average salary found earlier").
+- Order them so that anything a later step needs has already been computed.
 - The LAST sub-question must be the one whose answer is the answer to the whole \
 request. Everything before it exists to make it answerable.
 - Emit at most {max_sub_questions} sub-questions. If the request needs more, it is \
@@ -841,17 +848,9 @@ too broad to decompose — return the original question unchanged as a single st
 
 ## Output
 
-Return a one-element list when the request is already a single step. That entry is \
-what gets answered, so restate the request as one self-contained question:
-
-- Preserve every filter, literal, qualifier, and requested output exactly. Never add \
-a constraint, never drop one, never change what is being asked for.
-- Make an implicit scope explicit when the request itself already determines it — \
-above all, which population an "average", "total", or "highest" is computed over. \
-"Teams with less than average passing" inside a question about 2014 normal-dribbling \
-teams means the average *among those teams*; say so.
-- Resolve pronouns and repair grammar or typos that obscure the meaning.
-- Do not otherwise reword. If nothing above applies, return the request verbatim.
+Return a one-element list when the request is already a single step. Copy the \
+input question verbatim — do not rephrase, shorten, strip clauses, or make \
+implicit scope explicit. Later SQL generation reads the original.
 
 Examples:
 
@@ -883,30 +882,40 @@ row to return, not an earlier step.)
 
 Input: For the teams with normal build-up play dribbling class in 2014, list the \
 names of the teams with less than average chance creation passing.
-sub_questions: ["What are the names of the teams with normal build-up play dribbling \
-class in 2014 whose chance creation passing is below the average chance creation \
-passing among teams with normal build-up play dribbling class in 2014?"]
+sub_questions: ["For the teams with normal build-up play dribbling class in 2014, \
+list the names of the teams with less than average chance creation passing."]
 
-(One step, but the average is over the teams the question already named, not over \
-every team. Nothing was added — the scope was already there, just unsaid.)
+(One step. Do not rewrite it to spell out the average's population.)
 
 Input: List all the authors who wrote fewer pages than the average.
-sub_questions: [
-  "What is the average number of pages across all books?",
-  "Which authors wrote books with fewer pages than the average number of pages \
-across all books?"
-]
+sub_questions: ["List all the authors who wrote fewer pages than the average."]
+
+(The average is a subquery, not a first step. Splitting would bake a number into \
+the second query.)
 
 Input: What is the total processed time of all solutions from the repository with \
 the most forks?
+sub_questions: ["What is the total processed time of all solutions from the \
+repository with the most forks?"]
+
+(Same: "the repository with the most forks" is a nested MAX, not a lookup.)
+
+Input: How many orders with a quantity greater than 5 have been shipped by the \
+fastest delivery method?
+sub_questions: ["How many orders with a quantity greater than 5 have been shipped \
+by the fastest delivery method?"]
+
+(Do not first ask what "fastest" is. That invents a metric and a literal. Keep \
+the superlative inside one query.)
+
+Input: Confirm whether 2014 had any delayed shipments. If it did, what was the \
+longest delay?
 sub_questions: [
-  "Which repository has the most forks?",
-  "What is the total processed time of all solutions belonging to the repository \
-with the most forks?"
+  "Did 2014 have any delayed shipments?",
+  "If 2014 had delayed shipments, what was the longest delay among them?"
 ]
 
-(Also a superlative, but the request wants one value, and the second step needs the \
-first one's result to find it. That is a step, not a column.)
+(A yes/no that gates a follow-up. That is a step, not a subquery.)
 """
 
 

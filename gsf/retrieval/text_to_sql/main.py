@@ -185,8 +185,7 @@ def _state_for_step(
     two callers want opposite things from it. A genuine step passes its own
     question, because intent validation would otherwise weigh one step's SQL
     against the whole multi-part request and reject a correct partial answer.
-    A single-step restatement passes nothing and keeps the user's own words, so
-    that same comparison catches a restatement that lost a constraint.
+    A one-step plan keeps the user's own words.
     """
     path_state = dict(base_state["path_state"])
     path_state["processing_question"] = question
@@ -223,7 +222,10 @@ def _plan_steps(state: dict) -> list[str]:
         logger.exception("Question decomposition failed; answering in one pass")
         return [_whole_question(state)]
     sub_questions = (result.get("path_state") or {}).get("sub_questions") or []
-    return [str(s) for s in sub_questions] or [_whole_question(state)]
+    planned = [str(s) for s in sub_questions] or [_whole_question(state)]
+    if len(planned) <= 1:
+        return [_whole_question(state)]
+    return planned
 
 
 def _planning_thought(sub_questions: list[str], whole_question: str) -> str | None:

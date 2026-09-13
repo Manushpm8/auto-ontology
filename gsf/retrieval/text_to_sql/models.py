@@ -172,9 +172,9 @@ class QuestionDecompositionModel(BaseModel):
         description=(
             "Ordered single-step questions. Each one must be answerable by a "
             "single SQL query and must be self-contained. The last entry is "
-            "the question the user ultimately wants answered. Return a "
-            "one-element list holding the original question when it is "
-            "already a single step."
+            "the question the user ultimately wants answered. When the "
+            "request is already a single step, return a one-element list "
+            "holding the original question copied verbatim — do not rephrase."
         ),
     )
 

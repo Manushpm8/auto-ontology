@@ -289,35 +289,28 @@ def test_a_genuine_step_becomes_its_own_reference_question(
     assert [s["initial_question"] for s in graph.states] == ["First?", "Second?"]
 
 
-def test_a_single_step_restatement_is_what_gets_answered(
+def test_a_single_step_paraphrase_is_discarded(
     main: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The useful part of a one-step plan is the scope it makes explicit.
-
-    The planner routinely turns "less than average X" into "less than the
-    average X among <the population the question already named>". Discarding
-    that would throw away the main thing planning buys on questions that do not
-    split.
-    """
+    """One step means the user's question, not a planner rewrite."""
     graph = _FakeGraph(("SELECT 1", [{"a": 1}]))
     monkeypatch.setattr(main, "_build_state", lambda _payload: _base_state())
     monkeypatch.setattr(main, "app", graph)
-    restatement = "What is the average salary among districts in 2013?"
-    _plan(main, monkeypatch, restatement)
+    _plan(main, monkeypatch, "What is the average salary among districts in 2013?")
 
-    _run(main)
+    events = _run(main)
+    planning = [e for e in events if e.get("node") == main.DECOMPOSITION_NODE]
+    thoughts = [e for e in events if e["type"] == "result"][0]["answer"]["thoughts"]
 
-    assert graph.states[0]["path_state"]["processing_question"] == restatement
+    assert graph.states[0]["path_state"]["processing_question"] == "whole question"
+    assert graph.states[0]["initial_question"] == "whole question"
+    assert planning[1]["thought"] is None
+    assert "Read the question as:" not in thoughts
 
 
-def test_a_restatement_leaves_the_users_own_words_as_the_reference(
+def test_a_one_step_plan_leaves_the_users_own_words_as_the_reference(
     main: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Intent validation must still measure the SQL against what was asked.
-
-    ``get_original_question`` reads ``initial_question``, so keeping it is what
-    catches a restatement that quietly dropped a constraint.
-    """
     graph = _FakeGraph(("SELECT 1", [{"a": 1}]))
     monkeypatch.setattr(main, "_build_state", lambda _payload: _base_state())
     monkeypatch.setattr(main, "app", graph)
@@ -326,6 +319,7 @@ def test_a_restatement_leaves_the_users_own_words_as_the_reference(
     _run(main)
 
     assert graph.states[0]["initial_question"] == "whole question"
+    assert graph.states[0]["path_state"]["processing_question"] == "whole question"
 
 
 def test_a_verbatim_single_step_plan_changes_nothing(
@@ -346,7 +340,7 @@ def test_a_verbatim_single_step_plan_changes_nothing(
     assert planning[1]["thought"] is None
 
 
-def test_a_restatement_is_announced(
+def test_a_one_step_paraphrase_is_not_announced(
     main: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     graph = _FakeGraph(("SELECT 1", [{"a": 1}]))
@@ -358,8 +352,8 @@ def test_a_restatement_is_announced(
     planning = [e for e in events if e.get("node") == main.DECOMPOSITION_NODE]
     thoughts = [e for e in events if e["type"] == "result"][0]["answer"]["thoughts"]
 
-    assert planning[1]["thought"] == "Read the question as: The clearer phrasing"
-    assert "Read the question as: The clearer phrasing" in thoughts
+    assert planning[1]["thought"] is None
+    assert "Read the question as:" not in thoughts
 
 
 def test_planning_is_absent_entirely_when_the_feature_is_off(

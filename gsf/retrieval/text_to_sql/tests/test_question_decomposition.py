@@ -58,14 +58,25 @@ def test_prompt_carries_the_step_cap_and_the_question() -> None:
     assert "## Evidence" not in prompt
 
 
-def test_prompt_states_what_a_single_step_restatement_may_change() -> None:
-    """The one-step entry is answered as written, so its contract must be explicit."""
+def test_prompt_keeps_a_single_step_as_the_original_question() -> None:
+    """No split means no rewrite; later nodes see the user's words."""
     prompt = create_question_decomposition_prompt(_QUESTION)
 
-    assert "Preserve every filter, literal, qualifier, and requested output" in prompt
-    assert "Never add a constraint, never drop one" in prompt
-    assert "Make an implicit scope explicit" in prompt
-    assert "return the request verbatim" in prompt
+    assert "Copy the input question verbatim" in prompt
+    assert "do not rephrase" in prompt
+    assert "Make an implicit scope explicit" not in prompt
+    assert "return the request verbatim" not in prompt
+
+
+def test_prompt_keeps_subquery_scalars_as_one_step() -> None:
+    """Superlatives and averages are nested SQL, not a lookup-then-paste split."""
+    prompt = create_question_decomposition_prompt(_QUESTION)
+
+    assert "The intermediate is a scalar a subquery can compute" in prompt
+    assert 'Do not first ask what "fastest" is' in prompt
+    assert "Which repository has the most forks?" not in prompt
+    assert "What is the average number of pages across all books?" not in prompt
+    assert "Did 2014 have any delayed shipments?" in prompt
 
 
 def test_prompt_includes_evidence_and_glossary_when_given() -> None:
@@ -111,6 +122,21 @@ def test_single_step_question_yields_one_entry(
         question_decomposition,
         "invoke_with_structured_output",
         _returning(question),
+    )
+
+    result = QuestionDecompositionAgent().execute(_state(question))
+
+    assert result["path_state"]["sub_questions"] == [question]
+
+
+def test_a_one_step_paraphrase_is_replaced_with_the_original(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    question = "How many shipments were delivered last month?"
+    monkeypatch.setattr(
+        question_decomposition,
+        "invoke_with_structured_output",
+        _returning("Count last month's delivered shipments."),
     )
 
     result = QuestionDecompositionAgent().execute(_state(question))

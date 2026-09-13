@@ -12,8 +12,9 @@ answered steps into the ``evidence`` string the next pass reads.
 
 Evidence is the carrier on purpose. It is already the channel for authoritative
 facts the agent must not second-guess -- ``sql_from_semantic`` injects it as
-"## Authoritative Evidence" and the SQL prompt is instructed to apply it
-verbatim -- which is exactly the standing a previously computed step needs.
+"## Authoritative Evidence". Complete identifier results may be used as
+literals in WHERE/CASE; calculated values and truncated listings must be
+re-expressed as a subquery of the prior SQL.
 """
 
 from __future__ import annotations
@@ -117,8 +118,8 @@ def build_step_evidence(base_evidence: str, answers: list[SubAnswer]) -> str:
     """Prepend *base_evidence* to the results of the steps already answered.
 
     The caller's own evidence keeps its position at the top so a domain formula
-    it supplies still reads as the primary instruction; the computed steps are
-    appended as facts rather than as instructions.
+    it supplies still reads as the primary instruction; prior-step SQL and
+    rows are appended as instructions for how the next query may use them.
     """
     if not answers:
         return base_evidence
@@ -133,9 +134,24 @@ def build_step_evidence(base_evidence: str, answers: list[SubAnswer]) -> str:
     section = f"""## Results of earlier steps
 
 This request was split into steps and the steps below have already been answered
-against this database. Their results are established facts — reuse them instead of
-recomputing them, and do not contradict them. Answer only the question you are given
-now; the earlier steps are context for it, not part of it.
+against this database. Answer only the question you are given now; the earlier
+steps are context for it, not part of it. Do not contradict them.
+
+How to use a prior Result in this query:
+
+- Identifiers — a complete, non-truncated list of keys that name rows (id,
+  code, name, label such as coachID or product ID): use those values in WHERE,
+  CASE, or IN. Do not re-look them up.
+- Measures — anything calculated (AVG, SUM, MAX, MIN, COUNT, a percentage,
+  "N% of X", a weight/score/duration): do not paste the number. Re-express the
+  step as a subquery or CTE from the SQL shown, or an equivalent nested
+  expression.
+- Truncated listings ("further row(s) omitted"): never IN-list the leftover
+  rows. Use IN (SELECT ...) / a subquery of the SQL shown so omitted rows are
+  not dropped.
+- A computed category (the "fastest" method, the "heaviest" player) is a
+  measure, not an identifier, even when the result looks like a label or a
+  constant.
 
 {steps}"""
 

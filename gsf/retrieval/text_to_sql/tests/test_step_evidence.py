@@ -45,6 +45,12 @@ def test_answered_steps_are_appended_below_the_callers_evidence() -> None:
     assert "### Step 1: What is the lowest average salary?" in evidence
     assert "SELECT MIN(A11) FROM district" in evidence
     assert '[{"min": 8110}]' in evidence
+    assert "Identifiers" in evidence
+    assert "Measures" in evidence
+    assert "do not paste the number" in evidence
+    assert "further row(s) omitted" in evidence
+    assert "reuse them instead of" not in evidence
+    assert "Do not paste a prior result" not in evidence
 
 
 def test_steps_are_numbered_in_the_order_they_were_answered() -> None:

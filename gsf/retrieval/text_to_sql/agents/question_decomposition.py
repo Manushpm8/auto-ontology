@@ -51,8 +51,8 @@ class QuestionDecompositionAgent(BaseAgent):
     """Emit ``path_state["sub_questions"]`` — ordered, single-step questions.
 
     Always returns at least one entry. A question that is already a single step
-    (the common case) yields a one-element list, which the caller treats as "do
-    not decompose" and runs exactly as it did before this node existed.
+    (the common case) yields a one-element list holding the original question,
+    even if the model paraphrased it.
     """
 
     def __init__(self, *, max_sub_questions: int = 5) -> None:
@@ -110,6 +110,11 @@ class QuestionDecompositionAgent(BaseAgent):
                         "falling back to a single step",
                         cleaned,
                     )
+                elif len(cleaned) == 1:
+                    # One step means the original request, even if the model
+                    # paraphrased it. Rewrites belong in later nodes.
+                    sub_questions = [question]
+                    self.logger.info("Decomposed into 1 step(s):\n  1. %s", question)
                 else:
                     sub_questions = cleaned
                     self.logger.info(
