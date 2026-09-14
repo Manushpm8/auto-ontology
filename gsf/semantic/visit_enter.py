@@ -13,9 +13,13 @@ from datetime import date, datetime, time as dt_time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Iterator
 
+import pandas as pd
+
 from gsf.connectors import get_connectors
+from gsf.connectors.db_errors import is_infrastructure_error
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.datasources import (
+    mark_table_as_junction,
     store_column_date_formats,
     store_column_sample_values,
     store_column_uniqueness,
@@ -37,6 +41,13 @@ logger = logging.getLogger(__name__)
 
 # Row cap for the per-column profiling sample.
 _PROFILING_SAMPLE_LIMIT = 1000
+# How long a profiling query may run before it is cancelled, on connectors that
+# support a cap. A bounded sample off a healthy warehouse is seconds; anything
+# past this is an engine that cannot get resources, and waiting out the driver's
+# own timeout (900s on Kyuubi) buys nothing.
+_PROFILING_QUERY_TIMEOUT_SECONDS = 120
+# Consecutive sample failures after which sampling is abandoned for the run.
+_MAX_CONSECUTIVE_SAMPLE_FAILURES = 3
 # Most-common values kept per column.
 _PROFILING_TOP_N = 5
 # String sample values longer than this are not persisted.
@@ -129,6 +140,98 @@ def _resolve_connector(database_name: str | None) -> "SQLDatabase | None":
         if db is not None and db.casefold() == key:
             return connector
     return None
+
+
+def _execute_capped(connector: "SQLDatabase", sql: str) -> pd.DataFrame:
+    """Run a profiling query, capped on connectors that advertise a free cap.
+
+    ``is True`` rather than a plain truthiness check: a test double answers
+    every attribute with something truthy, and silently passing ``timeout_s``
+    to a connector that does not take it would be a TypeError in production.
+    """
+    if getattr(connector, "supports_statement_timeout", False) is True:
+        return connector.execute(sql, timeout_s=_PROFILING_QUERY_TIMEOUT_SECONDS)
+    return connector.execute(sql)
+
+
+class _SamplingCircuitBreaker:
+    """Stop sampling a warehouse that has stopped answering sample queries.
+
+    A stalled engine fails every sample the same way and costs the full timeout
+    each time — 86 tables x 120s is nearly three hours spent producing no
+    sample values at all, on top of which nothing downstream improves. After
+    ``_MAX_CONSECUTIVE_SAMPLE_FAILURES`` in a row the rest of the run skips
+    sampling and says so once.
+
+    Only timeouts and connectivity failures count. A table that raises because
+    of a permission or a type the driver cannot decode says nothing about the
+    warehouse, and must not disable sampling for the other 85.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._failures: dict[str, int] = defaultdict(int)
+        self._tripped: set[str] = set()
+
+    @staticmethod
+    def _key(connector: "SQLDatabase") -> str:
+        # Casefolded to match _resolve_connector: a connector loaded from
+        # CONNECTION_STRINGS can spell its database differently from the
+        # catalog name a run is compiled under, and a key that disagrees with
+        # the reset would leave the breaker open for every later run.
+        name = getattr(connector, "database_name", None)
+        return str(name).casefold() if name else str(id(connector))
+
+    def is_open(self, connector: "SQLDatabase") -> bool:
+        with self._lock:
+            return self._key(connector) in self._tripped
+
+    def record_success(self, connector: "SQLDatabase") -> None:
+        with self._lock:
+            self._failures.pop(self._key(connector), None)
+
+    def record_failure(self, connector: "SQLDatabase", error: BaseException) -> bool:
+        """Count *error* against the warehouse. Returns whether it counted."""
+        if not isinstance(error, TimeoutError) and not is_infrastructure_error(error):
+            return False
+        key = self._key(connector)
+        with self._lock:
+            self._failures[key] += 1
+            if self._failures[key] < _MAX_CONSECUTIVE_SAMPLE_FAILURES:
+                return True
+            if key in self._tripped:
+                return True
+            self._tripped.add(key)
+        logger.warning(
+            "Value sampling disabled for %s — %d consecutive sample queries "
+            "timed out or could not reach the warehouse. Compilation continues "
+            "without sample values.",
+            key,
+            _MAX_CONSECUTIVE_SAMPLE_FAILURES,
+        )
+        return True
+
+    def reset(self, database_name: str) -> None:
+        key = database_name.casefold()
+        with self._lock:
+            self._failures.pop(key, None)
+            self._tripped.discard(key)
+
+
+_sampling_breaker = _SamplingCircuitBreaker()
+
+
+def reset_sampling_breaker(database_name: str) -> None:
+    """Re-enable sampling for *database_name* at the start of a run.
+
+    The breaker is process-wide and long-lived, so without this a warehouse
+    that was down during one run would stay un-sampled for every later run in
+    the same worker. Scoped to one database on purpose: compilation runs for
+    different datasources are not mutually exclusive, and clearing the whole
+    breaker would hand a run already in flight back the warehouse it had just
+    proven dead.
+    """
+    _sampling_breaker.reset(database_name)
 
 
 def _is_excluded_sample_type(data_type: str | None) -> bool:
@@ -252,11 +355,24 @@ def _distinct_values_if_low_cardinality(
     """
     quoted = quoted_identifier(col_name, getattr(connector, "dialect", None))
     try:
-        df = connector.execute(
+        df = _execute_capped(
+            connector,
             f"SELECT DISTINCT {quoted} FROM {qualified} "
-            f"WHERE {quoted} IS NOT NULL LIMIT {cap + 1}"
+            f"WHERE {quoted} IS NOT NULL LIMIT {cap + 1}",
         )
-    except Exception:
+    except Exception as exc:
+        # Falling back to the row sample's top-N is a fine outcome, but a probe
+        # that times out is not free: it is a full column scan per text column,
+        # and staying silent lets a degrading warehouse burn the cap on every
+        # one of them while the cheap row sample keeps resetting the streak.
+        if _sampling_breaker.record_failure(connector, exc):
+            logger.warning(
+                "Distinct-value probe on %s.%s failed (%s) — using the row "
+                "sample's most-common values instead",
+                qualified,
+                col_name,
+                type(exc).__name__,
+            )
         return None
     if df is None or df.empty:
         return None
@@ -322,14 +438,16 @@ def calculate_columns_profiling(
     qualified = connector.qualify(schema_name, table_name)
 
     try:
-        df = connector.execute(
-            f"SELECT * FROM {qualified} LIMIT {_PROFILING_SAMPLE_LIMIT}"
+        df = _execute_capped(
+            connector, f"SELECT * FROM {qualified} LIMIT {_PROFILING_SAMPLE_LIMIT}"
         )
-    except Exception:
+    except Exception as exc:
+        _sampling_breaker.record_failure(connector, exc)
         logger.warning(
             "[%s] column profiling query failed — skipping", table_name, exc_info=True
         )
         return {}
+    _sampling_breaker.record_success(connector)
 
     if df is None or df.empty:
         return {}
@@ -637,7 +755,14 @@ def process_table(
     # values for FK detection below.
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
-    if connector is not None:
+    if connector is not None and _sampling_breaker.is_open(connector):
+        # Already established that this warehouse is not answering samples.
+        # Re-asking costs the timeout per table and returns nothing.
+        logger.info(
+            "[%s] Skipping value sampling — sampling is disabled for this run",
+            table_name,
+        )
+    elif connector is not None:
         column_count = len(ctx.get("columns", []))
         try:
             with _step(table_name, f"Sampling column values ({column_count} columns)"):
@@ -671,6 +796,21 @@ def process_table(
         fk["source_column"] for fk in declared_fks if fk.get("source_column")
     }
     all_fk_names = declared_fk_names | suggested_fk_names
+
+    # Payload-bearing junctions are wider than the pure two-key shape handled
+    # by the later bridge pass. Require both the conservative LLM decision and
+    # structural evidence for at least two FK roles before persisting it.
+    if (
+        len(ctx.get("columns", [])) > 2
+        and fk_suggestions.is_junction_table
+        and len(all_fk_names) >= 2
+    ):
+        mark_table_as_junction(table_id)
+        logger.info(
+            "[%s] marked as a junction table: %s",
+            table_name,
+            fk_suggestions.junction_table_rationale or "LLM table-grain decision",
+        )
 
     # --- Build attribute specs for non-FK columns ---
     specs = column_attribute_specs(

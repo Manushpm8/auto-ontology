@@ -20,28 +20,68 @@ def _format_sample_values(raw: Any) -> str:
     return ", ".join(values)
 
 
-def qualify_table(database_name: str, schema_name: str, table_name: str) -> str:
+# Dialects whose connection does *not* bind the catalog, so a name has to carry
+# it explicitly. These are exactly the connectors that override
+# ``SQLDatabase.qualify`` to prepend it (``gsf.connectors.kyuubi``,
+# ``gsf.connectors.trino``); everywhere else the session is already scoped to
+# the database and a two-part name resolves.
+_CATALOG_QUALIFIED_DIALECTS = frozenset({"spark", "trino"})
+
+
+def qualify_table(
+    database_name: str,
+    schema_name: str,
+    table_name: str,
+    dialect: str | None = None,
+) -> str:
     """Build the qualified identifier the model is expected to copy verbatim.
 
     Two-level dialects (MySQL/MariaDB) have no schema namespace: the catalog
     reports ``TABLE_SCHEMA`` as the database itself, so naively joining all
-    three parts yields ``db.db.table``, which is a syntax error. Collapsing the
-    duplicate is also correct for three-level dialects, where a database and
-    schema may legitimately share a name — the connection is already scoped to
-    the database, so ``schema.table`` still resolves.
+    three parts yields ``db.db.table``, which is a syntax error. The duplicate
+    is collapsed for those, and for engines whose connection binds the database
+    so that ``schema.table`` still resolves.
+
+    It must *not* be collapsed on a dialect in
+    :data:`_CATALOG_QUALIFIED_DIALECTS`. There the catalog and the schema are
+    separate namespaces that may legitimately share a name — a Kyuubi catalog
+    ``lakehouse`` holding a schema ``lakehouse`` — and the session is left on
+    the engine's own default catalog (``spark_catalog``), not the bound one.
+    So collapsing emits ``lakehouse.events``, which Spark reads as schema
+    ``lakehouse`` under ``spark_catalog`` and rejects with
+    TABLE_OR_VIEW_NOT_FOUND. Scoping the session instead is not an option:
+    Spark rejects ``USE CATALOG``, and ``SET CATALOG`` leaves
+    ``current_schema()`` empty so the two-part name still does not resolve.
     """
     parts = [database_name, schema_name, table_name]
-    if database_name and schema_name and database_name.lower() == schema_name.lower():
+    collapsible = (dialect or "").lower() not in _CATALOG_QUALIFIED_DIALECTS
+    if (
+        collapsible
+        and database_name
+        and schema_name
+        and database_name.lower() == schema_name.lower()
+    ):
         parts = [schema_name, table_name]
     return ".".join(part for part in parts if part)
 
 
-def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
-    """Format a join-path endpoint as ``schema.table.column``."""
+def _hop_column(
+    hop: dict,
+    side: str,
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Format a join-path endpoint, qualified as :func:`qualify_table` would.
+
+    The hop's own database wins over *target_db*, so a path that crosses
+    databases names each side correctly; only the bridge-table builder in
+    ``gsf.dal.attributes`` omits it, and there *target_db* is the fallback.
+    """
+    database = hop.get(f"{side}_database") or target_db or ""
     schema = hop.get(f"{side}_schema", "")
     table = hop.get(f"{side}_table", "")
     column = hop.get(f"{side}_column", "")
-    prefix = f"{schema}.{table}" if schema else table
+    prefix = qualify_table(database, schema, table, dialect)
     return f"{prefix}.{column}"
 
 
@@ -49,13 +89,22 @@ def format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
     target_db: str | None = None,
+    dialect: str | None = None,
 ) -> str:
-    """Format the semantic anchor and authoritative join paths for a prompt."""
+    """Format the semantic anchor and authoritative join paths for a prompt.
+
+    Names are qualified exactly as :func:`format_tables_for_prompt` does. The
+    prompt calls these paths authoritative and tells the model to copy the join
+    conditions, so a name spelled differently here than in the schema context
+    is one the model may copy into SQL — on a catalog-qualified engine, dropping
+    the catalog makes it unresolvable.
+    """
     anchor_schema = primary_attribute.get("schema_name", "")
     anchor_table = primary_attribute.get("table_name", "")
     anchor_col = primary_attribute.get("col_name", "")
     anchor_name = primary_attribute.get("attr_name", "")
-    anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
+    anchor_database = primary_attribute.get("database_name") or target_db or ""
+    anchor_full = qualify_table(anchor_database, anchor_schema, anchor_table, dialect)
     # Only present on attrs (re-)ingested since this field was added — older
     # rows just omit the tag.
     anchor_datatype = primary_attribute.get("datatype") or ""
@@ -86,7 +135,8 @@ def format_semantic_context(
             # carry only "path" — no named attribute they resolve to. Render
             # a generic label instead of a blank "  : ." header line.
             if attr_name or col_name or table:
-                full_table = f"{schema}.{table}" if schema else table
+                database = entry.get("database_name") or target_db or ""
+                full_table = qualify_table(database, schema, table, dialect)
                 lines.append(f"  {attr_name}: {full_table}.{col_name}{datatype_tag}")
             else:
                 lines.append("  (structural bridge — connects tables kept above)")
@@ -94,13 +144,13 @@ def format_semantic_context(
             if path:
                 lines.append("    Join path:")
                 if len(path) == 1:
-                    left = _hop_column(path[0], "source", target_db)
-                    right = _hop_column(path[0], "target", target_db)
+                    left = _hop_column(path[0], "source", target_db, dialect)
+                    right = _hop_column(path[0], "target", target_db, dialect)
                     lines.append(f"      {left} = {right}")
                 else:
                     for cur, nxt in zip(path, path[1:]):
-                        left = _hop_column(cur, "target", target_db)
-                        right = _hop_column(nxt, "source", target_db)
+                        left = _hop_column(cur, "target", target_db, dialect)
+                        right = _hop_column(nxt, "source", target_db, dialect)
                         lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)
@@ -109,8 +159,22 @@ def format_semantic_context(
 def format_tables_for_prompt(
     tables: list[dict],
     target_db: str | None = None,
+    dialect: str | None = None,
 ) -> str:
-    """Format tables and their columns as schema context for a prompt."""
+    """Format tables and their columns as schema context for a prompt.
+
+    *dialect* only decides how each table name is qualified; see
+    :func:`qualify_table`. Omitting it keeps the two-part form, which is wrong
+    for a catalog-qualified engine, so callers that have a connector should
+    pass its dialect.
+
+    *target_db* stands in for a table that carries no ``database_name`` of its
+    own, which legacy catalog metadata does not (see
+    ``connector_routing.resolve_connector_from_tables``). Without it such a
+    table renders unqualified here while :func:`format_semantic_context` names
+    the same table with its catalog — and on a catalog-qualified engine the
+    short one does not resolve.
+    """
     if not tables:
         return "No tables available"
 
@@ -121,10 +185,10 @@ def format_tables_for_prompt(
         table_name = table.get("name", "UNKNOWN")
         table_label = table.get("label", "")
         table_description = table.get("description", "")
-        database_name = table.get("database_name", "")
+        database_name = table.get("database_name") or target_db or ""
         schema_name = table.get("schema_name", "")
 
-        full_name = qualify_table(database_name, schema_name, table_name)
+        full_name = qualify_table(database_name, schema_name, table_name, dialect)
 
         table_parts.append(f"TABLE: {full_name}")
         if table_label and table_label != table_name:

@@ -13,11 +13,16 @@ import pandas as pd
 import pytest
 
 from gsf.semantic.visit_enter import (
+    _MAX_CONSECUTIVE_SAMPLE_FAILURES,
+    _distinct_values_if_low_cardinality,
+    _PROFILING_QUERY_TIMEOUT_SECONDS,
     _json_ready_sample,
     _keep_persisted_sample,
     _sample_key,
+    _sampling_breaker,
     calculate_columns_profiling,
     process_table,
+    reset_sampling_breaker,
 )
 from gsf.utils.sql_identifiers import qualified_name
 
@@ -630,6 +635,88 @@ def test_process_table_skips_fk_columns(
     mock_merge_term.assert_not_called()
 
 
+def test_process_table_marks_a_wide_llm_junction() -> None:
+    from gsf.semantic.models import PotentialFkResult
+
+    table = {"id": "line", "name": "order_product", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            {"name": "order_id", "data_type": "integer"},
+            {"name": "product_id", "data_type": "integer"},
+            {"name": "quantity", "data_type": "integer"},
+        ],
+        "fks": [
+            {"source_column": "order_id", "target_table": "orders"},
+            {"source_column": "product_id", "target_table": "products"},
+        ],
+    }
+    decision = PotentialFkResult(
+        is_junction_table=True,
+        junction_table_rationale="Relationship payload between orders and products.",
+    )
+
+    with (
+        patch(
+            "gsf.semantic.visit_enter.suggest_potential_foreign_keys",
+            return_value=decision,
+        ),
+        patch("gsf.semantic.visit_enter.column_attribute_specs", return_value=[]),
+        patch("gsf.semantic.visit_enter.mark_table_as_junction") as mock_mark,
+    ):
+        process_table(table, ctx, domain_summary=None)
+
+    mock_mark.assert_called_once_with("line")
+
+
+@pytest.mark.parametrize(
+    ("columns", "declared_fks"),
+    [
+        (
+            [
+                {"name": "left_id", "data_type": "integer"},
+                {"name": "right_id", "data_type": "integer"},
+            ],
+            [
+                {"source_column": "left_id", "target_table": "entities"},
+                {"source_column": "right_id", "target_table": "entities"},
+            ],
+        ),
+        (
+            [
+                {"name": "customer_id", "data_type": "integer"},
+                {"name": "preference", "data_type": "text"},
+                {"name": "updated_at", "data_type": "timestamp"},
+            ],
+            [{"source_column": "customer_id", "target_table": "customers"}],
+        ),
+    ],
+)
+def test_process_table_rejects_insufficient_structural_junction_evidence(
+    columns: list[dict[str, str]],
+    declared_fks: list[dict[str, str]],
+) -> None:
+    from gsf.semantic.models import PotentialFkResult
+
+    decision = PotentialFkResult(
+        is_junction_table=True,
+        junction_table_rationale="Intentionally over-positive LLM fixture.",
+    )
+    table = {"id": "candidate", "name": "candidate", "schema_name": "public"}
+    ctx = {"columns": columns, "fks": declared_fks}
+
+    with (
+        patch(
+            "gsf.semantic.visit_enter.suggest_potential_foreign_keys",
+            return_value=decision,
+        ),
+        patch("gsf.semantic.visit_enter.column_attribute_specs", return_value=[]),
+        patch("gsf.semantic.visit_enter.mark_table_as_junction") as mock_mark,
+    ):
+        process_table(table, ctx, domain_summary=None)
+
+    mock_mark.assert_not_called()
+
+
 @patch("gsf.semantic.visit_enter.merge_column_attribute")
 @patch("gsf.semantic.visit_enter.merge_term")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
@@ -684,3 +771,189 @@ def test_process_table_multiple_terms(
 
     assert mock_merge_term.call_count == 2
     assert mock_merge_col_attr.call_count == 2
+
+
+# ----------------------------------------------------------------------
+# Sample query cap and circuit breaker
+# ----------------------------------------------------------------------
+
+
+class _CappedConnector:
+    """A connector whose execute() accepts a timeout, like Kyuubi's."""
+
+    dialect = "spark"
+    database_name = "nvdp"
+    supports_statement_timeout = True
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[tuple[str, int | None]] = []
+
+    def qualify(self, schema: str, table: str) -> str:
+        return f"`{schema}`.`{table}`"
+
+    def execute(self, sql: str, parameters=None, *, timeout_s: int | None = None):
+        self.calls.append((sql, timeout_s))
+        if self.error is not None:
+            raise self.error
+        return pd.DataFrame({"id": [1, 2]})
+
+
+TABLE = {"id": "t1", "name": "elk_log", "schema_name": "raw"}
+COLUMNS = [{"name": "id", "data_type": "bigint"}]
+
+
+@pytest.fixture(autouse=True)
+def _reset_breaker():
+    reset_sampling_breaker(_CappedConnector.database_name)
+    yield
+    reset_sampling_breaker(_CappedConnector.database_name)
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_sample_query_is_capped_where_the_connector_supports_it(*_mocks) -> None:
+    """A bounded sample is seconds on a healthy engine; 900s means it is not."""
+    connector = _CappedConnector()
+
+    calculate_columns_profiling(TABLE, COLUMNS, connector)
+
+    assert connector.calls[0][1] == _PROFILING_QUERY_TIMEOUT_SECONDS
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_a_connector_without_a_cap_is_called_unchanged(*_mocks) -> None:
+    """Passing timeout_s to a connector that has no such parameter would fail."""
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame({"id": [1, 2]})
+
+    calculate_columns_profiling(TABLE, COLUMNS, connector)
+
+    assert connector.execute.call_args_list[0].kwargs == {}
+
+
+def test_repeated_sample_timeouts_disable_sampling_for_the_run() -> None:
+    """86 tables x a 120s timeout is three hours that produce nothing."""
+    connector = _CappedConnector(TimeoutError("cancelled after 120s"))
+
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        assert calculate_columns_profiling(TABLE, COLUMNS, connector) == {}
+
+    assert _sampling_breaker.is_open(connector)
+
+
+def test_a_sql_error_on_one_table_does_not_disable_sampling() -> None:
+    """A table the engine refuses says nothing about the other 85."""
+    connector = _CappedConnector(ValueError("Table or view not found: nope"))
+
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES + 2):
+        calculate_columns_profiling(TABLE, COLUMNS, connector)
+
+    assert not _sampling_breaker.is_open(connector)
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_one_success_clears_the_failure_streak(*_mocks) -> None:
+    """Only *consecutive* failures mean the warehouse itself is gone."""
+    failing = _CappedConnector(TimeoutError("cancelled"))
+    healthy = _CappedConnector()
+
+    calculate_columns_profiling(TABLE, COLUMNS, failing)
+    calculate_columns_profiling(TABLE, COLUMNS, healthy)
+    calculate_columns_profiling(TABLE, COLUMNS, failing)
+    calculate_columns_profiling(TABLE, COLUMNS, failing)
+
+    # Both connectors share a key (the database name), so the success in the
+    # middle is what keeps the breaker closed here.
+    assert not _sampling_breaker.is_open(failing)
+
+
+def test_resetting_one_database_leaves_another_run_alone() -> None:
+    """Compilations for two datasources overlap; one must not re-arm the other."""
+    dead = _CappedConnector(TimeoutError("cancelled"))
+
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        calculate_columns_profiling(TABLE, COLUMNS, dead)
+    assert _sampling_breaker.is_open(dead)
+
+    reset_sampling_breaker("some_other_database")
+
+    assert _sampling_breaker.is_open(dead), (
+        "a run starting elsewhere must not hand this run back a dead warehouse"
+    )
+
+
+def test_distinct_probe_timeouts_count_toward_the_breaker() -> None:
+    """The probe is a full column scan; silent timeouts burn the cap per column."""
+    connector = _CappedConnector()
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        assert (
+            _distinct_values_if_low_cardinality(
+                _CappedConnector(TimeoutError("cancelled")),
+                "`raw`.`elk_log`",
+                "status",
+                25,
+            )
+            is None
+        )
+
+    assert _sampling_breaker.is_open(connector)
+
+
+@patch("gsf.semantic.visit_enter.calculate_columns_profiling")
+@patch("gsf.semantic.visit_enter._resolve_connector")
+@patch("gsf.semantic.visit_enter.merge_column_attribute")
+@patch("gsf.semantic.visit_enter.merge_term")
+@patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("gsf.semantic.visit_enter.extract_term")
+def test_a_tripped_breaker_stops_process_table_sampling(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_merge_term: MagicMock,
+    mock_merge_col_attr: MagicMock,
+    mock_resolve: MagicMock,
+    mock_profiling: MagicMock,
+) -> None:
+    """Tripping the breaker is only worth anything if it saves the 120s."""
+    from gsf.semantic.models import PotentialFkResult, TableTermsResult
+
+    mock_fk_suggest.return_value = PotentialFkResult()
+    mock_term.return_value = TableTermsResult(terms=[])
+    connector = _CappedConnector(TimeoutError("cancelled"))
+    mock_resolve.return_value = connector
+
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        _sampling_breaker.record_failure(connector, TimeoutError("cancelled"))
+    assert _sampling_breaker.is_open(connector)
+
+    table = {"id": "t1", "name": "orders", "description": "", "schema_name": "public"}
+    ctx = {"columns": [{"name": "amount", "data_type": "numeric"}], "fks": []}
+    process_table(table, ctx, domain_summary=None, database_name="nvdp")
+
+    mock_profiling.assert_not_called()
+
+
+def test_the_breaker_key_matches_however_the_database_is_spelled() -> None:
+    """_resolve_connector matches case-insensitively, so the key must too.
+
+    A connector loaded from CONNECTION_STRINGS can spell its database
+    differently from the catalog name the run compiles under; a key that
+    disagreed with the reset would leave sampling off for every later run.
+    """
+
+    class _Shouty(_CappedConnector):
+        database_name = "NVDP"
+
+    dead = _Shouty(TimeoutError("cancelled"))
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        _sampling_breaker.record_failure(dead, TimeoutError("cancelled"))
+    assert _sampling_breaker.is_open(dead)
+
+    reset_sampling_breaker("nvdp")
+
+    assert not _sampling_breaker.is_open(dead)
