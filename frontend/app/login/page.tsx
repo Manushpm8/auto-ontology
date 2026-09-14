@@ -35,7 +35,7 @@ const LoginLoading = () => (
 // signing in has to hand the user back to the authorize endpoint with them —
 // otherwise the browser lands on /chat and the client that started the flow
 // waits for a code that will never come.
-const AUTHORIZE_PATH = '/api/auth/mcp/authorize';
+const AUTHORIZE_PATH = '/api/auth/oauth2/authorize';
 
 const resumeAuthorize = (params: URLSearchParams): string | null =>
 	params.has('client_id') && params.get('response_type') === 'code'

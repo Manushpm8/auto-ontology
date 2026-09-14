@@ -47,7 +47,11 @@ RUN npm install -g --silent corepack@latest \
 WORKDIR /app
 
 # Install only what's needed to resolve the dependency graph deterministically.
+# `patches/` must be present: pnpm-workspace.yaml pins a patched
+# `@better-auth/oauth-provider` and `pnpm install --frozen-lockfile` refuses
+# to proceed without the patch file.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY patches ./patches
 COPY prisma ./prisma
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \

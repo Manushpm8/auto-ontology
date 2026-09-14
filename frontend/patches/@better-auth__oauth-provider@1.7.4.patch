@@ -1,0 +1,17 @@
+diff --git a/dist/authorize-zWEGx4ky.mjs b/dist/authorize-zWEGx4ky.mjs
+index 5fdd51c7da07656096bebbdd7b37a7b6b2490d92..1eaa1383357448594f7117eb535eeb25a558ee2c 100644
+--- a/dist/authorize-zWEGx4ky.mjs
++++ b/dist/authorize-zWEGx4ky.mjs
+@@ -1708,7 +1708,11 @@ function validateClientRedirectUri(redirectUri, applicationType) {
+ 		if (!isAllowedNativeHttpLoopback) invalidRedirectUri(`native clients may use http only on the exact loopback hosts localhost, 127.0.0.1, or [::1]: ${redirectUri}`);
+ 		return;
+ 	}
+-	if (FORBIDDEN_NATIVE_REDIRECT_SCHEMES.has(url.protocol) || !isReverseDomainPrivateUseRedirectUri(url)) invalidRedirectUri(`native private-use redirect URI schemes must be well-formed reverse-domain names, omit the naming authority, and must not use a reserved scheme: ${redirectUri}`);
++	// RFC 8252 §7.1 recommends authority-free reverse-domain URIs; it does not
++	// forbid a host. Cursor registers `cursor://anysphere.cursor-mcp/oauth/callback`.
++	// Keep reserved schemes rejected. See better-auth/better-auth#10946.
++	const isHostBearingPrivateUse = url.host.length > 0 && url.pathname.startsWith("/") && url.protocol !== "ws:" && url.protocol !== "wss:";
++	if (FORBIDDEN_NATIVE_REDIRECT_SCHEMES.has(url.protocol) || url.protocol === "ws:" || url.protocol === "wss:" || !(isReverseDomainPrivateUseRedirectUri(url) || isHostBearingPrivateUse)) invalidRedirectUri(`native private-use redirect URI schemes must be well-formed reverse-domain names, omit the naming authority, and must not use a reserved scheme: ${redirectUri}`);
+ }
+ function assertValidRegistrationJwks(jwks) {
+ 	const result = validatePublicClientJwks(jwks);

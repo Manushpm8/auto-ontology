@@ -18,8 +18,10 @@ multiSchema). Ingestion's vector table lives in the separate `vdb` schema
 
 The wrapper first empties conversation_analytics IFF it predates the
 required user_id column (idempotent, no-op otherwise), because `db push`
-cannot add a NOT NULL column to a table that already has rows. See
-frontend/prisma/migrate.sh.
+cannot add a NOT NULL column to a table that already has rows. It also
+drops the Better Auth 1.6 OAuth tables (`oauthApplication` and the old
+`oauthAccessToken` / `oauthConsent` shape) so 1.7 can recreate them.
+See frontend/prisma/migrate.sh.
 
 No `--accept-data-loss`: if the `public` schema still drifts from
 prisma/schema.prisma, this intentionally refuses to drop and the Job
