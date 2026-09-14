@@ -14,19 +14,19 @@ importers:
   .:
     dependencies:
       '@better-auth/api-key':
-        specifier: ~1.7.4
+        specifier: 1.7.4
         version: 1.7.4(@better-auth/core@1.7.4(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.3.0))(@better-auth/utils@0.4.2)(better-auth@1.7.4(@prisma/client@7.7.0(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3))(mysql2@3.24.4(@types/node@20.19.39))(next@16.3.5(@babel/core@7.29.0)(@types/node@20.19.39)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(pg@8.20.0)(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vitest@4.1.11(@types/node@20.19.39)(jsdom@26.1.0)(vite@8.3.0(@types/node@20.19.39)(esbuild@0.28.2)(jiti@2.6.1)(tsx@4.23.11))))(better-call@1.4.0(zod@4.4.3))
       '@better-auth/core':
         specifier: 1.7.4
         version: 1.7.4(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.3.0)
       '@better-auth/mcp':
-        specifier: ~1.7.4
+        specifier: 1.7.4
         version: 1.7.4(@better-auth/core@1.7.4(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.3.0))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-auth@1.7.4(@prisma/client@7.7.0(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3))(mysql2@3.24.4(@types/node@20.19.39))(next@16.3.5(@babel/core@7.29.0)(@types/node@20.19.39)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(pg@8.20.0)(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vitest@4.1.11(@types/node@20.19.39)(jsdom@26.1.0)(vite@8.3.0(@types/node@20.19.39)(esbuild@0.28.2)(jiti@2.6.1)(tsx@4.23.11))))(better-call@1.4.0(zod@4.4.3))
       '@better-auth/oauth-provider':
-        specifier: ~1.7.4
+        specifier: 1.7.4
         version: 1.7.4(patch_hash=3b47ec26a6e7c85976bb8cf8173c1c241024b44afe344b12ff7402521336b695)(@better-auth/core@1.7.4(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.3.0))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-auth@1.7.4(@prisma/client@7.7.0(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3))(mysql2@3.24.4(@types/node@20.19.39))(next@16.3.5(@babel/core@7.29.0)(@types/node@20.19.39)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(pg@8.20.0)(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vitest@4.1.11(@types/node@20.19.39)(jsdom@26.1.0)(vite@8.3.0(@types/node@20.19.39)(esbuild@0.28.2)(jiti@2.6.1)(tsx@4.23.11))))(better-call@1.4.0(zod@4.4.3))
       '@better-auth/sso':
-        specifier: ~1.7.4
+        specifier: 1.7.4
         version: 1.7.4(@better-auth/core@1.7.4(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.3.0))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-auth@1.7.4(@prisma/client@7.7.0(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3))(mysql2@3.24.4(@types/node@20.19.39))(next@16.3.5(@babel/core@7.29.0)(@types/node@20.19.39)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(pg@8.20.0)(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vitest@4.1.11(@types/node@20.19.39)(jsdom@26.1.0)(vite@8.3.0(@types/node@20.19.39)(esbuild@0.28.2)(jiti@2.6.1)(tsx@4.23.11))))(better-call@1.4.0(zod@4.4.3))
       '@nvidia/foundations-react-core':
         specifier: ^0.604.1
@@ -44,7 +44,7 @@ importers:
         specifier: ^1.20.0
         version: 1.20.0
       better-auth:
-        specifier: ~1.7.4
+        specifier: 1.7.4
         version: 1.7.4(@prisma/client@7.7.0(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3))(mysql2@3.24.4(@types/node@20.19.39))(next@16.3.5(@babel/core@7.29.0)(@types/node@20.19.39)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(pg@8.20.0)(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vitest@4.1.11(@types/node@20.19.39)(jsdom@26.1.0)(vite@8.3.0(@types/node@20.19.39)(esbuild@0.28.2)(jiti@2.6.1)(tsx@4.23.11)))
       d3-force:
         specifier: ^3.0.0

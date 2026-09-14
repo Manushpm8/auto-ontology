@@ -2,14 +2,19 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Cursor (and other desktop MCP clients) register a short-lived loopback HTTP
-// listener and/or a private-use URI scheme as the OAuth redirect. Navigating
-// Chrome to that URL is what produces "This site can't be reached": the
-// listener is gone (or bound to a different localhost address than Chrome
-// resolved). These helpers decide when a Location is that callback, and deliver
-// the code with fetch instead of a top-level navigation.
-
-const BLOCKED_PROTOCOLS = new Set(['file:', 'javascript:', 'data:', 'blob:', 'ws:', 'wss:']);
+// Desktop MCP clients (Cursor, the Python SDK) register a short-lived loopback
+// HTTP listener as the OAuth redirect. Navigating Chrome to that URL is what
+// produces "This site can't be reached": the listener is gone, or bound to a
+// different localhost address than Chrome resolved. These helpers decide when
+// a Location is that listener and deliver the code with fetch instead of a
+// top-level navigation.
+//
+// Only loopback HTTP(S) qualifies. A private-use scheme such as `cursor://` is
+// left as an ordinary 302: the browser hands it to the OS protocol handler, and
+// that navigation carries the user's consent click as its activation. Routing
+// it through the handoff page would lose that activation and would let anyone
+// who can craft a `/oauth/handoff?url=` link launch an arbitrary protocol
+// handler from a GSF origin.
 
 const isLoopbackHostname = (hostname: string): boolean =>
 	hostname === 'localhost' ||
@@ -22,17 +27,15 @@ const originPort = (url: URL): string => {
 	return url.protocol === 'https:' ? '443' : '80';
 };
 
-/** Loopback HTTP or a private-use scheme; never `file:` / `javascript:` / web origins. */
-export const isSafeMcpRedirect = (url: URL): boolean => {
-	if (BLOCKED_PROTOCOLS.has(url.protocol)) return false;
-	if (url.protocol !== 'http:' && url.protocol !== 'https:') return true;
+/** Loopback HTTP(S) only; never a web origin, a file, or a custom scheme. */
+export const isLoopbackCallback = (url: URL): boolean => {
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
 	return isLoopbackHostname(url.hostname);
 };
 
-/** True when `url` is an MCP client's callback, not a GSF page. */
+/** True when `url` is an MCP client's loopback listener, not a GSF page. */
 export const isMcpClientCallback = (url: URL, requestUrl: string): boolean => {
-	if (!isSafeMcpRedirect(url)) return false;
-	if (url.protocol !== 'http:' && url.protocol !== 'https:') return true;
+	if (!isLoopbackCallback(url)) return false;
 	try {
 		// Consent, login, and other GSF pages are also loopback in local dev.
 		// Only a *different port* (Cursor's :8787, Claude's ephemeral port, …)
@@ -44,11 +47,15 @@ export const isMcpClientCallback = (url: URL, requestUrl: string): boolean => {
 };
 
 const loopbackCandidates = (parsed: URL): string[] => {
-	const aliases = ['localhost', '127.0.0.1', '::1'];
+	// `URL.hostname` accepts IPv6 only in bracketed form; a bare `::1` is
+	// silently ignored and the previous hostname is kept.
+	const aliases = ['localhost', '127.0.0.1', '[::1]'];
 	return [
 		parsed.toString(),
 		...aliases
-			.filter((hostname) => parsed.hostname !== hostname)
+			.filter(
+				(hostname) => parsed.hostname !== hostname && `[${parsed.hostname}]` !== hostname,
+			)
 			.map((hostname) => {
 				const next = new URL(parsed);
 				next.hostname = hostname;
@@ -59,7 +66,10 @@ const loopbackCandidates = (parsed: URL): string[] => {
 
 // Fetch every localhost alias so an IPv4 Chrome tab still hits a listener that
 // bound `[::1]:8787` (and the reverse). `no-cors` is required: the listener is
-// not GSF and will not send ACAO. Keep the tab on a GSF page either way.
+// not GSF and will not send ACAO. A live listener answers with an opaque
+// response, which counts as fulfilled; a closed port rejects. Returns true only
+// when at least one alias was reached, so callers can tell delivery from a dead
+// listener.
 export const deliverLoopbackCallback = async (redirectUrl: string): Promise<boolean> => {
 	let parsed: URL;
 	try {
@@ -67,13 +77,12 @@ export const deliverLoopbackCallback = async (redirectUrl: string): Promise<bool
 	} catch {
 		return false;
 	}
-	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-	if (!isLoopbackHostname(parsed.hostname)) return false;
+	if (!isLoopbackCallback(parsed)) return false;
 
-	await Promise.allSettled(
+	const results = await Promise.allSettled(
 		loopbackCandidates(parsed).map((url) =>
 			fetch(url, { mode: 'no-cors', credentials: 'omit', keepalive: true }),
 		),
 	);
-	return true;
+	return results.some((result) => result.status === 'fulfilled');
 };
