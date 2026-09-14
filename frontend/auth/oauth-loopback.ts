@@ -69,7 +69,10 @@ const loopbackCandidates = (parsed: URL): string[] => {
 // not GSF and will not send ACAO. A live listener answers with an opaque
 // response, which counts as fulfilled; a closed port rejects. Returns true only
 // when at least one alias was reached, so callers can tell delivery from a dead
-// listener.
+// listener. Each attempt has a deadline: a listener that accepts the socket
+// but never answers would otherwise leave the page in its waiting state forever.
+const DELIVERY_TIMEOUT_MS = 5_000;
+
 export const deliverLoopbackCallback = async (redirectUrl: string): Promise<boolean> => {
 	let parsed: URL;
 	try {
@@ -81,7 +84,12 @@ export const deliverLoopbackCallback = async (redirectUrl: string): Promise<bool
 
 	const results = await Promise.allSettled(
 		loopbackCandidates(parsed).map((url) =>
-			fetch(url, { mode: 'no-cors', credentials: 'omit', keepalive: true }),
+			fetch(url, {
+				mode: 'no-cors',
+				credentials: 'omit',
+				keepalive: true,
+				signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+			}),
 		),
 	);
 	return results.some((result) => result.status === 'fulfilled');
