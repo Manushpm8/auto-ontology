@@ -21,6 +21,12 @@ const isPublicPath = (pathname: string): boolean =>
  * gating of admin areas (e.g. /settings/*) happens in those layouts/pages via
  * requireAdmin(), since the role is not present in the session cookie.
  */
+const withPathname = (request: NextRequest): NextResponse => {
+	const requestHeaders = new Headers(request.headers);
+	requestHeaders.set('x-gsf-pathname', request.nextUrl.pathname);
+	return NextResponse.next({ request: { headers: requestHeaders } });
+};
+
 function guardPage(request: NextRequest): NextResponse {
 	const { pathname, search } = request.nextUrl;
 	const hasSession = getSessionCookie(request) != null;
@@ -41,7 +47,7 @@ function guardPage(request: NextRequest): NextResponse {
 	// authoritatively on the login page via useSession() (which validates and
 	// clears an invalid cookie).
 
-	return NextResponse.next();
+	return withPathname(request);
 }
 
 export function proxy(request: NextRequest) {
@@ -52,7 +58,7 @@ export function proxy(request: NextRequest) {
 	// the single source of truth. Pages are still gated below, because a route
 	// handler cannot redirect the way the middleware can.
 	if (pathname.startsWith('/api/')) {
-		return NextResponse.next();
+		return withPathname(request);
 	}
 
 	return guardPage(request);
