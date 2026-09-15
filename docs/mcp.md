@@ -215,9 +215,7 @@ spelling of the same host, almost always `127.0.0.1` against `localhost`. Set
 `GSF_MCP_PUBLIC_URL` to the URL the client uses, or leave `GSF_MCP_HOST` unset.
 
 **"This request carried no signed-in session"** — the grant behind the call
-expired or was revoked in GSF. Sign in again from the client. After a GSF
-upgrade from Better Auth 1.6 to 1.7, existing MCP grants are dropped and every
-client must sign in once more.
+expired or was revoked in GSF. Sign in again from the client.
 
 **`ask_question` returned an empty answer, with no SQL and no error** — the run
 completed but retrieval found nothing to build a query from. Call

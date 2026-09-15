@@ -5,5 +5,3 @@ onlyBuiltDependencies:
     - prisma
     - sharp
     - unrs-resolver
-patchedDependencies:
-    '@better-auth/oauth-provider@1.7.4': patches/@better-auth__oauth-provider@1.7.4.patch

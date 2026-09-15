@@ -17,6 +17,16 @@ import { Role } from '@/enums/auth';
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const isHttpRedirectUri = (value: unknown): value is string => {
+	if (typeof value !== 'string') return false;
+	try {
+		const url = new URL(value);
+		return url.protocol === 'http:' || url.protocol === 'https:';
+	} catch {
+		return false;
+	}
+};
+
 const prisma = getPrisma();
 
 // During `next build` the module is evaluated but no auth request is handled,
@@ -68,12 +78,28 @@ export const auth = betterAuth({
 	// `application_type` to `web`, and Cursor sometimes sends `web` itself —
 	// either way the web-client rule rejects those URIs. This authorization
 	// server exists for MCP, so DCR is always native.
+	//
+	// Unpatched Better Auth also rejects Cursor's host-bearing `cursor://`
+	// callback (better-auth#10946). Cursor still registers loopback
+	// `http://localhost:8787/callback` and `https://www.cursor.com/...`, which
+	// native DCR accepts, so drop the custom-scheme extras rather than patch
+	// the package.
 	hooks: {
 		before: createAuthMiddleware(async (ctx) => {
 			if (ctx.path !== '/oauth2/register') return;
 			const body = ctx.body;
 			if (!isPlainObject(body)) return;
-			return { context: { body: { ...body, application_type: 'native' } } };
+			return {
+				context: {
+					body: {
+						...body,
+						application_type: 'native',
+						redirect_uris: Array.isArray(body.redirect_uris)
+							? body.redirect_uris.filter(isHttpRedirectUri)
+							: body.redirect_uris,
+					},
+				},
+			};
 		}),
 	},
 	plugins: [

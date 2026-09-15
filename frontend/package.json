@@ -7,9 +7,9 @@
 	"scripts": {
 		"postinstall": "prisma generate",
 		"db:generate": "prisma generate",
-		"db:push": "sh prisma/migrate.sh",
+		"db:push": "prisma db push",
 		"dev": "pnpm db:push && pnpm db:generate && next dev -p 3000",
-		"start": "pnpm db:push && pnpm db:generate && next start",
+		"start": "prisma db push && prisma generate && next start",
 		"build": "prisma generate && next build",
 		"lint": "eslint .",
 		"openapi": "tsx scripts/generate-openapi.ts",
