@@ -22,9 +22,20 @@ const isLoopbackHostname = (hostname: string): boolean =>
 	hostname === '::1' ||
 	hostname === '[::1]';
 
-const originPort = (url: URL): string => {
-	if (url.port) return url.port;
-	return url.protocol === 'https:' ? '443' : '80';
+const appOrigin = (requestUrl: string): string | null => {
+	const appUrl = process.env.APP_URL;
+	if (appUrl) {
+		try {
+			return new URL(appUrl).origin;
+		} catch {
+			// Fall through to the incoming request.
+		}
+	}
+	try {
+		return new URL(requestUrl).origin;
+	} catch {
+		return null;
+	}
 };
 
 /** Loopback HTTP(S) only; never a web origin, a file, or a custom scheme. */
@@ -36,14 +47,25 @@ export const isLoopbackCallback = (url: URL): boolean => {
 /** True when `url` is an MCP client's loopback listener, not a GSF page. */
 export const isMcpClientCallback = (url: URL, requestUrl: string): boolean => {
 	if (!isLoopbackCallback(url)) return false;
-	try {
-		// Consent, login, and other GSF pages are also loopback in local dev.
-		// Only a *different port* (Cursor's :8787, Claude's ephemeral port, …)
-		// is the client's listener.
-		return originPort(url) !== originPort(new URL(requestUrl));
-	} catch {
-		return false;
-	}
+	const origin = appOrigin(requestUrl);
+	// GSF pages are also loopback in local dev (localhost:3000). Anything else
+	// on loopback — Cursor's :8787, Claude's ephemeral port — is the client.
+	if (!origin) return true;
+	return url.origin !== origin;
+};
+
+/** Absolute GSF `/oauth/handoff` URL that delivers `callback` without leaving GSF. */
+export const mcpHandoffLocation = (callback: URL, requestUrl: string): string => {
+	const handoff = new URL('/oauth/handoff', process.env.APP_URL || requestUrl);
+	handoff.searchParams.set('url', callback.toString());
+	return handoff.toString();
+};
+
+/** Same-origin path so the browser stays on this GSF host. */
+export const mcpHandoffPath = (callback: URL): string => {
+	const handoff = new URL('/oauth/handoff', 'http://gsf.invalid');
+	handoff.searchParams.set('url', callback.toString());
+	return `${handoff.pathname}${handoff.search}`;
 };
 
 const loopbackCandidates = (parsed: URL): string[] => {
@@ -62,6 +84,24 @@ const loopbackCandidates = (parsed: URL): string[] => {
 				return next.toString();
 			}),
 	];
+};
+
+// Fetch from a public HTTPS origin (Astra) to localhost is often blocked by
+// private-network access rules. A hidden iframe is a nested navigation, which
+// Chrome still allows, so the listener can receive the code while this tab
+// stays on GSF. The iframe is removed after a delay; its document is the
+// client's response or Chrome's error page, neither of which the user should
+// see.
+const pokeLoopbackViaIframe = (url: string): void => {
+	if (typeof document === 'undefined') return;
+	const iframe = document.createElement('iframe');
+	iframe.setAttribute('aria-hidden', 'true');
+	iframe.title = 'oauth-callback';
+	iframe.referrerPolicy = 'no-referrer';
+	iframe.style.display = 'none';
+	iframe.src = url;
+	document.body.appendChild(iframe);
+	window.setTimeout(() => iframe.remove(), 10_000);
 };
 
 // Fetch every localhost alias so an IPv4 Chrome tab still hits a listener that
@@ -92,5 +132,62 @@ export const deliverLoopbackCallback = async (redirectUrl: string): Promise<bool
 			}),
 		),
 	);
-	return results.some((result) => result.status === 'fulfilled');
+	const delivered = results.some((result) => result.status === 'fulfilled');
+	if (!delivered) pokeLoopbackViaIframe(parsed.toString());
+	return delivered;
+};
+
+const redirectUrlFromPayload = (data: unknown): string | null => {
+	if (typeof data !== 'object' || data === null) return null;
+	const payload = data as { redirect?: unknown; url?: unknown };
+	if (payload.redirect !== true || typeof payload.url !== 'string') return null;
+	return payload.url;
+};
+
+/** Keep the tab on GSF for a loopback callback; otherwise follow `redirectUrl`. */
+export const followOAuthRedirect = (redirectUrl: string): void => {
+	let parsed: URL;
+	try {
+		parsed = new URL(redirectUrl, window.location.origin);
+	} catch {
+		window.location.assign(redirectUrl);
+		return;
+	}
+	if (isLoopbackCallback(parsed) && parsed.origin !== window.location.origin) {
+		window.location.assign(mcpHandoffPath(parsed));
+		return;
+	}
+	window.location.assign(parsed.toString());
+};
+
+// After SSO or password sign-in the login page has to resume `/oauth2/authorize`.
+// A top-level navigation follows Better Auth's 302 to :8787. Asking for JSON
+// (or reading a 302 Location) lets us send loopback callbacks to `/oauth/handoff`
+// instead, so Chrome never paints "This site can't be reached".
+export const resumeAuthorizeFromApp = async (destination: string): Promise<void> => {
+	try {
+		const response = await fetch(destination, {
+			headers: { Accept: 'application/json' },
+			credentials: 'include',
+			redirect: 'manual',
+		});
+		if (response.status >= 300 && response.status < 400) {
+			const location = response.headers.get('location');
+			if (location) {
+				followOAuthRedirect(location);
+				return;
+			}
+		}
+		if (response.ok) {
+			const url = redirectUrlFromPayload(await response.json());
+			if (url) {
+				followOAuthRedirect(url);
+				return;
+			}
+		}
+	} catch {
+		// Fall through to a real navigation; the authorize 302 rewrite is the
+		// backup so login still completes if this fetch fails.
+	}
+	window.location.assign(destination);
 };

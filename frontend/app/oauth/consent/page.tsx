@@ -5,14 +5,19 @@ import { useSearchParams } from 'next/navigation';
 import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { authClient } from '@/auth/auth-client';
-import { deliverLoopbackCallback } from '@/auth/oauth-loopback';
+import {
+	deliverLoopbackCallback,
+	followOAuthRedirect,
+	isLoopbackCallback,
+} from '@/auth/oauth-loopback';
+import { OauthStatus } from '@/app/oauth/OauthStatus';
 import { ButtonTheme, Size } from '@/enums/button';
 
 const ConsentForm = () => {
 	const params = useSearchParams();
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [completed, setCompleted] = useState(false);
+	const [outcome, setOutcome] = useState<'granted' | 'denied' | null>(null);
 	const clientId = params.get('client_id') ?? 'the MCP client';
 	const scopes = (params.get('scope') ?? '')
 		.split(' ')
@@ -24,28 +29,38 @@ const ConsentForm = () => {
 		setError(null);
 		const result = await authClient.oauth2.consent({ accept });
 		if (result.data?.redirect && result.data.url) {
-			if (accept && (await deliverLoopbackCallback(result.data.url))) {
-				setCompleted(true);
+			let callback: URL | null = null;
+			try {
+				callback = new URL(result.data.url, window.location.origin);
+			} catch {
+				callback = null;
+			}
+			if (callback && isLoopbackCallback(callback)) {
+				await deliverLoopbackCallback(callback.toString());
+				setOutcome(accept ? 'granted' : 'denied');
 				setSubmitting(false);
 				return;
 			}
-			window.location.assign(result.data.url);
+			followOAuthRedirect(result.data.url);
 			return;
 		}
 		setError(result.error?.message ?? 'Could not complete authorization.');
 		setSubmitting(false);
 	};
 
-	if (completed) {
+	if (outcome === 'granted') {
 		return (
-			<div className="flex w-full max-w-md flex-col gap-3 text-center">
-				<h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-					Back to Cursor
-				</h1>
-				<p className="text-sm text-zinc-600 dark:text-zinc-400">
-					Access granted. You can close this tab.
-				</p>
-			</div>
+			<OauthStatus title="Thank you">
+				Authentication successful. You can close this page.
+			</OauthStatus>
+		);
+	}
+
+	if (outcome === 'denied') {
+		return (
+			<OauthStatus title="Authorization cancelled">
+				You can close this page and return to the application that started sign-in.
+			</OauthStatus>
 		);
 	}
 

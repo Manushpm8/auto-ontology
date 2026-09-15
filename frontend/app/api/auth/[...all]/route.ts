@@ -5,7 +5,7 @@
 import { NextResponse } from 'next/server';
 import { toNextJsHandler } from 'better-auth/next-js';
 import { auth } from '@/auth/auth';
-import { isMcpClientCallback } from '@/auth/oauth-loopback';
+import { isMcpClientCallback, mcpHandoffLocation } from '@/auth/oauth-loopback';
 import { withPublic } from '@/auth/with-auth';
 
 const handlers = toNextJsHandler(auth);
@@ -50,10 +50,8 @@ const rewriteMcpClientRedirect =
 			return response;
 		}
 		if (!isMcpClientCallback(callback, req.url)) return response;
-		const handoff = new URL('/oauth/handoff', req.url);
-		handoff.searchParams.set('url', callback.toString());
 		const headers = new Headers(response.headers);
-		headers.set('location', handoff.toString());
+		headers.set('location', mcpHandoffLocation(callback, req.url));
 		return new NextResponse(response.body, {
 			status: response.status,
 			statusText: response.statusText,
