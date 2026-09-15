@@ -746,6 +746,13 @@ are actually needed to answer the question.
 
 Rules:
 - Only remove tables you are confident are NOT needed in the SQL query.
+- A table can be required even when none of its columns appear in the answer:
+  joining it may restrict WHICH rows qualify (only schools that appear in
+  frpm; only patients who have an examination record). "No column of mine is
+  returned" is NOT a reason to remove a table.
+- Before removing a table, confirm BOTH: (a) it supplies no column the answer
+  needs, AND (b) removing it cannot change the set of rows that qualify.
+  Report both per table — a table stays unless both hold.
 - If table A must be joined through tables B and C to reach table D, do NOT
   remove any table in the join chain (A, B, C, or D). The join paths below
   show real table connections. Keep the full bridges between tables that
@@ -761,7 +768,10 @@ Rules:
 Candidate tables:
 {tables_summary}
 
-Provide brief reasoning (1-2 sentences) then return the names of tables that can be safely REMOVED.
+Provide brief reasoning (1-2 sentences), then for each table you want REMOVED
+give its name together with both removal checks: whether it supplies no column
+the answer needs, and whether removing it cannot change which rows qualify.
+State in its justification how you verified the row-scoping check.
 Only remove a table if you are confident it is not needed. When in doubt, do NOT remove."""
 
 
