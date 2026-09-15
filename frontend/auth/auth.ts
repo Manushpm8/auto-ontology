@@ -107,7 +107,7 @@ export const auth = betterAuth({
 		admin({ ac, roles, adminRoles: [Role.Admin], defaultRole: Role.Viewer }),
 		// GSF Allows only one SSO provider, so this makes the redirect URI static.
 		// Better Auth's baseURL already includes `/api/auth`, so this becomes
-		// APP_URL/api/auth/sso/callback — the URI Starfleet and the README register.
+		// APP_URL/api/auth/sso/callback — the URI the README tells the IdP to register.
 		sso({ redirectURI: '/sso/callback' }),
 		// Machine-to-machine credentials: long-lived API tokens users mint for
 		// scripts. The plugin owns hashing (SHA-256), expiry, and revocation; we
