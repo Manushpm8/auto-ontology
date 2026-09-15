@@ -44,7 +44,7 @@ RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" \
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 COPY gsf_mcp/ ./gsf_mcp/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
