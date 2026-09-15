@@ -250,11 +250,6 @@ model Apikey {
 // etc. Prisma derives the delegate from the model name, so `OAuthClient` would
 // generate `prisma.oAuthClient` and every call would fail at runtime.
 //
-// 1.7 replaced `oauthApplication` with `oauthClient` and split refresh tokens
-// onto their own table. Outstanding 1.6 grants cannot be copied; see
-// prisma/migrate.sh, which drops the old tables before `db push`. Dynamically
-// registered MCP clients re-register themselves.
-//
 // A client that registers itself has no owning user, so `userId` is optional —
 // a dynamically registered MCP client belongs to no one until someone consents.
 //
