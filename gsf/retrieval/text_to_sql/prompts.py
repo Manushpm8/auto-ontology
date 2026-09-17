@@ -196,6 +196,7 @@ def create_sql_from_candidates_prompt(
     dialect: str | None = None,
     target_db: str | None = None,
     has_evidence: bool = False,
+    has_sql_examples: bool = False,
 ) -> str:
     """System prompt for SQL generation from semantic retrieval candidates.
 
@@ -253,9 +254,69 @@ ORDER BY total_sales DESC;"""
         else ""
     )
 
+    # Solved question/SQL pairs retrieved by question wording from a labelled
+    # corpus of other databases. Two failure modes need heading off: borrowing
+    # identifiers or literals instead of structure, and treating the first
+    # listed pair as the best fit (they are ordered by wording similarity, which
+    # is only weakly related to whether their structure transfers).
+
+    # The exemplar's own evidence shows how a stated formula
+    # was turned into SQL (casting, operand order, whether
+    # *100 was applied), which is the transferable part.
+    sql_examples_block = (
+        "## How To Use Reference Query Patterns\n"
+        "The request includes solved question/SQL pairs from OTHER databases, "
+        "retrieved because their wording resembles this request. They are "
+        "precedent for how a request of this kind becomes SQL — nothing else.\n"
+        "Work through them like this:\n"
+        "1. Read each pair's question, and its evidence when present, and judge "
+        "which pairs ask for the same KIND of thing as this request: a count, a "
+        "ratio, a share, a superlative, a per-group breakdown, one entity or a "
+        "list. Ignore the subject matter; two questions about different domains "
+        "can still be the same kind of request.\n"
+        "2. From the pairs that match in kind, transfer the construction: which "
+        "aggregate answers it, whether the answer needs a join to reach a name "
+        "or label, whether a ratio is cast to REAL before dividing, whether a "
+        "conditional share puts the filter in a CASE inside the aggregate "
+        "rather than in WHERE, and whether DISTINCT is needed.\n"
+        "3. When a pair's evidence states a formula, study how that formula was "
+        "turned into SQL — operand order, the cast, whether the result was scaled "
+        "by 100, whether anything was rounded — and give THIS request's evidence "
+        "the same treatment.\n"
+        "4. Then rebuild the query for this database from scratch: every table, "
+        "column and alias must come from AVAILABLE TABLES, and every filter value "
+        "from this question or its evidence. Names, aliases and literals in the "
+        "pairs do NOT exist here.\n"
+        "5. The pairs are ordered by question similarity, not by how well they "
+        "fit. The first is not automatically the best; prefer whichever pair "
+        "matches this request's kind most closely, and when pairs disagree with "
+        "each other, follow that one rather than the earliest.\n"
+        "6. If no pair matches the kind of request being made, ignore them all "
+        "and build from the question and schema: project exactly what is asked "
+        "and nothing beside it, and bound the result only where the question "
+        "implies a bound. Forcing an ill-fitting pattern is worse than using "
+        "none.\n"
+        "The Rules section still governs throughout: a pair shows how a request "
+        "of this kind is usually built, but where a pair and a rule disagree, "
+        "the rule wins. The question, its evidence, and the schema outrank both.\n"
+        "What they tell you nothing about, no matter what they do:\n"
+        "- Which columns to SELECT, or how many. The pair answered a different "
+        "question; what to return follows from THIS question and the Rules "
+        "section, even when the pair returns more or fewer columns.\n"
+        "- Whether to add LIMIT, and with what number. That follows from this "
+        "question's own wording under the Rules section.\n"
+        "- How many tables YOUR query needs. A single-table pair is no reason to "
+        "drop a join this question requires, and a multi-join pair is no reason "
+        "to add one; their schema is not yours.\n"
+        "- Which columns exist, or what a column is called here.\n"
+        "- Which values to filter on.\n\n"
+        if has_sql_examples
+        else ""
+    )
+
     return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
 
-{evidence_block}Key rules:
+{evidence_block}{sql_examples_block}Key rules:
 {table_name_rule}
 - When SQL snippets are provided as reference, do NOT copy their aliases.
   Define your own aliases in FROM/JOIN and use only those.
@@ -468,6 +529,49 @@ def format_custom_analyses_section(custom_analyses: list[dict] | None) -> str:
         + "\n".join(ca_lines)
         + "\n\n"
     )
+
+
+def format_sql_examples_section(sql_examples: list[dict] | None) -> str:
+    """Render retrieved question/SQL/evidence precedent for prompt injection.
+
+    Each example is rendered whole — its question, its own evidence, its source
+    database and its SQL — because the transferable lesson is the mapping from
+    request to query, not the query alone. The evidence line in particular
+    shows how a stated formula became SQL (casting, operand order, whether the
+    result was scaled), which is exactly what the model has to reproduce for
+    the request at hand.
+
+    Deliberately separate from the ``## Example SQL Queries`` slot, which holds
+    custom-analysis SQL written against the *target* database and which the
+    prompt rules invite the model to lift filter values from. These examples
+    are structural precedent from other databases, so the section is labelled
+    and framed so the two cannot be confused.
+
+    Returns "" when there is nothing to inject.
+    """
+    if not sql_examples:
+        return ""
+    blocks: list[str] = []
+    for example in sql_examples:
+        sql = " ".join((example.get("sql") or "").split())
+        if not sql:
+            continue
+        source = (example.get("db") or "").strip()
+        header = f"{len(blocks) + 1}."
+        if source:
+            header += f" [source database: {source}]"
+        lines = [header]
+        question = (example.get("question") or "").strip()
+        if question:
+            lines.append(f"   Question: {question}")
+        evidence = " ".join((example.get("evidence") or "").split())
+        if evidence:
+            lines.append(f"   Evidence: {evidence}")
+        lines.append(f"   SQL: {sql}")
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return ""
+    return "## Reference Query Patterns\n" + "\n\n".join(blocks)
 
 
 def create_empty_like_check_prompt(
