@@ -21,7 +21,6 @@ from gsf.retrieval.text_to_sql.connector_routing import (
 from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
-from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
 from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
@@ -84,7 +83,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         )
 
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
-    domain_rules = fetch_custom_analyses() + list(acronyms or [])
+    domain_rules = list(acronyms or [])
 
     # ``prediction=True`` only means something when the KumoRFM branch was built
     # into the graph at startup; without KUMO_RFM_API_KEY the classify node does

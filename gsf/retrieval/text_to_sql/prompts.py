@@ -75,7 +75,8 @@ create_sql_user_prompt = (
     "- Infer LIMIT from the question's intent: "
     "if a superlative (most/least/highest/lowest/best/worst/top/bottom) "
     "is paired with a number, add LIMIT with that number; "
-    "if a superlative appears without a number, add LIMIT 1; "
+    "if an unnumbered superlative asks for one singular item, add LIMIT 1; "
+    "if it asks for plural items, do not add LIMIT; "
     "if a specific count is requested without a superlative, "
     "add LIMIT with that number; "
     "otherwise do not add LIMIT.\n"
@@ -195,7 +196,6 @@ def create_sql_from_candidates_prompt(
     *,
     dialect: str | None = None,
     target_db: str | None = None,
-    has_evidence: bool = False,
 ) -> str:
     """System prompt for SQL generation from semantic retrieval candidates.
 
@@ -237,25 +237,9 @@ WHERE s.order_date BETWEEN
 GROUP BY c.country_name
 ORDER BY total_sales DESC;"""
 
-    evidence_block = (
-        "## Evidence Priority\n"
-        "The request includes evidence — treat it as authoritative "
-        "ground truth. Evidence overrides semantic hints, examples, descriptions, and "
-        "your own interpretation. Apply every evidence clause exactly: use named "
-        "columns/tables, formulas, filters, synonyms, ranking rules, and LIKE patterns "
-        "as specified. If evidence maps a requested answer to columns, SELECT those "
-        "columns exactly. Do NOT substitute semantically similar columns or raw "
-        "question literals when evidence gives an exact SQL mapping. "
-        "Follow any explicit evidence formula verbatim: same operands and same "
-        "numerator/denominator order even if the question implies the opposite, "
-        "with no added * 100, - 1, ROUND, or extra columns.\n\n"
-        if has_evidence
-        else ""
-    )
-
     return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
 
-{evidence_block}Key rules:
+Key rules:
 {table_name_rule}
 - When SQL snippets are provided as reference, do NOT copy their aliases.
   Define your own aliases in FROM/JOIN and use only those.
@@ -311,6 +295,26 @@ sale is attributed to a country, sums the sales amounts within that quarter,
 and then groups the results by country and orders them from highest to lowest
 total sales.
 """
+
+
+def format_authoritative_evidence(evidence: str) -> str:
+    """Wrap evidence verbatim with strict instructions for SQL use and validation."""
+    if not evidence:
+        return ""
+
+    return (
+        "## Authoritative Evidence\n"
+        "This evidence is critical. The generated SQL MUST follow every instruction "
+        "in it exactly, even when another approach appears equivalent.\n"
+        "- Whenever the evidence explains a value or where that value is stored, "
+        "include the value in the SQL using the stated column, table, filter, and "
+        "operator. Do not substitute another value or location.\n"
+        "- Whenever the evidence explains a formula, calculate that exact formula "
+        "from the stated available tables and columns. Do not replace it with a "
+        "shortcut or precomputed field.\n\n"
+        "Evidence (verbatim):\n"
+        f"{evidence}"
+    )
 
 
 create_sql_general_prompt = f"""You are an expert SQL query builder.
@@ -603,6 +607,7 @@ def create_intent_validation_prompt(
     custom_analyses: str = "",
     join_paths: str = "",
     joins_validated_elsewhere: bool = False,
+    has_evidence: bool = False,
 ) -> str:
     question_block = format_dual_question_block(
         original_question, sanitized_question, processing_question
@@ -637,6 +642,14 @@ def create_intent_validation_prompt(
             "\nIf AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that follows "
             "one of those verified paths."
         )
+    evidence_criterion = (
+        "\n3. Does the SQL follow EVERY instruction in the Authoritative Evidence "
+        "exactly? Evidence compliance is strict, not lenient. Flag any missing or "
+        "substituted evidence-defined value, column/table mapping, filter, operator, "
+        "or formula as a critical evidence issue."
+        if has_evidence
+        else ""
+    )
     return f"""User's Question:
 {question_block}
 {custom_analyses_block}
@@ -649,6 +662,7 @@ Generated SQL Query:
 Check for CRITICAL issues ONLY (be lenient):
 {join_criterion}
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
+{evidence_criterion}
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \
