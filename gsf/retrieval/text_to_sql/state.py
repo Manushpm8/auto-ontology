@@ -41,6 +41,7 @@ class TextToSQLPayload(TypedDict):
     # are advisory and usually come from *other* databases, so they inform
     # query shape only — never identifiers or filter values.
     sql_examples: NotRequired[list[dict[str, str]]]
+    value_anchors: NotRequired[list[dict[str, str]]]
     # The clarified/merged question on its own — no hint blocks or SQL
     # references mixed in (unlike `evidence`, which carries those too).
     # Omitted by callers that never enrich the question.
@@ -65,6 +66,7 @@ class AgentState(TypedDict):
     initial_question: str
     evidence: NotRequired[str]
     sql_examples: NotRequired[list[dict[str, str]]]
+    value_anchors: NotRequired[list[dict[str, str]]]
     enriched_question: NotRequired[str]
     messages: list[HumanMessage]
     decision: str

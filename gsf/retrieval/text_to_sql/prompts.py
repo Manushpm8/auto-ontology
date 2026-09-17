@@ -574,6 +574,96 @@ def format_sql_examples_section(sql_examples: list[dict] | None) -> str:
     return "## Reference Query Patterns\n" + "\n\n".join(blocks)
 
 
+def format_value_anchors_section(value_anchors: list[dict] | None) -> str:
+    """Render looked-up question phrases and the columns that store them.
+
+    Each anchor is an observation about the live database, not a suggestion:
+    this phrase from the question is stored in this column, with this exact
+    spelling, in this many rows. It exists because the schema alone does not
+    say which of several plausible columns holds a value: the same label often
+    sits in a code column and a display column, or in an entity's own attribute
+    and a denormalised copy on a related table. Picking the wrong one still
+    returns rows, so nothing downstream notices.
+
+    Anchors marked absent are the other half and carry as much weight: a label
+    the question states that the database does not store anywhere means the
+    filter has to be built some other way, rather than from the question's own
+    wording.
+
+    The usage guidance travels inside the section so that attaching it needs no
+    second change to the surrounding prompts.
+
+    Returns "" when nothing was looked up.
+    """
+    if not value_anchors:
+        return ""
+    found, absent = [], []
+    for anchor in value_anchors:
+        phrase = (anchor.get("phrase") or "").strip()
+        if not phrase:
+            continue
+        kind = (anchor.get("kind") or "value").strip()
+        if kind == "absent":
+            absent.append(f'"{phrase}"')
+            continue
+        table = (anchor.get("tbl") or "").strip()
+        column = (anchor.get("col") or "").strip()
+        value = (anchor.get("stored_value") or "").strip()
+        if not (table and column and value):
+            continue
+        rows = anchor.get("n_rows") or ""
+        count = f" — {int(rows):,} rows" if str(rows).isdigit() else ""
+        # Two different facts, and conflating them invites an equality filter
+        # on a value that only contains the phrase.
+        claim = (
+            f"= '{value}'{count}"
+            if kind != "contains"
+            else f"contains it inside values such as '{value}' (no value equals the phrase)"
+        )
+        found.append(f'- "{phrase}": {table}."{column}" {claim}')
+    if not found and not absent:
+        return ""
+
+    lines = ["## Verified Database Values"]
+    lines.append(
+        "Phrases from the question, looked up in this database. Every line "
+        "below is a fact about what the data contains."
+    )
+    if found:
+        lines.append("")
+        lines.extend(found)
+    if absent:
+        lines.append("")
+        lines.append(
+            "Stated in the question but stored NOWHERE in this database: "
+            + ", ".join(sorted(set(absent)))
+            + "."
+        )
+    lines.append("")
+    # The absent clause is only included when there is an absent line, so the
+    # section never instructs against something it did not list.
+    never_invent = (
+        " Never filter on a phrase listed as stored nowhere; find what the "
+        "database does store for that idea, or express the condition another way."
+        if absent
+        else ""
+    )
+    lines.append(
+        "Use these when choosing a filter: take the column and the exact "
+        "stored spelling from here instead of inferring either from the "
+        "question's wording or a column's name. A line reading = '...' supports "
+        "an equality filter on that spelling; a line saying the column merely "
+        "contains the phrase does not — match such a column with LIKE, or not "
+        "at all if the question means an exact category. A phrase listed under several "
+        "columns is genuinely ambiguous — decide which column the question is "
+        "asking about from its wording and the column's role in the schema, "
+        "not from the order listed." + never_invent + " Evidence "
+        "still outranks these lines, and a phrase absent from this list is not "
+        "thereby absent from the database — only the listed phrases were looked up."
+    )
+    return "\n".join(lines)
+
+
 def create_empty_like_check_prompt(
     question_block: str,
     sql_code: str,
