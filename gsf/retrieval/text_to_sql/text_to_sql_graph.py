@@ -25,6 +25,9 @@ from gsf.retrieval.entity_coverage.agents.question_extraction import (
 from gsf.retrieval.text_to_sql.agents.empty_result_value_repair import (
     EmptyResultValueRepairAgent,
 )
+from gsf.retrieval.text_to_sql.agents.evidence_refinement import (
+    EvidenceRefinementAgent,
+)
 from gsf.retrieval.text_to_sql.agents.combined_precheck import (
     CombinedPrecheckAgent,
 )
@@ -232,6 +235,20 @@ def route_decision(state: AgentState) -> str:
     return mapped
 
 
+def route_evidence_refinement(state: AgentState) -> str:
+    """Run schema-aware evidence refinement only when evidence is present."""
+    if (state.get("evidence") or "").strip():
+        return "refine_evidence"
+    return "construct_sql_from_candidates"
+
+
+def route_prediction_or_evidence(state: AgentState) -> str:
+    """Keep prediction requests separate; refine evidence only on the SQL path."""
+    if route_decision(state) == "prediction":
+        return "prediction"
+    return route_evidence_refinement(state)
+
+
 def _make_node(name, fn):
     """
     Create a node with logging wrapper.
@@ -308,6 +325,7 @@ def create_graph():
     question_extraction_agent = QuestionExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
+    evidence_refinement_agent = EvidenceRefinementAgent()
     sql_from_candidates_agent = SQLFromCandidatesAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
     sql_validation_agent = SQLValidationAgent()
@@ -329,6 +347,9 @@ def create_graph():
     )
     prepare_candidates_node = _make_node(
         "prepare_candidates", agent_wrapper(candidate_preparation_agent)
+    )
+    refine_evidence_node = _make_node(
+        "refine_evidence", agent_wrapper(evidence_refinement_agent)
     )
     # Live DB grounding is a repair signal, not always-on context: the
     # value-repair node only runs after an empty execution result.
@@ -406,6 +427,7 @@ def create_graph():
     graph.add_node("question_extraction", question_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
+    graph.add_node("refine_evidence", refine_evidence_node)
     graph.add_node("check_value_repair", value_repair_node)
     if combined_precheck_node is not None:
         graph.add_node("precheck_combined", combined_precheck_node)
@@ -421,11 +443,6 @@ def create_graph():
     # Minimal flow using only the defined nodes.
     graph.add_edge("question_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
-
-    after_prepare = (
-        "classify_prediction" if prediction_enabled else "construct_sql_from_candidates"
-    )
-    graph.add_edge("prepare_candidates", after_prepare)
 
     if prediction_enabled:
         # After candidate preparation, a decision tree routes prediction questions
@@ -454,10 +471,11 @@ def create_graph():
 
         graph.add_conditional_edges(
             "classify_prediction",
-            route_decision,
+            route_prediction_or_evidence,
             {
                 "prediction": "prepare_prediction_graph",
-                "sql": "construct_sql_from_candidates",
+                "refine_evidence": "refine_evidence",
+                "construct_sql_from_candidates": "construct_sql_from_candidates",
             },
         )
         graph.add_conditional_edges(
@@ -469,7 +487,18 @@ def create_graph():
             },
         )
         graph.add_edge("kumo_predict", END)
+        graph.add_edge("prepare_candidates", "classify_prediction")
+    else:
+        graph.add_conditional_edges(
+            "prepare_candidates",
+            route_evidence_refinement,
+            {
+                "refine_evidence": "refine_evidence",
+                "construct_sql_from_candidates": "construct_sql_from_candidates",
+            },
+        )
 
+    graph.add_edge("refine_evidence", "construct_sql_from_candidates")
     graph.add_conditional_edges(
         "construct_sql_from_candidates",
         route_decision,
