@@ -597,6 +597,19 @@ def format_value_anchors_section(value_anchors: list[dict] | None) -> str:
     """
     if not value_anchors:
         return ""
+    # Between columns of one table a row count decides nothing while reading as
+    # though it did: schools.MailCity holds 'San Joaquin' in more rows than
+    # schools.City, and City is what the question means. Across tables the
+    # count does discriminate, since volume tracks where a value belongs, so it
+    # is dropped only where columns of the same table compete.
+    rivals: dict[tuple[str, str], set[str]] = {}
+    for anchor in value_anchors:
+        key = (
+            (anchor.get("phrase") or "").strip().lower(),
+            (anchor.get("tbl") or "").strip().lower(),
+        )
+        rivals.setdefault(key, set()).add((anchor.get("col") or "").strip().lower())
+
     found, absent = [], []
     for anchor in value_anchors:
         phrase = (anchor.get("phrase") or "").strip()
@@ -612,7 +625,12 @@ def format_value_anchors_section(value_anchors: list[dict] | None) -> str:
         if not (table and column and value):
             continue
         rows = anchor.get("n_rows") or ""
-        count = f" — {int(rows):,} rows" if str(rows).isdigit() else ""
+        contested = len(rivals.get((phrase.lower(), table.lower()), ())) > 1
+        count = (
+            f" — {int(rows):,} row{'' if int(rows) == 1 else 's'}"
+            if str(rows).isdigit() and not contested
+            else ""
+        )
         # Two different facts, and conflating them invites an equality filter
         # on a value that only contains the phrase.
         claim = (
@@ -620,7 +638,13 @@ def format_value_anchors_section(value_anchors: list[dict] | None) -> str:
             if kind != "contains"
             else f"contains it inside values such as '{value}' (no value equals the phrase)"
         )
-        found.append(f'- "{phrase}": {table}."{column}" {claim}')
+        # Supplied only where the phrase matched several columns of one table.
+        # There the row counts say nothing about which column the question
+        # means, and the documented name often says it outright: 'MailCity' is
+        # "mailing city", so a question that does not say mailing means City.
+        gloss = (anchor.get("description") or "").strip()
+        named = f" ({gloss})" if gloss else ""
+        found.append(f'- "{phrase}": {table}."{column}"{named} {claim}')
     if not found and not absent:
         return ""
 
@@ -657,7 +681,15 @@ def format_value_anchors_section(value_anchors: list[dict] | None) -> str:
         "at all if the question means an exact category. A phrase listed under several "
         "columns is genuinely ambiguous — decide which column the question is "
         "asking about from its wording and the column's role in the schema, "
-        "not from the order listed." + never_invent + " Evidence "
+        "not from the order listed. Where such a column is "
+        "followed by a documented name in parentheses, that name is how the "
+        "question would have to refer to it: a qualifier in the name must also "
+        "be present in the question to pick that column, and an unqualified "
+        "mention means the plain column. A row count, where one is given, says "
+        "only how many rows hold that value: where one phrase sits in several "
+        "tables, the larger count tends to mark the table the value principally "
+        "belongs to. A small count is not itself a reason to distrust a match — "
+        "a value held by a single row is often the very entity the question names." + never_invent + " Evidence "
         "still outranks these lines, and a phrase absent from this list is not "
         "thereby absent from the database — only the listed phrases were looked up."
     )
