@@ -195,11 +195,12 @@ def delete_connection(
         )
     ),
 ) -> dict:
-    """Remove a connection, returning the deleted row.
+    """Remove a connection, echoing the database name it tore down.
 
-    404 when no connection carries that ``database_name``. Data already ingested
-    from the connection is not removed here — reset it through the ingestion
-    service's ``POST /ingest/delete``.
+    404 when no connection carries that ``database_name``. The connection
+    record is removed synchronously, but deleting the data already ingested
+    from it is handed to the ingestion service and is best-effort — a 200 means
+    the connection is gone, not that its graph is.
     """
     try:
         row = service.delete_connection(database_name)

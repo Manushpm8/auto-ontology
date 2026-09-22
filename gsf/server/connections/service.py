@@ -15,7 +15,7 @@ from gsf.connectors.registry import create_connector, invalidate_connectors_cach
 from gsf.connectors.vault import delete_secrets, is_vault_configured, write_secret
 from gsf.server.ingestion.proxy import trigger_ingest, trigger_reset
 from gsf.server.chat.worker import refresh_chat_workers
-from gsf.dal.connections import insert_connection, list_connections
+from gsf.dal.connections import clear_connection, insert_connection, list_connections
 
 logger = logging.getLogger(__name__)
 
@@ -273,13 +273,34 @@ def set_sso_federation(*, database_name: str, enabled: bool) -> dict[str, Any]:
     return {"database_name": database_name, "sso_federation": enabled}
 
 
-def delete_connection(database_name: str) -> dict[str, str]:
-    """Delete a UI-managed connection and tear down its ingested database graph."""
+def delete_connection(database_name: str) -> dict[str, str] | None:
+    """Delete a UI-managed connection and tear down its ingested database graph.
+
+    ``None`` when no connection carries that name, which the route turns into a
+    404.
+
+    Removing the record is done here rather than delegated to the ingestion
+    service: a connection is a catalog row carrying connection metadata, and
+    clearing that is a write this process can do. Delegating it meant a delete
+    silently did nothing whenever the service was unreachable — and still
+    answered 200, because the call to it is best-effort.
+
+    Deleting the ingested graph stays the service's job and stays best-effort.
+    It is the slow half, and failing it leaves stale data rather than a
+    connection that comes back from the dead.
+    """
+    if _stored_connection(database_name) is None:
+        return None
+
+    # Vault first: `list_connections` prefers a secret over the row, so failing
+    # after the row is cleared would resurrect the connection, while failing
+    # after the secret is gone cannot.
     if is_vault_configured():
         delete_secrets(database_name)
 
-    invalidate_connectors_cache()
-    refresh_chat_workers()
+    clear_connection(database_name=database_name)
+
+    _refresh_connection_caches()
 
     trigger_reset(database_name)
 

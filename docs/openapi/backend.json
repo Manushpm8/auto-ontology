@@ -5949,7 +5949,7 @@
     },
     "/api/connections/{database_name}": {
       "delete": {
-        "description": "Remove a connection, returning the deleted row.\n\n404 when no connection carries that ``database_name``. Data already ingested\nfrom the connection is not removed here \u2014 reset it through the ingestion\nservice's ``POST /ingest/delete``.",
+        "description": "Remove a connection, echoing the database name it tore down.\n\n404 when no connection carries that ``database_name``. The connection\nrecord is removed synchronously, but deleting the data already ingested\nfrom it is handed to the ingestion service and is best-effort \u2014 a 200 means\nthe connection is gone, not that its graph is.",
         "operationId": "delete_connection_api_connections__database_name__delete",
         "parameters": [
           {

@@ -221,6 +221,62 @@ def test_update_connection_reports_an_unknown_database_as_missing() -> None:
             raise AssertionError("expected a LookupError for the unknown database")
 
 
+def test_delete_connection_clears_the_stored_record() -> None:
+    """The record has to go from this process. Leaving it to the ingestion
+    service meant a delete did nothing whenever that service was unreachable,
+    and the connection came back on the next page load."""
+    with (
+        patch.object(
+            service, "_stored_connection", return_value=_snowflake_connection()
+        ),
+        patch.object(service, "is_vault_configured", return_value=False),
+        patch.object(service, "clear_connection") as clear_connection,
+        patch.object(service, "_refresh_connection_caches"),
+        patch.object(service, "trigger_reset") as trigger_reset,
+    ):
+        result = service.delete_connection("database")
+
+    clear_connection.assert_called_once_with(database_name="database")
+    trigger_reset.assert_called_once_with("database")
+    assert result == {"database_name": "database"}
+
+
+def test_delete_connection_removes_the_vault_secret_before_the_row() -> None:
+    """`list_connections` prefers a Vault secret over the row, so clearing the
+    row first would resurrect the connection if the secret delete then failed."""
+    calls: list[str] = []
+
+    with (
+        patch.object(
+            service, "_stored_connection", return_value=_snowflake_connection()
+        ),
+        patch.object(service, "is_vault_configured", return_value=True),
+        patch.object(
+            service, "delete_secrets", side_effect=lambda *_: calls.append("vault")
+        ),
+        patch.object(
+            service, "clear_connection", side_effect=lambda **_: calls.append("row")
+        ),
+        patch.object(service, "_refresh_connection_caches"),
+        patch.object(service, "trigger_reset"),
+    ):
+        service.delete_connection("database")
+
+    assert calls == ["vault", "row"]
+
+
+def test_delete_connection_reports_an_unknown_database_as_missing() -> None:
+    with (
+        patch.object(service, "_stored_connection", return_value=None),
+        patch.object(service, "clear_connection") as clear_connection,
+        patch.object(service, "trigger_reset") as trigger_reset,
+    ):
+        assert service.delete_connection("ghost") is None
+
+    clear_connection.assert_not_called()
+    trigger_reset.assert_not_called()
+
+
 def test_create_connection_drops_the_schema_shorthand() -> None:
     """`schema` is the form's shorthand for `schemas`; storing both would leave two
     sources of truth for what gets ingested."""
