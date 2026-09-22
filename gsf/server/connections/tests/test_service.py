@@ -119,6 +119,108 @@ def test_test_connection_rejects_a_schema_that_does_not_exist() -> None:
     assert connector.closed
 
 
+def test_test_connection_allows_the_connection_an_edit_replaces() -> None:
+    """Without `replacing`, re-testing an existing connection fails the duplicate
+    check — an edit could never be validated before saving."""
+    connector = _StubConnector(["sales"])
+    stored = _databricks_connection()
+
+    with (
+        patch.object(service, "_stored_connection", return_value=stored),
+        patch.object(service, "create_connector", return_value=connector),
+    ):
+        schemas = service.test_connection(
+            _databricks_connection(password=""), replacing="main"
+        )
+
+    assert schemas == ["sales"]
+
+
+def test_test_connection_rejects_renaming_the_database_it_replaces() -> None:
+    with patch.object(
+        service, "_stored_connection", return_value=_databricks_connection()
+    ):
+        try:
+            service.test_connection(
+                _databricks_connection(database="other"), replacing="main"
+            )
+        except ValueError as exc:
+            assert "cannot be changed" in str(exc)
+        else:
+            raise AssertionError("expected a ValueError for the renamed database")
+
+
+def test_update_connection_keeps_the_stored_secret_when_left_blank() -> None:
+    """The UI never receives credentials, so it cannot send them back; a blank
+    field means "unchanged" rather than "clear it"."""
+    stored = _snowflake_connection()
+
+    with (
+        patch.object(service, "_stored_connection", return_value=stored),
+        patch.object(service, "is_vault_configured", return_value=False),
+        patch.object(service, "insert_connection") as insert_connection,
+        patch.object(service, "_refresh_connection_caches"),
+        patch.object(service, "trigger_ingest") as trigger_ingest,
+    ):
+        service.update_connection(
+            database_name="database",
+            connection={**_snowflake_connection(), "password": "", "user": "renamed"},
+        )
+
+    updated = json.loads(insert_connection.call_args.kwargs["connection"])
+    assert updated["password"] == "secret"
+    assert updated["user"] == "renamed"
+    # The schema allowlist is untouched, so the ingested graph is still correct.
+    trigger_ingest.assert_not_called()
+
+
+def test_update_connection_reingests_when_the_schema_allowlist_changes() -> None:
+    with (
+        patch.object(
+            service, "_stored_connection", return_value=_snowflake_connection()
+        ),
+        patch.object(service, "is_vault_configured", return_value=False),
+        patch.object(service, "insert_connection"),
+        patch.object(service, "_refresh_connection_caches"),
+        patch.object(service, "trigger_ingest") as trigger_ingest,
+    ):
+        service.update_connection(
+            database_name="database",
+            connection={**_snowflake_connection(), "schemas": ["GPU_FLEET", "BILLING"]},
+        )
+
+    trigger_ingest.assert_called_once()
+
+
+def test_update_connection_rejects_changing_the_connector_type() -> None:
+    """The ingested graph was built by the stored connector, so pointing the same
+    catalog row at a different driver is a new connection, not an edit."""
+    with patch.object(
+        service, "_stored_connection", return_value=_snowflake_connection()
+    ):
+        try:
+            service.update_connection(
+                database_name="database",
+                connection={**_snowflake_connection(), "type": "postgresql"},
+            )
+        except ValueError as exc:
+            assert "cannot be changed" in str(exc)
+        else:
+            raise AssertionError("expected a ValueError for the changed type")
+
+
+def test_update_connection_reports_an_unknown_database_as_missing() -> None:
+    with patch.object(service, "_stored_connection", return_value=None):
+        try:
+            service.update_connection(
+                database_name="ghost", connection=_snowflake_connection()
+            )
+        except LookupError as exc:
+            assert "ghost" in str(exc)
+        else:
+            raise AssertionError("expected a LookupError for the unknown database")
+
+
 def test_create_connection_drops_the_schema_shorthand() -> None:
     """`schema` is the form's shorthand for `schemas`; storing both would leave two
     sources of truth for what gets ingested."""

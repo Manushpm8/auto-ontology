@@ -19,6 +19,18 @@ from gsf.dal.connections import insert_connection, list_connections
 
 logger = logging.getLogger(__name__)
 
+# Credentials, stripped from every payload the UI receives. An edit form
+# therefore opens with these blank, which is why the update path reads blank as
+# "unchanged" rather than "clear it".
+SECRET_FIELDS = frozenset(
+    {
+        "password",
+        "password_env",
+        "private_key",
+        "private_key_passphrase",
+    }
+)
+
 
 def _database_already_connected(database_name: str) -> bool:
     """True if a UI-managed connection already exists for this database."""
@@ -28,7 +40,54 @@ def _database_already_connected(database_name: str) -> bool:
     )
 
 
-def test_connection(connection: dict[str, Any]) -> list[str]:
+def _stored_connection(database_name: str) -> dict[str, Any] | None:
+    """The stored connection for a catalog database, or ``None`` if there is none."""
+    return next(
+        (
+            conn
+            for conn in list_connections()
+            if str(conn.get("database") or "").strip() == database_name
+        ),
+        None,
+    )
+
+
+def _with_stored_secrets(
+    connection: dict[str, Any], stored: dict[str, Any]
+) -> dict[str, Any]:
+    """Fill blank credentials from the stored connection.
+
+    The UI never gets credentials back, so it cannot send them back either.
+    Taking blank literally would mean re-typing an access token just to correct
+    a hostname, and would silently wipe the credential of anyone who didn't.
+    """
+    merged = dict(connection)
+    for field in SECRET_FIELDS:
+        if not str(merged.get(field) or "").strip() and stored.get(field):
+            merged[field] = stored[field]
+    return merged
+
+
+def _ingest_scope(connection: dict[str, Any]) -> list[str]:
+    """The schema allowlist that decides what ingestion pulls in."""
+    return sorted(str(schema) for schema in (connection.get("schemas") or []))
+
+
+def _refresh_connection_caches() -> None:
+    """Rebuild everything holding a connector or a cached connection flag."""
+    invalidate_connectors_cache()
+    refresh_chat_workers()
+
+    # Imported here rather than at module scope: ``databricks_oauth`` reaches
+    # back into the server package, so a top-level import is circular.
+    from gsf.connectors.databricks_oauth import invalidate_sso_federation_cache
+
+    invalidate_sso_federation_cache()
+
+
+def test_connection(
+    connection: dict[str, Any], *, replacing: str | None = None
+) -> list[str]:
     """Validate credentials for the settings UI test action.
 
     Returns the connection's schemas when the connector supports enumerating
@@ -39,13 +98,28 @@ def test_connection(connection: dict[str, Any]) -> list[str]:
     When the form names a specific ``schema``, the test also confirms that schema
     exists — the UI then skips schema selection, so a typo would otherwise only
     surface much later as an ingest that silently finds nothing.
+
+    ``replacing`` names the connection an edit is about to overwrite: the
+    "already connected" guard would otherwise reject a connection for being
+    itself, and blank credentials are filled from the stored ones so the test
+    exercises exactly what the update would save.
     """
     database_name = str(connection.get("database") or "").strip()
     if not database_name:
         raise ValueError("Database name is required")
 
-    if _database_already_connected(database_name):
-        raise ValueError(f"A connection for database {database_name!r} already exists")
+    if replacing is None:
+        if _database_already_connected(database_name):
+            raise ValueError(
+                f"A connection for database {database_name!r} already exists"
+            )
+    else:
+        stored = _stored_connection(replacing)
+        if stored is None:
+            raise LookupError(f"No connection found for database {replacing!r}")
+        if database_name != replacing:
+            raise ValueError("A connection's database name cannot be changed")
+        connection = _with_stored_secrets(connection, stored)
 
     requested_schema = str(connection.get("schema") or "").strip()
 
@@ -108,6 +182,67 @@ def create_connection(
     return connection
 
 
+def update_connection(
+    *,
+    database_name: str,
+    connection: dict[str, Any],
+) -> dict[str, Any]:
+    """Rewrite an existing connection's settings, keeping its identity.
+
+    ``database`` and ``type`` are the connection's identity — the catalog row is
+    keyed by the name, and its ingested graph was built by that connector — so
+    pointing the record at a different database or driver is a new connection,
+    not an edit. Everything else, credentials included, can change.
+
+    Re-ingest only when the schema allowlist moved. Rotating a token or fixing a
+    hostname leaves the ingested graph correct, and re-ingesting it would be a
+    long, surprising side effect of saving a form.
+    """
+    # Same shorthand the create path drops: `schema` is the single-schema form
+    # of `schemas`, and storing both leaves two sources of truth.
+    connection = {key: value for key, value in connection.items() if key != "schema"}
+
+    stored = _stored_connection(database_name)
+    if stored is None:
+        raise LookupError(f"No connection found for database {database_name!r}")
+
+    incoming_database = str(connection.get("database") or "").strip()
+    if incoming_database and incoming_database != database_name:
+        raise ValueError("A connection's database name cannot be changed")
+
+    stored_type = str(stored.get("type") or "").strip()
+    incoming_type = str(connection.get("type") or "").strip()
+    if incoming_type and stored_type and incoming_type != stored_type:
+        raise ValueError("A connection's type cannot be changed")
+
+    updated = _with_stored_secrets(
+        {
+            **connection,
+            "type": stored_type or incoming_type,
+            "database": database_name,
+        },
+        stored,
+    )
+
+    if is_vault_configured():
+        write_secret(database_name, updated)
+        # Blank out any credentials the row still carries from before Vault was
+        # configured, so there is only ever one copy of them.
+        insert_connection(connection="", database_name=database_name)
+    else:
+        insert_connection(
+            connection=json.dumps(updated),
+            database_name=database_name,
+        )
+
+    _refresh_connection_caches()
+
+    if _ingest_scope(updated) != _ingest_scope(stored):
+        trigger_ingest(updated)
+
+    return updated
+
+
 def set_sso_federation(*, database_name: str, enabled: bool) -> dict[str, Any]:
     """Toggle "authenticate as signed-in user" on an existing connection.
 
@@ -116,14 +251,7 @@ def set_sso_federation(*, database_name: str, enabled: bool) -> dict[str, Any]:
     it. Ingestion is unaffected — it always uses the stored access token — so
     no re-ingest is triggered.
     """
-    connection = next(
-        (
-            conn
-            for conn in list_connections()
-            if str(conn.get("database") or "").strip() == database_name
-        ),
-        None,
-    )
+    connection = _stored_connection(database_name)
     if connection is None:
         raise ValueError(f"No connection found for database {database_name!r}")
 
@@ -137,16 +265,10 @@ def set_sso_federation(*, database_name: str, enabled: bool) -> dict[str, Any]:
             database_name=database_name,
         )
 
-    # Connectors cache the credential, and chat workers hold connectors, so both
-    # must be rebuilt for the change to take effect on the next question.
-    invalidate_connectors_cache()
-    refresh_chat_workers()
-
-    # Bust the SSO-federation flag cache so the chat endpoint picks up the
-    # change on the very next request rather than waiting for the TTL to expire.
-    from gsf.connectors.databricks_oauth import invalidate_sso_federation_cache
-
-    invalidate_sso_federation_cache()
+    # Connectors cache the credential, chat workers hold connectors, and the
+    # chat endpoint caches this very flag, so all three have to be rebuilt for
+    # the change to take effect on the next question rather than after a TTL.
+    _refresh_connection_caches()
 
     return {"database_name": database_name, "sso_federation": enabled}
 
