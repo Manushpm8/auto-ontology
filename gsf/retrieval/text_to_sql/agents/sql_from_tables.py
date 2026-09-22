@@ -41,6 +41,7 @@ from gsf.retrieval.text_to_sql.prompts import (
     format_authoritative_evidence,
     format_dialect_rules,
     format_dual_question_block,
+    format_projection_rules,
 )
 from gsf.retrieval.data_access.relevant_tables import get_relevant_tables
 
@@ -116,6 +117,7 @@ class SQLFromTablesAgent(BaseAgent):
             system_prompt = create_sql_from_candidates_prompt(
                 dialect=dialect,
                 target_db=target_db,
+                has_sql_examples=bool(state.get("sql_examples")),
             )
         else:
             system_prompt = create_sql_general_prompt
@@ -126,6 +128,9 @@ class SQLFromTablesAgent(BaseAgent):
         user_prompt = create_sql_user_prompt.format(
             dialect=dialect,
             dialect_rules=format_dialect_rules(dialect),
+            projection_rules=format_projection_rules(
+                state.get("shorten_answer", False)
+            ),
             main_question=main_question,
             observation_block=observation_block,
             queries=[],
@@ -134,6 +139,7 @@ class SQLFromTablesAgent(BaseAgent):
                 target_db=path_state.get("target_db"),
                 dialect=dialect,
             ),
+            important_columns="No semantically matched columns.",
             join_paths="",
             qa_from_conversations=similar_questions,
             custom_analyses="",

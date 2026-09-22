@@ -35,6 +35,7 @@ from gsf.retrieval.data_access.custom_analyses import (
 )
 from gsf.retrieval.entity_coverage.prompts import format_glossary_section
 from gsf.retrieval.text_to_sql.formatters_util import (
+    format_important_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
 )
@@ -50,6 +51,9 @@ from gsf.retrieval.text_to_sql.prompts import (
     format_custom_analyses_section,
     format_dialect_rules,
     format_dual_question_block,
+    format_projection_rules,
+    format_sql_examples_section,
+    format_value_anchors_section,
 )
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 
@@ -121,7 +125,9 @@ class SQLFromCandidatesAgent(BaseAgent):
         connectors = state.get("connectors") or []
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
-        evidence = state["evidence"]
+        evidence = state.get("evidence", "")
+        sql_examples_section = format_sql_examples_section(state.get("sql_examples"))
+        value_anchors_section = format_value_anchors_section(state.get("value_anchors"))
         main_question = format_dual_question_block(
             original_question, sanitized_question
         )
@@ -157,6 +163,16 @@ class SQLFromCandidatesAgent(BaseAgent):
         self.logger.info(
             f"Using {len(similar_questions)} similar questions from conversations."
         )
+        if sql_examples_section:
+            self.logger.info(
+                "Injecting %d reference query pattern(s) into the SQL prompt.",
+                len(state.get("sql_examples") or []),
+            )
+        if value_anchors_section:
+            self.logger.info(
+                "Injecting %d verified database value(s) into the SQL prompt.",
+                len(state.get("value_anchors") or []),
+            )
 
         def build_messages() -> list:
             """
@@ -238,16 +254,27 @@ class SQLFromCandidatesAgent(BaseAgent):
                 if relevant_tables
                 else "No tables available."
             )
+            important_columns = format_important_columns_for_prompt(
+                primary_attribute,
+                attribute_join_paths,
+                relevant_tables,
+                target_db=target_db,
+                dialect=dialect,
+            )
 
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
                 dialect=dialect,
                 dialect_rules=format_dialect_rules(dialect),
+                projection_rules=format_projection_rules(
+                    state.get("shorten_answer", False)
+                ),
                 main_question=main_question,
                 observation_block=observation_block,
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
+                important_columns=important_columns,
                 join_paths=join_paths,
                 custom_analyses=ca_section + sa_section,
             )
@@ -256,6 +283,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             system_prompt = create_sql_from_candidates_prompt(
                 dialect=dialect,
                 target_db=target_db,
+                has_sql_examples=bool(sql_examples_section),
             )
 
             messages = state["messages"] + [SystemMessage(content=system_prompt)]
@@ -263,6 +291,15 @@ class SQLFromCandidatesAgent(BaseAgent):
                 messages.append(
                     SystemMessage(content=format_authoritative_evidence(evidence))
                 )
+            # Before the query patterns: anchors state what this database
+            # contains, which constrains the SQL more tightly than precedent
+            # from another database does.
+            if value_anchors_section:
+                messages.append(SystemMessage(content=value_anchors_section))
+            # After evidence, so that on any conflict the authoritative block is
+            # the one the model read first and the advisory one qualifies it.
+            if sql_examples_section:
+                messages.append(SystemMessage(content=sql_examples_section))
             messages.append(HumanMessage(content=user_prompt))
 
             # Add calendar time window reminder if needed

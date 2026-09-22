@@ -16,6 +16,8 @@ def _run_sql_from_tables(
     *,
     question: str,
     evidence: str,
+    sql_examples: list[dict] | None = None,
+    shorten_answer: bool | None = None,
 ) -> list:
     captured: list = []
     monkeypatch.setattr(sql_from_tables, "format_tables_for_prompt", lambda *a, **k: "")
@@ -30,17 +32,19 @@ def _run_sql_from_tables(
         return None
 
     monkeypatch.setattr(sql_from_tables, "invoke_with_structured_output", fake_invoke)
-    SQLFromTablesAgent().execute(
-        {
-            "llm": MagicMock(),
-            "initial_question": question,
-            "evidence": evidence,
-            "messages": [],
-            "connectors": [object()],
-            "data_retriever": object(),
-            "path_state": {"relevant_tables": [{}]},
-        }
-    )
+    state = {
+        "llm": MagicMock(),
+        "initial_question": question,
+        "evidence": evidence,
+        "messages": [],
+        "connectors": [object()],
+        "data_retriever": object(),
+        "sql_examples": sql_examples or [],
+        "path_state": {"relevant_tables": [{}]},
+    }
+    if shorten_answer is not None:
+        state["shorten_answer"] = shorten_answer
+    SQLFromTablesAgent().execute(state)
     return captured
 
 
@@ -76,3 +80,31 @@ def test_tables_agent_does_not_scan_question_for_evidence(
 
     assert "## Authoritative Evidence" not in messages[1].content
     assert "MUST follow every instruction" not in messages[1].content
+
+
+def test_tables_agent_enables_reference_query_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _run_sql_from_tables(
+        monkeypatch,
+        question="How many customers placed orders?",
+        evidence="Count distinct customers.",
+        sql_examples=[{"question": "How many users purchased?", "sql": "SELECT 1"}],
+    )
+
+    assert "## How To Use Reference Query Patterns" in messages[0].content
+
+
+def test_tables_agent_uses_request_projection_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _run_sql_from_tables(
+        monkeypatch,
+        question="Which account has the highest balance?",
+        evidence="Use accounts.balance.",
+        shorten_answer=True,
+    )
+
+    assert "Return exactly the requested output fields and NO others" in (
+        messages[-1].content
+    )

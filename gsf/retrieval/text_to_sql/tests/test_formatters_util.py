@@ -5,6 +5,7 @@
 from gsf.retrieval.text_to_sql.formatters_util import (
     format_semantic_context,
     format_tables_for_prompt,
+    format_used_schema_for_prompt,
     qualify_table,
 )
 
@@ -75,6 +76,38 @@ def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
     assert "dw.dw." not in rendered
 
 
+def test_used_schema_context_keeps_details_only_for_referenced_columns() -> None:
+    rendered = format_used_schema_for_prompt(
+        [
+            {
+                "name": "orders",
+                "schema_name": "public",
+                "description": "Purchase records.",
+                "pk": ["id"],
+                "columns": [
+                    {
+                        "name": "total",
+                        "data_type": "numeric",
+                        "description": "Order total.",
+                        "sample_values": ["12.50"],
+                    },
+                    {"name": "unused", "data_type": "text"},
+                ],
+            }
+        ],
+        used_tables=["public.orders"],
+        used_columns=["public.orders.total"],
+    )
+
+    assert "TABLES USED IN SQL:" in rendered
+    assert "- public.orders | description: Purchase records." in rendered
+    assert "primary key: ['id']" in rendered
+    assert "COLUMNS USED IN SQL:" in rendered
+    assert "public.orders.total (numeric) - Order total." in rendered
+    assert "sample values: 12.50" in rendered
+    assert "unused" not in rendered
+
+
 def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:
     """The model copies these names verbatim, so the catalog has to survive."""
     rendered = format_tables_for_prompt(
@@ -132,6 +165,25 @@ def test_prompt_omits_sample_values_when_absent() -> None:
     assert "sample values" not in rendered
 
 
+def test_prompt_renders_column_nullability_states() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "items",
+                "columns": [
+                    {"name": "id", "data_type": "int", "is_nullable": False},
+                    {"name": "category", "data_type": "text", "is_nullable": True},
+                    {"name": "legacy_value", "data_type": "text", "is_nullable": None},
+                ],
+            }
+        ]
+    )
+
+    assert "id (int) | is_nullable: false" in rendered
+    assert "category (text) | is_nullable: true" in rendered
+    assert "legacy_value (text) | is_nullable: unknown" in rendered
+
+
 def test_prompt_renders_date_format_when_present() -> None:
     rendered = format_tables_for_prompt(
         [
@@ -156,8 +208,8 @@ def test_prompt_renders_date_format_when_present() -> None:
 def test_semantic_context_keeps_catalog_on_spark() -> None:
     """The anchor, the attribute lines and the join hops all carry the catalog.
 
-    The prompt calls these paths authoritative and tells the model to copy the
-    join conditions, so any name here can end up in SQL.
+    The prompt tells the model to copy a selected path's verified join conditions,
+    so any name here can end up in SQL.
     """
     primary_attribute = {
         "database_name": "lakehouse",
@@ -198,6 +250,8 @@ def test_semantic_context_keeps_catalog_on_spark() -> None:
         "lakehouse.lakehouse.clusters.cluster_id"
         " = lakehouse.lakehouse.events.cluster_id" in rendered
     )
+    assert "they are not a plan" in rendered
+    assert "Never add a path merely because it is listed" in rendered
 
 
 def test_semantic_context_falls_back_to_target_db_for_bridge_hops() -> None:
