@@ -217,8 +217,6 @@ export const ConnectionsView = () => {
 				error={deleteError}
 			/>
 
-			{/* Remounted per opening so the wizard starts from the step, values and
-			    test state of whatever it was opened for. */}
 			<ConnectionModal
 				key={`${connectionModalOpen}:${editingConnection?.database_name ?? ''}`}
 				open={connectionModalOpen}
