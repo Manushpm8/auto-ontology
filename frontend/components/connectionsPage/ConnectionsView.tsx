@@ -206,7 +206,8 @@ export const ConnectionsView = () => {
 					deletingConnection ? (
 						<>
 							Are you sure you want to remove <strong>{deletingConnection}</strong>?
-							Its entire subgraph will be deleted. This action cannot be undone.
+							The connection goes away immediately; its ingested data is cleaned up in
+							the background. This action cannot be undone.
 						</>
 					) : null
 				}

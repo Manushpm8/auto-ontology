@@ -5822,7 +5822,7 @@
     },
     "/api/connections": {
       "get": {
-        "description": "List every configured database connection, credential-free.\n\n``password`` and ``password_env`` are stripped from each connection object,\nso the payload is safe to render in the UI. ``database_name`` doubles as the\nconnection's identity in the other routes here.",
+        "description": "List every configured database connection, credential-free.\n\nCredentials \u2014 passwords, private keys and the Kyuubi truststore password \u2014\nare stripped from each connection object, so the payload is safe to render\nin the UI. ``database_name`` doubles as the connection's identity in the\nother routes here.",
         "operationId": "list_connections_api_connections_get",
         "responses": {
           "200": {

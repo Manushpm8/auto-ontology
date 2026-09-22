@@ -28,6 +28,7 @@ SECRET_FIELDS = frozenset(
         "password_env",
         "private_key",
         "private_key_passphrase",
+        "truststore_password",
     }
 )
 
@@ -74,15 +75,29 @@ def _ingest_scope(connection: dict[str, Any]) -> list[str]:
 
 
 def _refresh_connection_caches() -> None:
-    """Rebuild everything holding a connector or a cached connection flag."""
-    invalidate_connectors_cache()
-    refresh_chat_workers()
+    """Rebuild everything holding a connector or a cached connection flag.
 
+    Each refresh is best-effort, because callers run this *after* they have
+    already persisted. Letting one raise would abandon the rest of the write:
+    an update re-ingests only when the schema allowlist moved, so failing here
+    would skip that ingest with the new allowlist already stored, and the retry
+    would compare the new list against itself and skip it again — permanently.
+    A stale cache, by contrast, costs one refresh.
+    """
     # Imported here rather than at module scope: ``databricks_oauth`` reaches
     # back into the server package, so a top-level import is circular.
     from gsf.connectors.databricks_oauth import invalidate_sso_federation_cache
 
-    invalidate_sso_federation_cache()
+    caches = (
+        ("connectors", invalidate_connectors_cache),
+        ("chat workers", refresh_chat_workers),
+        ("SSO federation", invalidate_sso_federation_cache),
+    )
+    for name, refresh in caches:
+        try:
+            refresh()
+        except Exception:
+            logger.exception("Failed to refresh the %s cache", name)
 
 
 def test_connection(
@@ -174,8 +189,7 @@ def create_connection(
         database_name=database_name,
     )
 
-    invalidate_connectors_cache()
-    refresh_chat_workers()
+    _refresh_connection_caches()
 
     trigger_ingest(connection)
 

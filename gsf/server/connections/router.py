@@ -67,9 +67,10 @@ def is_env_source() -> bool:
 def list_connections() -> dict:
     """List every configured database connection, credential-free.
 
-    ``password`` and ``password_env`` are stripped from each connection object,
-    so the payload is safe to render in the UI. ``database_name`` doubles as the
-    connection's identity in the other routes here.
+    Credentials — passwords, private keys and the Kyuubi truststore password —
+    are stripped from each connection object, so the payload is safe to render
+    in the UI. ``database_name`` doubles as the connection's identity in the
+    other routes here.
     """
     rows = [_serialize_connection(conn) for conn in _list_connections()]
     return {"data": rows, "count": len(rows)}
