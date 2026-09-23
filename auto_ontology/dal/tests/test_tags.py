@@ -1455,7 +1455,7 @@ def test_a_kind_dropped_from_the_rule_loses_its_labels(tagged) -> None:
 
 
 def test_a_rule_applies_every_tag_it_holds(tagged) -> None:
-    """One statement per kind and tag, so two tags is two labels per object."""
+    """The tags travel as an array, so one statement is every tag on the kind."""
     second = create_tag(name=f"{tagged.prefix}-confidential")["id"]
 
     applied, _removed = sync_tags_by_rule(
@@ -1466,3 +1466,43 @@ def test_a_rule_applies_every_tag_it_holds(tagged) -> None:
 
     assert applied == 2
     assert len(list_tag_targets(second)) == 1
+
+
+def test_the_same_tag_twice_is_one_label(tagged) -> None:
+    """The array is deduplicated before the statement sees it.
+
+    The anti-join that keeps a re-apply cheap reads what is *stored*, so it
+    cannot see a repeat inside the batch it is filtering.
+    """
+    applied, _removed = sync_tags_by_rule(
+        rule_id=tagged.rule("said-twice"),
+        tag_ids=[tagged.tag, tagged.tag],
+        targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
+    )
+
+    assert applied == 1
+    assert len(list_tag_targets(tagged.tag)) == 1
+
+
+def test_a_rule_does_not_duplicate_a_tag_a_person_already_applied(tagged) -> None:
+    """The label exists and stays that person's; the rule adds nothing.
+
+    Which is why the anti-join is blind to ``rule_id``: it has to ask what the
+    unique constraint asks -- whether this tag is on this object at all --
+    rather than whether *this rule* put it there.
+    """
+    attach_tag(
+        tag_id=tagged.tag,
+        kind=TARGET_COLUMN,
+        item_id=tagged.column,
+        tagged_by="user-1",
+    )
+
+    applied, _removed = sync_tags_by_rule(
+        rule_id=tagged.rule("totals"),
+        tag_ids=[tagged.tag],
+        targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
+    )
+
+    assert applied == 0
+    assert tagged.items()[TARGET_COLUMN]["tagged_by"] == "user-1"
