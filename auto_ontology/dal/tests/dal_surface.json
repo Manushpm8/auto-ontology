@@ -139,6 +139,7 @@
     "fetch_global_search": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None, limit: 'int' = 200, synonym_limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "filter_special_characters": "(input_string: 'str') -> 'str'",
     "is_view_table_type": "(table_type: 'str | None') -> 'bool'",
+    "matching_id_selects": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None) -> 'dict[str, Select]'",
     "search_object_type": "(label: 'str | None', table_type: 'str | None' = None) -> 'str | None'",
     "search_tokens": "(search_term: 'str') -> 'list[str]'",
     "synonym_matches_tokens": "(synonym: 'str', tokens: 'list[str]') -> 'bool'",
@@ -192,6 +193,7 @@
     "get_tag": "(tag_id: 'str') -> 'dict[str, Any] | None'",
     "list_tag_targets": "(tag_id: 'str', *, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "list_tags": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
+    "sync_tags_by_rule": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'dict[str, Select]') -> 'tuple[int, int]'",
     "update_tag": "(*, tag_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
   "terms": {

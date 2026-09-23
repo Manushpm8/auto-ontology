@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import Select
+
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal import search as search_dal
 from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
@@ -249,6 +251,55 @@ def global_search(
     items = [_normalize_item(row, synonym_tokens=synonym_tokens) for row in rows]
     items = _fit_list_limit(items, search_term=stripped)
     return {"data": items, "count": len(items)}
+
+
+def match_selects(
+    *,
+    search_term: str,
+    text_match_option: str,
+    objects: list[str] | None,
+    include_description: bool,
+    include_synonyms: bool,
+) -> dict[str, Select]:
+    """The same match as :func:`global_search`, uncapped, as unexecuted
+    statements — one ``SELECT id`` per object type.
+
+    The path a rule replays on ingest. It goes through :func:`_prepare_search`
+    like the other two, which is the whole point of it being here rather than
+    a direct call into the DAL: what counts as a match -- the tokens, the
+    object types, whether aliases are consulted -- is decided once, so a rule
+    cannot come to label something the dialog that created it would not have
+    shown.
+
+    What it does *not* share with :func:`global_search` is the cap. That is
+    deliberate and is the difference between the two callers: a person is shown
+    a page and a rule labels a catalog, so stopping a rule at
+    ``LIST_LIMIT`` would silently cap what it labels at the size of a page
+    however far the catalog had grown. See
+    :func:`auto_ontology.dal.search.matching_id_selects`.
+
+    Empty for a query the search would refuse. Unlike the other two this does
+    not raise :class:`SearchValidationError` for a short term, because a rule
+    cannot hold one -- the create route applies ``MIN_SEARCH_LENGTH`` before
+    the rule is stored -- while an unsupported match option is still a
+    programming error and still raises.
+    """
+    prepared = _prepare_search(
+        search_term=search_term,
+        text_match_option=text_match_option,
+        objects=objects,
+        include_synonyms=include_synonyms,
+    )
+    if prepared is None:
+        return {}
+
+    tokens, types, _stripped, synonym_tokens = prepared
+    return search_dal.matching_id_selects(
+        tokens,
+        types,
+        include_description=include_description,
+        synonym_tokens=synonym_tokens,
+    )
 
 
 def global_search_count(

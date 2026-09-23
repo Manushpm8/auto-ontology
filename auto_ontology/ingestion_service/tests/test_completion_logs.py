@@ -167,13 +167,32 @@ def test_data_scheduler_partial_failure_is_reported_as_such(
 
 
 def _patch_semantic_scheduler(
-    monkeypatch: pytest.MonkeyPatch, databases: list[str], run: Any
-) -> None:
+    monkeypatch: pytest.MonkeyPatch,
+    databases: list[str],
+    run: Any,
+    rules: Any = None,
+) -> list[bool]:
+    """Neutralise the pass's dependencies, and report whether rules ran.
+
+    ``reapply_rules`` is stubbed like the compilation itself: it reads the
+    rules out of Postgres, which these tests have no database for, and it is
+    the pass's own behaviour rather than the rules' that is under test here.
+    The returned list is what the tests below assert on -- it has an entry per
+    call, so "the rules ran" and "the rules did not" are both checkable.
+    """
     import auto_ontology.ingestion_service.semantic_scheduler as mod
+
+    ran: list[bool] = []
+
+    def _default() -> tuple[int, int]:
+        ran.append(True)
+        return 0, 0
 
     monkeypatch.setattr(mod, "is_semantic_compilation_enabled", lambda: True)
     monkeypatch.setattr(mod, "resolve_database_names", lambda: databases)
     monkeypatch.setattr(mod, "run_semantic_compilation", run)
+    monkeypatch.setattr(mod, "reapply_rules", rules or _default)
+    return ran
 
 
 def test_semantic_scheduler_reports_success_and_table_total(
@@ -220,3 +239,89 @@ def test_semantic_scheduler_disabled_run_claims_nothing(
         asyncio.run(SemanticScheduler()._run_once())
 
     assert "finished successfully" not in _messages(caplog)
+
+
+# --------------------------------------------------------------------------
+# Tagging rules, at the end of a semantic pass
+# --------------------------------------------------------------------------
+#
+# A rule labels both layers, so this pass is the only point at which the
+# catalog and the semantic layer it labels are both current. What the tests
+# below pin is *when* it runs: after a completed pass, not after one that was
+# cut short, since a stop leaves the semantic layer half written and labels
+# applied against half of it would be taken back on the next pass.
+
+
+def test_a_completed_pass_re_applies_the_rules(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    ran = _patch_semantic_scheduler(monkeypatch, ["pagila"], lambda db: 7)
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(SemanticScheduler()._run_once())
+
+    assert ran == [True]
+
+
+def test_rules_still_run_when_one_database_failed_to_compile(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The pass ran to the end; what it managed to write is worth labelling."""
+
+    def _sometimes(database_name: str) -> int:
+        if database_name == "chinook":
+            raise RuntimeError("nope")
+        return 7
+
+    ran = _patch_semantic_scheduler(monkeypatch, ["pagila", "chinook"], _sometimes)
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(SemanticScheduler()._run_once())
+
+    assert ran == [True]
+
+
+def test_a_stopped_pass_does_not_re_apply_the_rules(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Stopped at a database boundary, so the semantic layer is half written."""
+    ran = _patch_semantic_scheduler(monkeypatch, ["pagila", "chinook"], lambda db: 7)
+    scheduler = SemanticScheduler()
+    scheduler.abort()
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(scheduler._run_once())
+
+    assert ran == []
+
+
+def test_a_disabled_pass_does_not_re_apply_the_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran = _patch_semantic_scheduler(monkeypatch, ["pagila"], lambda db: 7)
+    import auto_ontology.ingestion_service.semantic_scheduler as mod
+
+    monkeypatch.setattr(mod, "is_semantic_compilation_enabled", lambda: False)
+
+    asyncio.run(SemanticScheduler()._run_once())
+
+    assert ran == []
+
+
+def test_a_failure_to_re_apply_does_not_fail_the_compilation(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Otherwise a rules outage would put a red state on the settings page
+    against a compilation that in fact succeeded."""
+
+    def _boom() -> tuple[int, int]:
+        raise RuntimeError("no database")
+
+    _patch_semantic_scheduler(monkeypatch, ["pagila"], lambda db: 7, rules=_boom)
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(SemanticScheduler()._run_once())
+
+    text = _messages(caplog)
+    assert "could not re-apply tagging rules" in text
+    assert "semantic: finished successfully — 1 database(s)" in text

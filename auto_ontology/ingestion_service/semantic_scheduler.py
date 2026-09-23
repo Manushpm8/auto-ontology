@@ -13,6 +13,12 @@ Every pass re-checks the ``semantic_compilation_enabled`` settings flag and
 no-ops when it is off, so disabling in the UI takes effect on the next run
 (scheduled or triggered) without waiting for a service restart.
 
+A completed pass also re-applies every tagging rule — see
+:meth:`SemanticScheduler._reapply_rules`. That is the one piece of work here
+which is not compilation, and it lives here because it is the only point in
+either scheduler at which both the catalog and the semantic layer a rule
+labels are current.
+
 Compilation reads the catalog (databases/schemas/tables) that
 :class:`DataScheduler` writes to the store. Both schedulers start their first pass at the same moment on
 service boot, so without coordination this one could race ahead and compile
@@ -40,6 +46,7 @@ from auto_ontology.ingestion_service.history import (
 )
 from auto_ontology.ingestion_service.scheduler import IntervalScheduler
 from auto_ontology.semantic.compile import run_semantic_compilation
+from auto_ontology.server.rules.service import reapply_rules
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +71,42 @@ class SemanticScheduler(IntervalScheduler):
         # the module docstring. Optional so tests/callers that don't care about
         # the startup race can still construct one on its own.
         self._depends_on = depends_on
+
+    async def _reapply_rules(self) -> None:
+        """Re-label the catalog through every stored rule, after compiling it.
+
+        A rule is a saved search plus the tags to apply to what it matches, and
+        it goes on matching as the catalog grows -- a column ingested last
+        night is not labelled by anything else. See
+        ``auto_ontology.server.rules.service.reapply_rules``.
+
+        Here rather than in the data scheduler because a rule labels *both*
+        layers: Tables and Columns, which ingest writes, and Terms and their
+        attributes, which this pass writes. Running it at the end of this pass
+        is the only point at which both are current -- and this pass already
+        waits for ingest's (see the module docstring), so the catalog beneath
+        the semantic layer is current too.
+
+        Only reached when the pass ran to completion. A stop or a mid-run
+        disable returns before this, which is the right way round: those cut
+        the pass short at a database boundary, so the semantic layer is half
+        written, and labels applied against half of it would be taken back
+        again on the next pass.
+
+        A failure here is logged and does not fail the pass. Per-rule failures
+        are already contained one level down, so reaching this handler means
+        the whole rule pass could not run -- and recording the *compilation*
+        as failed for it would put a red state on the settings page against a
+        compilation that in fact succeeded.
+
+        In a thread for the reason the compilation itself is: this is
+        synchronous database work, and awaiting it on the event loop would
+        block the scheduler's own timers.
+        """
+        try:
+            await asyncio.to_thread(reapply_rules)
+        except Exception:
+            logger.exception("semantic: could not re-apply tagging rules")
 
     async def _run_once(self) -> None:
         # Re-check the settings flag on every pass so a disable is honored live:
@@ -144,6 +187,8 @@ class SemanticScheduler(IntervalScheduler):
                     failed += 1
                     outcome = RUN_FAILED
                     logger.exception("semantic: failed for database %s", database_name)
+
+            await self._reapply_rules()
         finally:
             # A no-op when outcome is None (stop/disable) — see
             # record_run_finish's docstring on why that leaves the row NULL
