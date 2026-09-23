@@ -278,11 +278,20 @@ def match_selects(
     however far the catalog had grown. See
     :func:`auto_ontology.dal.search.matching_id_selects`.
 
-    Empty for a query the search would refuse. Unlike the other two this does
-    not raise :class:`SearchValidationError` for a short term, because a rule
-    cannot hold one -- the create route applies ``MIN_SEARCH_LENGTH`` before
-    the rule is stored -- while an unsupported match option is still a
-    programming error and still raises.
+    Raises for a term it cannot replay, where the other two return an empty
+    result for one. That is not an inconsistency but the same answer read by
+    a different caller: the list and the count are drawing a screen for
+    somebody who has typed one character so far, while this feeds
+    :func:`auto_ontology.server.rules.service.reapply_rule`, which reads no
+    targets as "this rule matches nothing now" and takes back every label it
+    applied. A term that cannot be tokenized is not a rule that matches
+    nothing, and quietly erasing its labels is the wrong half of that
+    ambiguity to land on -- raising instead leaves them standing and puts the
+    rule in the pass's failure tally.
+
+    A guard rather than a reachable path: the create route holds a term to
+    ``MIN_SEARCH_LENGTH`` and an update cannot change it, so reaching this
+    means a rule was written straight to the DAL.
     """
     prepared = _prepare_search(
         search_term=search_term,
@@ -291,7 +300,11 @@ def match_selects(
         include_synonyms=include_synonyms,
     )
     if prepared is None:
-        return {}
+        raise SearchValidationError(
+            f"Search term {search_term!r} cannot be replayed; a rule's term "
+            f"must be at least {MIN_SEARCH_LENGTH} characters and hold "
+            f"something searchable"
+        )
 
     tokens, types, _stripped, synonym_tokens = prepared
     return search_dal.matching_id_selects(

@@ -686,7 +686,12 @@ def test_counts_respect_the_object_filter(world: World) -> None:
 # the list, which is a page and stops at 200.
 
 
-def _matching_ids(world: World, term: str, types: set[str] | None = None, **kwargs):
+def _matching_ids(
+    world: World,
+    term: str,
+    types: set[str] | None = None,
+    **kwargs: bool,
+) -> dict[str, set[str]]:
     """Run every statement :func:`matching_id_selects` built, as a rule would."""
     selects = search.matching_id_selects(
         search.search_tokens(term),

@@ -201,6 +201,13 @@ def reapply_rule(rule: dict[str, Any]) -> tuple[int, int]:
     declares, as :func:`find_targets` reads them: they were written with
     ``exclude_none``, so a filter the dialog never sent is absent from the row
     rather than null, and ``.get`` is what keeps the two the same rule.
+
+    Note what is *not* guarded here: no targets means no match, and no match
+    means the rule's labels all come off. That is the correct reading of a
+    rule whose objects have been renamed out from under it, and the wrong one
+    of a rule that could not be replayed at all -- so
+    :func:`search_service.match_selects` raises for the second case rather
+    than handing back the empty mapping the first produces.
     """
     filters = rule["filters"] or {}
     selects = search_service.match_selects(

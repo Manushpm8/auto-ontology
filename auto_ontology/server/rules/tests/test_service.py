@@ -263,7 +263,11 @@ def test_one_failing_rule_does_not_stop_the_others() -> None:
 
         assert reapply_rules() == (2, 1)
 
-    assert sync.call_args_list[0].kwargs["rule_id"] == "good"
+    # The failing rule reaches no write at all, which is the half that
+    # matters: a search that could not run says nothing about what the rule
+    # should be labelling, and syncing on it would take back every label the
+    # rule holds.
+    assert [call.kwargs["rule_id"] for call in sync.call_args_list] == ["good"]
 
 
 def test_a_deployment_with_no_rules_does_nothing() -> None:
