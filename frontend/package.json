@@ -1,5 +1,5 @@
 {
-	"name": "gsf",
+	"name": "auto-ontology",
 	"version": "0.1.1",
 	"private": true,
 	"type": "module",
@@ -58,5 +58,10 @@
 		"typescript": "^5",
 		"vite": "^8.3.0",
 		"vitest": "^4.1.11"
+	},
+	"pnpm": {
+		"overrides": {
+			"deepmerge-ts": "^7.1.6"
+		}
 	}
 }
