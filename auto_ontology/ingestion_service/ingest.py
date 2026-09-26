@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
@@ -195,23 +196,112 @@ def trigger_delete_ingest(database_name: str | None = None) -> None:
     ).start()
 
 
-def trigger_reset_semantic(database_name: str | None = None) -> None:
-    """Delete a database's semantic layer without blocking.
+# How long to wait for an in-flight compilation pass to stop before resetting
+# anyway. A pass is cut short at a database boundary and the database in flight
+# cannot be interrupted, so this has to exceed the slowest single-database
+# compile; resetting underneath one would reintroduce the race this ordering
+# exists to remove.
+_ABORT_DRAIN_TIMEOUT_S = 1800
+_ABORT_POLL_S = 0.5
+
+# create_task keeps only a weak reference, so a bare task can be garbage
+# collected mid-flight. Holding it here until it finishes is the documented
+# workaround.
+_background_tasks: set[asyncio.Task[None]] = set()
+
+# One reset at a time. Each call runs as its own task, and the pause is a single
+# boolean, so two overlapping resets would have the first to finish resume the
+# scheduler while the second is still deleting — reopening the window the pause
+# exists to close. Serialising also stops them deleting and rebuilding on top of
+# each other: the second reset cancels the first's rebuild and starts its own,
+# which is what asking for a reset twice should mean.
+_reset_lock = asyncio.Lock()
+
+
+async def _wait_until_idle(scheduler: Any) -> bool:
+    """Block until *scheduler* is not mid-pass. False if it never stopped."""
+    deadline = time.monotonic() + _ABORT_DRAIN_TIMEOUT_S
+    while scheduler.running:
+        if time.monotonic() > deadline:
+            return False
+        await asyncio.sleep(_ABORT_POLL_S)
+    return True
+
+
+async def reset_semantic_layer_and_recompile(
+    scheduler: Any, database_name: str | None = None
+) -> None:
+    """Delete a semantic layer and rebuild it — strictly in that order.
+
+    The ordering *is* the feature. These three steps used to overlap: the
+    deletion ran on its own thread while a compilation pass ran on the
+    scheduler's task, and both races lost data.
+
+    A pass asks which tables still lack a Term *once*, at its start. Begin a
+    pass while the delete is still in flight and it snapshots the pre-delete
+    answer — every table still has a Term, so it compiles nothing, and the
+    delete lands milliseconds later. Observed on a live store: the first
+    database of a reset pass computed its work list 11ms before the delete and
+    reported "0 table(s) processed", leaving that database wiped and not
+    rebuilt. Symmetrically, an *old* pass still running during the delete keeps
+    writing Terms that the delete has already swept past.
+
+    So: stop the running pass, wait for it to actually stop, delete, and only
+    then start the rebuild. Callers run this as a background task, which keeps
+    the endpoint's non-blocking contract — the wait can be minutes, since the
+    database in flight cannot be interrupted.
 
     Passing ``None`` resets the semantic layer of every database.
     """
+    label = database_name or "<all>"
+    async with _reset_lock:
+        await _reset_semantic_layer_and_recompile(scheduler, database_name, label)
 
-    def _run() -> None:
-        try:
-            delete_semantic_layer(database_name)
-        except Exception:
-            logger.exception(
-                "Background reset-semantic failed for database %s",
-                database_name or "<all>",
+
+async def _reset_semantic_layer_and_recompile(
+    scheduler: Any, database_name: str | None, label: str
+) -> None:
+    """Body of :func:`reset_semantic_layer_and_recompile`, one caller at a time."""
+    # Paused for the whole stop-and-delete window, not just aborted. abort()
+    # ends the current pass but leaves the loop ticking, and a pass started by a
+    # timer tick or /semantic/compile between the drain and the end of the
+    # delete would read the pre-delete catalog, find every table already
+    # carrying a Term, compile nothing, and leave the layer deleted but not
+    # rebuilt — the exact failure this ordering exists to prevent.
+    scheduler.pause()
+    try:
+        scheduler.abort()
+        if not await _wait_until_idle(scheduler):
+            logger.warning(
+                "reset-semantic %s: a compilation pass was still running after "
+                "%ds; resetting anyway",
+                label,
+                _ABORT_DRAIN_TIMEOUT_S,
             )
+        await asyncio.to_thread(delete_semantic_layer, database_name)
+    except Exception:
+        # Deliberately no rebuild on failure: a pass started now would compile
+        # against a half-deleted layer and the result would be neither the old
+        # one nor a clean one.
+        logger.exception("Background reset-semantic failed for database %s", label)
+        return
+    finally:
+        # Always, including the failure path — a paused scheduler that is never
+        # resumed silently stops compiling for good.
+        scheduler.resume()
 
-    threading.Thread(
-        target=_run,
-        daemon=True,
-        name=f"reset-semantic-{database_name or 'all'}",
-    ).start()
+    if not scheduler.start():
+        scheduler.trigger()
+
+
+def trigger_reset_semantic(scheduler: Any, database_name: str | None = None) -> None:
+    """Schedule :func:`reset_semantic_layer_and_recompile` without blocking.
+
+    Must be called from the event loop thread — ``scheduler.start()`` and
+    ``trigger()`` touch asyncio primitives owned by that loop.
+    """
+    task = asyncio.create_task(
+        reset_semantic_layer_and_recompile(scheduler, database_name)
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
