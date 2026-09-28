@@ -22,7 +22,7 @@ export const ConnectionTypeStep = ({ onSelect }: ConnectionTypeStepProps) => (
 			{CONNECTOR_TYPES.map((type) => (
 				<OptionCard key={type} onClick={() => onSelect(type)}>
 					<Icon name={IconName.Database} className="h-8 w-8 text-[#76b900]" />
-					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+					<span className="text-sm font-medium text-heading dark:text-zinc-100">
 						{connectionDisplayName[type]}
 					</span>
 				</OptionCard>

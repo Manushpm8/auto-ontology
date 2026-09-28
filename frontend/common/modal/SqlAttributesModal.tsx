@@ -37,7 +37,7 @@ const TruncatedDescription = ({ text }: { text: string | null }) => {
 	const value = text?.trim() ?? '';
 
 	if (value === '') {
-		return <span className="italic text-zinc-400 dark:text-zinc-500">No Description</span>;
+		return <span className="italic text-secondary dark:text-zinc-500">No Description</span>;
 	}
 
 	return <Text text={value} />;
@@ -118,7 +118,7 @@ export const SqlAttributesModal = ({ term, onClose }: SqlAttributesModalProps) =
 								className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700"
 							>
 								<Text as="h3" text={attr.name} variant={TextVariant.Heading} />
-								<div className="mt-1 max-w-md text-xs text-zinc-500 dark:text-zinc-400">
+								<div className="mt-1 max-w-md text-xs text-secondary dark:text-zinc-400">
 									<TruncatedDescription text={attr.description} />
 								</div>
 								<SqlBlock

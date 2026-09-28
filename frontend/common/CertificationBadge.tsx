@@ -17,13 +17,13 @@ const PILL_CLASS: Record<CertificationStatus, string> = {
 	[CertificationStatus.Partial]:
 		'border-amber-300/60 bg-amber-100 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300',
 	[CertificationStatus.Pending]:
-		'border-zinc-200 bg-zinc-100 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400',
+		'border-zinc-200 bg-zinc-100 text-secondary dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400',
 };
 
 const ICON_CLASS: Record<CertificationStatus, string> = {
 	[CertificationStatus.Certified]: 'text-[#76b900]',
 	[CertificationStatus.Partial]: 'text-amber-500',
-	[CertificationStatus.Pending]: 'text-zinc-400 dark:text-zinc-500',
+	[CertificationStatus.Pending]: 'text-secondary dark:text-zinc-500',
 };
 
 export type CertificationBadgeProps = {
@@ -46,7 +46,7 @@ export const CertificationBadge = ({
 				<Icon name={IconName.Certification} className={`h-4 w-4 ${ICON_CLASS[status]}`} />
 				<span
 					role="tooltip"
-					className="pointer-events-none absolute bottom-full left-1/2 z-[1000] mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-zinc-600 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+					className="pointer-events-none absolute bottom-full left-1/2 z-[1000] mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-body opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
 				>
 					{title}
 				</span>

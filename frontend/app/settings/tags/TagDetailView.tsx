@@ -67,7 +67,7 @@ const TaggedByCell = ({ item }: { item: TagItem }) => {
 		return (
 			<span className="flex min-w-0 items-center gap-1.5" title={item.rule.name}>
 				<Icon name={IconName.Lightning} className="h-3.5 w-3.5 shrink-0 text-[#76b900]" />
-				<span className="min-w-0 truncate text-zinc-600 dark:text-zinc-300">
+				<span className="min-w-0 truncate text-body dark:text-zinc-300">
 					{item.rule.name}
 				</span>
 			</span>
@@ -82,11 +82,11 @@ const TaggedByCell = ({ item }: { item: TagItem }) => {
 		<span className="flex min-w-0 items-center gap-2" title={label}>
 			<span
 				aria-hidden="true"
-				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${known ? 'bg-[#76b900] text-white' : 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400'}`}
+				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${known ? 'bg-[#76b900] text-white' : 'bg-zinc-200 text-secondary dark:bg-zinc-700 dark:text-zinc-400'}`}
 			>
 				{label.charAt(0).toUpperCase()}
 			</span>
-			<span className="min-w-0 truncate text-zinc-600 dark:text-zinc-300">{label}</span>
+			<span className="min-w-0 truncate text-body dark:text-zinc-300">{label}</span>
 		</span>
 	);
 };
@@ -101,9 +101,9 @@ const COLUMNS: TableColumn<TagItem>[] = [
 			<span className="flex min-w-0 items-center gap-2">
 				<Icon
 					name={TYPE_ICONS[item.type]}
-					className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500"
+					className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-500"
 				/>
-				<span className="min-w-0 truncate text-zinc-800 dark:text-zinc-200">
+				<span className="min-w-0 truncate text-heading dark:text-zinc-200">
 					{item.name}
 				</span>
 			</span>
@@ -114,7 +114,7 @@ const COLUMNS: TableColumn<TagItem>[] = [
 		header: 'Type',
 		width: 'w-44',
 		nowrap: true,
-		className: 'text-zinc-600 dark:text-zinc-400',
+		className: 'text-body dark:text-zinc-400',
 		cell: (item) => TYPE_LABELS[item.type],
 	},
 	{
@@ -122,7 +122,7 @@ const COLUMNS: TableColumn<TagItem>[] = [
 		header: 'Location',
 		truncate: true,
 		title: (item) => item.path ?? '',
-		className: 'text-zinc-600 dark:text-zinc-400',
+		className: 'text-body dark:text-zinc-400',
 		// Only a term has no location: it is a glossary entry, not a catalog object.
 		cell: (item) => item.path ?? '—',
 	},
@@ -138,7 +138,7 @@ const COLUMNS: TableColumn<TagItem>[] = [
 		header: 'Tagged',
 		width: 'w-32',
 		nowrap: true,
-		className: 'text-zinc-500 dark:text-zinc-400',
+		className: 'text-secondary dark:text-zinc-400',
 		cell: (item) => formatDate(item.tagged),
 	},
 ];
@@ -268,7 +268,7 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 						<SkeletonBlock className="h-5 w-48" />
 					) : (
 						<>
-							<h1 className="min-w-0 truncate text-base font-semibold text-zinc-900 dark:text-zinc-100">
+							<h1 className="min-w-0 truncate text-base font-semibold text-heading dark:text-zinc-100">
 								{tag.name}
 							</h1>
 							{/* How many objects carry the tag, which a scrolled list
@@ -277,7 +277,7 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 							    Withheld until a page has landed, since a list that
 							    failed to load has no count rather than a count of
 							    none. */}
-							<span className="ml-auto shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
+							<span className="ml-auto shrink-0 text-xs text-secondary dark:text-zinc-400">
 								{itemsLoading || itemsError != null ? null : `${total} tagged · `}
 								Created {formatDate(tag.created)}
 							</span>

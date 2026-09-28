@@ -134,7 +134,7 @@ export const RelationshipsModal = ({
 				if (href == null) {
 					return (
 						<span
-							className="flex h-6 w-6 items-center justify-center rounded text-zinc-300 dark:text-zinc-600"
+							className="flex h-6 w-6 items-center justify-center rounded text-disabled dark:text-zinc-600"
 							title={`${row.name} has no catalog location to open`}
 						>
 							<Icon name={IconName.ExternalLink} className="h-3.5 w-3.5" />
@@ -144,7 +144,7 @@ export const RelationshipsModal = ({
 				return (
 					<NextLink
 						href={href}
-						className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+						className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
 						aria-label={`Open ${row.name}`}
 						title={`Open ${row.name}`}
 					>

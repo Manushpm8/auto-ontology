@@ -107,7 +107,7 @@ const TermCard = ({
 			{term.description != null && term.description.trim() !== '' ? (
 				<Text as="p" text={term.description} lines={3} variant={TextVariant.Body} />
 			) : (
-				<p className="text-sm italic text-zinc-400 dark:text-zinc-500">
+				<p className="text-sm italic text-secondary dark:text-zinc-500">
 					No Description Available
 				</p>
 			)}
@@ -118,14 +118,14 @@ const TermCard = ({
 			{/* Column Attributes */}
 			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
 						Column Attributes
 					</span>
 				</div>
 				<div className="flex items-center">
-					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
 						<span>Column Attributes</span>
-						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
+						<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
 							{columnAttributeCount}
 						</span>
 					</span>
@@ -135,14 +135,14 @@ const TermCard = ({
 			{/* SQL Attributes */}
 			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
 						SQL Attributes
 					</span>
 				</div>
 				<div className="flex items-center">
-					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
 						<span>SQL Attributes</span>
-						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
+						<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
 							{sqlAttributeCount}
 						</span>
 					</span>
@@ -152,13 +152,13 @@ const TermCard = ({
 			{/* Related Terms */}
 			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
 						Related Terms
 					</span>
 				</div>
-				<div className="flex items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+				<div className="flex items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
 					<span>Related Terms</span>
-					<span className="font-medium text-zinc-900 dark:text-zinc-100">
+					<span className="font-medium text-heading dark:text-zinc-100">
 						{relatedCount}
 					</span>
 				</div>
@@ -167,7 +167,7 @@ const TermCard = ({
 			{/* Zones */}
 			<div>
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
 						Zones
 					</span>
 				</div>
@@ -182,7 +182,7 @@ const TermCard = ({
 							/>
 						))
 					) : (
-						<span className="text-sm text-zinc-500 dark:text-zinc-400">-</span>
+						<span className="text-sm text-secondary dark:text-zinc-400">-</span>
 					)}
 				</div>
 			</div>
@@ -214,9 +214,9 @@ const withCounts = (held: Map<string, number>, rows: TermCount[] | undefined) =>
 };
 
 const FIELD_INPUT_CLASSNAME =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
 
-const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
+const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100';
 
 export const TermsView = () => {
 	const router = useRouter();
@@ -1348,7 +1348,7 @@ export const TermsView = () => {
 					/>
 
 					{sqlEditValidationMessage != null && (
-						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
 							{sqlEditValidationMessage}
 						</p>
 					)}
@@ -1533,7 +1533,7 @@ export const TermsView = () => {
 					</div>
 
 					{sqlAttrValidationMessage != null && (
-						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
 							{sqlAttrValidationMessage}
 						</p>
 					)}
@@ -1552,7 +1552,7 @@ export const TermsView = () => {
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
 				<Icon name={IconName.Terms} className="h-5 w-5 text-[#76b900]" />
-				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
 					Terms
 				</h1>
 			</header>

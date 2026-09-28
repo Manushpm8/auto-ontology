@@ -61,7 +61,7 @@ export const ActiveTermCard = ({
 }: ActiveTermCardProps) => (
 	<section className="absolute right-4 top-20 bottom-28 z-20 flex w-[380px] flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
 		<header className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-			<p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+			<p className="text-xs font-semibold text-body dark:text-zinc-300">
 				Showing info on this Semantic Object
 			</p>
 			<Button
@@ -103,7 +103,7 @@ export const ActiveTermCard = ({
 				<PropertyRow label="ID" value={node.id} monospace />
 			</div>
 			<div className="grid grid-cols-2 gap-2">
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
 					Related Terms: {node.relationshipCount}
 					<DetailLinkButton
 						count={node.relationshipCount}
@@ -111,7 +111,7 @@ export const ActiveTermCard = ({
 						label="View related Terms"
 					/>
 				</span>
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
 					Attribute Columns: {node.columnAttributesCount}
 					<DetailLinkButton
 						count={node.columnAttributesCount}
@@ -119,7 +119,7 @@ export const ActiveTermCard = ({
 						label="View attribute columns"
 					/>
 				</span>
-				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
 					SQL Attributes: {node.sqlAttributesCount}
 					<DetailLinkButton
 						count={node.sqlAttributesCount}

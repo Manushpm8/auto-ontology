@@ -52,7 +52,7 @@ export const CertificationSelect = ({
 	const items = [
 		{
 			label: 'Pending Approval',
-			icon: <Icon name={IconName.Certification} className="h-4 w-4 text-zinc-400" />,
+			icon: <Icon name={IconName.Certification} className="h-4 w-4 text-secondary" />,
 			onClick: () => {
 				void select(false);
 			},
@@ -84,7 +84,7 @@ export const CertificationSelect = ({
 					) : (
 						<Icon
 							name={IconName.ChevronRight}
-							className="h-3 w-3 rotate-90 text-zinc-400"
+							className="h-3 w-3 rotate-90 text-secondary"
 						/>
 					)}
 				</button>

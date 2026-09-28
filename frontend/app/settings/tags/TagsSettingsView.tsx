@@ -77,11 +77,11 @@ const TagAuthorCell = ({ author }: { author: TagAuthor | null | undefined }) => 
 		<span className={`flex min-w-0 items-center gap-2 ${AUTHOR_COLUMN}`}>
 			<span
 				aria-hidden="true"
-				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${name === '' ? 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white'}`}
+				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${name === '' ? 'bg-zinc-200 text-secondary dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white'}`}
 			>
 				{label.charAt(0).toUpperCase()}
 			</span>
-			<span className="min-w-0 truncate text-xs text-zinc-500 dark:text-zinc-400">
+			<span className="min-w-0 truncate text-xs text-secondary dark:text-zinc-400">
 				{label}
 			</span>
 		</span>
@@ -240,7 +240,7 @@ const TagsList = () => {
 			>
 				<div className="w-full space-y-5">
 					<div className="flex items-center gap-3">
-						<h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+						<h1 className="text-base font-semibold text-heading dark:text-zinc-100">
 							Tags
 						</h1>
 						{tags.length > 0 || searching ? (
@@ -290,7 +290,7 @@ const TagsList = () => {
 						/* No `overflow-hidden` here, deliberately: it would clip the
 						   absolutely positioned action menu of every row. */
 						<div className="rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
-							<div className="flex items-center gap-3 border-b border-zinc-200/90 px-4 py-2 text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:border-zinc-700/90 dark:text-zinc-400">
+							<div className="flex items-center gap-3 border-b border-zinc-200/90 px-4 py-2 text-xs font-semibold tracking-wide text-secondary uppercase dark:border-zinc-700/90 dark:text-zinc-400">
 								<span className="min-w-0 flex-1">Name</span>
 								<span className={AUTHOR_COLUMN}>Created By</span>
 								<span className="w-28 shrink-0 text-right">Created Date</span>
@@ -318,13 +318,13 @@ const TagsList = () => {
 										>
 											<Icon
 												name={IconName.Tag}
-												className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500"
+												className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-500"
 											/>
-											<span className="min-w-0 flex-1 truncate text-sm text-zinc-800 dark:text-zinc-200">
+											<span className="min-w-0 flex-1 truncate text-sm text-heading dark:text-zinc-200">
 												{tag.name}
 											</span>
 											<TagAuthorCell author={tag.created_by_user} />
-											<span className="w-28 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
+											<span className="w-28 shrink-0 text-right text-xs text-secondary dark:text-zinc-400">
 												{formatDate(tag.created)}
 											</span>
 											{/* Blank rather than an author for a tag nothing has
@@ -335,7 +335,7 @@ const TagsList = () => {
 											) : (
 												<TagAuthorCell author={tag.modified_by_user} />
 											)}
-											<span className="w-28 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
+											<span className="w-28 shrink-0 text-right text-xs text-secondary dark:text-zinc-400">
 												{modifiedLabel(tag)}
 											</span>
 										</Link>
@@ -427,14 +427,14 @@ const TagsList = () => {
 				<div>
 					<label
 						htmlFor="tag-name"
-						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100"
+						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-heading dark:text-zinc-100"
 					>
 						<Icon
 							name={IconName.Tag}
-							className="h-4 w-4 text-zinc-500 dark:text-zinc-400"
+							className="h-4 w-4 text-secondary dark:text-zinc-400"
 						/>
 						Tag Name
-						<span className="font-normal text-zinc-400 dark:text-zinc-500">
+						<span className="font-normal text-secondary dark:text-zinc-500">
 							(Max. {MAX_TAG_NAME_LENGTH})
 						</span>
 					</label>
@@ -451,7 +451,7 @@ const TagsList = () => {
 							setSubmitError(null);
 						}}
 						placeholder="Type tag name"
-						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${submitError == null ? 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600' : 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30'}`}
+						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${submitError == null ? 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600' : 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30'}`}
 					/>
 				</div>
 
@@ -487,7 +487,7 @@ const TagsList = () => {
 export const TagsSettingsSkeleton = () => (
 	<main className={TAGS_PANEL_CLASSNAME}>
 		<div className={`w-full space-y-5 ${TAGS_PANEL_PADDING}`}>
-			<h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Tags</h1>
+			<h1 className="text-base font-semibold text-heading dark:text-zinc-100">Tags</h1>
 			<div className="py-2" role="status" aria-label="Loading tags">
 				<SkeletonRows rows={4} />
 			</div>

@@ -178,12 +178,12 @@ const ZoneCard = ({
 				<div className="flex items-center gap-2">
 					<Text as="h2" text={zone.name} variant={TextVariant.Heading} />
 					{!zone.enabled ? (
-						<span className="shrink-0 rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-medium tracking-wide text-zinc-600 uppercase dark:bg-zinc-700 dark:text-zinc-300">
+						<span className="shrink-0 rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-medium tracking-wide text-body uppercase dark:bg-zinc-700 dark:text-zinc-300">
 							Disabled
 						</span>
 					) : null}
 				</div>
-				<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{zone.label}</p>
+				<p className="mt-1 text-xs text-secondary dark:text-zinc-400">{zone.label}</p>
 			</div>
 			<div className="flex shrink-0 items-start gap-2">
 				{isAdmin ? (
@@ -225,7 +225,7 @@ const ZoneCard = ({
 				</div>
 			</div>
 		</div>
-		<p className="mt-3 text-sm text-zinc-700 dark:text-zinc-300">
+		<p className="mt-3 text-sm text-body dark:text-zinc-300">
 			{zone.description?.trim() ? zone.description : 'No description'}
 		</p>
 	</div>
@@ -618,7 +618,7 @@ export default function ZonesSettingsPage() {
 		<main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 			<div className="w-full space-y-5">
 				<div className="flex items-center gap-3">
-					<h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+					<h1 className="text-base font-semibold text-heading dark:text-zinc-100">
 						Zones
 					</h1>
 					<div className="ml-auto">
@@ -745,7 +745,7 @@ export default function ZonesSettingsPage() {
 					<>
 						<div className="flex items-end gap-3">
 							<div className="flex-1">
-								<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+								<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
 									Name <span className="text-red-500">*</span>
 								</label>
 								<input
@@ -753,7 +753,7 @@ export default function ZonesSettingsPage() {
 									value={name}
 									onChange={(e) => setName(e.target.value)}
 									placeholder="Zone name"
-									className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600'}`}
+									className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600'}`}
 								/>
 								{nameExists ? (
 									<p className="mt-1 text-xs text-red-500 dark:text-red-400">
@@ -769,7 +769,7 @@ export default function ZonesSettingsPage() {
 							/>
 						</div>
 						<div>
-							<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+							<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
 								Description
 							</label>
 							<textarea
@@ -777,13 +777,13 @@ export default function ZonesSettingsPage() {
 								onChange={(e) => setDescription(e.target.value)}
 								placeholder="Optional description"
 								rows={3}
-								className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
+								className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 							/>
 						</div>
 					</>
 				) : (
 					<div className="space-y-3">
-						<p className="text-sm text-zinc-600 dark:text-zinc-300">
+						<p className="text-sm text-body dark:text-zinc-300">
 							Choose data to connect for this zone.
 						</p>
 						{treeLoading ? (

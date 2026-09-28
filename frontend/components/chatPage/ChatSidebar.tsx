@@ -96,7 +96,7 @@ function ConversationItem({
 				onClick={onSelect}
 			>
 				<Text text={conv.title} />
-				<span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">
+				<span className="mt-0.5 block text-[10px] text-secondary dark:text-zinc-400">
 					{formatDate(conv.createdAt, '(DD.MM.YY)')}
 				</span>
 			</SelectButton>
