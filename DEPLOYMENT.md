@@ -1,44 +1,31 @@
 # Deploying Auto Ontology on Kubernetes
 
-## Deployment From NVStaging
+## Deploying a Release
+
+A release is staged in `nvstaging/gsf`, then copied to the public
+`nvidia` org by an NGC Catalog publishing merge request.
+
+To install a published release:
 
 1. Fetch the chart from NGC:
 
    ```bash
-   helm fetch https://helm.ngc.nvidia.com/nvstaging/auto-ontology/charts/auto-ontology-0.0.1.tgz \
-     --username='$oauthtoken' \
-     --password=<API-KEY>
+   helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.0.0.tgz
    ```
 
-2. Create the nvcr.io image-pull secret:
+2. Install the chart:
 
    ```bash
-   kubectl create secret docker-registry nvcr-creds \
-     --docker-server=nvcr.io \
-     --docker-username='$oauthtoken' \
-     --docker-password=<API-KEY>
-   ```
-
-3. Attach the pull secret to the default ServiceAccount so pods inherit it:
-
-   ```bash
-   kubectl patch serviceaccount default \
-     -p '{"imagePullSecrets":[{"name":"nvcr-creds"}]}'
-   ```
-
-4. Install the chart:
-
-   ```bash
-   helm install auto_ontology auto-ontology-0.0.1.tgz \
+   helm install auto-ontology auto-ontology-1.0.0.tgz \
      --set defaultModelsApiKey=<API-KEY> \
      --set postgresPassword=<POSTGRES-PASSWORD> \
      --set connectionStrings=<CONNECTION-STRINGS>
    ```
 
-5. Expose the UI:
+3. Expose the UI:
 
    ```bash
-   kubectl port-forward frontend 3000:3000
+   kubectl port-forward svc/frontend 3000:3000
    ```
 
 ## Staging / Astra nightly deployment

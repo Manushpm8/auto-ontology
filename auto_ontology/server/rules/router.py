@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 
 from auto_ontology.dal import rules as rules_dal
 from auto_ontology.dal import tags as tags_dal
+from auto_ontology.dal.search import search_tokens
 from auto_ontology.dal.session import write_transaction
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
@@ -127,12 +128,34 @@ def _validated_search_term(raw: str) -> str:
     The same :data:`MIN_SEARCH_LENGTH` rather than a rule-specific one: a rule
     that stored a term the search refuses would be a rule that can never be
     replayed.
+
+    **The length is not enough on its own.** Every separator in
+    ``auto_ontology.dal.search`` tokenises to nothing, so ``"**"`` clears the
+    floor and still leaves no tokens -- and the two search paths then disagree
+    about it. Creating the rule goes through ``global_search``, which reads no
+    tokens as "matches nothing" and returns an empty page, so the rule is
+    saved. Replaying it goes through ``match_selects``, which raises rather
+    than erase a rule's labels over a term it could not read. The rule is
+    therefore stored labelling nothing and throwing on every nightly pass for
+    the rest of its life, with no way to notice but the log.
+
+    Unreachable from the UI, which only offers to save a rule over a search
+    that matched something -- so this is the same kind of guard as the floor
+    above: the API is reachable directly on the private network.
     """
     search_term = raw.strip()
     if len(search_term) < MIN_SEARCH_LENGTH:
         raise HTTPException(
             status_code=400,
             detail=f"Rule search term must be at least {MIN_SEARCH_LENGTH} characters",
+        )
+    if not search_tokens(search_term):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Rule search term must hold something searchable; "
+                f"{search_term!r} is only separators"
+            ),
         )
     return search_term
 

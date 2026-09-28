@@ -674,3 +674,178 @@ def test_counts_respect_the_object_filter(world: World) -> None:
         search.search_tokens(world.prefix), {Labels.COLUMN}, include_description=False
     )
     assert set(counts) == {Labels.COLUMN}
+
+
+# --------------------------------------------------------------------------
+# matching_id_selects — the match a rule replays
+# --------------------------------------------------------------------------
+#
+# The third path, and the one with no page to fill: a rule labels everything
+# its search finds. So the property under test throughout is that this agrees
+# with the *count* -- which is uncapped for the same reason -- rather than with
+# the list, which is a page and stops at 200.
+
+
+def _matching_ids(
+    world: World,
+    term: str,
+    types: set[str] | None = None,
+    **kwargs: bool,
+) -> dict[str, set[str]]:
+    """Run every statement :func:`matching_id_selects` built, as a rule would."""
+    selects = search.matching_id_selects(
+        search.search_tokens(term),
+        types or ALL_TYPES,
+        synonym_tokens=search.synonym_word_tokens(term),
+        **kwargs,
+    )
+    return {
+        label: {row["id"] for row in store().query_read(statement)}
+        for label, statement in selects.items()
+    }
+
+
+def test_the_match_is_not_capped_at_the_list_limit(world: World) -> None:
+    """The whole reason this exists beside ``fetch_global_search``.
+
+    A rule matching more columns than a page can show has to label all of
+    them: capped, it would label an arbitrary two hundred and leave the rest
+    unlabelled however many times ingest re-ran it.
+    """
+    needle = f"{world.prefix}zbulk"
+    extra: list[str] = []
+    try:
+        with write_transaction():
+            for i in range(search.LIST_LIMIT + 50):
+                extra.append(
+                    _add(
+                        s.catalog_column,
+                        table_id=world.table,
+                        name=f"{needle}_{i:04d}",
+                    )
+                )
+
+        listed = search.fetch_global_search(
+            search.search_tokens(needle), {Labels.COLUMN}, include_description=False
+        )
+        matched = _matching_ids(
+            world, needle, {Labels.COLUMN}, include_description=False
+        )
+
+        assert len(listed) == search.LIST_LIMIT
+        assert matched[Labels.COLUMN] == set(extra)
+    finally:
+        if extra:
+            with write_transaction():
+                store().query_write(
+                    s.catalog_column.delete().where(s.catalog_column.c.id.in_(extra))
+                )
+
+
+def test_the_match_agrees_with_the_count(world: World) -> None:
+    """Same rows as the tab badges, which are the uncapped truth about a query.
+
+    ``View`` is folded into ``Table`` here and counted apart there, so the
+    comparison is over the total rather than per key -- see
+    :func:`matching_id_selects` on why a view is labelled as the table it is.
+    """
+    counts = search.count_global_search(
+        search.search_tokens(world.prefix), ALL_TYPES, include_description=False
+    )
+    matched = _matching_ids(world, world.prefix, include_description=False)
+
+    assert sum(len(ids) for ids in matched.values()) == sum(counts.values())
+
+
+def test_a_view_is_matched_under_the_table_it_is(world: World) -> None:
+    """One key, because a view is a ``catalog_table`` row and a tag on one is a
+    tag on a Table."""
+    matched = _matching_ids(
+        world,
+        f"{world.prefix}_rental",
+        {Labels.TABLE, search.SEARCH_TYPE_VIEW},
+        include_description=False,
+    )
+
+    assert set(matched) == {Labels.TABLE}
+    assert matched[Labels.TABLE] == {world.table, world.view}
+
+
+def test_asking_only_for_views_leaves_the_table_out(world: World) -> None:
+    """The two tabs still filter, even sharing a key."""
+    matched = _matching_ids(
+        world,
+        f"{world.prefix}_rental",
+        {search.SEARCH_TYPE_VIEW},
+        include_description=False,
+    )
+
+    assert matched[Labels.TABLE] == {world.view}
+
+
+def test_a_term_reached_only_by_an_alias_is_matched(world: World) -> None:
+    """Folded in with ``or_`` rather than branched off: there is no page for an
+    alias-only Term to be evicted from."""
+    matched = _matching_ids(
+        world, f"{world.prefix} Takings", {LABEL_TERM}, include_description=False
+    )
+
+    assert matched[LABEL_TERM] == {world.term}
+
+
+def test_aliases_are_ignored_when_the_rule_says_so(world: World) -> None:
+    """``synonyms: false`` in a rule's filters reaches here as no tokens."""
+    selects = search.matching_id_selects(
+        search.search_tokens(f"{world.prefix} Takings"),
+        {LABEL_TERM},
+        include_description=False,
+        synonym_tokens=[],
+    )
+
+    assert store().query_read(selects[LABEL_TERM]) == []
+
+
+def test_an_unrepresented_term_is_not_matched(world: World) -> None:
+    """Same visibility rule as the list. A rule labelling a Term no page can
+    open would be a label nobody can see, let alone remove."""
+    matched = _matching_ids(
+        world, f"{world.prefix}_Orphan", {LABEL_TERM}, include_description=False
+    )
+
+    assert matched[LABEL_TERM] == set()
+
+
+def test_an_attribute_with_no_visible_term_is_not_matched(world: World) -> None:
+    matched = _matching_ids(
+        world,
+        f"{world.prefix}_net",
+        {LABEL_COLUMN_ATTRIBUTE},
+        include_description=False,
+    )
+
+    assert matched[LABEL_COLUMN_ATTRIBUTE] == {world.attribute}
+
+
+def test_descriptions_are_matched_only_when_asked(world: World) -> None:
+    """The rule's own ``description`` filter, on the path it replays."""
+    needle = "how much the customer paid"
+
+    assert (
+        _matching_ids(world, needle, {Labels.COLUMN}, include_description=False)[
+            Labels.COLUMN
+        ]
+        == set()
+    )
+    assert (
+        world.column
+        in _matching_ids(world, needle, {Labels.COLUMN}, include_description=True)[
+            Labels.COLUMN
+        ]
+    )
+
+
+def test_a_query_that_matches_nothing_builds_no_statements() -> None:
+    """Read by a caller syncing labels as "this rule matches nothing", which is
+    a legitimate state for a standing rule."""
+    assert search.matching_id_selects([], ALL_TYPES, include_description=False) == {}
+    assert search.matching_id_selects(["x"], set(), include_description=False) == {}

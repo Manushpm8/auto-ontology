@@ -41,6 +41,7 @@ from typing import Any
 from sqlalchemy import (
     ARRAY,
     Boolean,
+    Select,
     Text,
     and_,
     case,
@@ -823,3 +824,89 @@ def count_global_search(
             continue
         out[key] = out.get(key, 0) + int(row["count"])
     return out
+
+
+def matching_id_selects(
+    tokens: list[str],
+    object_types: set[str],
+    *,
+    include_description: bool,
+    synonym_tokens: list[str] | None = None,
+) -> dict[str, Select]:
+    """The same match as the list, as one ``SELECT id`` per label — unexecuted.
+
+    The third path through this module, beside the list and the count, and the
+    one a *rule* replays. A rule labels everything its search finds, so it needs
+    neither of the other two: the list is capped at :data:`LIST_LIMIT`, which
+    would stop a rule at 200 objects however far the catalog had grown, and the
+    count says how many there are without saying which.
+
+    Statements rather than rows, because the caller does not want the rows
+    either. ``auto_ontology.dal.tags.apply_labels_now_matched`` embeds these in an
+    ``INSERT ... SELECT`` and a ``DELETE``, so a rule matching fifty thousand
+    columns moves no id into Python and back — Postgres reads the match and
+    writes the labels without the result set ever leaving it. That is also why
+    they are keyed by label: ``tag_target`` has a column per kind, so each kind
+    is its own statement whichever way it is used.
+
+    Uncapped *and* unranked. The rank exists to decide which rows survive the
+    cap (see :func:`_list_rank`), and with no cap there is nothing for it to
+    decide -- so dropping it is not a shortcut but the absence of a question.
+    It is also what makes this cheaper than the list it mirrors: ``ORDER BY``
+    is what forces Postgres to read the whole match set before returning
+    anything, and without it these stream.
+
+    Only ``id`` is selected, for the same reason: a label needs something to
+    point at and nothing else. The list's other eight columns -- name,
+    description, the synonym array -- exist to be rendered, and the breadcrumb
+    lookups that follow them in :func:`_with_breadcrumbs` are per-hit work this
+    path never does.
+
+    Terms reached only by an alias are folded in with ``or_`` rather than
+    branched off as :func:`_synonym_term_select` does. That branch is separate
+    so it cannot be evicted from the page by 200 name matches; no page, no
+    eviction, and one disjunction is the same set of Terms in one statement.
+
+    ``View`` shares ``Labels.TABLE``'s key, because it shares its table: a view
+    is a ``catalog_table`` row whose ``table_type`` says so, and a tag applied
+    to one is a tag on a Table. :func:`_table_where` already decides which of
+    the two tabs the caller asked for.
+
+    Empty for a query nothing can match -- no tokens, or no object types -- as
+    the list and the count both return empty for it. A caller syncing labels
+    reads that as "this rule matches nothing", which is a legitimate state for
+    a standing rule and not a reason to leave the labels it wrote in place.
+    """
+    if not tokens or not object_types:
+        return {}
+
+    aliases = synonym_tokens or []
+    selects: dict[str, Select] = {}
+
+    for label in _SEARCH_LABELS:
+        if label == Labels.TABLE:
+            # Handled below with View, which shares this table.
+            continue
+        if label not in object_types:
+            continue
+
+        table = SEARCH_TABLES[label]
+        match = _text_match(table, tokens, include_description)
+
+        if label == LABEL_TERM:
+            if aliases:
+                match = or_(match, _synonym_exists(aliases))
+            selects[label] = select(table.c.id).where(_term_is_visible(), match)
+        elif label in _ATTRIBUTE_TERM_LINKS:
+            selects[label] = select(table.c.id).where(
+                _attribute_is_visible(label), match
+            )
+        else:
+            selects[label] = select(table.c.id).where(match)
+
+    if Labels.TABLE in object_types or SEARCH_TYPE_VIEW in object_types:
+        selects[Labels.TABLE] = select(s.catalog_table.c.id).where(
+            _table_where(tokens, object_types, include_description)
+        )
+
+    return selects

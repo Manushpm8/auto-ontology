@@ -16,6 +16,7 @@ from auto_ontology.server.search.service import (
     SearchValidationError,
     global_search,
     global_search_count,
+    match_selects,
     rank_key,
     resolve_object_types,
 )
@@ -136,6 +137,30 @@ def test_unsupported_match_option_raises() -> None:
             include_description=False,
             include_synonyms=True,
         )
+
+
+@pytest.mark.parametrize("term", ["a", "**", "   "])
+def test_a_term_that_cannot_be_replayed_raises_instead_of_matching_nothing(
+    term: str,
+) -> None:
+    """Where the list and the count return empty, this has to refuse.
+
+    Its caller re-applies a rule, and reads an empty match as "this rule
+    matches nothing now" -- which would take back every label the rule has
+    ever applied on the strength of a term that was never evaluated.
+    """
+    with patch(
+        "auto_ontology.server.search.service.search_dal.matching_id_selects"
+    ) as matching:
+        with pytest.raises(SearchValidationError, match="cannot be replayed"):
+            match_selects(
+                search_term=term,
+                text_match_option="contains",
+                objects=None,
+                include_description=False,
+                include_synonyms=True,
+            )
+    matching.assert_not_called()
 
 
 @patch("auto_ontology.server.search.service.search_dal.fetch_global_search")
