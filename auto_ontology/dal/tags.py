@@ -46,6 +46,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import (
+    ARRAY,
     Column,
     ColumnElement,
     FromClause,
@@ -53,18 +54,23 @@ from sqlalchemy import (
     Subquery,
     Table,
     Text,
+    and_,
     cast,
+    exists,
     func,
     literal,
+    not_,
     null,
+    or_,
     select,
+    true,
     union_all,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
 from auto_ontology.dal import schema as s
-from auto_ontology.dal.session import store
+from auto_ontology.dal.session import store, write_transaction
 
 #: The rule ``uq_tag_name_lower`` indexes, as a comparison the DAL can run.
 _FOLDED_NAME = func.lower(func.trim(s.tag.c.name))
@@ -827,6 +833,188 @@ def attach_tags_by_rule(
             )
         )
     return applied
+
+
+def apply_labels_now_matched(
+    *, rule_id: str, tag_ids: list[str], targets: dict[str, Select]
+) -> int:
+    """``INSERT ... SELECT`` the rule's tags onto everything it matches.
+
+    The second half of a replay; :func:`remove_labels_no_longer_matched` is the
+    first, and ``auto_ontology.server.rules.service.reapply_rules`` is what runs
+    the two -- every rule's removal before any rule's application, for a reason
+    that is on *that* function rather than here, because neither half can see
+    it on its own.
+
+    *targets* is a ``SELECT id`` per kind, as
+    :func:`auto_ontology.dal.search.matching_id_selects` produces it — statements, not
+    ids. They are embedded in the write rather than run first, so a rule
+    matching fifty thousand columns never moves an id out of Postgres: the
+    match, the comparison against what is already labelled, and the insert are
+    one plan per statement. That is what makes this affordable on every ingest
+    rather than only on the small rules.
+
+    Returns labels written, not objects matched -- an object already carrying
+    the tag is untouched and uncounted, which is what makes a run over an
+    unchanged catalog report zero rather than reporting the whole catalog
+    again. It is also what keeps ``tag_target.tagged`` honest: a row left alone
+    keeps the day it was really applied, where a wipe and a rewrite would move
+    every label's "Tagged" to the date of the last ingest.
+
+    Tags no longer in *tag_ids* are not considered, because they cannot occur:
+    a rule's tags are fixed at creation (see :func:`auto_ontology.dal.rules.update_rule`)
+    and a tag deleted from the vocabulary takes its labels with it by cascade.
+
+    One transaction over the kinds, which is as much as is worth holding: five
+    statements that are one rule's labels, and a rule applied to Columns but
+    not to the Terms it also matched is a state no reader should see.
+
+    One statement per kind, which is as far as this can be collapsed:
+    ``tag_target`` has a column per kind, so two kinds cannot share an INSERT.
+
+    The tags are *not* a statement each. They arrive as an array and are
+    cross-joined to the match, so the work is one pass whatever a rule carries.
+    Both of the things that make that cheap matter, and dropping either brings
+    back a cost proportional to the tags -- measured over half a million
+    columns with a hundred thousand of them matching, on a pass where every
+    label was already in place:
+
+    The ``NOT EXISTS`` is the larger one, 1.6s down to 0.4s for three tags.
+    Without it the conflict clause is still correct but arrives too late: every
+    matched row is built and offered to the index before being thrown away, and
+    on a settled catalog that is the whole hundred thousand, every night, for
+    nothing. Leaving with the row not yet formed skips all of it.
+
+    ``unnest`` is what keeps that flat: one tag, three and five all measured
+    0.4s, where a statement each would have paid the 0.4s five times. Rules
+    multiply the same way, so on a deployment with tens of rules the two
+    together are the difference between a nightly pass of seconds and one of
+    minutes -- five tags were 2.7s before this and 0.4s after.
+
+    Neither helps the *first* pass, which really does write a row per pair --
+    three tags over that catalog took eight seconds either way, the ``NOT
+    EXISTS`` costing about 6% for an anti-join that finds nothing. That is the
+    right trade: the first pass happens once and the idle one every night
+    after.
+
+    Not a materialized CTE. Reading the match once per tag sounds like the
+    thing to avoid, but the scan is 73ms of the above and pinning it measured
+    no better -- the cost is in the rows, not in finding them.
+
+    Repeats collapse before the array is built: two clicks on one tag are one
+    intention, as :func:`attach_tags_by_rule` treats them, and the duplicate
+    would otherwise survive the anti-join, which only knows what is already
+    stored.
+
+    ``on_conflict_do_nothing`` stays behind the anti-join as the guarantee
+    rather than the filter: the two read the same ``(tag_id, <kind>)`` unique
+    constraints, but a label applied by hand between this statement's snapshot
+    and its write would slip past the first and has to not raise. It is also
+    what keeps such a label with the person who applied it -- see
+    :func:`attach_tags_by_rule`, which absorbs the duplicate for the same
+    reason. ``id`` is left to the column default.
+    """
+    if not tag_ids:
+        return 0
+
+    # ``render_derived`` and not ``alias``, as in ``search._synonym_exists``:
+    # the alias alone names the function's result without naming its column,
+    # and ``rule_tag.tag_id`` is then an undefined column at runtime.
+    tags = (
+        func.unnest(cast(list(dict.fromkeys(tag_ids)), ARRAY(Text)))
+        .table_valued("tag_id")
+        .render_derived("rule_tag")
+    )
+    stored = s.tag_target.alias("stored")
+
+    applied = 0
+    with write_transaction():
+        for kind, matched in targets.items():
+            column = _target_column(kind)
+            found = matched.subquery()
+            applied += len(
+                store().query_write(
+                    insert(s.tag_target)
+                    .from_select(
+                        ["tag_id", "rule_id", column.name],
+                        # ``ON true``: the cross product of the tags and the
+                        # match *is* what "apply these tags to these objects"
+                        # means. Spelled as a join rather than as two FROM
+                        # entries only so it reads as deliberate -- SQLAlchemy
+                        # warns about the latter, on the assumption that a
+                        # cartesian product is a forgotten condition.
+                        select(tags.c.tag_id, literal(rule_id), found.c.id)
+                        .select_from(found.join(tags, true()))
+                        .where(
+                            # Deliberately blind to `rule_id`: what the
+                            # constraint forbids is the tag twice on the
+                            # object, whoever put it there, so this has to ask
+                            # the same question.
+                            not_(
+                                exists(
+                                    select(literal(1)).where(
+                                        stored.c.tag_id == tags.c.tag_id,
+                                        stored.c[column.name] == found.c.id,
+                                    )
+                                )
+                            )
+                        ),
+                    )
+                    .on_conflict_do_nothing()
+                    .returning(s.tag_target.c.id)
+                )
+            )
+    return applied
+
+
+def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select]) -> int:
+    """Delete the rule's labels on objects its search no longer finds.
+
+    The first half of a replay, and it runs for *every* rule before
+    :func:`apply_labels_now_matched` runs for any -- see
+    ``auto_ontology.server.rules.service.reapply_rules``, which is what orders
+    the two and where the reason lives.
+
+    An empty *targets* removes every label the rule has. A rule whose search
+    matches nothing is a rule that should be labelling nothing, which is an
+    ordinary state -- the catalog may not have grown into it yet, or may have
+    grown out of it -- and not a reason to leave yesterday's labels standing.
+
+    **What is removed is this rule's doing and nothing else.** The statement is
+    scoped to ``rule_id``, and a hand-applied label carries none -- so an object
+    a person tagged by hand is not reachable from here, even when the rule also
+    matched it and even when it stops matching. The same holds the other way: a
+    label this rule applied to an object that has since been renamed out of the
+    search is removed, because a rule-applied tag is the rule still holding
+    rather than a fact of its own.
+
+    One statement for every kind at once, unlike the insert: what is deleted is
+    identified by ``rule_id`` and the columns are only a test, so all five fit
+    in one WHERE.
+
+    That test is "kept", negated. A row is kept when the column for its kind is
+    the one it fills *and* its id is still in that kind's match; anything else
+    the rule owns goes, which covers the three ways a label goes stale -- the
+    object stopped matching, its whole kind dropped out of the rule's filters,
+    or the rule now matches nothing at all.
+
+    Written as ``IS NOT NULL AND IN`` rather than ``IN`` alone because a row
+    fills exactly one of the five columns and leaves the rest null: ``NULL IN
+    (...)`` is null, and a null inside the negation would leave the row
+    undecided rather than deleted.
+    """
+    kept = [
+        and_(_target_column(kind).is_not(None), _target_column(kind).in_(matched))
+        for kind, matched in targets.items()
+    ]
+    conditions: list[ColumnElement[bool]] = [s.tag_target.c.rule_id == rule_id]
+    if kept:
+        conditions.append(not_(or_(*kept)))
+    return len(
+        store().query_write(
+            s.tag_target.delete().where(*conditions).returning(s.tag_target.c.id)
+        )
+    )
 
 
 def detach_tag(*, tag_id: str, kind: str, item_id: str) -> list[dict[str, Any]] | None:

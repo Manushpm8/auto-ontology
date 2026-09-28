@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import Select
+
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal import search as search_dal
 from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
@@ -249,6 +251,68 @@ def global_search(
     items = [_normalize_item(row, synonym_tokens=synonym_tokens) for row in rows]
     items = _fit_list_limit(items, search_term=stripped)
     return {"data": items, "count": len(items)}
+
+
+def match_selects(
+    *,
+    search_term: str,
+    text_match_option: str,
+    objects: list[str] | None,
+    include_description: bool,
+    include_synonyms: bool,
+) -> dict[str, Select]:
+    """The same match as :func:`global_search`, uncapped, as unexecuted
+    statements — one ``SELECT id`` per object type.
+
+    The path a rule replays on ingest. It goes through :func:`_prepare_search`
+    like the other two, which is the whole point of it being here rather than
+    a direct call into the DAL: what counts as a match -- the tokens, the
+    object types, whether aliases are consulted -- is decided once, so a rule
+    cannot come to label something the dialog that created it would not have
+    shown.
+
+    What it does *not* share with :func:`global_search` is the cap. That is
+    deliberate and is the difference between the two callers: a person is shown
+    a page and a rule labels a catalog, so stopping a rule at
+    ``LIST_LIMIT`` would silently cap what it labels at the size of a page
+    however far the catalog had grown. See
+    :func:`auto_ontology.dal.search.matching_id_selects`.
+
+    Raises for a term it cannot replay, where the other two return an empty
+    result for one. That is not an inconsistency but the same answer read by
+    a different caller: the list and the count are drawing a screen for
+    somebody who has typed one character so far, while this feeds
+    :func:`auto_ontology.server.rules.service.replay_search`, whose caller reads
+    no targets as "this rule matches nothing now" and takes back every label it
+    applied. A term that cannot be tokenized is not a rule that matches
+    nothing, and quietly erasing its labels is the wrong half of that
+    ambiguity to land on -- raising instead leaves them standing and puts the
+    rule in the pass's failure tally, before either write phase touches it.
+
+    A guard rather than a reachable path: the create route holds a term to
+    ``MIN_SEARCH_LENGTH`` and an update cannot change it, so reaching this
+    means a rule was written straight to the DAL.
+    """
+    prepared = _prepare_search(
+        search_term=search_term,
+        text_match_option=text_match_option,
+        objects=objects,
+        include_synonyms=include_synonyms,
+    )
+    if prepared is None:
+        raise SearchValidationError(
+            f"Search term {search_term!r} cannot be replayed; a rule's term "
+            f"must be at least {MIN_SEARCH_LENGTH} characters and hold "
+            f"something searchable"
+        )
+
+    tokens, types, _stripped, synonym_tokens = prepared
+    return search_dal.matching_id_selects(
+        tokens,
+        types,
+        include_description=include_description,
+        synonym_tokens=synonym_tokens,
+    )
 
 
 def global_search_count(

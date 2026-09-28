@@ -139,6 +139,7 @@
     "fetch_global_search": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None, limit: 'int' = 200, synonym_limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "filter_special_characters": "(input_string: 'str') -> 'str'",
     "is_view_table_type": "(table_type: 'str | None') -> 'bool'",
+    "matching_id_selects": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None) -> 'dict[str, Select]'",
     "search_object_type": "(label: 'str | None', table_type: 'str | None' = None) -> 'str | None'",
     "search_tokens": "(search_term: 'str') -> 'list[str]'",
     "synonym_matches_tokens": "(synonym: 'str', tokens: 'list[str]') -> 'bool'",
@@ -180,6 +181,7 @@
     "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
   },
   "tags": {
+    "apply_labels_now_matched": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'dict[str, Select]') -> 'int'",
     "attach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str', tagged_by: 'str | None' = None) -> 'list[dict[str, Any]] | None'",
     "attach_tags_by_rule": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'list[tuple[str, str]]') -> 'int'",
     "count_tag_targets": "(tag_id: 'str') -> 'int'",
@@ -192,6 +194,7 @@
     "get_tag": "(tag_id: 'str') -> 'dict[str, Any] | None'",
     "list_tag_targets": "(tag_id: 'str', *, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "list_tags": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
+    "remove_labels_no_longer_matched": "(*, rule_id: 'str', targets: 'dict[str, Select]') -> 'int'",
     "update_tag": "(*, tag_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
   "terms": {
