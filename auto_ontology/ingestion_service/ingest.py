@@ -26,6 +26,7 @@ from auto_ontology.connectors.registry import (
     invalidate_connectors_cache,
 )
 from auto_ontology.dal.reset import delete_all_data, delete_semantic_layer
+from auto_ontology.ingestion_service.rules import replay_rules
 
 logger = logging.getLogger("ingestion_service.ingest")
 
@@ -164,6 +165,15 @@ def trigger_ingest(connection: dict[str, Any]) -> None:
                 )
                 return
             run_ingest(connector)
+            # Unconditional, unlike the ingest pass's own replay: neither
+            # scheduler covers this path. It is a bare thread, and creating a
+            # connection asks for an ingest without asking for a compilation
+            # (see ``server/connections/service.py``), so nothing would label
+            # the database that was just ingested until a scheduler tick hours
+            # later. Runs even when compilation is on, which at worst repeats
+            # work the next semantic pass would have done -- the replay is a
+            # diff and writes nothing where the labels are already right.
+            replay_rules("ingest")
         except Exception:
             logger.exception(
                 "Background ingest failed for database %s",

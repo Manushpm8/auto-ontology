@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Any
 
 import pytest
@@ -33,6 +34,27 @@ class _Connector:
 
 def _messages(caplog: pytest.LogCaptureFixture) -> str:
     return "\n".join(record.getMessage() for record in caplog.records)
+
+
+def _stub_rules(monkeypatch: pytest.MonkeyPatch, rules: Any = None) -> list[bool]:
+    """Neutralise the rule replay, and report whether it ran.
+
+    Stubbed like the compilation itself: it reads the rules out of Postgres,
+    which these tests have no database for, and it is each caller's decision
+    to replay them that is under test here rather than the rules' own
+    behaviour. The returned list has an entry per call, so "the rules ran" and
+    "the rules did not" are both checkable.
+    """
+    import auto_ontology.ingestion_service.rules as mod
+
+    ran: list[bool] = []
+
+    def _default() -> tuple[int, int]:
+        ran.append(True)
+        return 0, 0
+
+    monkeypatch.setattr(mod, "reapply_rules", rules or _default)
+    return ran
 
 
 # --------------------------------------------------------------------------
@@ -98,19 +120,50 @@ def test_run_ingest_logs_no_success_when_extraction_raises(
     assert "finished successfully" not in _messages(caplog)
 
 
+def test_trigger_ingest_re_applies_the_rules(
+    _stub_ingest: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither scheduler covers this path, so it has to replay them itself.
+
+    Creating a connection asks the ingestion service for an ingest and not for
+    a compilation, so without this the database that was just ingested carries
+    no rule's tags until a scheduler tick hours later.
+    """
+    import auto_ontology.ingestion_service.ingest as mod
+
+    monkeypatch.setattr(mod, "invalidate_connectors_cache", lambda: None)
+    monkeypatch.setattr(mod, "get_connectors", lambda: [_Connector("pagila")])
+    ran = _stub_rules(monkeypatch)
+
+    mod.trigger_ingest({"database": "pagila"})
+    for thread in threading.enumerate():
+        if thread.name == "ingest-pagila":
+            thread.join(timeout=10)
+
+    assert ran == [True]
+
+
 # --------------------------------------------------------------------------
 # DataScheduler
 # --------------------------------------------------------------------------
 
 
 def _patch_data_scheduler(
-    monkeypatch: pytest.MonkeyPatch, connectors: list[_Connector], run: Any
-) -> None:
+    monkeypatch: pytest.MonkeyPatch,
+    connectors: list[_Connector],
+    run: Any,
+    *,
+    semantic_enabled: bool = False,
+) -> list[bool]:
     import auto_ontology.ingestion_service.data_scheduler as mod
 
     monkeypatch.setattr(mod, "invalidate_connectors_cache", lambda: None)
     monkeypatch.setattr(mod, "get_connectors", lambda: connectors)
     monkeypatch.setattr(mod, "run_ingest", run)
+    monkeypatch.setattr(
+        mod, "is_semantic_compilation_enabled", lambda: semantic_enabled
+    )
+    return _stub_rules(monkeypatch)
 
 
 def test_data_scheduler_reports_success_tally(
@@ -162,6 +215,57 @@ def test_data_scheduler_partial_failure_is_reported_as_such(
 
 
 # --------------------------------------------------------------------------
+# Tagging rules, at the end of an ingest pass
+# --------------------------------------------------------------------------
+#
+# Only when semantic compilation is off. With it on, the semantic pass replays
+# the rules against both layers at once, which is the better moment; with it
+# off there is no such pass, and without this the deployment would label the
+# catalog once per rule, when the rule was created, and never again.
+
+
+def test_ingest_pass_re_applies_the_rules_when_compilation_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran = _patch_data_scheduler(
+        monkeypatch, [_Connector("a")], lambda c: None, semantic_enabled=False
+    )
+
+    asyncio.run(DataScheduler()._run_once())
+
+    assert ran == [True]
+
+
+def test_ingest_pass_leaves_the_rules_to_the_semantic_pass_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran = _patch_data_scheduler(
+        monkeypatch, [_Connector("a")], lambda c: None, semantic_enabled=True
+    )
+
+    asyncio.run(DataScheduler()._run_once())
+
+    assert ran == []
+
+
+def test_a_failure_to_re_apply_does_not_fail_the_ingest(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def _boom() -> tuple[int, int]:
+        raise RuntimeError("no database")
+
+    _patch_data_scheduler(monkeypatch, [_Connector("a")], lambda c: None)
+    _stub_rules(monkeypatch, _boom)
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(DataScheduler()._run_once())
+
+    text = _messages(caplog)
+    assert "could not re-apply tagging rules" in text
+    assert "ingest: finished successfully — 1 connection(s)" in text
+
+
+# --------------------------------------------------------------------------
 # SemanticScheduler
 # --------------------------------------------------------------------------
 
@@ -172,27 +276,13 @@ def _patch_semantic_scheduler(
     run: Any,
     rules: Any = None,
 ) -> list[bool]:
-    """Neutralise the pass's dependencies, and report whether rules ran.
-
-    ``reapply_rules`` is stubbed like the compilation itself: it reads the
-    rules out of Postgres, which these tests have no database for, and it is
-    the pass's own behaviour rather than the rules' that is under test here.
-    The returned list is what the tests below assert on -- it has an entry per
-    call, so "the rules ran" and "the rules did not" are both checkable.
-    """
+    """Neutralise the pass's dependencies, and report whether rules ran."""
     import auto_ontology.ingestion_service.semantic_scheduler as mod
-
-    ran: list[bool] = []
-
-    def _default() -> tuple[int, int]:
-        ran.append(True)
-        return 0, 0
 
     monkeypatch.setattr(mod, "is_semantic_compilation_enabled", lambda: True)
     monkeypatch.setattr(mod, "resolve_database_names", lambda: databases)
     monkeypatch.setattr(mod, "run_semantic_compilation", run)
-    monkeypatch.setattr(mod, "reapply_rules", rules or _default)
-    return ran
+    return _stub_rules(monkeypatch, rules)
 
 
 def test_semantic_scheduler_reports_success_and_table_total(
