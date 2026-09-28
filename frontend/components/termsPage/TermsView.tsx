@@ -95,7 +95,13 @@ const TermCard = ({
 		{/* Card header */}
 		<div className="flex items-start justify-between gap-3">
 			<div className="min-w-0 space-y-0.5">
-				<Text as="h2" text={term.name} variant={TextVariant.CardTitle} />
+				<div className="flex min-w-0 items-center gap-2">
+					<Icon
+						name={IconName.Terms}
+						className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
+					/>
+					<Text as="h2" text={term.name} variant={TextVariant.CardTitle} fill />
+				</div>
 				{term.synonyms && term.synonyms.length > 0 && (
 					<Text as="p" text={term.synonyms.join(', ')} variant={TextVariant.Caption} />
 				)}
@@ -936,6 +942,7 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
+						icon: IconName.Column,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -1032,6 +1039,7 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
+						icon: IconName.Link,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -1103,6 +1111,7 @@ export const TermsView = () => {
 			header: {
 				header: {
 					title: term.name,
+					icon: IconName.Terms,
 					titleEditable: true,
 					certification: { certified: term.name_certified },
 				},
@@ -1551,7 +1560,7 @@ export const TermsView = () => {
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.Terms} className="h-5 w-5 text-[#76b900]" />
+				<Icon name={IconName.Terms} className="h-5 w-5 text-body dark:text-zinc-300" />
 				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
 					Terms
 				</h1>

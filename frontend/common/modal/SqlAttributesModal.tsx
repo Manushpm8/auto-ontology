@@ -76,7 +76,10 @@ export const SqlAttributesModal = ({ term, onClose }: SqlAttributesModalProps) =
 		<Modal open={term != null} onClose={onClose} className="w-full max-w-2xl">
 			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex min-w-0 items-center gap-2">
-					<Icon name={IconName.Link} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					<Icon
+						name={IconName.Link}
+						className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
+					/>
 					<Text as="h2" variant={TextVariant.Heading}>
 						{term?.name} — SQL Attributes ({total})
 					</Text>

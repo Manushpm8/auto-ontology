@@ -70,7 +70,10 @@ export const RuleInformationModal = ({
 	<Modal open={rule != null} onClose={onClose} className="w-full max-w-lg">
 		<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 			<div className="flex min-w-0 items-center gap-2">
-				<Icon name={IconName.Lightning} className="h-5 w-5 shrink-0 text-[#76b900]" />
+				<Icon
+					name={IconName.Lightning}
+					className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
+				/>
 				<h2 className="min-w-0 truncate text-base font-semibold text-heading dark:text-zinc-100">
 					{rule?.name}
 				</h2>

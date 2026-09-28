@@ -66,7 +66,10 @@ const TaggedByCell = ({ item }: { item: TagItem }) => {
 	if (item.rule != null) {
 		return (
 			<span className="flex min-w-0 items-center gap-1.5" title={item.rule.name}>
-				<Icon name={IconName.Lightning} className="h-3.5 w-3.5 shrink-0 text-[#76b900]" />
+				<Icon
+					name={IconName.Lightning}
+					className="h-3.5 w-3.5 shrink-0 text-body dark:text-zinc-300"
+				/>
 				<span className="min-w-0 truncate text-body dark:text-zinc-300">
 					{item.rule.name}
 				</span>
@@ -263,7 +266,10 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 				/>
 
 				<div className="flex items-center gap-2">
-					<Icon name={IconName.Tag} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					<Icon
+						name={IconName.Tag}
+						className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
+					/>
 					{tag == null ? (
 						<SkeletonBlock className="h-5 w-48" />
 					) : (

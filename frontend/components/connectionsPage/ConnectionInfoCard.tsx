@@ -63,7 +63,10 @@ export const ConnectionInfoCard = ({
 		<article className="flex h-fit flex-col rounded-lg border border-zinc-200/90 bg-white shadow-sm dark:border-zinc-700/90 dark:bg-zinc-950">
 			<header className="flex w-full items-center justify-between gap-2 px-4 py-5">
 				<div className="flex min-w-0 items-center gap-1">
-					<Icon name={IconName.Database} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					<Icon
+						name={IconName.Database}
+						className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
+					/>
 					<Text
 						as="h3"
 						text={connection.database_name}

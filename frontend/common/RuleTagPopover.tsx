@@ -189,7 +189,7 @@ const RuleTagForm = ({
 			<div className="flex items-baseline gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
 				<Icon
 					name={IconName.Lightning}
-					className="h-4 w-4 shrink-0 self-center text-[#76b900]"
+					className="h-4 w-4 shrink-0 self-center text-body dark:text-zinc-300"
 				/>
 				<h3 className="text-sm font-semibold text-heading dark:text-zinc-100">
 					Create a New Rule Based Tag

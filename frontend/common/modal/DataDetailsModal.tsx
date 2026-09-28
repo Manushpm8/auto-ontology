@@ -238,7 +238,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 									? IconName.Terms
 									: IconName.Link
 						}
-						className="h-5 w-5 shrink-0 text-[#76b900]"
+						className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
 					/>
 					<Text as="h2" variant={TextVariant.Heading}>
 						{target?.name} ({title})

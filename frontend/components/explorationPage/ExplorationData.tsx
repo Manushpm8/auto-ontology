@@ -108,7 +108,7 @@ export const ActiveDataCard = ({
 			</Button>
 		</header>
 		<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-			<div className="flex items-start gap-3">
+			<div className="flex items-start gap-2">
 				<Icon
 					name={catalogNodeInfo[node.nodeType].icon}
 					className="mt-0.5 h-5 w-5 shrink-0 text-[#3b82b6]"

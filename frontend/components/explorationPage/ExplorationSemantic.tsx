@@ -76,8 +76,11 @@ export const ActiveTermCard = ({
 			</Button>
 		</header>
 		<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-			<div className="flex items-start gap-3">
-				<Icon name={IconName.Terms} className="mt-0.5 h-5 w-5 shrink-0 text-[#76b900]" />
+			<div className="flex items-start gap-2">
+				<Icon
+					name={IconName.Terms}
+					className="mt-0.5 h-5 w-5 shrink-0 text-body dark:text-zinc-300"
+				/>
 				<div className="min-w-0 flex-1 space-y-1">
 					<Text as="h2" text={node.name} variant={TextVariant.Heading} />
 					{node.synonyms.length > 0 && (

@@ -278,7 +278,7 @@ export default function RulesSettingsPage() {
 									<div className="flex items-center gap-2 px-4 py-3">
 										<Icon
 											name={IconName.Lightning}
-											className="h-4 w-4 shrink-0 text-[#76b900]"
+											className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
 										/>
 										<span className="min-w-0 flex-1 truncate text-sm font-semibold text-heading dark:text-zinc-100">
 											{rule.name}

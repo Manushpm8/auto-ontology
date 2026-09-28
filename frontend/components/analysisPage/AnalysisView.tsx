@@ -318,7 +318,7 @@ export const AnalysisView = () => {
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.ChartBar} className="h-5 w-5 text-[#76b900]" />
+				<Icon name={IconName.ChartBar} className="h-5 w-5 text-body dark:text-zinc-300" />
 				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
 					{isPql ? 'PQL analyses' : 'Custom analyses'}
 				</h1>
@@ -396,7 +396,18 @@ export const AnalysisView = () => {
 								}`}
 							>
 								<div className="flex items-start justify-between gap-3">
-									<Text as="h2" text={a.name} variant={TextVariant.CardTitle} />
+									<div className="flex min-w-0 flex-1 items-center gap-2">
+										<Icon
+											name={IconName.ChartBar}
+											className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
+										/>
+										<Text
+											as="h2"
+											text={a.name}
+											variant={TextVariant.CardTitle}
+											fill
+										/>
+									</div>
 									<PopoverMenu
 										className="shrink-0"
 										items={[
