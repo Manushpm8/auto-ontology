@@ -13,7 +13,10 @@
  * hands the staged tag ids back — writes the difference.
  */
 
+import type { QueryClient } from '@tanstack/react-query';
+
 import { tagsApi } from '@/api/tags';
+import { tagQueries } from '@/lib/queries/tags';
 import { ComposerSectionKind } from '@/enums/datasources';
 import type { TagItemType } from '@/enums/tags';
 import type { ComposerEntityTagsSection } from '@/types/composer-section';
@@ -33,19 +36,25 @@ export const TAGS_SECTION_ID = 'tags';
  * A failed read answers `[]`: the chips an object already carries come from its
  * own payload and stay readable, so an empty picker (which explains itself) is
  * a smaller loss than failing the page over a control. Call it beside the
- * object's own fetch — the section is then built from one snapshot, and a tag
- * created elsewhere appears on the next refetch rather than needing its own
- * subscription.
+ * object's own fetch — the section is then built from one snapshot.
  *
- * That refetch is what keeps the picker current, and it is why this asks for no
- * authors and holds no cache. It runs on every detail page open and again after
- * every save, so anything the answer carries is paid for on each of them — and
- * a cached list would show a vocabulary that no longer matches the one the
- * settings page has just been edited in.
+ * Read through the query cache rather than straight from the API, which is
+ * what stops every detail page open from re-reading the whole vocabulary: the
+ * root layout has already started that read, and `ensureQueryData` hands back
+ * what it got. Staleness is bounded the other way round now — the settings
+ * page invalidates the list it just edited, so a cached copy can't outlive the
+ * vocabulary it describes.
+ *
+ * Takes the client rather than reaching for it, because a page builds its
+ * sections inside a callback rather than while rendering, and hooks cannot be
+ * called from there.
  */
-export const fetchTagOptions = async (): Promise<TagChip[]> => {
-	const res = await tagsApi.getAll();
-	return res.error ? [] : (res.data ?? []);
+export const fetchTagOptions = async (queryClient: QueryClient): Promise<TagChip[]> => {
+	try {
+		return await queryClient.ensureQueryData(tagQueries.vocabulary());
+	} catch {
+		return [];
+	}
 };
 
 /** The tags section as every detail page wants it: editable, titled, in place. */

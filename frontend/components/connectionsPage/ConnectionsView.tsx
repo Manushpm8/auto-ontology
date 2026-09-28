@@ -4,7 +4,8 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Placeholders } from '@/assets/images/placeholders';
 import { Button } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
@@ -17,12 +18,30 @@ import { ConfirmModal } from '@/common/modal';
 import { Toast } from '@/common/Toast';
 import { Icon, IconName } from '@/common/icons';
 import { connectionsApi } from '@/api/connections';
+import {
+	connectionQueries,
+	invalidateConnectionList,
+	patchConnectionList,
+} from '@/lib/queries/connections';
 import type { Connection } from '@/types/connection';
 
 export const ConnectionsView = () => {
-	const [connections, setConnections] = useState<Connection[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const queryClient = useQueryClient();
+
+	// Prefetched by the root layout, so the cards are usually drawn on the
+	// first pass instead of after the mount's own read.
+	const {
+		data: connections = [],
+		isPending: loading,
+		error: loadError,
+		refetch,
+	} = useQuery(connectionQueries.list());
+	const error = loadError?.message ?? null;
+
+	/** Where a write puts what it just changed — the list the page reads from. */
+	const patchConnections = (update: Parameters<typeof patchConnectionList>[1]) =>
+		patchConnectionList(queryClient, update);
+
 	const [connectionModalOpen, setConnectionModalOpen] = useState(false);
 	const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
 	const [deletingConnection, setDeletingConnection] = useState<string | null>(null);
@@ -30,30 +49,6 @@ export const ConnectionsView = () => {
 	const [deleteError, setDeleteError] = useState<string | null>(null);
 	const [ssoFederationPending, setSsoFederationPending] = useState<string | null>(null);
 	const [ssoError, setSsoError] = useState<string | null>(null);
-
-	const fetchConnections = useCallback(async () => {
-		try {
-			setError(null);
-			const res = await connectionsApi.getAll();
-			if (res.error) {
-				setError(res.message ?? 'Failed to load connections.');
-				setConnections([]);
-				return;
-			}
-			setConnections(res.data ?? []);
-		} catch {
-			setError('Failed to load connections.');
-			setConnections([]);
-		}
-	}, []);
-
-	useEffect(() => {
-		void (async () => {
-			setLoading(true);
-			await fetchConnections();
-			setLoading(false);
-		})();
-	}, [fetchConnections]);
 
 	const handleCreateConnection = () => {
 		setEditingConnection(null);
@@ -72,7 +67,7 @@ export const ConnectionsView = () => {
 
 	const handleConnectionModalConfirm = () => {
 		handleConnectionModalClose();
-		void fetchConnections();
+		void invalidateConnectionList(queryClient);
 	};
 
 	const handleSsoFederationChange = async (databaseName: string, enabled: boolean) => {
@@ -80,7 +75,7 @@ export const ConnectionsView = () => {
 		setSsoFederationPending(databaseName);
 
 		// Optimistic update — apply immediately so the checkbox doesn't snap back.
-		setConnections((prev) =>
+		patchConnections((prev) =>
 			prev.map((c) =>
 				c.database_name === databaseName
 					? { ...c, connection: { ...c.connection, sso_federation: enabled } }
@@ -93,7 +88,7 @@ export const ConnectionsView = () => {
 
 		if (res.error) {
 			// Revert optimistic update on failure.
-			setConnections((prev) =>
+			patchConnections((prev) =>
 				prev.map((c) =>
 					c.database_name === databaseName
 						? { ...c, connection: { ...c.connection, sso_federation: !enabled } }
@@ -127,7 +122,7 @@ export const ConnectionsView = () => {
 			return;
 		}
 
-		setConnections((prev) => prev.filter((c) => c.database_name !== deletingConnection));
+		patchConnections((prev) => prev.filter((c) => c.database_name !== deletingConnection));
 		setDeletingConnection(null);
 	};
 
@@ -149,8 +144,7 @@ export const ConnectionsView = () => {
 					size={Size.REGULAR}
 					type="button"
 					onClick={() => {
-						setLoading(true);
-						void fetchConnections().finally(() => setLoading(false));
+						void refetch();
 					}}
 				>
 					Retry
