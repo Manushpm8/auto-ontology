@@ -45,6 +45,7 @@ from auto_ontology.ingestion_service.history import (
     record_run_start,
 )
 from auto_ontology.ingestion_service.scheduler import IntervalScheduler
+from auto_ontology.semantic.cancellation import clear_cancel, request_cancel
 from auto_ontology.semantic.compile import run_semantic_compilation
 from auto_ontology.server.rules.service import reapply_rules
 
@@ -53,6 +54,22 @@ logger = logging.getLogger(__name__)
 # Cadence measured from the end of the previous run rather than a fixed
 # wall-clock time.
 SEMANTIC_INTERVAL = timedelta(hours=24)
+
+# Appended when a pass compiles nothing. The count is tables that *needed*
+# compiling (``compile_semantic_layer`` works from the tables with no Term yet),
+# so zero is a legitimate outcome — while the elapsed time can still be minutes,
+# because the FK, SqlAttribute and bridge-table stages run afterwards
+# regardless. Without this, "0 table(s) ... in 620.7s" reads as a stall or a
+# silently failed run.
+#
+# Deliberately does not name a cause. Zero establishes only that nothing needed
+# compiling; whether that is a settled catalog, one whose tables are all
+# excluded by a connection's table filter, or an empty catalog, this cannot
+# tell — and claiming the first would hide the other two.
+_NOTHING_TO_COMPILE = (
+    " (no table needed compiling; the elapsed time is the FK, SqlAttribute "
+    "and bridge-table stages, which run on every pass)"
+)
 
 
 class SemanticScheduler(IntervalScheduler):
@@ -71,6 +88,18 @@ class SemanticScheduler(IntervalScheduler):
         # the module docstring. Optional so tests/callers that don't care about
         # the startup race can still construct one on its own.
         self._depends_on = depends_on
+
+    def abort(self) -> None:
+        """Stop the in-flight pass at the next *table*, not the next database.
+
+        The base class only sets its own flag, which the pass checks between
+        databases — so an abort could take as long as the slowest single
+        database (312s observed here). Cancelling the semantic work as well
+        makes queued tables no-ops and skips the post-compile stages, which
+        brings a stop down to roughly one table.
+        """
+        request_cancel()
+        super().abort()
 
     async def _reapply_rules(self) -> None:
         """Re-label the catalog through every stored rule, after compiling it.
@@ -109,6 +138,10 @@ class SemanticScheduler(IntervalScheduler):
             logger.exception("semantic: could not re-apply tagging rules")
 
     async def _run_once(self) -> None:
+        # A cancellation belongs to the pass that was running when it was
+        # requested; leaving it set would abort this one before it starts.
+        clear_cancel()
+
         # Re-check the settings flag on every pass so a disable is honored live:
         # the loop keeps ticking but no-ops until re-enabled, rather than running
         # until the next service restart. Mirrors the lifespan startup gate.
@@ -150,8 +183,11 @@ class SemanticScheduler(IntervalScheduler):
             for index, database_name in enumerate(databases):
                 # Checked per database rather than once per pass, so a stop
                 # request or a disable ends the run at the next boundary instead
-                # of after every database. The database in flight always
-                # finishes: its work runs in a thread that cannot be interrupted.
+                # of after every database. The database in flight is not
+                # abandoned — Python cannot kill its worker threads — but
+                # ``abort`` also cancels the semantic work, so it stops at its
+                # next table and skips the post-compile stages rather than
+                # running to completion.
                 if self.aborting:
                     logger.info(
                         "semantic: stopped on request; %d database(s) not compiled",
@@ -176,9 +212,13 @@ class SemanticScheduler(IntervalScheduler):
                     )
                     succeeded += 1
                     total_tables += tables_processed
+                    # "compiled", not "processed": the count is tables that
+                    # *needed* compiling. The pass summary carries the why when
+                    # it is zero; repeating it per database would be five copies
+                    # of the same sentence.
                     logger.info(
                         "Finished semantic compilation successfully for database %s: "
-                        "%d table(s) processed in %.1fs",
+                        "%d table(s) compiled in %.1fs",
                         database_name,
                         tables_processed,
                         time.monotonic() - database_started,
@@ -222,8 +262,9 @@ class SemanticScheduler(IntervalScheduler):
             else:
                 logger.info(
                     "semantic: finished successfully — %d database(s), "
-                    "%d table(s) processed in %.1fs",
+                    "%d table(s) compiled in %.1fs%s",
                     succeeded,
                     total_tables,
                     elapsed,
+                    "" if total_tables else _NOTHING_TO_COMPILE,
                 )
