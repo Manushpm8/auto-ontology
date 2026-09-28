@@ -40,13 +40,25 @@ export const connectionQueries = {
  * refetch is still out is an ordinary sequence rather than a contrived one.
  * Callers must await it — the point is to have won the race before the
  * request that follows starts.
+ *
+ * Splices only into a list that is actually held, as the zone list does and
+ * for the same reason — though this page has no way to reach it today, since
+ * a failed read replaces the cards with a retry rather than sitting above
+ * them. The guard is in the helper rather than left to that: a list of one
+ * published as the whole of them is not a mistake worth making depend on how
+ * some other file happens to render an error.
  */
 export const patchConnectionList = async (
 	queryClient: QueryClient,
 	update: (connections: Connection[]) => Connection[],
 ): Promise<void> => {
 	await queryClient.cancelQueries({ queryKey: LIST_KEY });
-	queryClient.setQueryData(LIST_KEY, (held: Connection[] | undefined) => update(held ?? []));
+	const held = queryClient.getQueryData<Connection[]>(LIST_KEY);
+	if (held === undefined) {
+		await queryClient.invalidateQueries({ queryKey: LIST_KEY });
+		return;
+	}
+	queryClient.setQueryData(LIST_KEY, update(held));
 };
 
 /**

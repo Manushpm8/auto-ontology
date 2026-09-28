@@ -68,9 +68,22 @@ export const invalidateTagVocabulary = (queryClient: QueryClient): Promise<void>
 /**
  * Adds a tag created outside the settings page to the vocabulary already
  * loaded, rather than re-reading the list to learn about a tag we just made.
+ *
+ * Only where one is loaded, which is not a given: the rule panel offers to
+ * create whatever was typed as soon as nothing matches it, and a vocabulary
+ * that failed to read matches nothing. Adding to an empty list there would
+ * publish the new tag as the entire vocabulary — a success, so the panel
+ * would stop reporting the failure too. Re-reading says what is true.
+ *
+ * Cancels a read in flight first, for the reason the zone and connection
+ * lists do: an answer given before the tag existed must not land after it.
  */
-export const addTagToVocabulary = (queryClient: QueryClient, tag: TagChip): void => {
-	queryClient.setQueryData(VOCABULARY_KEY, (held: TagChip[] | undefined) =>
-		[...(held ?? []), tag].sort(byName),
-	);
+export const addTagToVocabulary = async (queryClient: QueryClient, tag: TagChip): Promise<void> => {
+	await queryClient.cancelQueries({ queryKey: VOCABULARY_KEY });
+	const held = queryClient.getQueryData<TagChip[]>(VOCABULARY_KEY);
+	if (held === undefined) {
+		await queryClient.invalidateQueries({ queryKey: VOCABULARY_KEY });
+		return;
+	}
+	queryClient.setQueryData(VOCABULARY_KEY, [...held, tag].sort(byName));
 };

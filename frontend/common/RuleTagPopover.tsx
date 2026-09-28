@@ -115,8 +115,10 @@ const RuleTagForm = ({
 		error: loadError,
 	} = useQuery(tagQueries.vocabulary());
 	// One box for both: a panel that couldn't read the tags and one whose write
-	// was refused each have a single thing to say, and they cannot happen at
-	// once — there is nothing to create a tag from until the list has arrived.
+	// was refused each have a single thing to say. Both can hold at once — a
+	// failed read leaves `offerCreate` open, since a vocabulary that never
+	// arrived matches nothing — and the refused write is then the newer of the
+	// two, so it is the one shown.
 	const error = writeError ?? loadError?.message ?? null;
 
 	const trimmedSearch = search.trim();
@@ -152,7 +154,7 @@ const RuleTagForm = ({
 		// Written into the shared vocabulary, not into a list of this panel's
 		// own: a tag made here exists for every picker in the app, and putting
 		// it there saves re-reading the whole list to learn about it.
-		addTagToVocabulary(queryClient, { id: created.id, name: created.name });
+		await addTagToVocabulary(queryClient, { id: created.id, name: created.name });
 		setSelected((prev) => [...prev, { id: created.id, name: created.name }].sort(byName));
 		setSearch('');
 	};
