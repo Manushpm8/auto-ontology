@@ -40,10 +40,21 @@ export const TAGS_SECTION_ID = 'tags';
  *
  * Read through the query cache rather than straight from the API, which is
  * what stops every detail page open from re-reading the whole vocabulary: the
- * root layout has already started that read, and `ensureQueryData` hands back
- * what it got. Staleness is bounded the other way round now — the settings
- * page invalidates the list it just edited, so a cached copy can't outlive the
- * vocabulary it describes.
+ * root layout has already started that read, and a copy still inside its
+ * `staleTime` is handed back without asking again.
+ *
+ * `fetchQuery` rather than `ensureQueryData`, which returns whatever is held
+ * however old it is. That is not enough here, because nothing on a detail
+ * page subscribes to the vocabulary: this reads it without an observer, so
+ * the invalidation the settings page fires after a rename finds no active
+ * query to refetch and only marks the entry. `fetchQuery` reads that mark —
+ * an invalidated query is stale whatever its age — and so re-reads before
+ * answering, where `ensureQueryData` would go on offering the old name.
+ *
+ * `retry` is restated because `fetchQuery` turns it off where the caller
+ * leaves it unset, and the one retry the provider asks for is wanted here
+ * too: this answers `[]` on failure, and a dropped connection emptying the
+ * picker is worth a second attempt.
  *
  * Takes the client rather than reaching for it, because a page builds its
  * sections inside a callback rather than while rendering, and hooks cannot be
@@ -51,7 +62,7 @@ export const TAGS_SECTION_ID = 'tags';
  */
 export const fetchTagOptions = async (queryClient: QueryClient): Promise<TagChip[]> => {
 	try {
-		return await queryClient.ensureQueryData(tagQueries.vocabulary());
+		return await queryClient.fetchQuery({ ...tagQueries.vocabulary(), retry: 1 });
 	} catch {
 		return [];
 	}
