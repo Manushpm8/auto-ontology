@@ -842,7 +842,7 @@ def matching_id_selects(
     count says how many there are without saying which.
 
     Statements rather than rows, because the caller does not want the rows
-    either. ``auto_ontology.dal.tags.sync_tags_by_rule`` embeds these in an
+    either. ``auto_ontology.dal.tags.apply_labels_now_matched`` embeds these in an
     ``INSERT ... SELECT`` and a ``DELETE``, so a rule matching fifty thousand
     columns moves no id into Python and back — Postgres reads the match and
     writes the labels without the result set ever leaving it. That is also why

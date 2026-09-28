@@ -282,12 +282,12 @@ def match_selects(
     result for one. That is not an inconsistency but the same answer read by
     a different caller: the list and the count are drawing a screen for
     somebody who has typed one character so far, while this feeds
-    :func:`auto_ontology.server.rules.service.reapply_rule`, which reads no
-    targets as "this rule matches nothing now" and takes back every label it
+    :func:`auto_ontology.server.rules.service.replay_search`, whose caller reads
+    no targets as "this rule matches nothing now" and takes back every label it
     applied. A term that cannot be tokenized is not a rule that matches
     nothing, and quietly erasing its labels is the wrong half of that
     ambiguity to land on -- raising instead leaves them standing and puts the
-    rule in the pass's failure tally.
+    rule in the pass's failure tally, before either write phase touches it.
 
     A guard rather than a reachable path: the create route holds a term to
     ``MIN_SEARCH_LENGTH`` and an update cannot change it, so reaching this

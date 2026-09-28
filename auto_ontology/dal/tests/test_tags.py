@@ -79,7 +79,8 @@ from auto_ontology.dal.tags import (  # noqa: E402
     get_tag,
     list_tag_targets,
     list_tags,
-    sync_tags_by_rule,
+    apply_labels_now_matched,
+    remove_labels_no_longer_matched,
     update_tag,
 )
 
@@ -1260,7 +1261,7 @@ def test_a_label_left_behind_is_not_adopted_by_the_next_rule(tagged) -> None:
 
 
 # --------------------------------------------------------------------------
-# sync_tags_by_rule — re-applying a rule as the catalog changes
+# Re-applying a rule as the catalog changes
 # --------------------------------------------------------------------------
 #
 # The ingest path, and the one place in this module that takes *statements*
@@ -1271,6 +1272,24 @@ def test_a_label_left_behind_is_not_adopted_by_the_next_rule(tagged) -> None:
 # ``auto_ontology.dal.search``. This module does not know how a search is spelled -- it
 # knows how to apply one -- and a test that imported the search would be
 # checking two modules at once and failing for either.
+#
+# ``_sync`` below is one rule's two halves back to back, which is what most of
+# these tests are about: what a single rule does to its own labels. The order
+# the halves run in across *rules* belongs to
+# ``auto_ontology.server.rules.service.reapply_rules`` and is tested there --
+# except for the one case that is a property of these statements rather than of
+# the loop, which has its own section at the end.
+
+
+def _sync(
+    *, rule_id: str, tag_ids: list[str], targets: dict[str, Select]
+) -> tuple[int, int]:
+    """One rule's replay: take back what it no longer matches, apply the rest."""
+    removed = remove_labels_no_longer_matched(rule_id=rule_id, targets=targets)
+    applied = apply_labels_now_matched(
+        rule_id=rule_id, tag_ids=tag_ids, targets=targets
+    )
+    return applied, removed
 
 
 def _columns_named(like: str, table_id: str) -> Select:
@@ -1296,7 +1315,7 @@ def test_a_rule_labels_what_its_search_matches_now(tagged) -> None:
     """The ingest case: a column added since the rule was written."""
     fresh = _add(s.catalog_column, table_id=tagged.table, name="total_net")
 
-    applied, removed = sync_tags_by_rule(
+    applied, removed = _sync(
         rule_id=tagged.rule("totals"),
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1312,7 +1331,7 @@ def test_a_rule_labels_what_its_search_matches_now(tagged) -> None:
 def test_a_rule_takes_back_a_label_it_no_longer_matches(tagged) -> None:
     """A column renamed out of the search stops carrying the rule's tag."""
     rule_id = tagged.rule("totals")
-    sync_tags_by_rule(
+    _sync(
         rule_id=rule_id,
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1323,7 +1342,7 @@ def test_a_rule_takes_back_a_label_it_no_longer_matches(tagged) -> None:
         .where(s.catalog_column.c.id == tagged.column)
         .values(name="net_proceeds")
     )
-    applied, removed = sync_tags_by_rule(
+    applied, removed = _sync(
         rule_id=rule_id,
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1338,12 +1357,10 @@ def test_re_applying_an_unchanged_rule_writes_nothing(tagged) -> None:
     changed, or a nightly re-apply would rewrite the whole catalog's labels."""
     rule_id = tagged.rule("totals")
     targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
-    sync_tags_by_rule(rule_id=rule_id, tag_ids=[tagged.tag], targets=targets)
+    _sync(rule_id=rule_id, tag_ids=[tagged.tag], targets=targets)
     before = _tagged_dates(tagged.tag)
 
-    assert sync_tags_by_rule(
-        rule_id=rule_id, tag_ids=[tagged.tag], targets=targets
-    ) == (0, 0)
+    assert _sync(rule_id=rule_id, tag_ids=[tagged.tag], targets=targets) == (0, 0)
     # The date, not just the count: a wipe-and-rewrite also reports one applied
     # and one removed, and would pass a test that only counted the labels left.
     assert _tagged_dates(tagged.tag) == before
@@ -1357,7 +1374,7 @@ def test_a_re_apply_keeps_the_day_a_surviving_label_was_applied(tagged) -> None:
     every object the rule still matches.
     """
     rule_id = tagged.rule("totals")
-    sync_tags_by_rule(
+    _sync(
         rule_id=rule_id,
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1369,7 +1386,7 @@ def test_a_re_apply_keeps_the_day_a_surviving_label_was_applied(tagged) -> None:
     )
 
     _add(s.catalog_column, table_id=tagged.table, name="total_net")
-    sync_tags_by_rule(
+    _sync(
         rule_id=rule_id,
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1389,7 +1406,7 @@ def test_syncing_leaves_a_hand_applied_label_alone(tagged) -> None:
         tagged_by="user-1",
     )
 
-    applied, removed = sync_tags_by_rule(
+    applied, removed = _sync(
         rule_id=tagged.rule("nothing-doing"),
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("no-such-name%", tagged.table)},
@@ -1406,7 +1423,7 @@ def test_another_rules_labels_are_not_touched(tagged) -> None:
         rule_id=other, tag_ids=[tagged.tag], targets=[(TARGET_TERM, tagged.term)]
     )
 
-    sync_tags_by_rule(
+    _sync(
         rule_id=tagged.rule("totals"),
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1419,13 +1436,13 @@ def test_a_rule_that_now_matches_nothing_takes_back_every_label(tagged) -> None:
     """An empty match is a rule that should be labelling nothing, not a rule
     to leave yesterday's labels standing for."""
     rule_id = tagged.rule("totals")
-    sync_tags_by_rule(
+    _sync(
         rule_id=rule_id,
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
     )
 
-    assert sync_tags_by_rule(rule_id=rule_id, tag_ids=[tagged.tag], targets={}) == (
+    assert _sync(rule_id=rule_id, tag_ids=[tagged.tag], targets={}) == (
         0,
         1,
     )
@@ -1436,7 +1453,7 @@ def test_a_kind_dropped_from_the_rule_loses_its_labels(tagged) -> None:
     """The other way a label goes stale: the object still matches the words,
     but its kind is no longer one the rule asks for."""
     rule_id = tagged.rule("both-kinds")
-    sync_tags_by_rule(
+    _sync(
         rule_id=rule_id,
         tag_ids=[tagged.tag],
         targets={
@@ -1445,7 +1462,7 @@ def test_a_kind_dropped_from_the_rule_loses_its_labels(tagged) -> None:
         },
     )
 
-    sync_tags_by_rule(
+    _sync(
         rule_id=rule_id,
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1458,7 +1475,7 @@ def test_a_rule_applies_every_tag_it_holds(tagged) -> None:
     """The tags travel as an array, so one statement is every tag on the kind."""
     second = create_tag(name=f"{tagged.prefix}-confidential")["id"]
 
-    applied, _removed = sync_tags_by_rule(
+    applied, _removed = _sync(
         rule_id=tagged.rule("two-tags"),
         tag_ids=[tagged.tag, second],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1474,7 +1491,7 @@ def test_the_same_tag_twice_is_one_label(tagged) -> None:
     The anti-join that keeps a re-apply cheap reads what is *stored*, so it
     cannot see a repeat inside the batch it is filtering.
     """
-    applied, _removed = sync_tags_by_rule(
+    applied, _removed = _sync(
         rule_id=tagged.rule("said-twice"),
         tag_ids=[tagged.tag, tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1498,7 +1515,7 @@ def test_a_rule_does_not_duplicate_a_tag_a_person_already_applied(tagged) -> Non
         tagged_by="user-1",
     )
 
-    applied, _removed = sync_tags_by_rule(
+    applied, _removed = _sync(
         rule_id=tagged.rule("totals"),
         tag_ids=[tagged.tag],
         targets={TARGET_COLUMN: _columns_named("total%", tagged.table)},
@@ -1506,3 +1523,75 @@ def test_a_rule_does_not_duplicate_a_tag_a_person_already_applied(tagged) -> Non
 
     assert applied == 0
     assert tagged.items()[TARGET_COLUMN]["tagged_by"] == "user-1"
+
+
+# --------------------------------------------------------------------------
+# Two rules over one object, and why the replay runs in phases
+# --------------------------------------------------------------------------
+#
+# The statements here are per rule and cannot be otherwise: `tag_target` holds
+# one row per (tag, object), so the second rule to match an object writes
+# nothing and the first owns the label. What that costs is only visible across
+# rules -- the owner's removal takes back a label the other rule is still
+# applying -- so the fix lives in
+# `auto_ontology.server.rules.service.reapply_rules`, which removes for every
+# rule before applying for any. These pin the halves it is built on, so a
+# change down here that quietly made the phases unnecessary, or made them
+# insufficient, shows up as a failure rather than as a passing suite.
+
+
+def test_a_second_rule_matching_the_same_object_writes_nothing(tagged) -> None:
+    """The first rule owns the row, whoever else goes on matching it."""
+    owner = tagged.rule("a-owner")
+    other = tagged.rule("b-other")
+    matched = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+
+    assert _sync(rule_id=owner, tag_ids=[tagged.tag], targets=matched) == (1, 0)
+    assert _sync(rule_id=other, tag_ids=[tagged.tag], targets=matched) == (0, 0)
+    assert tagged.items()[TARGET_COLUMN]["rule"]["id"] == owner
+
+
+def test_the_owner_giving_up_takes_the_shared_label_with_it(tagged) -> None:
+    """Rule by rule, the label is gone even though the other rule matches.
+
+    This is the behaviour ``reapply_rules`` exists to order around, pinned here
+    so it is visible where it happens: the removal is scoped to ``rule_id``, so
+    it cannot know another rule wanted the row, and the other rule cannot have
+    written one of its own.
+    """
+    owner = tagged.rule("a-owner")
+    other = tagged.rule("b-other")
+    matched = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=owner, tag_ids=[tagged.tag], targets=matched)
+
+    # The other rule replays first and finds nothing to do, as above. Then the
+    # owner stops matching.
+    _sync(rule_id=other, tag_ids=[tagged.tag], targets=matched)
+    _sync(
+        rule_id=owner,
+        tag_ids=[tagged.tag],
+        targets={TARGET_COLUMN: _columns_named("no-such%", tagged.table)},
+    )
+
+    assert list_tag_targets(tagged.tag) == []
+
+
+def test_removing_first_lets_the_other_rule_take_the_label(tagged) -> None:
+    """The same two rules in the order ``reapply_rules`` imposes.
+
+    Every removal, then every application -- so the owner's row is gone before
+    the rule that still matches tries to write, and the label changes hands
+    inside one pass instead of disappearing until the next one.
+    """
+    owner = tagged.rule("a-owner")
+    other = tagged.rule("b-other")
+    matched = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    narrowed = {TARGET_COLUMN: _columns_named("no-such%", tagged.table)}
+    _sync(rule_id=owner, tag_ids=[tagged.tag], targets=matched)
+
+    remove_labels_no_longer_matched(rule_id=owner, targets=narrowed)
+    remove_labels_no_longer_matched(rule_id=other, targets=matched)
+    apply_labels_now_matched(rule_id=owner, tag_ids=[tagged.tag], targets=narrowed)
+    apply_labels_now_matched(rule_id=other, tag_ids=[tagged.tag], targets=matched)
+
+    assert tagged.items()[TARGET_COLUMN]["rule"]["id"] == other

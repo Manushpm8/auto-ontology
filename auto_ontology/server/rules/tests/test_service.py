@@ -155,20 +155,27 @@ def test_stored_filters_are_handed_to_the_search_as_saved() -> None:
 # bad rule must not stop the rest, and an empty deployment must not raise.
 
 
-def _reapply(rules: list[dict]) -> tuple[tuple[int, int], list, list]:
-    """Run the ingest pass over *rules*, returning what the two halves saw."""
+def _reapply(rules: list[dict]) -> tuple[tuple[int, int], list, list, list]:
+    """Run the ingest pass over *rules*, returning what each phase saw."""
     with (
         patch("auto_ontology.server.rules.service.rules_dal.list_rules") as list_rules,
         patch(
             "auto_ontology.server.rules.service.search_service.match_selects"
         ) as match,
-        patch("auto_ontology.server.rules.service.tags_dal.sync_tags_by_rule") as sync,
+        patch(
+            "auto_ontology.server.rules.service.tags_dal"
+            ".remove_labels_no_longer_matched"
+        ) as remove,
+        patch(
+            "auto_ontology.server.rules.service.tags_dal.apply_labels_now_matched"
+        ) as apply_,
     ):
         list_rules.return_value = rules
         match.side_effect = lambda **kwargs: SELECTS
-        sync.return_value = (1, 0)
+        remove.return_value = 0
+        apply_.return_value = 1
         totals = reapply_rules()
-    return totals, match.call_args_list, sync.call_args_list
+    return totals, match.call_args_list, remove.call_args_list, apply_.call_args_list
 
 
 def _rule(**overrides) -> dict:
@@ -202,23 +209,28 @@ SELECTS = {
 def test_every_taggable_kind_is_synced_and_the_rest_dropped() -> None:
     """The same reduction the create path does on hits, one step earlier: a
     kind with no ``tag_target`` column is dropped by not asking for it."""
-    _totals, _match, sync = _reapply([_rule()])
+    _totals, _match, remove, apply_ = _reapply([_rule()])
 
-    assert sync[0].kwargs["targets"] == {
+    taggable = {
         "term": "select-term",
         "table": "select-table",
         "column": "select-column",
         "column_attribute": "select-column-attribute",
         "sql_attribute": "select-sql-attribute",
     }
-    assert sync[0].kwargs["rule_id"] == "rule-1"
-    assert sync[0].kwargs["tag_ids"] == ["tag-1"]
+    # Both phases, since the removal decides what to take back by asking the
+    # same question: a kind it did not hear about would look like a kind the
+    # rule stopped matching.
+    assert remove[0].kwargs["targets"] == taggable
+    assert apply_[0].kwargs["targets"] == taggable
+    assert apply_[0].kwargs["rule_id"] == "rule-1"
+    assert apply_[0].kwargs["tag_ids"] == ["tag-1"]
 
 
 def test_the_stored_search_is_what_gets_replayed() -> None:
     """Read from the row rather than reconstructed, so a rule labels what it
     was saved as -- and with the same defaults ``exclude_none`` left out."""
-    _totals, match, _sync = _reapply([_rule()])
+    _totals, match, _remove, _apply = _reapply([_rule()])
 
     assert match[0].kwargs == {
         "search_term": "revenue",
@@ -231,7 +243,7 @@ def test_the_stored_search_is_what_gets_replayed() -> None:
 
 def test_stored_filters_reach_the_uncapped_search_too() -> None:
     filters = {"objects": ["Column"], "description": True, "synonyms": False}
-    _totals, match, _sync = _reapply([_rule(filters=filters)])
+    _totals, match, _remove, _apply = _reapply([_rule(filters=filters)])
 
     assert match[0].kwargs["objects"] == ["Column"]
     assert match[0].kwargs["include_description"] is True
@@ -239,12 +251,47 @@ def test_stored_filters_reach_the_uncapped_search_too() -> None:
 
 
 def test_every_rule_runs_and_the_labels_are_totalled() -> None:
-    totals, match, sync = _reapply(
+    totals, match, remove, apply_ = _reapply(
         [_rule(id="rule-1"), _rule(id="rule-2"), _rule(id="rule-3")]
     )
 
-    assert len(match) == len(sync) == 3
+    assert len(match) == len(remove) == len(apply_) == 3
     assert totals == (3, 0)
+
+
+def test_every_rule_removes_before_any_rule_applies() -> None:
+    """The reason this is phases rather than a sync per rule.
+
+    ``tag_target`` holds one row per (tag, object), so two rules applying the
+    same tag to the same object share a row owned by whichever wrote it first.
+    Rule by rule, the owner's removal deletes a label the other rule is still
+    applying, and whether it survives comes down to which rule ``list_rules``
+    happens to return first -- it orders by name, so renaming a rule decided
+    it. Removing everything first means the row is free by the time anybody
+    applies, and the rule that still matches takes it in the same pass.
+    """
+    order: list[str] = []
+    with (
+        patch("auto_ontology.server.rules.service.rules_dal.list_rules") as list_rules,
+        patch(
+            "auto_ontology.server.rules.service.search_service.match_selects"
+        ) as match,
+        patch(
+            "auto_ontology.server.rules.service.tags_dal"
+            ".remove_labels_no_longer_matched"
+        ) as remove,
+        patch(
+            "auto_ontology.server.rules.service.tags_dal.apply_labels_now_matched"
+        ) as apply_,
+    ):
+        list_rules.return_value = [_rule(id="a"), _rule(id="b")]
+        match.side_effect = lambda **kwargs: SELECTS
+        remove.side_effect = lambda **kw: order.append(f"remove {kw['rule_id']}") or 0
+        apply_.side_effect = lambda **kw: order.append(f"apply {kw['rule_id']}") or 0
+
+        reapply_rules()
+
+    assert order == ["remove a", "remove b", "apply a", "apply b"]
 
 
 def test_one_failing_rule_does_not_stop_the_others() -> None:
@@ -255,24 +302,32 @@ def test_one_failing_rule_does_not_stop_the_others() -> None:
         patch(
             "auto_ontology.server.rules.service.search_service.match_selects"
         ) as match,
-        patch("auto_ontology.server.rules.service.tags_dal.sync_tags_by_rule") as sync,
+        patch(
+            "auto_ontology.server.rules.service.tags_dal"
+            ".remove_labels_no_longer_matched"
+        ) as remove,
+        patch(
+            "auto_ontology.server.rules.service.tags_dal.apply_labels_now_matched"
+        ) as apply_,
     ):
         list_rules.return_value = [_rule(id="bad"), _rule(id="good")]
         match.side_effect = [RuntimeError("no such column"), SELECTS]
-        sync.return_value = (2, 1)
+        remove.return_value = 1
+        apply_.return_value = 2
 
         assert reapply_rules() == (2, 1)
 
-    # The failing rule reaches no write at all, which is the half that
-    # matters: a search that could not run says nothing about what the rule
-    # should be labelling, and syncing on it would take back every label the
-    # rule holds.
-    assert [call.kwargs["rule_id"] for call in sync.call_args_list] == ["good"]
+    # The failing rule reaches neither write, which is the half that matters:
+    # a search that could not run says nothing about what the rule should be
+    # labelling, and removing on it would take back every label the rule
+    # holds -- with nothing to put them back, now that the phases are apart.
+    assert [call.kwargs["rule_id"] for call in remove.call_args_list] == ["good"]
+    assert [call.kwargs["rule_id"] for call in apply_.call_args_list] == ["good"]
 
 
 def test_a_deployment_with_no_rules_does_nothing() -> None:
     """The ordinary case for most deployments, on every ingest."""
-    totals, match, sync = _reapply([])
+    totals, match, remove, apply_ = _reapply([])
 
     assert totals == (0, 0)
-    assert match == sync == []
+    assert match == remove == apply_ == []

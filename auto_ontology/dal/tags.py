@@ -835,62 +835,39 @@ def attach_tags_by_rule(
     return applied
 
 
-def sync_tags_by_rule(
+def apply_labels_now_matched(
     *, rule_id: str, tag_ids: list[str], targets: dict[str, Select]
-) -> tuple[int, int]:
-    """Make this rule's labels exactly what its search matches now.
+) -> int:
+    """``INSERT ... SELECT`` the rule's tags onto everything it matches.
+
+    The second half of a replay; :func:`remove_labels_no_longer_matched` is the
+    first, and ``auto_ontology.server.rules.service.reapply_rules`` is what runs
+    the two -- every rule's removal before any rule's application, for a reason
+    that is on *that* function rather than here, because neither half can see
+    it on its own.
 
     *targets* is a ``SELECT id`` per kind, as
     :func:`auto_ontology.dal.search.matching_id_selects` produces it — statements, not
-    ids. They are embedded in the writes below rather than run first, so a rule
+    ids. They are embedded in the write rather than run first, so a rule
     matching fifty thousand columns never moves an id out of Postgres: the
-    match, the comparison against what is already labelled, and the writes are
-    all one plan per statement. That is what makes this affordable on every
-    ingest rather than only on the small rules.
+    match, the comparison against what is already labelled, and the insert are
+    one plan per statement. That is what makes this affordable on every ingest
+    rather than only on the small rules.
 
-    Returns ``(applied, removed)``. Applied counts labels written, not objects
-    matched -- an object already carrying the tag is untouched and uncounted,
-    which is what makes a run over an unchanged catalog report zero rather than
-    reporting the whole catalog again.
-
-    The difference, rather than a wipe and a rewrite. Both produce the same set
-    of labels, and this repository's reason for preferring the first is
-    ``tag_target.tagged``: a row deleted and re-inserted is a *new* row with
-    today's date, so re-applying a rule nightly would move every label's
-    "Tagged" to the date of the last ingest. Only what changed is written, so
-    a label that was already right keeps the day it was really applied.
-
-    **What is removed is this rule's doing and nothing else.** Every statement
-    here is scoped to ``rule_id``, and a hand-applied label carries none -- so
-    an object a person tagged by hand is not reachable from here, even when the
-    rule also matched it and even when it stops matching. The same holds the
-    other way: a label this rule applied to an object that has since been
-    renamed out of the search is removed, because a rule-applied tag is the
-    rule still holding rather than a fact of its own.
-
-    An empty *targets* removes every label the rule has. A rule whose search
-    matches nothing is a rule that should be labelling nothing, which is an
-    ordinary state -- the catalog may not have grown into it yet, or may have
-    grown out of it -- and not a reason to leave yesterday's labels standing.
-
-    One transaction, because half of this is worse than none: the delete alone
-    would strip a rule of labels it is about to re-apply, and a reader between
-    the two statements would see the rule labelling less than it does.
+    Returns labels written, not objects matched -- an object already carrying
+    the tag is untouched and uncounted, which is what makes a run over an
+    unchanged catalog report zero rather than reporting the whole catalog
+    again. It is also what keeps ``tag_target.tagged`` honest: a row left alone
+    keeps the day it was really applied, where a wipe and a rewrite would move
+    every label's "Tagged" to the date of the last ingest.
 
     Tags no longer in *tag_ids* are not considered, because they cannot occur:
     a rule's tags are fixed at creation (see :func:`auto_ontology.dal.rules.update_rule`)
     and a tag deleted from the vocabulary takes its labels with it by cascade.
-    """
-    with write_transaction():
-        removed = _remove_labels_no_longer_matched(rule_id, targets)
-        applied = _apply_labels_now_matched(rule_id, tag_ids, targets)
-    return applied, removed
 
-
-def _apply_labels_now_matched(
-    rule_id: str, tag_ids: list[str], targets: dict[str, Select]
-) -> int:
-    """``INSERT ... SELECT`` the rule's tags onto everything it matches.
+    One transaction over the kinds, which is as much as is worth holding: five
+    statements that are one rule's labels, and a rule applied to Columns but
+    not to the Terms it also matched is a state no reader should see.
 
     One statement per kind, which is as far as this can be collapsed:
     ``tag_target`` has a column per kind, so two kinds cannot share an INSERT.
@@ -951,45 +928,65 @@ def _apply_labels_now_matched(
     stored = s.tag_target.alias("stored")
 
     applied = 0
-    for kind, matched in targets.items():
-        column = _target_column(kind)
-        found = matched.subquery()
-        applied += len(
-            store().query_write(
-                insert(s.tag_target)
-                .from_select(
-                    ["tag_id", "rule_id", column.name],
-                    # ``ON true``: the cross product of the tags and the match
-                    # *is* what "apply these tags to these objects" means.
-                    # Spelled as a join rather than as two FROM entries only so
-                    # it reads as deliberate -- SQLAlchemy warns about the
-                    # latter, on the assumption that a cartesian product is a
-                    # forgotten condition.
-                    select(tags.c.tag_id, literal(rule_id), found.c.id)
-                    .select_from(found.join(tags, true()))
-                    .where(
-                        # Deliberately blind to `rule_id`: what the constraint
-                        # forbids is the tag twice on the object, whoever put
-                        # it there, so this has to ask the same question.
-                        not_(
-                            exists(
-                                select(literal(1)).where(
-                                    stored.c.tag_id == tags.c.tag_id,
-                                    stored.c[column.name] == found.c.id,
+    with write_transaction():
+        for kind, matched in targets.items():
+            column = _target_column(kind)
+            found = matched.subquery()
+            applied += len(
+                store().query_write(
+                    insert(s.tag_target)
+                    .from_select(
+                        ["tag_id", "rule_id", column.name],
+                        # ``ON true``: the cross product of the tags and the
+                        # match *is* what "apply these tags to these objects"
+                        # means. Spelled as a join rather than as two FROM
+                        # entries only so it reads as deliberate -- SQLAlchemy
+                        # warns about the latter, on the assumption that a
+                        # cartesian product is a forgotten condition.
+                        select(tags.c.tag_id, literal(rule_id), found.c.id)
+                        .select_from(found.join(tags, true()))
+                        .where(
+                            # Deliberately blind to `rule_id`: what the
+                            # constraint forbids is the tag twice on the
+                            # object, whoever put it there, so this has to ask
+                            # the same question.
+                            not_(
+                                exists(
+                                    select(literal(1)).where(
+                                        stored.c.tag_id == tags.c.tag_id,
+                                        stored.c[column.name] == found.c.id,
+                                    )
                                 )
                             )
-                        )
-                    ),
+                        ),
+                    )
+                    .on_conflict_do_nothing()
+                    .returning(s.tag_target.c.id)
                 )
-                .on_conflict_do_nothing()
-                .returning(s.tag_target.c.id)
             )
-        )
     return applied
 
 
-def _remove_labels_no_longer_matched(rule_id: str, targets: dict[str, Select]) -> int:
+def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select]) -> int:
     """Delete the rule's labels on objects its search no longer finds.
+
+    The first half of a replay, and it runs for *every* rule before
+    :func:`apply_labels_now_matched` runs for any -- see
+    ``auto_ontology.server.rules.service.reapply_rules``, which is what orders
+    the two and where the reason lives.
+
+    An empty *targets* removes every label the rule has. A rule whose search
+    matches nothing is a rule that should be labelling nothing, which is an
+    ordinary state -- the catalog may not have grown into it yet, or may have
+    grown out of it -- and not a reason to leave yesterday's labels standing.
+
+    **What is removed is this rule's doing and nothing else.** The statement is
+    scoped to ``rule_id``, and a hand-applied label carries none -- so an object
+    a person tagged by hand is not reachable from here, even when the rule also
+    matched it and even when it stops matching. The same holds the other way: a
+    label this rule applied to an object that has since been renamed out of the
+    search is removed, because a rule-applied tag is the rule still holding
+    rather than a fact of its own.
 
     One statement for every kind at once, unlike the insert: what is deleted is
     identified by ``rule_id`` and the columns are only a test, so all five fit
