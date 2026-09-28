@@ -41,12 +41,20 @@ export const zoneQueries = {
  * Rewrites the zones held for a user, for a caller that has just written one
  * and knows what changed. `zones` defaults to empty so a caller can splice
  * into a list that has not arrived without checking first.
+ *
+ * A read already in flight is cancelled first, because it would otherwise
+ * land after this and put back what it was told before the write: a save that
+ * answers with no body falls back to invalidating this key, so a toggle
+ * clicked while that refetch is still out is an ordinary sequence rather than
+ * a contrived one. Callers must await it — the point is to have won the race
+ * before the request that follows starts.
  */
-export const patchZoneList = (
+export const patchZoneList = async (
 	queryClient: QueryClient,
 	userId: string,
 	update: (zones: Zone[]) => Zone[],
-): void => {
+): Promise<void> => {
+	await queryClient.cancelQueries({ queryKey: listKey(userId) });
 	queryClient.setQueryData(listKey(userId), (held: Zone[] | undefined) => update(held ?? []));
 };
 

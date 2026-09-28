@@ -509,7 +509,7 @@ export default function ZonesSettingsPage() {
 			const created: ZoneCreated | undefined = response.data;
 			if (created != null) {
 				const { id, name: n, label, description: d, color: c, enabled: en } = created;
-				patchZones((prev) => {
+				await patchZones((prev) => {
 					const next = [
 						...prev.filter((z) => z.id !== created.id),
 						{ id, name: n, label, description: d, color: c, enabled: en },
@@ -555,7 +555,7 @@ export default function ZonesSettingsPage() {
 
 		const updated = response?.data;
 		if (updated != null) {
-			patchZones((prev) =>
+			await patchZones((prev) =>
 				prev.map((zone) =>
 					zone.id === updated.id
 						? {
@@ -596,7 +596,7 @@ export default function ZonesSettingsPage() {
 			return;
 		}
 
-		patchZones((prev) => prev.filter((zone) => zone.id !== confirmDeleteZone.id));
+		await patchZones((prev) => prev.filter((zone) => zone.id !== confirmDeleteZone.id));
 		setConfirmDeleteZone(null);
 	};
 
@@ -605,7 +605,7 @@ export default function ZonesSettingsPage() {
 		const nextEnabled = !zone.enabled;
 		setTogglingZoneId(zone.id);
 		setToggleError(null);
-		patchZones((prev) =>
+		await patchZones((prev) =>
 			prev.map((z) => (z.id === zone.id ? { ...z, enabled: nextEnabled } : z)),
 		);
 
@@ -613,7 +613,7 @@ export default function ZonesSettingsPage() {
 		setTogglingZoneId(null);
 
 		if (response.error) {
-			patchZones((prev) =>
+			await patchZones((prev) =>
 				prev.map((z) => (z.id === zone.id ? { ...z, enabled: zone.enabled } : z)),
 			);
 			setToggleError(response.message ?? 'Failed to update zone status.');

@@ -74,8 +74,9 @@ export const ConnectionsView = () => {
 		setSsoError(null);
 		setSsoFederationPending(databaseName);
 
-		// Optimistic update — apply immediately so the checkbox doesn't snap back.
-		patchConnections((prev) =>
+		// Optimistic update — applied before the write so the checkbox doesn't
+		// snap back while it is out.
+		await patchConnections((prev) =>
 			prev.map((c) =>
 				c.database_name === databaseName
 					? { ...c, connection: { ...c.connection, sso_federation: enabled } }
@@ -88,7 +89,7 @@ export const ConnectionsView = () => {
 
 		if (res.error) {
 			// Revert optimistic update on failure.
-			patchConnections((prev) =>
+			await patchConnections((prev) =>
 				prev.map((c) =>
 					c.database_name === databaseName
 						? { ...c, connection: { ...c.connection, sso_federation: !enabled } }
@@ -122,7 +123,9 @@ export const ConnectionsView = () => {
 			return;
 		}
 
-		patchConnections((prev) => prev.filter((c) => c.database_name !== deletingConnection));
+		await patchConnections((prev) =>
+			prev.filter((c) => c.database_name !== deletingConnection),
+		);
 		setDeletingConnection(null);
 	};
 
