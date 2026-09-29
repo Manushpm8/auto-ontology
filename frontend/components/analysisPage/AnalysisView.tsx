@@ -153,10 +153,14 @@ export const AnalysisView = () => {
 	});
 
 	useEffect(() => {
-		if (focusId == null || loading || isLoadingMore || !hasMore) return;
+		// `error` stops this as it stops `InfiniteScroll`'s sentinel: a failed
+		// page leaves `hasMore` true and clears `isLoadingMore`, and `loadMore`
+		// clears the error before retrying, so without the guard a server that
+		// keeps failing is retried in a loop. The Retry control owns that.
+		if (focusId == null || loading || isLoadingMore || !hasMore || error != null) return;
 		if (items.some((item) => item.id === focusId)) return;
 		loadMore();
-	}, [focusId, items, loading, isLoadingMore, hasMore, loadMore]);
+	}, [focusId, items, loading, isLoadingMore, hasMore, error, loadMore]);
 
 	useEffect(() => {
 		if (focusId == null || loading) return;
@@ -408,6 +412,19 @@ export const AnalysisView = () => {
 						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-red-900/80 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
 							{error}
 						</pre>
+						{/* `reload`, not `loadMore`: a failed first page leaves
+						    nothing fetched, so `loadMore` sees the list as ended
+						    and returns without asking for anything. */}
+						<div className="mt-4 flex justify-center">
+							<Button
+								theme={ButtonTheme.Secondary}
+								size={Size.SMALL}
+								type="button"
+								onClick={reload}
+							>
+								Retry
+							</Button>
+						</div>
 					</div>
 				)}
 
