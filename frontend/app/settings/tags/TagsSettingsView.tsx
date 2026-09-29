@@ -7,6 +7,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { tagsApi } from '@/api/tags';
 import { Button } from '@/common/Button';
@@ -23,6 +24,7 @@ import { ButtonTheme, Size } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useInfiniteList } from '@/hooks/useInfiniteList';
+import { invalidateTagVocabulary } from '@/lib/queries/tags';
 import type { Tag, TagAuthor } from '@/types/tags';
 
 import { TagDetailView } from './TagDetailView';
@@ -89,6 +91,11 @@ const TagAuthorCell = ({ author }: { author: TagAuthor | null | undefined }) => 
 };
 
 const TagsList = () => {
+	// This page is the only one that writes the vocabulary, and every picker in
+	// the app reads it. Each write below tells the cache so, which is what
+	// keeps a tag renamed here from lingering under its old name in a picker
+	// opened later in the same session.
+	const queryClient = useQueryClient();
 	const [dialog, setDialog] = useState<NameDialog | null>(null);
 	const [name, setName] = useState('');
 	const [submitting, setSubmitting] = useState(false);
@@ -182,6 +189,7 @@ const TagsList = () => {
 		}
 
 		setDialog(null);
+		void invalidateTagVocabulary(queryClient);
 		// Re-read rather than splice the answer into the rows on screen, even
 		// though both requests return the whole tag: the list is ordered by name
 		// and read a page at a time, so a new or renamed tag generally belongs in
@@ -215,6 +223,7 @@ const TagsList = () => {
 		}
 
 		setConfirmDeleteTag(null);
+		void invalidateTagVocabulary(queryClient);
 		// Re-read rather than drop the row locally, for the reason the create
 		// path re-reads: the pages already loaded were windows on a list one tag
 		// longer, so keeping them would leave it a row short at every window
