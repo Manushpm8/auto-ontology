@@ -45,11 +45,6 @@ import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
 import type { ColumnAttribute, SqlAttribute, Term, TermCount, TermDetail } from '@/types/terms';
 
-/**
- * Where the page sits under the Terms crumb the top bar already draws. The
- * ids stand in until the names have loaded, so the trail never collapses to a
- * blank crumb mid-fetch.
- */
 const termFocusTrail = ({
 	focusId,
 	sqlAttrId,
@@ -976,7 +971,7 @@ export const TermsView = () => {
 						title: attr.name,
 						icon: IconName.Column,
 						titleEditable: true,
-						certification: { certified: attr.certified, showLabel: true },
+						certification: { certified: attr.certified },
 					},
 				},
 				sections: [
@@ -1073,7 +1068,7 @@ export const TermsView = () => {
 						title: attr.name,
 						icon: IconName.Link,
 						titleEditable: true,
-						certification: { certified: attr.certified, showLabel: true },
+						certification: { certified: attr.certified },
 					},
 				},
 				sections: [
@@ -1256,11 +1251,6 @@ export const TermsView = () => {
 	const focusedColAttr =
 		colAttrId != null ? (columnAttrs.find((attr) => attr.id === colAttrId) ?? null) : null;
 
-	// Same server-rolled-up value the list card shows, so the two can't disagree.
-	const termCertificationStatus = focusedTerm?.certification ?? CertificationStatus.Pending;
-
-	// Breadcrumbs are drawn once, by the top bar; the focused pages only say
-	// which term — and which of its attributes — they are showing.
 	useBreadcrumbTrail(
 		termFocusTrail({
 			focusId,
@@ -1276,50 +1266,53 @@ export const TermsView = () => {
 		const sqlAttrTitle = focusedSqlAttr?.name ?? sqlAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
-				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<div className="ml-auto flex shrink-0 items-center gap-1">
-						{sqlAttrEditing ? null : (
-							<>
-								<Button
-									theme={ButtonTheme.Primary}
-									size={Size.REGULAR}
-									type="button"
-									onClick={() => {
-										setSqlAttrEditError(null);
-										setSqlAttrEditing(true);
-									}}
-									aria-label={`Edit ${sqlAttrTitle}`}
-									title="Edit"
-									iconPosition="left"
-								>
-									<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-									Edit
-								</Button>
-								<Button
-									theme={ButtonTheme.DangerSubtle}
-									size={Size.REGULAR}
-									type="button"
-									onClick={() => {
-										setDeletingSqlAttr({ id: sqlAttrId, name: sqlAttrTitle });
-										setDeleteSqlAttrError(null);
-									}}
-									aria-label={`Delete ${sqlAttrTitle}`}
-									title="Delete"
-									iconPosition="left"
-								>
-									<Icon name={IconName.Trash} className="h-3.5 w-3.5" />
-									Delete
-								</Button>
-							</>
-						)}
-					</div>
-				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
 						key={sqlAttrId}
 						dataId={sqlAttrId}
 						getSinglePage={getSqlAttributeSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
+						headerActions={
+							<>
+								{sqlAttrEditing ? null : (
+									<>
+										<Button
+											theme={ButtonTheme.Primary}
+											size={Size.REGULAR}
+											type="button"
+											onClick={() => {
+												setSqlAttrEditError(null);
+												setSqlAttrEditing(true);
+											}}
+											aria-label={`Edit ${sqlAttrTitle}`}
+											title="Edit"
+											iconPosition="left"
+										>
+											<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+											Edit
+										</Button>
+										<Button
+											theme={ButtonTheme.DangerSubtle}
+											size={Size.REGULAR}
+											type="button"
+											onClick={() => {
+												setDeletingSqlAttr({
+													id: sqlAttrId,
+													name: sqlAttrTitle,
+												});
+												setDeleteSqlAttrError(null);
+											}}
+											aria-label={`Delete ${sqlAttrTitle}`}
+											title="Delete"
+											iconPosition="left"
+										>
+											<Icon name={IconName.Trash} className="h-3.5 w-3.5" />
+											Delete
+										</Button>
+									</>
+								)}
+							</>
+						}
 						isEditing={sqlAttrEditing}
 						onPatchEdits={handleSqlAttrEditSave}
 						onSave={() => {
@@ -1410,33 +1403,33 @@ export const TermsView = () => {
 		const colAttrTitle = focusedColAttr?.name ?? colAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
-				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<div className="ml-auto flex shrink-0 items-center gap-1">
-						{columnAttrEditing ? null : (
-							<Button
-								theme={ButtonTheme.Primary}
-								size={Size.REGULAR}
-								type="button"
-								onClick={() => {
-									setColumnAttrEditError(null);
-									setColumnAttrEditing(true);
-								}}
-								aria-label={`Edit ${colAttrTitle}`}
-								title="Edit"
-								iconPosition="left"
-							>
-								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-								Edit
-							</Button>
-						)}
-					</div>
-				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
 						key={colAttrId}
 						dataId={colAttrId}
 						getSinglePage={getColumnAttributeSinglePage}
 						treeDataEpoch={columnAttrsEpoch}
+						headerActions={
+							<>
+								{columnAttrEditing ? null : (
+									<Button
+										theme={ButtonTheme.Primary}
+										size={Size.REGULAR}
+										type="button"
+										onClick={() => {
+											setColumnAttrEditError(null);
+											setColumnAttrEditing(true);
+										}}
+										aria-label={`Edit ${colAttrTitle}`}
+										title="Edit"
+										iconPosition="left"
+									>
+										<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+										Edit
+									</Button>
+								)}
+							</>
+						}
 						isEditing={columnAttrEditing}
 						onPatchEdits={handleColumnAttrEditSave}
 						onSave={() => {
@@ -1466,42 +1459,41 @@ export const TermsView = () => {
 	if (focusId != null) {
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
-				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<CertificationBadge status={termCertificationStatus} />
-					<div className="ml-auto flex items-center gap-2">
-						{termEditing ? null : (
-							<Button
-								theme={ButtonTheme.Primary}
-								size={Size.REGULAR}
-								type="button"
-								onClick={() => {
-									setTermEditing(true);
-								}}
-								iconPosition="left"
-							>
-								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-								Edit
-							</Button>
-						)}
-						<Button
-							theme={ButtonTheme.Primary}
-							size={Size.REGULAR}
-							type="button"
-							onClick={() => setCreateSqlAttrModalOpen(true)}
-							iconPosition="left"
-							shadow
-						>
-							<Icon name={IconName.Plus} className="h-4 w-4" />
-							Create new sql attribute
-						</Button>
-					</div>
-				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
 						key={focusId}
 						dataId={focusId}
 						getSinglePage={getSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
+						headerActions={
+							<>
+								{termEditing ? null : (
+									<Button
+										theme={ButtonTheme.Primary}
+										size={Size.REGULAR}
+										type="button"
+										onClick={() => {
+											setTermEditing(true);
+										}}
+										iconPosition="left"
+									>
+										<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+										Edit
+									</Button>
+								)}
+								<Button
+									theme={ButtonTheme.Primary}
+									size={Size.REGULAR}
+									type="button"
+									onClick={() => setCreateSqlAttrModalOpen(true)}
+									iconPosition="left"
+									shadow
+								>
+									<Icon name={IconName.Plus} className="h-4 w-4" />
+									Create new sql attribute
+								</Button>
+							</>
+						}
 						isEditing={termEditing}
 						onPatchEdits={handleTermEditSave}
 						onSave={() => {

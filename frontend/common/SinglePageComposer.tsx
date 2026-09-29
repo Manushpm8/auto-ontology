@@ -128,6 +128,12 @@ export type SinglePageComposerProps = {
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
+	/**
+	 * Page-level controls for the title bar. Passing them lifts the title out of
+	 * the scrolling body into a fixed bar of its own, so the page does not have
+	 * to keep a second header above the composer just to hold its buttons.
+	 */
+	headerActions?: ReactNode;
 };
 
 function composerSectionHeading(section: ComposerSection): string {
@@ -814,6 +820,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			onDataTableCertificationChange,
 			inlineSaveSectionId,
 			hideEditToolbar = false,
+			headerActions,
 		} = props;
 		const router = useRouter();
 
@@ -1006,6 +1013,101 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			);
 		}
 
+		const editControls =
+			!hideEditToolbar &&
+			((hasEditableSections && entityId && !isEditingActive) || isEditingActive) ? (
+				<>
+					{hasEditableSections && entityId && !isEditingActive && (
+						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.REGULAR}
+							type="button"
+							onClick={() => {
+								pendingEditsRef.current = {};
+								setSaveError(null);
+								setLocalEditingMode(true);
+							}}
+							iconPosition="left"
+						>
+							<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+							Edit
+						</Button>
+					)}
+					{isEditingActive && (
+						<div className="flex items-center gap-2">
+							<Button
+								theme={ButtonTheme.Secondary}
+								size={Size.REGULAR}
+								type="button"
+								disabled={saving}
+								onClick={() => {
+									if (saving) return;
+									setLocalEditingMode(false);
+									setSaveError(null);
+									onCancel?.();
+								}}
+							>
+								Cancel
+							</Button>
+							{inlineSaveSectionId == null && (
+								<Button
+									theme={ButtonTheme.Primary}
+									size={Size.REGULAR}
+									type="button"
+									disabled={saving}
+									onClick={() => {
+										void handleSave();
+									}}
+									iconPosition="left"
+								>
+									{saving ? (
+										<>
+											<Spinner aria-label="Saving" className="h-3.5 w-3.5" />
+											Saving…
+										</>
+									) : (
+										'Save'
+									)}
+								</Button>
+							)}
+						</div>
+					)}
+				</>
+			) : null;
+
+		const titleBlock = (
+			<div className="flex min-w-0 flex-1 items-center gap-2">
+				{headerIcon ? (
+					<Icon
+						name={headerIcon}
+						className="h-6 w-6 shrink-0 text-body dark:text-zinc-300"
+					/>
+				) : null}
+				<div className="min-w-0 flex-1">
+					{isEditingActive && titleEditable ? (
+						<input
+							ref={titleInputRef}
+							key={title}
+							type="text"
+							autoFocus
+							defaultValue={title}
+							onChange={(e) => {
+								pendingEditsRef.current.name = e.target.value;
+							}}
+							className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+							aria-label="Name"
+						/>
+					) : (
+						<Text as="h1" text={title} variant={TextVariant.PageTitle} />
+					)}
+				</div>
+			</div>
+		);
+
+		const certControl = headerCertification
+			? renderCertControl('name', headerCertification)
+			: null;
+
 		return (
 			<div
 				ref={ref}
@@ -1017,69 +1119,22 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</div>
 				) : null}
 
-				{!hideEditToolbar &&
-				((hasEditableSections && entityId && !isEditingActive) || isEditingActive) ? (
-					<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
-						{hasEditableSections && entityId && !isEditingActive && (
-							<Button
-								theme={ButtonTheme.Primary}
-								size={Size.REGULAR}
-								type="button"
-								onClick={() => {
-									pendingEditsRef.current = {};
-									setSaveError(null);
-									setLocalEditingMode(true);
-								}}
-								iconPosition="left"
-							>
-								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-								Edit
-							</Button>
-						)}
-						{isEditingActive && (
-							<div className="flex items-center gap-2">
-								<Button
-									theme={ButtonTheme.Secondary}
-									size={Size.REGULAR}
-									type="button"
-									disabled={saving}
-									onClick={() => {
-										if (saving) return;
-										setLocalEditingMode(false);
-										setSaveError(null);
-										onCancel?.();
-									}}
-								>
-									Cancel
-								</Button>
-								{inlineSaveSectionId == null && (
-									<Button
-										theme={ButtonTheme.Primary}
-										size={Size.REGULAR}
-										type="button"
-										disabled={saving}
-										onClick={() => {
-											void handleSave();
-										}}
-										iconPosition="left"
-									>
-										{saving ? (
-											<>
-												<Spinner
-													aria-label="Saving"
-													className="h-3.5 w-3.5"
-												/>
-												Saving…
-											</>
-										) : (
-											'Save'
-										)}
-									</Button>
-								)}
-							</div>
-						)}
-					</div>
-				) : null}
+				{headerActions != null ? (
+					<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800">
+						{titleBlock}
+						{certControl ? <div className="shrink-0">{certControl}</div> : null}
+						<div className="ml-auto flex shrink-0 items-center gap-2">
+							{editControls}
+							{headerActions}
+						</div>
+					</header>
+				) : (
+					editControls != null && (
+						<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
+							{editControls}
+						</div>
+					)
+				)}
 
 				<div
 					className="grid min-h-0 w-full min-w-0 flex-1 gap-0 overflow-hidden"
@@ -1106,43 +1161,14 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 					<main className="min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 						<div className="space-y-5">
-							<div className="flex items-start justify-between gap-3">
-								<div className="flex min-w-0 flex-1 items-center gap-2">
-									{headerIcon ? (
-										<Icon
-											name={headerIcon}
-											className="h-6 w-6 shrink-0 text-body dark:text-zinc-300"
-										/>
+							{headerActions == null ? (
+								<div className="flex items-start justify-between gap-3">
+									{titleBlock}
+									{certControl ? (
+										<div className="shrink-0 pt-1">{certControl}</div>
 									) : null}
-									<div className="min-w-0 flex-1">
-										{isEditingActive && titleEditable ? (
-											<input
-												ref={titleInputRef}
-												key={title}
-												type="text"
-												autoFocus
-												defaultValue={title}
-												onChange={(e) => {
-													pendingEditsRef.current.name = e.target.value;
-												}}
-												className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-												aria-label="Name"
-											/>
-										) : (
-											<Text
-												as="h1"
-												text={title}
-												variant={TextVariant.PageTitle}
-											/>
-										)}
-									</div>
 								</div>
-								{headerCertification ? (
-									<div className="shrink-0 pt-1">
-										{renderCertControl('name', headerCertification)}
-									</div>
-								) : null}
-							</div>
+							) : null}
 							{sections.length === 0 ? (
 								<EmptyState
 									illustration={
