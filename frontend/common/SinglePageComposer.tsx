@@ -128,11 +128,6 @@ export type SinglePageComposerProps = {
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
-	/**
-	 * Page-level controls for the title bar. Passing them lifts the title out of
-	 * the scrolling body into a fixed bar of its own, so the page does not have
-	 * to keep a second header above the composer just to hold its buttons.
-	 */
 	headerActions?: ReactNode;
 };
 
@@ -592,7 +587,6 @@ function renderComposerSection(
 						layout={section.layout ?? 'auto'}
 						minWidthClass="min-w-[28rem]"
 						cellClassName="px-3 py-2"
-						theadClassName="border-b border-zinc-200 bg-zinc-100/95 text-left text-xs font-semibold uppercase tracking-wide text-body dark:border-zinc-700 dark:bg-zinc-800/90 dark:text-zinc-300"
 						bodyClassName="text-heading dark:text-zinc-200"
 						rowClassName="border-b border-zinc-100 transition-colors hover:bg-zinc-50/80 dark:border-zinc-800 dark:hover:bg-zinc-900/50"
 						columns={section.columns.map((col) => {

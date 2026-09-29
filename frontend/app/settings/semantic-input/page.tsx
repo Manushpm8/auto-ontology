@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
+import { TABLE_THEAD_CLASSNAME } from '@/common/Table';
 import { Button } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
@@ -264,14 +265,10 @@ const AcronymsSection = () => {
 			) : hasAcronyms ? (
 				<div className="mt-4 overflow-visible rounded-md border border-zinc-200/90 dark:border-zinc-700">
 					<table className="w-full min-w-[28rem] text-left text-sm">
-						<thead className="border-b border-zinc-200 bg-zinc-100/95 dark:border-zinc-700 dark:bg-zinc-800/90">
-							<tr>
-								<th className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-body dark:text-zinc-300">
-									Name
-								</th>
-								<th className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-body dark:text-zinc-300">
-									Description
-								</th>
+						<thead>
+							<tr className={TABLE_THEAD_CLASSNAME}>
+								<th className="px-3 py-2">Name</th>
+								<th className="px-3 py-2">Description</th>
 								<th className="w-10" />
 							</tr>
 						</thead>

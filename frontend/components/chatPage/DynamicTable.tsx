@@ -7,7 +7,7 @@
 import { useMemo } from 'react';
 import type { ParsedTable, TableRow } from '@/lib/parseSqlResponse';
 import { EmptyState } from '@/common/EmptyState';
-import { Table } from '@/common/Table';
+import { Table, TABLE_THEAD_CLASSNAME } from '@/common/Table';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { usePagination } from '@/hooks/usePagination';
 import type { TableColumn } from '@/types/table';
@@ -50,7 +50,7 @@ export const DynamicTable = ({ table }: DynamicTableProps) => {
 			textClassName="text-xs"
 			cellClassName="px-3 py-2"
 			containerClassName="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
-			theadClassName="sticky top-0 border-b border-zinc-200 bg-zinc-50 text-left font-semibold text-body dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+			theadClassName={`sticky top-0 ${TABLE_THEAD_CLASSNAME}`}
 			bodyClassName="text-body dark:text-zinc-300"
 			rowClassName="border-b border-zinc-100 last:border-b-0 dark:border-zinc-800"
 			scrollClassName="max-h-[478px] overflow-auto"
