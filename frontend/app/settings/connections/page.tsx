@@ -3,15 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { redirect } from 'next/navigation';
-import { connectionsApi } from '@/api/connections';
 import { ConnectionsView } from '@/components/connectionsPage/ConnectionsView';
+import { readConnectionsEnvSource } from '@/lib/server/connections';
 
 export default async function ConnectionsSettingsPage() {
 	// Connections from CONNECTION_STRINGS are fixed by config and cannot be
 	// created, edited or removed here, which is why SettingsNav hides this
 	// section. Hiding the link is not enough on its own: a bookmark or a typed
 	// URL would still reach a page whose every action is a dead end.
-	const envManaged = await connectionsApi.isEnvSource();
+	const envManaged = await readConnectionsEnvSource();
 	if (envManaged === true) {
 		redirect('/settings/zones');
 	}
