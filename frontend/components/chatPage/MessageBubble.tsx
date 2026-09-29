@@ -47,7 +47,8 @@ const QueryResultsSection = ({
 		{sqlResponse && !parsedTable && (
 			<div className="group relative overflow-hidden rounded-lg bg-zinc-900 dark:bg-zinc-950">
 				<div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1.5">
-					<span className="text-xs font-medium text-secondary">Raw</span>
+					{/* Dark in both themes, so the light-theme text tokens do not apply here. */}
+					<span className="text-xs font-medium text-zinc-400">Raw</span>
 					<CopyButton text={sqlResponse} />
 				</div>
 				<pre className="overflow-x-auto p-3 text-xs leading-relaxed text-zinc-100">

@@ -28,7 +28,7 @@ export const SearchInput = ({
 		className={`flex items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 transition-colors focus-within:border-[#76b900] focus-within:ring-2 focus-within:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 ${className}`}
 	>
 		<svg
-			className="h-4 w-4 shrink-0 text-secondary"
+			className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-400"
 			viewBox="0 0 20 20"
 			fill="currentColor"
 			aria-hidden
