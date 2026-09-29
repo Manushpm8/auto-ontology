@@ -117,6 +117,13 @@ export const Table = <T,>({
 						onKeyDown={
 							onRowClick
 								? (e) => {
+										// Only the row's own keystrokes. Enter and Space
+										// belong to whatever is focused, so a nested
+										// control — an action menu, a link in a cell —
+										// would otherwise have its activation swallowed
+										// by `preventDefault` and navigate the row
+										// instead.
+										if (e.target !== e.currentTarget) return;
 										if (e.key === 'Enter' || e.key === ' ') {
 											e.preventDefault();
 											onRowClick(row, index);
