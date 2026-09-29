@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
-import { Breadcrumbs } from '@/common/Breadcrumbs';
+import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 import { Button } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
@@ -28,6 +28,7 @@ import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import { CertificationStatus } from '@/enums/certification';
+import { useBreadcrumbTrail } from '@/contexts/BreadcrumbContext';
 import { TagItemType } from '@/enums/tags';
 import { ToastVariant } from '@/enums/toast';
 import { attributeStatus } from '@/lib/certification';
@@ -43,6 +44,37 @@ import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
 import type { ColumnAttribute, SqlAttribute, Term, TermCount, TermDetail } from '@/types/terms';
+
+/**
+ * Where the page sits under the Terms crumb the top bar already draws. The
+ * ids stand in until the names have loaded, so the trail never collapses to a
+ * blank crumb mid-fetch.
+ */
+const termFocusTrail = ({
+	focusId,
+	sqlAttrId,
+	colAttrId,
+	termName,
+	sqlAttrName,
+	colAttrName,
+}: {
+	focusId: string | null;
+	sqlAttrId: string | null;
+	colAttrId: string | null;
+	termName?: string;
+	sqlAttrName?: string;
+	colAttrName?: string;
+}): BreadcrumbItem[] => {
+	if (focusId == null) return [];
+
+	const term: BreadcrumbItem = {
+		label: termName ?? focusId,
+		href: `/terms?focus=${encodeURIComponent(focusId)}`,
+	};
+	if (sqlAttrId != null) return [term, { label: sqlAttrName ?? sqlAttrId }];
+	if (colAttrId != null) return [term, { label: colAttrName ?? colAttrId }];
+	return [term];
+};
 
 type TermCardProps = {
 	term: Term;
@@ -1227,22 +1259,24 @@ export const TermsView = () => {
 	// Same server-rolled-up value the list card shows, so the two can't disagree.
 	const termCertificationStatus = focusedTerm?.certification ?? CertificationStatus.Pending;
 
+	// Breadcrumbs are drawn once, by the top bar; the focused pages only say
+	// which term — and which of its attributes — they are showing.
+	useBreadcrumbTrail(
+		termFocusTrail({
+			focusId,
+			sqlAttrId,
+			colAttrId,
+			termName: focusedTerm?.name ?? focusedSqlAttr?.term_name ?? focusedColAttr?.term_name,
+			sqlAttrName: focusedSqlAttr?.name,
+			colAttrName: focusedColAttr?.name,
+		}),
+	);
+
 	if (focusId != null && sqlAttrId != null) {
-		const termTitle = focusedTerm?.name ?? focusedSqlAttr?.term_name ?? focusId;
 		const sqlAttrTitle = focusedSqlAttr?.name ?? sqlAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<Breadcrumbs
-						items={[
-							{ label: 'Terms', href: '/terms' },
-							{
-								label: termTitle,
-								href: `/terms?focus=${encodeURIComponent(focusId)}`,
-							},
-							{ label: sqlAttrTitle },
-						]}
-					/>
 					<div className="ml-auto flex shrink-0 items-center gap-1">
 						{sqlAttrEditing ? null : (
 							<>
@@ -1373,21 +1407,10 @@ export const TermsView = () => {
 	}
 
 	if (focusId != null && colAttrId != null) {
-		const termTitle = focusedTerm?.name ?? focusedColAttr?.term_name ?? focusId;
 		const colAttrTitle = focusedColAttr?.name ?? colAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<Breadcrumbs
-						items={[
-							{ label: 'Terms', href: '/terms' },
-							{
-								label: termTitle,
-								href: `/terms?focus=${encodeURIComponent(focusId)}`,
-							},
-							{ label: colAttrTitle },
-						]}
-					/>
 					<div className="ml-auto flex shrink-0 items-center gap-1">
 						{columnAttrEditing ? null : (
 							<Button
@@ -1441,13 +1464,9 @@ export const TermsView = () => {
 	}
 
 	if (focusId != null) {
-		const termTitle = focusedTerm?.name ?? focusId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<Breadcrumbs
-						items={[{ label: 'Terms', href: '/terms' }, { label: termTitle }]}
-					/>
 					<CertificationBadge status={termCertificationStatus} />
 					<div className="ml-auto flex items-center gap-2">
 						{termEditing ? null : (

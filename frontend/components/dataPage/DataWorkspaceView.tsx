@@ -8,8 +8,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
 import type { NodePatch } from '@/api/types';
+import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 import { EmptyState } from '@/common/EmptyState';
 import { IconName } from '@/common/icons';
+import { useBreadcrumbTrail } from '@/contexts/BreadcrumbContext';
 import { SkeletonBlock, SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { DataModels } from '@/enums/datasources';
 import { EmptyStateVariant } from '@/enums/emptyState';
@@ -21,6 +23,7 @@ import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import { Toast } from '@/common/Toast';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
+import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { buildTreeFocusPageFormat, resolveTreeNode } from '@/lib/data/tree-focus-page';
 import { TAGS_SECTION_ID, fetchTagOptions, stagedTagIds, syncTags } from '@/lib/tags';
 import {
@@ -43,6 +46,53 @@ type CatalogNodePatch = Partial<Database> & Partial<Schema> & Partial<Table> & P
  * depth opened — rather than off the tree, so it also answers before the branch
  * has been hydrated, which is when the page decides whether to read the tags.
  */
+/**
+ * The catalog node the workspace has open, as crumbs under "All Data". Each
+ * ancestor links to its own truncated focus, which is how the catalog already
+ * addresses them. An unresolved focus — a branch still loading, or an id that
+ * no longer exists — contributes nothing rather than a placeholder crumb.
+ */
+const catalogTrail = (focusId: string | null, databases: Database[]): BreadcrumbItem[] => {
+	const resolved = resolveTreeNode(focusId, databases);
+	const crumb = (label: string, ...ids: string[]): BreadcrumbItem => ({
+		label,
+		href: catalogPathFromFocusId(ids.join('|')),
+	});
+
+	switch (resolved.type) {
+		case DataModels.DB: {
+			const { database } = resolved;
+			return [crumb(database.name, database.id)];
+		}
+		case DataModels.SCHEMA: {
+			const { database, schema } = resolved;
+			return [
+				crumb(database.name, database.id),
+				crumb(schema.schema_name, database.id, schema.id),
+			];
+		}
+		case DataModels.TABLE: {
+			const { database, schema, table } = resolved;
+			return [
+				crumb(database.name, database.id),
+				crumb(schema.schema_name, database.id, schema.id),
+				crumb(table.name, database.id, schema.id, table.id),
+			];
+		}
+		case DataModels.COLUMN: {
+			const { database, schema, table, column } = resolved;
+			return [
+				crumb(database.name, database.id),
+				crumb(schema.schema_name, database.id, schema.id),
+				crumb(table.name, database.id, schema.id, table.id),
+				crumb(column.column_name, database.id, schema.id, table.id, column.id),
+			];
+		}
+		default:
+			return [];
+	}
+};
+
 const focusedTagType = (focusId: string | null): TagItemType | null => {
 	const depth = focusId?.split('|').filter((segment) => segment.length > 0).length ?? 0;
 	if (depth === 3) return TagItemType.Table;
@@ -193,6 +243,10 @@ export function DataWorkspaceView() {
 		const segments = treeFocusId.split('|').filter((s) => s.length > 0);
 		return segments[segments.length - 1] ?? null;
 	}, [treeFocusId]);
+
+	// Breadcrumbs live in the top bar, so the workspace names the catalog node
+	// it has open rather than drawing a second trail of its own.
+	useBreadcrumbTrail(catalogTrail(treeFocusId, treeDatabases));
 
 	// Merges a patch into the matching catalog node anywhere in the tree and
 	// bumps the epoch so the detail page rebuilds with the new values.

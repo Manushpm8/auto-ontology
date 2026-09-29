@@ -8,7 +8,6 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 import { tagsApi } from '@/api/tags';
-import { Breadcrumbs } from '@/common/Breadcrumbs';
 import { formatDate } from '@/common/date';
 import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
@@ -16,6 +15,7 @@ import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
 import { AUTO_GENERATED_LABEL } from '@/constants/tags';
+import { useBreadcrumbTrail } from '@/contexts/BreadcrumbContext';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { TagItemType } from '@/enums/tags';
 import { useInfiniteList } from '@/hooks/useInfiniteList';
@@ -226,13 +226,17 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 		if (path != null) router.push(path);
 	};
 
+	// The tag's crumb joins the Settings › Tags trail the top bar already draws,
+	// and only once the name is known: the id in the URL is not a label, and an
+	// empty crumb after the separator reads as a tag whose name is blank.
+	useBreadcrumbTrail(tag == null ? [] : [{ label: tag.name }]);
+
 	// Nothing to head the page with, so it gets its own screen rather than an
-	// error banner under a blank title. The action matters: the breadcrumb's
-	// last crumb is plain text, so a lone "Tags" crumb is not a way back.
+	// error banner under a blank title. The action matters: the trail ends at
+	// "Tags" here, and a crumb the reader is already on is not a way back.
 	if (error != null) {
 		return (
 			<div className={`w-full space-y-5 ${TAGS_PANEL_PADDING}`}>
-				<Breadcrumbs items={[{ label: 'Tags' }]} />
 				<EmptyState
 					icon={IconName.Tag}
 					title="This tag could not be opened"
@@ -254,17 +258,6 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 			error={items.length > 0 ? itemsError : null}
 		>
 			<div className="w-full space-y-5">
-				{/* The tag's own crumb is added only once its name is known: the id in
-				    the URL is not a label, and an empty crumb after the separator
-				    reads as a tag whose name is blank. */}
-				<Breadcrumbs
-					items={
-						tag == null
-							? [{ label: 'Tags' }]
-							: [{ label: 'Tags', href: TAGS_PATH }, { label: tag.name }]
-					}
-				/>
-
 				<div className="flex items-center gap-2">
 					<Icon
 						name={IconName.Tag}
