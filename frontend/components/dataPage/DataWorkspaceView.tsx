@@ -38,20 +38,6 @@ export type DataWorkspaceViewProps = Record<string, never>;
 
 type CatalogNodePatch = Partial<Database> & Partial<Schema> & Partial<Table> & Partial<Column>;
 
-/**
- * Which kind of tag target the focused node is, or null for the kinds that
- * carry no tags.
- *
- * Read off the focus path — `dbId|schemaId|tableId|columnId` truncated to the
- * depth opened — rather than off the tree, so it also answers before the branch
- * has been hydrated, which is when the page decides whether to read the tags.
- */
-/**
- * The catalog node the workspace has open, as crumbs under "All Data". Each
- * ancestor links to its own truncated focus, which is how the catalog already
- * addresses them. An unresolved focus — a branch still loading, or an id that
- * no longer exists — contributes nothing rather than a placeholder crumb.
- */
 const catalogTrail = (focusId: string | null, databases: Database[]): BreadcrumbItem[] => {
 	const resolved = resolveTreeNode(focusId, databases);
 	const crumb = (label: string, ...ids: string[]): BreadcrumbItem => ({
@@ -93,6 +79,14 @@ const catalogTrail = (focusId: string | null, databases: Database[]): Breadcrumb
 	}
 };
 
+/**
+ * Which kind of tag target the focused node is, or null for the kinds that
+ * carry no tags.
+ *
+ * Read off the focus path — `dbId|schemaId|tableId|columnId` truncated to the
+ * depth opened — rather than off the tree, so it also answers before the branch
+ * has been hydrated, which is when the page decides whether to read the tags.
+ */
 const focusedTagType = (focusId: string | null): TagItemType | null => {
 	const depth = focusId?.split('|').filter((segment) => segment.length > 0).length ?? 0;
 	if (depth === 3) return TagItemType.Table;

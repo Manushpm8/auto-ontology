@@ -26,8 +26,6 @@ const SECTION_LABELS: Record<string, string> = {
 	'/settings': 'Settings',
 };
 
-// Settings keeps every section under one route prefix, so the section a reader
-// is actually looking at exists only in the path, not in `SECTION_LABELS`.
 const SETTINGS_SECTION_LABELS: Record<string, string> = {
 	connections: 'Connections',
 	zones: 'Zones',
@@ -61,11 +59,6 @@ const crumbsForPath = (path: string): BreadcrumbItem[] => {
 	return label == null ? [section] : [section, { label, href: `/settings/${slug}` }];
 };
 
-/**
- * Identity of a trail by value. Pages rebuild their crumbs on every render, so
- * both the setter and the publishing hook compare content rather than the
- * array they were handed.
- */
 const trailKey = (items: BreadcrumbItem[]): string =>
 	items.map((item) => `${item.label}\u0000${item.href ?? ''}`).join('\u0001');
 
@@ -105,8 +98,7 @@ export const BreadcrumbProvider = ({ children }: { children: ReactNode }) => {
 				? [parent, ...current]
 				: current,
 		);
-		// The page owns everything below its section, and the page being left
-		// has already stopped rendering by the time the next one publishes.
+
 		setTrailRaw(EMPTY_TRAIL);
 		setPrevPath(pathname);
 	}
@@ -126,21 +118,9 @@ export const BreadcrumbProvider = ({ children }: { children: ReactNode }) => {
 
 export const useBreadcrumbs = () => useContext(BreadcrumbContext);
 
-/**
- * Names the caller's position below its section crumb — the focused term, the
- * opened tag, the catalog node. The top bar is the only place breadcrumbs are
- * drawn, so a page states where it is instead of rendering its own trail.
- *
- * Pass an empty array from a page that is showing its list rather than one
- * entity; the trail is also dropped when the caller unmounts.
- */
 export const useBreadcrumbTrail = (items: BreadcrumbItem[]) => {
 	const { setTrail } = useBreadcrumbs();
 
-	// Callers build the array inline, so there is no stable identity to key an
-	// effect on. Republishing after every render is what keeps the trail in
-	// step with names that arrive late; `setTrail` settles when the content is
-	// unchanged, so the repeat costs a string compare and no render.
 	useEffect(() => {
 		setTrail(items);
 	});
