@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { Button, SelectButton } from '@/common/Button';
@@ -12,7 +12,9 @@ import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
+import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { PopoverMenu } from '@/common/PopoverMenu';
+import { SearchInput } from '@/common/SearchInput';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
@@ -20,6 +22,8 @@ import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { analyses } from '@/api/analyses';
 import { pqlAnalyses } from '@/api/pqlAnalyses';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { DEFAULT_PAGE_SIZE, useInfiniteList } from '@/hooks/useInfiniteList';
 
 export type AnalysisViewProps = Record<string, never>;
 
@@ -63,9 +67,12 @@ export const AnalysisView = () => {
 	}
 	const mode: AnalysisMode = tabOverride ?? urlMode;
 	const setMode = (next: AnalysisMode) => setTabOverride(next);
-	const [items, setItems] = useState<AnalysisItem[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [searchQuery, setSearchQuery] = useState('');
+	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
+	// Keeps the search box off the screen until the list has answered once, so
+	// it doesn't sit above the first-load skeleton. Not reset between tabs: the
+	// query carries over, and so should the control that shows it.
+	const [hasLoaded, setHasLoaded] = useState(false);
 	const [loadingSkeletonCount, setLoadingSkeletonCount] = useState(3);
 
 	const [modalOpen, setModalOpen] = useState(false);
@@ -97,53 +104,66 @@ export const AnalysisView = () => {
 		return () => window.removeEventListener('resize', updateLoadingSkeletonCount);
 	}, []);
 
-	useEffect(() => {
-		let cancelled = false;
-
-		(async () => {
-			setLoading(true);
+	const fetchAnalysesPage = useCallback(
+		async (skip: number, limit: number) => {
+			const params = {
+				...(debouncedSearchQuery ? { query: debouncedSearchQuery } : {}),
+				skip,
+				limit,
+			};
 			if (isPql) {
-				const res = await pqlAnalyses.list();
-				if (cancelled) return;
-				if (res.error) {
-					setError(res.message ?? 'Failed to load PQL analyses');
-					setItems([]);
-				} else {
-					setError(null);
-					setItems(
-						(res.data ?? []).map((a) => ({
-							id: a.id,
-							name: a.name,
-							description: a.description,
-							code: a.pql,
-						})),
-					);
-				}
-			} else {
-				const res = await analyses.list();
-				if (cancelled) return;
-				if (res.error) {
-					setError(res.message ?? 'Failed to load custom analyses');
-					setItems([]);
-				} else {
-					setError(null);
-					setItems(
-						(res.data ?? []).map((a) => ({
-							id: a.id,
-							name: a.name,
-							description: a.description,
-							code: a.sql,
-						})),
-					);
-				}
+				const res = await pqlAnalyses.list(params);
+				if (res.error) return { error: res.message ?? 'Failed to load PQL analyses' };
+				setHasLoaded(true);
+				return {
+					items: (res.data ?? []).map((a) => ({
+						id: a.id,
+						name: a.name,
+						description: a.description,
+						code: a.pql,
+					})),
+					total: res.total ?? 0,
+				};
 			}
-			setLoading(false);
-		})();
+			const res = await analyses.list(params);
+			if (res.error) return { error: res.message ?? 'Failed to load custom analyses' };
+			setHasLoaded(true);
+			return {
+				items: (res.data ?? []).map((a) => ({
+					id: a.id,
+					name: a.name,
+					description: a.description,
+					code: a.sql,
+				})),
+				total: res.total ?? 0,
+			};
+		},
+		[debouncedSearchQuery, isPql],
+	);
 
-		return () => {
-			cancelled = true;
-		};
-	}, [mode, isPql]);
+	const {
+		items,
+		setItems,
+		isLoading: loading,
+		isLoadingMore,
+		error,
+		hasMore,
+		loadMore,
+		reload,
+	} = useInfiniteList(fetchAnalysesPage, {
+		pageSize: DEFAULT_PAGE_SIZE,
+		itemKey: (item) => item.id,
+	});
+
+	// A `?focus=` link can name an analysis that sits past the pages loaded so
+	// far, and nothing would bring it in — the reader was sent here to look at
+	// that one card, not to scroll for it. Keep asking for the next page until
+	// it arrives or the list runs out.
+	useEffect(() => {
+		if (focusId == null || loading || isLoadingMore || !hasMore) return;
+		if (items.some((item) => item.id === focusId)) return;
+		loadMore();
+	}, [focusId, items, loading, isLoadingMore, hasMore, loadMore]);
 
 	useEffect(() => {
 		if (focusId == null || loading) return;
@@ -305,13 +325,15 @@ export const AnalysisView = () => {
 		}
 
 		const saved = savedItem;
-		setItems((prev) => {
-			if (editingId !== null) {
-				return prev.map((a) => (a.id === editingId ? saved : a));
-			}
-			const without = prev.filter((a) => a.id !== saved.id);
-			return [saved, ...without];
-		});
+		if (editingId !== null) {
+			setItems((prev) => prev.map((a) => (a.id === editingId ? saved : a)));
+		} else {
+			// Where a new analysis belongs is the server's call: the list is
+			// ordered by name and read a page at a time, so putting it on top
+			// would show it in the wrong place and the page holding its real
+			// position would send it a second time. Start the list over.
+			reload();
+		}
 		setModalOpen(false);
 	};
 
@@ -352,7 +374,26 @@ export const AnalysisView = () => {
 				</div>
 			</header>
 
-			<div className="flex-1 overflow-y-auto px-6 py-6">
+			<InfiniteScroll
+				className="flex-1 px-6 py-6"
+				onLoadMore={loadMore}
+				isLoading={isLoadingMore}
+				hasMore={hasMore}
+				// Only a failed *first* page is rendered below — a failed later
+				// page keeps the cards already loaded and gets its own retry
+				// control instead (see `error` on `InfiniteScroll`).
+				error={items.length > 0 ? error : null}
+			>
+				{hasLoaded && (
+					<SearchInput
+						value={searchQuery}
+						onChange={setSearchQuery}
+						placeholder={`Search ${MODE_LABEL[mode]} analyses…`}
+						aria-label={`Search ${MODE_LABEL[mode]} analyses`}
+						className="mb-6 w-full"
+					/>
+				)}
+
 				{loading && (
 					<div
 						className="flex min-h-[calc(100dvh-7rem)] flex-col gap-4"
@@ -365,7 +406,7 @@ export const AnalysisView = () => {
 					</div>
 				)}
 
-				{!loading && error != null && (
+				{!loading && error != null && items.length === 0 && (
 					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
 						<h2 className="text-lg font-semibold tracking-tight text-red-800 dark:text-red-300">
 							Couldn&apos;t load {MODE_LABEL[mode]} analyses
@@ -379,11 +420,15 @@ export const AnalysisView = () => {
 				{!loading && error == null && items.length === 0 && (
 					<EmptyState
 						variant={EmptyStateVariant.Borderless}
-						title={`No ${MODE_LABEL[mode]} Analyses found`}
+						title={
+							debouncedSearchQuery
+								? `No ${MODE_LABEL[mode]} Analyses Match Your Search`
+								: `No ${MODE_LABEL[mode]} Analyses found`
+						}
 					/>
 				)}
 
-				{!loading && error == null && items.length > 0 && (
+				{!loading && items.length > 0 && (
 					<ul className="flex flex-col gap-4">
 						{items.map((a) => (
 							<li
@@ -460,7 +505,7 @@ export const AnalysisView = () => {
 						))}
 					</ul>
 				)}
-			</div>
+			</InfiniteScroll>
 
 			<ModalCreateNewItem
 				open={modalOpen}

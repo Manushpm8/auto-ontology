@@ -2,11 +2,22 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { requests } from './requests';
+import { pageQuery, requests } from './requests';
 import type { CustomAnalysis } from '@/types/analysis';
-import type { ResponseWithCount, ResponseWithError } from './types';
+import type { ApiPagedResponse, PageParams, ResponseWithCount, ResponseWithError } from './types';
 
-type ListResponse = ResponseWithError<ResponseWithCount<CustomAnalysis[]>>;
+/** One page of the list: `count` is this page, `total` every match. */
+type ListResult = ResponseWithCount<CustomAnalysis[]> & { total: number };
+type ListResponse = ApiPagedResponse<CustomAnalysis[]>;
+
+export type CustomAnalysesListParams = PageParams & {
+	/**
+	 * Case-insensitive substring filter on the analysis name.
+	 *
+	 * Goes up as `?q=`, which is what the route calls it.
+	 */
+	query?: string;
+};
 
 export type CustomAnalysisCreatePayload = {
 	name: string;
@@ -20,8 +31,11 @@ type DeleteResponse = ResponseWithError<{ data: { id: string } }>;
 type ValidateResponse = ResponseWithError<{ data: { valid: boolean; sql: string } }>;
 
 export const analyses = {
-	list: (): Promise<ListResponse> =>
-		requests.get<ResponseWithCount<CustomAnalysis[]>>('custom-analyses'),
+	list: (params?: CustomAnalysesListParams): Promise<ListResponse> =>
+		requests.get<ListResult>('custom-analyses', {
+			...(params?.query ? { q: params.query } : {}),
+			...pageQuery(params),
+		}),
 	validate: (sql: string): Promise<ValidateResponse> =>
 		requests.post<{ data: { valid: boolean; sql: string } }>('custom-analyses/validate', {
 			sql,
