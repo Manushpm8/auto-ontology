@@ -69,9 +69,6 @@ export const AnalysisView = () => {
 	const setMode = (next: AnalysisMode) => setTabOverride(next);
 	const [searchQuery, setSearchQuery] = useState('');
 	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
-	// Keeps the search box off the screen until the list has answered once, so
-	// it doesn't sit above the first-load skeleton. Not reset between tabs: the
-	// query carries over, and so should the control that shows it.
 	const [hasLoaded, setHasLoaded] = useState(false);
 	const [loadingSkeletonCount, setLoadingSkeletonCount] = useState(3);
 
@@ -155,10 +152,6 @@ export const AnalysisView = () => {
 		itemKey: (item) => item.id,
 	});
 
-	// A `?focus=` link can name an analysis that sits past the pages loaded so
-	// far, and nothing would bring it in — the reader was sent here to look at
-	// that one card, not to scroll for it. Keep asking for the next page until
-	// it arrives or the list runs out.
 	useEffect(() => {
 		if (focusId == null || loading || isLoadingMore || !hasMore) return;
 		if (items.some((item) => item.id === focusId)) return;
@@ -230,7 +223,10 @@ export const AnalysisView = () => {
 			setDeleteError(res.message ?? `Failed to delete ${MODE_LABEL[mode]} analysis`);
 			return;
 		}
-		setItems((prev) => prev.filter((a) => a.id !== deletingItem.id));
+		// Not a client-side filter: the next page is read from the count of
+		// rows fetched so far, and the delete shifted every later row up one,
+		// so one analysis would never be read at all.
+		reload();
 		setDeletingItem(null);
 	};
 
@@ -325,14 +321,15 @@ export const AnalysisView = () => {
 		}
 
 		const saved = savedItem;
-		if (editingId !== null) {
-			setItems((prev) => prev.map((a) => (a.id === editingId ? saved : a)));
-		} else {
-			// Where a new analysis belongs is the server's call: the list is
-			// ordered by name and read a page at a time, so putting it on top
-			// would show it in the wrong place and the page holding its real
-			// position would send it a second time. Start the list over.
+		// A create and a rename both move rows in the server's name order,
+		// which leaves the next page read from a window that no longer lines
+		// up with what is held. An edit that keeps the name cannot reorder
+		// anything, so it patches the card in place.
+		const renamed = items.some((a) => a.id === editingId && a.name !== saved.name);
+		if (editingId === null || renamed) {
 			reload();
+		} else {
+			setItems((prev) => prev.map((a) => (a.id === editingId ? saved : a)));
 		}
 		setModalOpen(false);
 	};
@@ -379,9 +376,6 @@ export const AnalysisView = () => {
 				onLoadMore={loadMore}
 				isLoading={isLoadingMore}
 				hasMore={hasMore}
-				// Only a failed *first* page is rendered below — a failed later
-				// page keeps the cards already loaded and gets its own retry
-				// control instead (see `error` on `InfiniteScroll`).
 				error={items.length > 0 ? error : null}
 			>
 				{hasLoaded && (
@@ -423,7 +417,7 @@ export const AnalysisView = () => {
 						title={
 							debouncedSearchQuery
 								? `No ${MODE_LABEL[mode]} Analyses Match Your Search`
-								: `No ${MODE_LABEL[mode]} Analyses found`
+								: `No ${MODE_LABEL[mode]} Analyses Found`
 						}
 					/>
 				)}
