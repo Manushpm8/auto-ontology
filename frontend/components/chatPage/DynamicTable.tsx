@@ -38,7 +38,7 @@ export const DynamicTable = ({ table }: DynamicTableProps) => {
 	);
 
 	if (columns.length === 0 || rows.length === 0) {
-		return <EmptyState variant={EmptyStateVariant.Inline} title="No data available" />;
+		return <EmptyState variant={EmptyStateVariant.Inline} title="No Data Available" />;
 	}
 
 	return (

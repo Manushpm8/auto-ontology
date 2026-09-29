@@ -141,7 +141,7 @@ export const ActiveDataCard = ({
 					<DetailLinkButton
 						count={node.columnsCount}
 						onClick={onShowColumns}
-						label="View columns"
+						label="View Columns"
 					/>
 				</span>
 				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">
@@ -165,7 +165,7 @@ export const ActiveDataCard = ({
 					<DetailLinkButton
 						count={node.relationshipCount}
 						onClick={onShowRelationships}
-						label="View related tables"
+						label="View Related Tables"
 					/>
 				</span>
 			</div>

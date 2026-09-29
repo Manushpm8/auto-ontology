@@ -159,7 +159,7 @@ const ConnectionDetails = ({ hops }: { hops: ExplorationLinkPathHopDto[] | null 
 			<EmptyState
 				variant={EmptyStateVariant.Inline}
 				icon={IconName.Link}
-				title="No connection found"
+				title="No Connection Found"
 				description="These terms no longer share a common table."
 			/>
 		);

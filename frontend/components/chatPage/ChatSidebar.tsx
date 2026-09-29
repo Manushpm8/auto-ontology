@@ -135,7 +135,7 @@ function ConversationItem({
 
 			<ConfirmModal
 				open={confirmDelete}
-				title="Delete conversation"
+				title="Delete Conversation"
 				message="Are you sure you want to delete this conversation? This action cannot be undone."
 				onConfirm={() => {
 					setConfirmDelete(false);
@@ -220,7 +220,7 @@ export const ChatSidebar = ({
 					) : conversations.length === 0 ? (
 						<EmptyState
 							variant={EmptyStateVariant.Inline}
-							title="No conversations yet"
+							title="No Conversations Yet"
 						/>
 					) : (
 						<ul className="space-y-0.5">

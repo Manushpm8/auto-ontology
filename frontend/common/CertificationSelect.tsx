@@ -75,7 +75,7 @@ export const CertificationSelect = ({
 					type="button"
 					onClick={toggle}
 					disabled={saving}
-					title={saving ? 'Saving certification…' : 'Set certification'}
+					title={saving ? 'Saving Certification…' : 'Set Certification'}
 					className={`inline-flex items-center gap-1 ${saving ? 'cursor-default opacity-70' : 'cursor-pointer'}`}
 				>
 					<CertificationBadge status={status} iconOnly={!showLabel} />

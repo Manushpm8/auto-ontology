@@ -55,7 +55,7 @@ const PromptEditor = ({
 						value={value}
 						onChange={(e) => setValue(e.target.value)}
 						rows={3}
-						placeholder="Enter your custom prompt prefix…"
+						placeholder="Enter Your Custom Prompt Prefix…"
 						className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-600"
 					/>
 					<div className="flex justify-end gap-2">
@@ -287,7 +287,7 @@ const AcronymsSection = () => {
 			) : (
 				<EmptyState
 					variant={EmptyStateVariant.Inline}
-					title="No Glossary definitions created yet"
+					title="No Glossary Definitions Created Yet"
 					action={{
 						label: 'Add Definition',
 						icon: IconName.ChatBubble,
@@ -343,7 +343,7 @@ const AcronymsSection = () => {
 
 			<ConfirmModal
 				open={confirmDelete !== null}
-				title="Delete acronym"
+				title="Delete Acronym"
 				message="Are you sure you want to delete this acronym? This action cannot be undone."
 				onConfirm={handleDelete}
 				onCancel={() => setConfirmDelete(null)}
@@ -507,7 +507,7 @@ export default function SemanticInputSettingsPage() {
 			<main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 				<div className="w-full space-y-5">
 					<SettingsSection
-						title="Custom prompts"
+						title="Custom Prompts"
 						subtitle="Default prompt prefixes automatically applied to all user prompts in this account"
 						prompts={prompts}
 						loading={loading}

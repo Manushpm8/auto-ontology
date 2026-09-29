@@ -201,7 +201,7 @@ export const ConnectionsView = () => {
 
 			<ConfirmModal
 				open={deletingConnection !== null}
-				title="Remove connection"
+				title="Remove Connection"
 				message={
 					deletingConnection ? (
 						<>

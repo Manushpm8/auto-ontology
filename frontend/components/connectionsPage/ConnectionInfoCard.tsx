@@ -114,7 +114,7 @@ export const ConnectionInfoCard = ({
 						/>
 						<span className="min-w-0">
 							<span className="block text-xs font-medium text-heading dark:text-zinc-200">
-								Authenticate as signed-in user
+								Authenticate as Signed-In User
 							</span>
 							<span className="block text-xs text-secondary dark:text-zinc-400">
 								{ssoFederationOn

@@ -631,7 +631,7 @@ export default function ZonesSettingsPage() {
 							shadow
 						>
 							<Icon name={IconName.Plus} className="h-4 w-4" />
-							Create new zone
+							Create New Zone
 						</Button>
 					</div>
 				</div>
@@ -680,7 +680,7 @@ export default function ZonesSettingsPage() {
 					<EmptyState
 						variant={EmptyStateVariant.Inline}
 						icon={IconName.Key}
-						title="No zones found"
+						title="No Zones Found"
 						className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
 					/>
 				)}
@@ -688,7 +688,7 @@ export default function ZonesSettingsPage() {
 			<ModalWithSteps
 				open={modalOpen}
 				onClose={closeZoneModal}
-				title={modalMode === 'edit' ? 'Edit zone' : 'Create new zone'}
+				title={modalMode === 'edit' ? 'Edit Zone' : 'Create New Zone'}
 				steps={['Info', 'Data to Connect']}
 				activeStep={activeStep}
 				onActiveStepChange={(step) => setActiveStep(step)}
@@ -715,7 +715,7 @@ export default function ZonesSettingsPage() {
 										disabled: submitting,
 									},
 									{
-										label: 'Create zone',
+										label: 'Create Zone',
 										onClick: () => {
 											void handleSubmit();
 										},
@@ -731,7 +731,7 @@ export default function ZonesSettingsPage() {
 										disabled: submitting,
 									},
 									{
-										label: 'Save changes',
+										label: 'Save Changes',
 										onClick: () => {
 											void handleSubmit();
 										},
@@ -752,7 +752,7 @@ export default function ZonesSettingsPage() {
 									type="text"
 									value={name}
 									onChange={(e) => setName(e.target.value)}
-									placeholder="Zone name"
+									placeholder="Zone Name"
 									className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600'}`}
 								/>
 								{nameExists ? (
@@ -775,7 +775,7 @@ export default function ZonesSettingsPage() {
 							<textarea
 								value={description}
 								onChange={(e) => setDescription(e.target.value)}
-								placeholder="Optional description"
+								placeholder="Optional Description"
 								rows={3}
 								className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 							/>
@@ -809,7 +809,7 @@ export default function ZonesSettingsPage() {
 			</ModalWithSteps>
 			<ConfirmModal
 				open={confirmDeleteZone !== null}
-				title="Delete zone"
+				title="Delete Zone"
 				message="Are you sure you want to delete this zone? This action cannot be undone."
 				onConfirm={handleConfirmZoneDelete}
 				onCancel={handleCancelZoneDelete}

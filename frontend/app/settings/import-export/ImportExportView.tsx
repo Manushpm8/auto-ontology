@@ -183,7 +183,7 @@ export const ImportExportView = () => {
 
 			<section className="rounded-lg border border-zinc-200 p-5 dark:border-zinc-700">
 				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-					Export model
+					Export Model
 				</h2>
 				<p className="mt-1 text-xs text-secondary">
 					Download the catalog and semantic layer for the selected databases as a YAML
@@ -228,7 +228,7 @@ export const ImportExportView = () => {
 				) : databasesError ? (
 					<p className="mt-4 text-sm text-red-600 dark:text-red-400">{databasesError}</p>
 				) : databases.length === 0 ? (
-					<p className="mt-4 text-sm text-secondary">No databases found.</p>
+					<p className="mt-4 text-sm text-secondary">No Databases Found.</p>
 				) : (
 					<div className="mt-4 space-y-2">
 						<label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/80">
@@ -287,7 +287,7 @@ export const ImportExportView = () => {
 
 			<section className="rounded-lg border border-zinc-200 p-5 dark:border-zinc-700">
 				<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
-					Import model
+					Import Model
 				</h2>
 				<p className="mt-1 text-xs text-secondary">
 					Upload a native Auto Ontology or Apache Ossie model YAML file to write it into
@@ -312,7 +312,7 @@ export const ImportExportView = () => {
 				<div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 					<div className="flex flex-col">
 						<span className="text-sm font-medium text-heading dark:text-zinc-100">
-							Replace existing data
+							Replace Existing Data
 						</span>
 						<span className="text-xs text-secondary">
 							Deletes semantic-layer data for the imported databases that isn&apos;t
@@ -321,7 +321,7 @@ export const ImportExportView = () => {
 					</div>
 					<Toggle
 						checked={replace}
-						aria-label="Replace existing data"
+						aria-label="Replace Existing Data"
 						onChange={setReplace}
 					/>
 				</div>
@@ -329,7 +329,7 @@ export const ImportExportView = () => {
 				<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 					<div className="flex flex-col">
 						<span className="text-sm font-medium text-heading dark:text-zinc-100">
-							Regenerate embeddings
+							Regenerate Embeddings
 						</span>
 						<span className="text-xs text-secondary">
 							Embeds newly created nodes and pushes them into the vector databases.
@@ -337,7 +337,7 @@ export const ImportExportView = () => {
 					</div>
 					<Toggle
 						checked={embed}
-						aria-label="Regenerate embeddings"
+						aria-label="Regenerate Embeddings"
 						onChange={setEmbed}
 					/>
 				</div>
@@ -345,7 +345,7 @@ export const ImportExportView = () => {
 				{importSummary ? (
 					<div className="mt-3 rounded-lg border border-[#76b900]/30 bg-[#76b900]/5 p-3 text-xs text-body dark:text-zinc-300">
 						<p className="font-medium text-heading dark:text-zinc-100">
-							Import summary
+							Import Summary
 						</p>
 						<ul className="mt-1.5 space-y-0.5">
 							<li>Read as {FORMAT_LABEL[importSummary.format]}</li>
@@ -382,14 +382,14 @@ export const ImportExportView = () => {
 
 			<ConfirmModal
 				open={confirmImportOpen}
-				title="Import model"
+				title="Import Model"
 				message={
 					<>
 						This writes <strong>{importFile?.name}</strong> into the catalog and
 						semantic layer.
 						{replace ? (
 							<>
-								Because <strong>Replace existing data </strong> is on,
+								Because <strong>Replace Existing Data </strong> is on,
 								semantic-layer data for the imported databases that isn&apos;t in
 								this file will be deleted. This action cannot be undone.
 							</>

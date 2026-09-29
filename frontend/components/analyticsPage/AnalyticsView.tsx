@@ -185,7 +185,7 @@ export const AnalyticsView = () => {
 				{!loading && error == null && total === 0 && (
 					<EmptyState
 						icon={IconName.ChartLine}
-						title="No analytics recorded yet"
+						title="No Analytics Recorded Yet"
 						description="Analytics are captured automatically when you send messages in a conversation."
 					/>
 				)}

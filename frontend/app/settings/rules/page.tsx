@@ -225,7 +225,7 @@ export default function RulesSettingsPage() {
 						<SearchInput
 							value={query}
 							onChange={setQuery}
-							placeholder="Search rules…"
+							placeholder="Search Rules…"
 							aria-label="Search rules"
 							className="w-full"
 						/>
@@ -394,7 +394,7 @@ export default function RulesSettingsPage() {
 						type="text"
 						value={name}
 						onChange={(event) => setName(event.target.value)}
-						placeholder="Type rule name"
+						placeholder="Type Rule Name"
 						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 					/>
 					{/* The tags and the search are on the information card, and are not
@@ -423,7 +423,7 @@ export default function RulesSettingsPage() {
 			    given the choice of whether to accept it. */}
 			<ConfirmModal
 				open={confirmDelete !== null}
-				title="Delete rule"
+				title="Delete Rule"
 				className="w-[520px] max-w-full"
 				message={
 					confirmDelete == null ? (

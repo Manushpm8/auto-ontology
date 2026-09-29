@@ -119,7 +119,7 @@ export const ActiveTermCard = ({
 					<DetailLinkButton
 						count={node.columnAttributesCount}
 						onClick={onShowColumnAttributes}
-						label="View attribute columns"
+						label="View Attribute Columns"
 					/>
 				</span>
 				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-body dark:border-zinc-700 dark:text-zinc-300">

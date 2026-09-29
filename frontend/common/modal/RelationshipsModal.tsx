@@ -219,7 +219,7 @@ export const RelationshipsModal = ({
 						rowKey={(row) => row.id}
 						pagination={pagination}
 						containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
-						emptyMessage="No related entities"
+						emptyMessage="No Related Entities"
 					/>
 				)}
 			</div>

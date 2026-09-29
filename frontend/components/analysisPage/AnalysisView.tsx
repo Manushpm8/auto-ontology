@@ -347,7 +347,7 @@ export const AnalysisView = () => {
 						shadow
 					>
 						<Icon name={IconName.Plus} className="h-4 w-4" />
-						Create new analysis
+						Create New Analysis
 					</Button>
 				</div>
 			</header>
@@ -379,7 +379,7 @@ export const AnalysisView = () => {
 				{!loading && error == null && items.length === 0 && (
 					<EmptyState
 						variant={EmptyStateVariant.Borderless}
-						title={`No ${MODE_LABEL[mode]} Analyses found`}
+						title={`No ${MODE_LABEL[mode]} Analyses Found`}
 					/>
 				)}
 

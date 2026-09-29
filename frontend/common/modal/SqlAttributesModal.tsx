@@ -112,7 +112,7 @@ export const SqlAttributesModal = ({ term, onClose }: SqlAttributesModalProps) =
 				) : error != null && attributes.length === 0 ? (
 					<p className="text-sm text-red-600 dark:text-red-300">{error}</p>
 				) : attributes.length === 0 ? (
-					<EmptyState variant={EmptyStateVariant.Inline} title="No SQL attributes" />
+					<EmptyState variant={EmptyStateVariant.Inline} title="No SQL Attributes" />
 				) : (
 					<ul className="space-y-4">
 						{attributes.map((attr) => (

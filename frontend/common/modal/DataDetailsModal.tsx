@@ -183,14 +183,14 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 					rowKey={(row) => row.id}
 					pagination={columnsPage.pagination}
 					containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
-					emptyMessage="No columns"
+					emptyMessage="No Columns"
 				/>
 			);
 		}
 
 		if (type === 'queries') {
 			if (details.queries.length === 0) {
-				return <EmptyState variant={EmptyStateVariant.Inline} title="No SQL queries" />;
+				return <EmptyState variant={EmptyStateVariant.Inline} title="No SQL Queries" />;
 			}
 			return (
 				<ul className="space-y-4">

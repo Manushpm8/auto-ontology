@@ -385,7 +385,7 @@ export function DataWorkspaceView() {
 			<EmptyState
 				variant={EmptyStateVariant.Borderless}
 				icon={IconName.Database}
-				title="No Databases found"
+				title="No Databases Found"
 			/>
 		);
 	}

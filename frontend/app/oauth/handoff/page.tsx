@@ -35,7 +35,7 @@ const HandoffStatus = () => {
 	}
 
 	return (
-		<OauthStatus title="Thank you">
+		<OauthStatus title="Thank You">
 			Authentication successful. You can close this page.
 		</OauthStatus>
 	);

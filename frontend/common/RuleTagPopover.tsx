@@ -212,7 +212,7 @@ const RuleTagForm = ({
 						type="text"
 						value={name}
 						onChange={(event) => setName(event.target.value)}
-						placeholder="Name this rule and save it!"
+						placeholder="Name This Rule and Save It!"
 						autoFocus
 						// Same frame and height as the search field below it, so the two
 						// controls in this panel read as one set.
@@ -254,7 +254,7 @@ const RuleTagForm = ({
 						<SearchInput
 							value={search}
 							onChange={setSearch}
-							placeholder="Select or search to add a tag…"
+							placeholder="Select or Search to Add a Tag…"
 							aria-label="Search tags"
 							className="h-9 w-full"
 						/>

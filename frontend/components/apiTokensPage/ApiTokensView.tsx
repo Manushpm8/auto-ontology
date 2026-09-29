@@ -153,7 +153,7 @@ export const ApiTokensView = () => {
 		},
 		{
 			key: 'last_request',
-			header: 'Last used',
+			header: 'Last Used',
 			width: 'w-32',
 			nowrap: true,
 			cell: (token) => (token.last_request ? formatDate(token.last_request) : 'Never'),
@@ -211,7 +211,7 @@ export const ApiTokensView = () => {
 					</div>
 					<Button theme={ButtonTheme.Primary} size={Size.SMALL} onClick={openCreate}>
 						<Icon name={IconName.Plus} className="mr-1.5 h-4 w-4" />
-						New token
+						New Token
 					</Button>
 				</div>
 
@@ -252,7 +252,7 @@ export const ApiTokensView = () => {
 				{!loading && tokens.length === 0 ? (
 					<EmptyState
 						icon={IconName.Key}
-						title="No API tokens yet"
+						title="No API Tokens Yet"
 						description="Create one to authenticate scripts and scheduled jobs against the Auto Ontology API."
 						variant={EmptyStateVariant.Dashed}
 					/>
@@ -331,7 +331,7 @@ export const ApiTokensView = () => {
 
 			<ConfirmModal
 				open={revoking !== null}
-				title="Revoke token"
+				title="Revoke Token"
 				message={
 					<>
 						Any script using <strong>{revoking?.name ?? 'this token'}</strong> will stop

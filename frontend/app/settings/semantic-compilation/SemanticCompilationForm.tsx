@@ -175,20 +175,20 @@ export const SemanticCompilationForm = ({
 									</span>
 								</div>
 								{running ? (
-									<span title="Semantic compilation is running">
+									<span title="Semantic Compilation Is Running">
 										<Spinner className="h-4 w-4 shrink-0 text-[#76b900]" />
 									</span>
 								) : failed ? (
 									<span
 										className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-400"
-										title="Semantic compilation failed"
+										title="Semantic Compilation Failed"
 									>
 										<Icon name={IconName.Close} className="h-3 w-3" />
 									</span>
 								) : (
 									<span
 										className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#76b900]/15 text-[#76b900]"
-										title="Semantic compilation is ready"
+										title="Semantic Compilation Is Ready"
 									>
 										<Icon name={IconName.Check} className="h-3 w-3" />
 									</span>
@@ -229,7 +229,7 @@ export const SemanticCompilationForm = ({
 						<div className="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 							<div className="flex flex-col">
 								<span className="text-sm font-medium text-heading dark:text-zinc-100">
-									Enable semantic compilation
+									Enable Semantic Compilation
 								</span>
 								<span className="text-xs text-secondary">
 									{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
@@ -237,7 +237,7 @@ export const SemanticCompilationForm = ({
 							</div>
 							<Toggle
 								checked={enabled}
-								aria-label="Enable semantic compilation"
+								aria-label="Enable Semantic Compilation"
 								disabled={saving}
 								onChange={handleToggle}
 							/>
@@ -247,7 +247,7 @@ export const SemanticCompilationForm = ({
 							<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 								<div className="flex flex-col">
 									<span className="text-sm font-medium text-heading dark:text-zinc-100">
-										Reset semantic layer
+										Reset Semantic Layer
 									</span>
 									<span className="text-xs text-secondary">
 										Deletes the semantic layer for every database, and rebuild
@@ -270,7 +270,7 @@ export const SemanticCompilationForm = ({
 
 			<ConfirmModal
 				open={confirmModalOpen}
-				title="Reset semantic layer"
+				title="Reset Semantic Layer"
 				message="This deletes the semantic layer and a rebuild will be triggered."
 				confirmLabel="Reset"
 				onConfirm={handleReset}

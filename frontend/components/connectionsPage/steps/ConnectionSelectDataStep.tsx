@@ -26,7 +26,7 @@ export const ConnectionSelectDataStep = ({
 			<EmptyState
 				variant={EmptyStateVariant.Borderless}
 				icon={IconName.Database}
-				title="No databases to select"
+				title="No Databases to Select"
 				description="No databases were discovered for this connection. You can still create it and run ingest later."
 				className="min-h-[360px]"
 			/>

@@ -327,7 +327,7 @@ const EditableTagListCard = ({
 					value={tags}
 					onChange={handleChange}
 					autoFocus={autoFocus}
-					placeholder="Type a value and press Enter"
+					placeholder="Type a Value and Press Enter"
 					ariaLabel={section.title}
 				/>
 			</div>
@@ -440,7 +440,7 @@ const EditableEntityTagsCard = ({
 							iconPosition="left"
 						>
 							<Icon name={IconName.Plus} className="h-3.5 w-3.5" />
-							Add tag
+							Add Tag
 						</Button>
 					)}
 				/>
@@ -999,7 +999,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								type="button"
 								onClick={() => handleIsPDF(false)}
 							>
-								Close PDF preview
+								Close PDF Preview
 							</Button>
 						</div>
 					) : null}
@@ -1173,7 +1173,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 											◇
 										</div>
 									}
-									title="Nothing selected yet"
+									title="Nothing Selected Yet"
 									description="Pick a database, schema, table, column, or field in the explorer to load metadata, descriptions, and related entities."
 								/>
 							) : (

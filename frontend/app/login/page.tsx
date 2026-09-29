@@ -122,7 +122,7 @@ const LoginForm = () => {
 		return <LoginLoading />;
 	}
 
-	// SSO configured: show a "Sign in with SSO" button (no auto-login) so the
+	// SSO configured: show a "Sign In with SSO" button (no auto-login) so the
 	// user explicitly starts the flow, plus the password backdoor for the local
 	// bootstrap admin.
 	if (ssoEnabled && !passwordMode) {
@@ -136,7 +136,7 @@ const LoginForm = () => {
 						type="button"
 						onClick={() => handleSso(provider.provider_id)}
 					>
-						Sign in with SSO
+						Sign In with SSO
 					</Button>
 				))}
 				<Button
@@ -148,7 +148,7 @@ const LoginForm = () => {
 						setShowPasswordLogin(true);
 					}}
 				>
-					Sign in with password
+					Sign In with Password
 				</Button>
 			</div>
 		);

@@ -50,7 +50,7 @@ const ConsentForm = () => {
 
 	if (outcome === 'granted') {
 		return (
-			<OauthStatus title="Thank you">
+			<OauthStatus title="Thank You">
 				Authentication successful. You can close this page.
 			</OauthStatus>
 		);
@@ -58,7 +58,7 @@ const ConsentForm = () => {
 
 	if (outcome === 'denied') {
 		return (
-			<OauthStatus title="Authorization cancelled">
+			<OauthStatus title="Authorization Cancelled">
 				You can close this page and return to the application that started sign-in.
 			</OauthStatus>
 		);

@@ -938,7 +938,7 @@ export const TermsView = () => {
 			if (focusId == null) {
 				return {
 					sections: [],
-					header: { header: { title: 'Column Attribute not found' } },
+					header: { header: { title: 'Column Attribute Not Found' } },
 				};
 			}
 			// TODO: viewer zone-scoping handled in a separate PR — for now the
@@ -953,7 +953,7 @@ export const TermsView = () => {
 			if (attr == null) {
 				return {
 					sections: [],
-					header: { header: { title: 'Column Attribute not found' } },
+					header: { header: { title: 'Column Attribute Not Found' } },
 				};
 			}
 			setColumnAttrs(attrs);
@@ -1047,7 +1047,7 @@ export const TermsView = () => {
 			if (res.error || !res.data) {
 				return {
 					sections: [],
-					header: { header: { title: 'SQL Attribute not found' } },
+					header: { header: { title: 'SQL Attribute Not Found' } },
 				};
 			}
 			const attr = res.data;
@@ -1115,7 +1115,7 @@ export const TermsView = () => {
 		if (res.error || !res.data) {
 			return {
 				sections: [],
-				header: { header: { title: 'Term not found' } },
+				header: { header: { title: 'Term Not Found' } },
 			};
 		}
 		const term = res.data;
@@ -1236,7 +1236,7 @@ export const TermsView = () => {
 						description: attr.description ?? '',
 						certification: attributeStatus(attr),
 					})),
-					emptyMessage: 'SQL attribute does not exist',
+					emptyMessage: 'SQL Attribute Does Not Exist',
 				},
 			],
 		};
@@ -1351,7 +1351,7 @@ export const TermsView = () => {
 					open={deletingSqlAttr !== null}
 					onCancel={handleDeleteSqlAttrClose}
 					onConfirm={handleDeleteSqlAttrConfirm}
-					title="Delete SQL attribute"
+					title="Delete SQL Attribute"
 					message={[
 						'Are you sure you want to delete ',
 						<strong key="name">{deletingSqlAttr?.name}</strong>,
@@ -1490,7 +1490,7 @@ export const TermsView = () => {
 									shadow
 								>
 									<Icon name={IconName.Plus} className="h-4 w-4" />
-									Create new sql attribute
+									Create New SQL Attribute
 								</Button>
 							</>
 						}
@@ -1591,7 +1591,7 @@ export const TermsView = () => {
 					<SearchInput
 						value={searchQuery}
 						onChange={setSearchQuery}
-						placeholder="Search terms…"
+						placeholder="Search Terms…"
 						aria-label="Search terms"
 						className="mb-6 w-full"
 					/>
