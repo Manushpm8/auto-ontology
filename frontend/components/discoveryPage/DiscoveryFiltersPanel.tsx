@@ -86,47 +86,6 @@ const selectionSummary = (selected: string[] | null): string => {
  */
 const CONTROL_WIDTH = 'w-32';
 
-type FilterSectionProps = {
-	title: string;
-	children: ReactNode;
-};
-
-/**
- * A named, collapsible group of filters.
- *
- * Open on mount, and collapsible rather than merely a heading, because this is
- * the panel's unit of growth: the screen this follows groups its filters as
- * General, Data and Semantic, and a panel of three flat lists is one a reader
- * has to scroll to see they have run out of.
- *
- * Its open state is local and unlifted, so it is not a filter: collapsing a
- * section hides controls without clearing them, and what a collapsed section
- * holds still counts towards the reset button's tally.
- */
-const FilterSection = ({ title, children }: FilterSectionProps) => {
-	const [open, setOpen] = useState(true);
-
-	return (
-		<section className="border-b border-zinc-200 dark:border-zinc-800">
-			<button
-				type="button"
-				onClick={() => setOpen((value) => !value)}
-				aria-expanded={open}
-				className="flex w-full cursor-pointer items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
-			>
-				<span className="truncate text-sm text-zinc-700 dark:text-zinc-300">{title}</span>
-				<Icon
-					name={IconName.ChevronRight}
-					className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${
-						open ? 'rotate-90' : ''
-					}`}
-				/>
-			</button>
-			{open && <div className="flex flex-col gap-1 pb-3">{children}</div>}
-		</section>
-	);
-};
-
 type FilterRowProps = {
 	icon: IconName;
 	title: string;
@@ -453,42 +412,40 @@ export const DiscoveryFiltersPanel = ({
 					</Button>
 				)}
 			</div>
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-				<FilterSection title="General">
-					<FilterRow
-						icon={IconName.Exploration}
-						title="Objects"
-						changed={filters.objects !== null}
-					>
-						<ObjectsFilter
-							selected={filters.objects}
-							onChange={(objects) => onChange({ ...filters, objects })}
-						/>
-					</FilterRow>
-					<FilterRow icon={IconName.Tag} title="Tags" changed={filters.tags !== null}>
-						<TagsFilter
-							selected={filters.tags}
-							onChange={(tags) => onChange({ ...filters, tags })}
-						/>
-					</FilterRow>
-					<FilterRow icon={IconName.Table} title="Data" changed={filters.data !== null}>
-						<DataFilter
-							selected={filters.data}
-							onChange={(data) => onChange({ ...filters, data })}
-						/>
-					</FilterRow>
-					<FilterRow
-						icon={IconName.Pencil}
-						title="Search In Description"
-						changed={filters.description !== DEFAULT_DISCOVERY_FILTERS.description}
-					>
-						<Toggle
-							checked={filters.description}
-							onChange={(description) => onChange({ ...filters, description })}
-							aria-label="Search in description"
-						/>
-					</FilterRow>
-				</FilterSection>
+			<div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-3">
+				<FilterRow
+					icon={IconName.Exploration}
+					title="Objects"
+					changed={filters.objects !== null}
+				>
+					<ObjectsFilter
+						selected={filters.objects}
+						onChange={(objects) => onChange({ ...filters, objects })}
+					/>
+				</FilterRow>
+				<FilterRow icon={IconName.Tag} title="Tags" changed={filters.tags !== null}>
+					<TagsFilter
+						selected={filters.tags}
+						onChange={(tags) => onChange({ ...filters, tags })}
+					/>
+				</FilterRow>
+				<FilterRow icon={IconName.Table} title="Data" changed={filters.data !== null}>
+					<DataFilter
+						selected={filters.data}
+						onChange={(data) => onChange({ ...filters, data })}
+					/>
+				</FilterRow>
+				<FilterRow
+					icon={IconName.Pencil}
+					title="Search In Description"
+					changed={filters.description !== DEFAULT_DISCOVERY_FILTERS.description}
+				>
+					<Toggle
+						checked={filters.description}
+						onChange={(description) => onChange({ ...filters, description })}
+						aria-label="Search in description"
+					/>
+				</FilterRow>
 			</div>
 		</div>
 	);
