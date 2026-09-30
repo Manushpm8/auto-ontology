@@ -74,6 +74,15 @@ export type RuleFilters = {
 	 * Never carries the untagged sentinel — the create route refuses it.
 	 */
 	tags?: string[] | null;
+	/**
+	 * Optional for the same reason as `tags`: a rule saved before the data
+	 * filter existed has no such key, and absent means it narrows by none.
+	 *
+	 * The ids outlive nothing: a database or schema dropped from the catalog
+	 * takes its rows with it, so a rule pointing at one goes on matching what
+	 * is left of its selection rather than breaking.
+	 */
+	data?: string[] | null;
 };
 
 /** A stored rule, as every read returns it. */

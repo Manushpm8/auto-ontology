@@ -32,7 +32,8 @@ export type GlobalSearchItem = {
  * defaults are not the same: `description` is off, `synonyms` on. See
  * `GlobalSearchFilters` in `auto_ontology/server/search/router.py` for why.
  *
- * `objects` and `tags` narrow instead, and omitting either narrows by nothing.
+ * `objects`, `tags` and `data` narrow instead, and omitting any of them
+ * narrows by nothing.
  */
 export type GlobalSearchFilters = {
 	description?: boolean;
@@ -48,6 +49,15 @@ export type GlobalSearchFilters = {
 	 * kind that cannot be tagged is untagged.
 	 */
 	tags?: string[];
+	/**
+	 * Database and schema ids in one list. A hit matches when its own schema,
+	 * or that schema's database, is among them.
+	 *
+	 * Narrows the kinds too, and harder than `tags` does: only Tables, Views
+	 * and Columns live under a schema, so everything else is dropped — a Term
+	 * reached by an alias included.
+	 */
+	data?: string[];
 };
 
 export type GlobalSearchRequest = {

@@ -24,6 +24,7 @@ import { PopoverAlign } from '@/enums/popover';
 import type { SearchObjectType } from '@/enums/search';
 import { tagQueries } from '@/lib/queries/tags';
 import type { DiscoveryFilters } from '@/types/discovery';
+import { DataFilter } from './DataFilter';
 
 export type DiscoveryFiltersPanelProps = {
 	/** The filters being edited, which are not yet the ones a search ran with. */
@@ -43,18 +44,19 @@ export type DiscoveryFiltersPanelProps = {
 export const changedDiscoveryFilterCount = (filters: DiscoveryFilters): number =>
 	(filters.objects === null ? 0 : 1) +
 	(filters.tags === null ? 0 : 1) +
+	(filters.data === null ? 0 : 1) +
 	(filters.description === DEFAULT_DISCOVERY_FILTERS.description ? 0 : 1);
 
 /**
  * Whether these filters exclude everything, so there is nothing to search for.
  *
  * Reachable only through Deselect All, and a real answer rather than an error:
- * a search restricted to no kind of object, or to no tag, has nowhere to look.
- * `DiscoveryView` uses it to answer such a search itself, since the request
- * has no way to ask for nothing.
+ * a search restricted to no kind of object, to no tag, or to no part of the
+ * catalog has nowhere to look. `DiscoveryView` uses it to answer such a
+ * search itself, since the request has no way to ask for nothing.
  */
 export const discoveryFiltersMatchNothing = (filters: DiscoveryFilters): boolean =>
-	filters.objects?.length === 0 || filters.tags?.length === 0;
+	filters.objects?.length === 0 || filters.tags?.length === 0 || filters.data?.length === 0;
 
 /**
  * The bulk button's two states, shared by both pickers so they cannot drift.
@@ -467,6 +469,12 @@ export const DiscoveryFiltersPanel = ({
 						<TagsFilter
 							selected={filters.tags}
 							onChange={(tags) => onChange({ ...filters, tags })}
+						/>
+					</FilterRow>
+					<FilterRow icon={IconName.Table} title="Data" changed={filters.data !== null}>
+						<DataFilter
+							selected={filters.data}
+							onChange={(data) => onChange({ ...filters, data })}
 						/>
 					</FilterRow>
 					<FilterRow

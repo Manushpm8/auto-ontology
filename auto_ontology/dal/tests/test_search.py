@@ -487,6 +487,253 @@ def test_the_object_filter_can_leave_tags_out(world: World) -> None:
 
 
 # --------------------------------------------------------------------------
+# The data filter
+# --------------------------------------------------------------------------
+#
+# Narrowing to what lives under chosen databases and schemas. It gets a world
+# of its own rather than extra rows in ``World``: the fixture above has one
+# database, and giving it a second would change what every test searching the
+# bare prefix finds -- which is most of this file.
+
+
+class DataWorld:
+    """Two databases under one prefix, so one search reaches both.
+
+    The shape is the smallest that can tell the four mistakes apart: a filter
+    that ignores the database, one that ignores the schema, one that cannot
+    place a Column, and one that forgets a View is a table.
+    """
+
+    def __init__(self) -> None:
+        self.prefix = f"dz{uuid.uuid4().hex[:8]}"
+        p = self.prefix
+
+        self.left = _add(s.catalog_database, name=f"{p}_left")
+        self.sales = _add(s.catalog_schema, database_id=self.left, name=f"{p}_sales")
+        self.finance = _add(
+            s.catalog_schema, database_id=self.left, name=f"{p}_finance"
+        )
+        self.orders = _add(
+            s.catalog_table,
+            schema_id=self.sales,
+            name=f"{p}_orders",
+            table_type=TableTypes.BASE_TABLE,
+        )
+        self.ledger = _add(
+            s.catalog_table,
+            schema_id=self.finance,
+            name=f"{p}_ledger",
+            table_type=TableTypes.BASE_TABLE,
+        )
+        self.amount = _add(s.catalog_column, table_id=self.orders, name=f"{p}_amount")
+
+        self.right = _add(s.catalog_database, name=f"{p}_right")
+        self.archive = _add(
+            s.catalog_schema, database_id=self.right, name=f"{p}_archive"
+        )
+        self.old_orders = _add(
+            s.catalog_table,
+            schema_id=self.archive,
+            name=f"{p}_orders_old",
+            table_type=TableTypes.BASE_TABLE,
+        )
+        self.old_view = _add(
+            s.catalog_table,
+            schema_id=self.archive,
+            name=f"{p}_orders_view",
+            table_type=TableTypes.VIEW,
+        )
+
+        # A Term matching the same prefix, and reachable by an alias as well as
+        # by its name -- the two routes the filter has to close separately.
+        self.term = _add(
+            s.term,
+            name=f"{p}_Orders",
+            source=SEMANTIC_SOURCE,
+            synonyms=[f"{p} Purchases"],
+        )
+        store().query_write(
+            s.table__term.insert().values(table_id=self.orders, term_id=self.term)
+        )
+
+
+@pytest.fixture(scope="module")
+def data_world() -> Iterator[DataWorld]:
+    with write_transaction():
+        built = DataWorld()
+    yield built
+    with write_transaction():
+        store().query_write(
+            s.catalog_database.delete().where(
+                s.catalog_database.c.id.in_([built.left, built.right])
+            )
+        )
+        store().query_write(s.term.delete().where(s.term.c.id == built.term))
+
+
+def _under(data: DataWorld, *ids: str, types: set[str] | None = None) -> set[str]:
+    """Names matching the whole prefix, narrowed to *ids*."""
+    return _names(
+        search.fetch_global_search(
+            search.search_tokens(data.prefix),
+            types or ALL_TYPES,
+            include_description=False,
+            synonym_tokens=search.synonym_word_tokens(data.prefix),
+            data_ids=list(ids),
+        )
+    )
+
+
+def test_a_database_narrows_to_everything_beneath_it(data_world: DataWorld) -> None:
+    """Both schemas of the chosen database, and neither of the other's."""
+    p = data_world.prefix
+    assert _under(data_world, data_world.left) == {
+        f"{p}_orders",
+        f"{p}_ledger",
+        f"{p}_amount",
+    }
+
+
+def test_a_schema_narrows_further_than_its_database(data_world: DataWorld) -> None:
+    """The finance table drops out, which is the whole point of offering
+    schemas in the tree rather than databases alone."""
+    p = data_world.prefix
+    assert _under(data_world, data_world.sales) == {f"{p}_orders", f"{p}_amount"}
+
+
+def test_databases_and_schemas_mix_in_one_selection(data_world: DataWorld) -> None:
+    """One list holds both, and an id matching either level is enough.
+
+    This is why the two are not separate request fields: the tree they come
+    from lets somebody tick a whole database and pick a schema out of another,
+    and that is one selection, not two filters.
+    """
+    p = data_world.prefix
+    assert _under(data_world, data_world.finance, data_world.right) == {
+        f"{p}_ledger",
+        f"{p}_orders_old",
+        f"{p}_orders_view",
+    }
+
+
+def test_a_column_is_placed_by_the_table_it_sits_on(data_world: DataWorld) -> None:
+    """A Column has no schema of its own, so it is reached through its table.
+
+    Get that hop wrong and the column either escapes every filter or is caught
+    by all of them -- neither of which the table beside it would show.
+    """
+    p = data_world.prefix
+    assert _under(data_world, data_world.sales, types={Labels.COLUMN}) == {
+        f"{p}_amount"
+    }
+    assert _under(data_world, data_world.right, types={Labels.COLUMN}) == set()
+
+
+def test_a_view_is_placed_like_the_table_it_shares_a_row_with(
+    data_world: DataWorld,
+) -> None:
+    p = data_world.prefix
+    assert _under(data_world, data_world.archive, types={search.SEARCH_TYPE_VIEW}) == {
+        f"{p}_orders_view"
+    }
+
+
+def test_the_filter_leaves_only_what_lives_under_a_schema(
+    data_world: DataWorld,
+) -> None:
+    """Tables, Views and Columns, and nothing else -- including the containers.
+
+    A Term is not part of any database, so it goes. So do the database and the
+    schema themselves: returning the very thing somebody just ticked says
+    nothing they did not already know, which is the line the reference
+    implementation takes too.
+    """
+    p = data_world.prefix
+    unfiltered = _under(data_world)
+    assert f"{p}_Orders" in unfiltered
+    assert f"{p}_left" in unfiltered
+    assert f"{p}_sales" in unfiltered
+
+    narrowed = _under(data_world, data_world.left)
+    assert f"{p}_Orders" not in narrowed
+    assert f"{p}_left" not in narrowed
+    assert f"{p}_sales" not in narrowed
+
+
+def test_an_alias_does_not_smuggle_a_term_past_the_filter(
+    data_world: DataWorld,
+) -> None:
+    """The alias branch is a second route to a Term, not an exemption.
+
+    It is a separate statement built by a separate function, so the narrowing
+    has to be repeated there -- and this is the only test that would notice,
+    since the Term's own name matches too and the main branch drops it either
+    way.
+    """
+    hits = search.fetch_global_search(
+        search.search_tokens(f"{data_world.prefix} purchases"),
+        ALL_TYPES,
+        include_description=False,
+        synonym_tokens=search.synonym_word_tokens(f"{data_world.prefix} Purchases"),
+        data_ids=[data_world.left],
+    )
+    assert hits == []
+
+
+def test_an_id_belonging_to_nothing_narrows_to_nothing(
+    data_world: DataWorld,
+) -> None:
+    """Database ids and schema ids are told apart by matching, not by the
+    caller, so an id that is neither simply finds no home."""
+    assert _under(data_world, data_world.orders) == set()
+
+
+def test_the_object_filter_still_narrows_inside_the_data_filter(
+    data_world: DataWorld,
+) -> None:
+    """The data filter never widens: asking only for Terms and also for a
+    database gives nothing, rather than the tables under it."""
+    assert _under(data_world, data_world.left, types={LABEL_TERM}) == set()
+
+
+def test_counts_agree_with_the_list_about_the_data_filter(
+    data_world: DataWorld,
+) -> None:
+    """The tab badge and the page under it are one match or neither is right."""
+    counts = search.count_global_search(
+        search.search_tokens(data_world.prefix),
+        ALL_TYPES,
+        include_description=False,
+        synonym_tokens=search.synonym_word_tokens(data_world.prefix),
+        data_ids=[data_world.right],
+    )
+    assert counts == {Labels.TABLE: 1, search.SEARCH_TYPE_VIEW: 1}
+
+
+def test_the_matching_statements_narrow_by_data_too(data_world: DataWorld) -> None:
+    """A rule saved over a filtered search labels what that search showed.
+
+    Its own loop, so the narrowing has to be repeated -- and missed here the
+    rule would quietly label every table in the catalog rather than the ones
+    on screen.
+    """
+    selects = search.matching_id_selects(
+        search.search_tokens(data_world.prefix),
+        ALL_TYPES,
+        include_description=False,
+        data_ids=[data_world.sales],
+    )
+    found = {
+        label: {row["id"] for row in store().query_read(q)}
+        for label, q in selects.items()
+    }
+    assert found == {
+        Labels.TABLE: {data_world.orders},
+        Labels.COLUMN: {data_world.amount},
+    }
+
+
+# --------------------------------------------------------------------------
 # Terms
 # --------------------------------------------------------------------------
 

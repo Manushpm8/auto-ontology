@@ -20,4 +20,5 @@ export const DEFAULT_DISCOVERY_FILTERS: DiscoveryFilters = {
 	objects: null,
 	description: true,
 	tags: null,
+	data: null,
 };

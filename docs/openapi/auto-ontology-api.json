@@ -4885,7 +4885,7 @@
     },
     "/api/search/global-search": {
       "post": {
-        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nevery token sort first, then Terms an alias matched.\n\n``filters.synonyms`` turns that alias matching off, which drops the Terms\nreached only by one and empties the ``synonyms`` reported on every hit --\nwith it off, no alias caused a hit, so there is none to name.\n\n``filters.tags`` narrows to the objects carrying one of those tags, or --\nfor the untagged sentinel among them -- carrying none. Labels a rule\napplied count the same as labels applied by hand.",
+        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nevery token sort first, then Terms an alias matched.\n\n``filters.synonyms`` turns that alias matching off, which drops the Terms\nreached only by one and empties the ``synonyms`` reported on every hit --\nwith it off, no alias caused a hit, so there is none to name.\n\n``filters.tags`` narrows to the objects carrying one of those tags, or --\nfor the untagged sentinel among them -- carrying none. Labels a rule\napplied count the same as labels applied by hand.\n\n``filters.data`` narrows to what lives under the given databases and\nschemas, which leaves Tables, Views and Columns and nothing else.",
         "operationId": "post_api_search_global_search",
         "requestBody": {
           "content": {
@@ -9094,8 +9094,22 @@
         "type": "object"
       },
       "GlobalSearchFilters": {
-        "description": "What a query is matched against, and which kinds of object it may hit.\n\nTwo flags widen the match beyond an object's name: ``description`` adds\nits description and ``synonyms`` adds a Term's aliases.\n\nTheir defaults differ, which is deliberate rather than an oversight.\n``description`` is off because matching prose is the narrower, more\nsurprising behaviour to opt into. ``synonyms`` is on because alias\nmatching is what this endpoint did for its whole life before the flag\nexisted, and defaulting it off would quietly take Terms away from every\ncaller that does not send the flag.\n\n``objects`` and ``tags`` both narrow rather than widen, and ``None`` for\neither means no narrowing -- an empty list would otherwise have to mean\n\"nothing\", which is not a search anyone asks for.\n\n``tags`` holds tag ids, and may hold ``UNTAGGED_FILTER_VALUE`` beside them\nfor the objects carrying no tag at all. Any one of the entries is enough\nfor a hit, so ticking two tags widens the selection within the narrowing.\nOnly five kinds can carry a tag, so a search narrowed to a tag returns no\nDatabase, Schema or analysis -- they come back only when the untagged\nsentinel is present, since a kind that cannot be tagged is untagged.",
+        "description": "What a query is matched against, and which kinds of object it may hit.\n\nTwo flags widen the match beyond an object's name: ``description`` adds\nits description and ``synonyms`` adds a Term's aliases.\n\nTheir defaults differ, which is deliberate rather than an oversight.\n``description`` is off because matching prose is the narrower, more\nsurprising behaviour to opt into. ``synonyms`` is on because alias\nmatching is what this endpoint did for its whole life before the flag\nexisted, and defaulting it off would quietly take Terms away from every\ncaller that does not send the flag.\n\n``objects``, ``tags`` and ``data`` all narrow rather than widen, and\n``None`` for any of them means no narrowing -- an empty list would\notherwise have to mean \"nothing\", which is not a search anyone asks for.\n\n``tags`` holds tag ids, and may hold ``UNTAGGED_FILTER_VALUE`` beside them\nfor the objects carrying no tag at all. Any one of the entries is enough\nfor a hit, so ticking two tags widens the selection within the narrowing.\nOnly five kinds can carry a tag, so a search narrowed to a tag returns no\nDatabase, Schema or analysis -- they come back only when the untagged\nsentinel is present, since a kind that cannot be tagged is untagged.\n\n``data`` holds database ids and schema ids together, and narrows to what\nlives under them: a row matches if its own schema, or that schema's\ndatabase, is among them. Only Table, View and Column live anywhere, so\nthis one narrows the result to those three outright -- a Term picked out\nby an alias is dropped along with the rest.",
         "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
           "description": {
             "default": false,
             "title": "Description",

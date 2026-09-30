@@ -216,6 +216,10 @@ class _Prepared(NamedTuple):
     synonym_tokens: list[str]
     tag_ids: list[str]
     include_untagged: bool
+    #: Database and schema ids in one list, passed through unvalidated -- an
+    #: id belonging to neither table narrows the search to nothing, which is
+    #: the same answer a deleted schema gives and needs no separate error.
+    data_ids: list[str]
 
 
 def _tokens_or_empty(search_term: str) -> list[str] | None:
@@ -232,6 +236,7 @@ def _prepare_search(
     objects: list[str] | None,
     include_synonyms: bool,
     tags: list[str] | None,
+    data: list[str] | None,
 ) -> _Prepared | None:
     """Validate and expand a query. ``None`` means nothing searchable.
 
@@ -262,7 +267,9 @@ def _prepare_search(
         search_dal.synonym_word_tokens(stripped) if include_synonyms else []
     )
     tag_ids, include_untagged = resolve_tag_filter(tags)
-    return _Prepared(tokens, types, stripped, synonym_tokens, tag_ids, include_untagged)
+    return _Prepared(
+        tokens, types, stripped, synonym_tokens, tag_ids, include_untagged, data or []
+    )
 
 
 def global_search(
@@ -273,6 +280,7 @@ def global_search(
     include_description: bool,
     include_synonyms: bool,
     tags: list[str] | None = None,
+    data: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run the list path: fulltext + enrichment, capped and ranked."""
     prepared = _prepare_search(
@@ -281,6 +289,7 @@ def global_search(
         objects=objects,
         include_synonyms=include_synonyms,
         tags=tags,
+        data=data,
     )
     if prepared is None:
         return {"data": [], "count": 0}
@@ -293,6 +302,7 @@ def global_search(
         synonym_tokens=synonym_tokens,
         tag_ids=prepared.tag_ids,
         include_untagged=prepared.include_untagged,
+        data_ids=prepared.data_ids,
         limit=search_dal.LIST_LIMIT,
         synonym_limit=_synonym_rescue_budget(search_dal.LIST_LIMIT),
     )
@@ -309,6 +319,7 @@ def match_selects(
     include_description: bool,
     include_synonyms: bool,
     tags: list[str] | None = None,
+    data: list[str] | None = None,
 ) -> dict[str, Select]:
     """The same match as :func:`global_search`, uncapped, as unexecuted
     statements — one ``SELECT id`` per object type.
@@ -348,6 +359,7 @@ def match_selects(
         objects=objects,
         include_synonyms=include_synonyms,
         tags=tags,
+        data=data,
     )
     if prepared is None:
         raise SearchValidationError(
@@ -363,6 +375,7 @@ def match_selects(
         synonym_tokens=prepared.synonym_tokens,
         tag_ids=prepared.tag_ids,
         include_untagged=prepared.include_untagged,
+        data_ids=prepared.data_ids,
     )
 
 
@@ -374,6 +387,7 @@ def global_search_count(
     include_description: bool,
     include_synonyms: bool,
     tags: list[str] | None = None,
+    data: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run the count path: same match as list, grouped by type, no cap."""
     prepared = _prepare_search(
@@ -382,6 +396,7 @@ def global_search_count(
         objects=objects,
         include_synonyms=include_synonyms,
         tags=tags,
+        data=data,
     )
     if prepared is None:
         return {"data": {}}
@@ -393,5 +408,6 @@ def global_search_count(
         synonym_tokens=prepared.synonym_tokens,
         tag_ids=prepared.tag_ids,
         include_untagged=prepared.include_untagged,
+        data_ids=prepared.data_ids,
     )
     return {"data": counts}

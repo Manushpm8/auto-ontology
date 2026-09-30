@@ -4,7 +4,7 @@
 
 """Global search across the catalog and semantic tables.
 
-One query term, nine tables, one ranked list. Three decisions shape the rest:
+One query term, ten tables, one ranked list. Three decisions shape the rest:
 
 * **It is a substring match, and only that.** ``contains`` is the sole
   ``text_match_option`` the API offers, so typing ``mount`` must find
@@ -146,6 +146,28 @@ _TAG_TARGET_COLUMNS = {
     Labels.COLUMN: s.tag_target.c.column_id,
     LABEL_COLUMN_ATTRIBUTE: s.tag_target.c.column_attribute_id,
     LABEL_SQL_ATTRIBUTE: s.tag_target.c.sql_attribute_id,
+}
+
+#: The labels the data filter can reach, and how each one gets to its schema.
+#:
+#: ``None`` for Table, which holds ``schema_id`` itself; Column has to go
+#: through its table to find one. Everything else is absent, which is what
+#: :func:`_data_filter_rules_out` reads as "this kind does not live under a
+#: schema": a Term or an analysis is not part of any database, so a search
+#: narrowed to one has no business returning it.
+#:
+#: Database and Schema are absent too, and that is the less obvious call. A
+#: schema *is* the thing being filtered on rather than something sitting under
+#: it, so returning the very schema somebody just ticked tells them nothing
+#: they did not already know. The reference implementation takes the same
+#: line: its condition admits the ``schema`` label, and then the object-type
+#: narrowing beside it drops Schema and Database from the results anyway.
+#:
+#: ``View`` is absent for the reason given on :data:`SEARCH_TYPE_VIEW`: it is
+#: a ``catalog_table`` row and shares ``Labels.TABLE``'s route.
+_DATA_SCHEMA_ROUTES = {
+    Labels.TABLE: None,
+    Labels.COLUMN: s.catalog_table,
 }
 
 #: The ``PROPERTY_OF`` link each attribute reaches its Term through.
@@ -432,6 +454,74 @@ def _tag_filter_rules_out(
     return label not in _TAG_TARGET_COLUMNS and not include_untagged
 
 
+def _data_where(label: str, data_ids: list[str]):
+    """This label's rows living under one of *data_ids*, or ``None``.
+
+    *data_ids* mixes database ids and schema ids in one list, because the tree
+    they are ticked in mixes the two: somebody selects a whole database, or
+    picks schemas out of it, and both are the same question -- "is this row
+    somewhere below what I chose". Keeping them in one list is also what lets a
+    ticked database stay one id rather than being expanded client-side into
+    however many schemas it has today, which would go stale the moment one was
+    added.
+
+    The two are told apart here rather than by the caller: an id matches if it
+    is the row's own schema, or that schema's database. Nothing distinguishes a
+    database id from a schema id in the request, and nothing needs to -- the ids
+    are unique across both tables, so an id that is neither simply matches
+    nothing.
+
+    A Column reaches its schema through its table (see
+    :data:`_DATA_SCHEMA_ROUTES`), which is why this is an ``EXISTS`` over a join
+    rather than a column test: the filter is about where a row *lives*, and only
+    Table knows that about itself.
+    """
+    if not data_ids or label not in _DATA_SCHEMA_ROUTES:
+        return None
+    table = SEARCH_TABLES[label]
+    through = _DATA_SCHEMA_ROUTES[label]
+
+    source = s.catalog_schema
+    if through is None:
+        anchor = s.catalog_schema.c.id == table.c.schema_id
+    else:
+        source = through.join(
+            s.catalog_schema, s.catalog_schema.c.id == through.c.schema_id
+        )
+        anchor = through.c.id == table.c.table_id
+
+    return (
+        select(literal(1))
+        .select_from(source)
+        .where(
+            anchor,
+            or_(
+                s.catalog_schema.c.id.in_(data_ids),
+                s.catalog_schema.c.database_id.in_(data_ids),
+            ),
+        )
+        .correlate(table)
+        .exists()
+    )
+
+
+def _data_filter_rules_out(label: str, data_ids: list[str]) -> bool:
+    """Whether the data filter leaves this label nothing to match.
+
+    True for every kind that does not live under a schema, which is every kind
+    but Table, View and Column. The reference implementation spells this as a
+    separate narrowing of the requested object types; here it is the same
+    ``continue`` the tag filter uses, for the same reason given on
+    :func:`_tag_filter_rules_out` -- a branch that can produce nothing is better
+    left out of the union than joined to it and filtered away.
+
+    Note what this does *not* do: it never widens. A caller that asked only for
+    Terms and also picked a database gets nothing, rather than silently being
+    given the tables under it.
+    """
+    return bool(data_ids) and label not in _DATA_SCHEMA_ROUTES
+
+
 def _hit_select(
     table,
     label: str,
@@ -572,6 +662,7 @@ def _synonym_term_select(
     include_description: bool,
     tag_ids: list[str],
     include_untagged: bool,
+    data_ids: list[str],
 ):
     """Visible Terms reached *only* by their synonyms, or ``None``.
 
@@ -597,8 +688,15 @@ def _synonym_term_select(
     to a Term, not an exemption from the narrowing -- a search for the tag PII
     that returned untagged Terms because an alias matched would be reporting
     hits its own count does not include.
+
+    The data filter ends the branch outright rather than narrowing it, for the
+    same reason it ends the Term branch of :func:`_hit_selects`: a Term does
+    not live under a schema, so a search confined to one cannot return Terms
+    however they were reached.
     """
     if LABEL_TERM not in object_types or not synonym_tokens:
+        return None
+    if _data_filter_rules_out(LABEL_TERM, data_ids):
         return None
     aliased = _term_select(synonym_tokens).where(
         _term_is_visible(),
@@ -636,6 +734,7 @@ def _hit_selects(
     synonym_tokens: list[str],
     tag_ids: list[str],
     include_untagged: bool,
+    data_ids: list[str],
 ) -> list[Any]:
     """One select per requested entity, ready to be unioned."""
     selects: list[Any] = []
@@ -653,14 +752,18 @@ def _hit_selects(
         if _tag_filter_rules_out(label, tag_ids, include_untagged=include_untagged):
             continue
 
+        if _data_filter_rules_out(label, data_ids):
+            continue
+
         tagged = _tag_where(label, tag_ids, include_untagged=include_untagged)
+        located = _data_where(label, data_ids)
         match = _match_where(label, tokens, include_description=include_description)
 
         if label == LABEL_TERM:
             selects.append(
                 _term_select(synonym_tokens).where(
                     _term_is_visible(),
-                    _all_of(match, tagged),
+                    _all_of(match, tagged, located),
                 )
             )
             continue
@@ -669,12 +772,12 @@ def _hit_selects(
             selects.append(
                 _hit_select(table, label, certified_flag=table.c.certified).where(
                     _attribute_is_visible(label),
-                    _all_of(match, tagged),
+                    _all_of(match, tagged, located),
                 )
             )
             continue
 
-        selects.append(_hit_select(table, label).where(_all_of(match, tagged)))
+        selects.append(_hit_select(table, label).where(_all_of(match, tagged, located)))
 
     if Labels.TABLE in object_types or SEARCH_TYPE_VIEW in object_types:
         selects.append(
@@ -690,6 +793,7 @@ def _hit_selects(
                     _tag_where(
                         Labels.TABLE, tag_ids, include_untagged=include_untagged
                     ),
+                    _data_where(Labels.TABLE, data_ids),
                 )
             )
         )
@@ -887,6 +991,7 @@ def fetch_global_search(
     synonym_tokens: list[str] | None = None,
     tag_ids: list[str] | None = None,
     include_untagged: bool = False,
+    data_ids: list[str] | None = None,
     limit: int = LIST_LIMIT,
     synonym_limit: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -903,7 +1008,7 @@ def fetch_global_search(
     that unordered ``LIMIT`` allowed: Postgres now reads the whole match set to
     sort it, and for a two-character query (see ``MIN_SEARCH_LENGTH``, which
     documents why those are not indexable) that is a sequential scan of all
-    nine tables. The trade is deliberate -- a correct page for a slower worst
+    ten tables. The trade is deliberate -- a correct page for a slower worst
     case.
 
     *synonym_limit* caps the alias branch, which is otherwise as long as the
@@ -921,6 +1026,7 @@ def fetch_global_search(
         synonym_tokens=synonym_tokens or [],
         tag_ids=tag_ids or [],
         include_untagged=include_untagged,
+        data_ids=data_ids or [],
     )
     # ``union_all``: each branch reads a different table, so no row can appear
     # in two of them, and paying for a DISTINCT over 200 rows with an array
@@ -943,6 +1049,7 @@ def fetch_global_search(
         include_description=include_description,
         tag_ids=tag_ids or [],
         include_untagged=include_untagged,
+        data_ids=data_ids or [],
     )
     if synonym_select is not None:
         if synonym_limit is not None:
@@ -975,6 +1082,7 @@ def count_global_search(
     synonym_tokens: list[str] | None = None,
     tag_ids: list[str] | None = None,
     include_untagged: bool = False,
+    data_ids: list[str] | None = None,
 ) -> dict[str, int]:
     """Hit counts by object type, uncapped.
 
@@ -995,6 +1103,7 @@ def count_global_search(
         synonym_tokens=synonym_tokens or [],
         tag_ids=tag_ids or [],
         include_untagged=include_untagged,
+        data_ids=data_ids or [],
     )
     synonym_select = _synonym_term_select(
         synonym_tokens or [],
@@ -1003,6 +1112,7 @@ def count_global_search(
         include_description=include_description,
         tag_ids=tag_ids or [],
         include_untagged=include_untagged,
+        data_ids=data_ids or [],
     )
     if synonym_select is not None:
         selects.append(synonym_select)
@@ -1033,6 +1143,7 @@ def matching_id_selects(
     synonym_tokens: list[str] | None = None,
     tag_ids: list[str] | None = None,
     include_untagged: bool = False,
+    data_ids: list[str] | None = None,
 ) -> dict[str, Select]:
     """The same match as the list, as one ``SELECT id`` per label — unexecuted.
 
@@ -1083,6 +1194,7 @@ def matching_id_selects(
 
     aliases = synonym_tokens or []
     tags = tag_ids or []
+    data = data_ids or []
     selects: dict[str, Select] = {}
 
     for label in _SEARCH_LABELS:
@@ -1093,23 +1205,26 @@ def matching_id_selects(
             continue
         if _tag_filter_rules_out(label, tags, include_untagged=include_untagged):
             continue
+        if _data_filter_rules_out(label, data):
+            continue
 
         table = SEARCH_TABLES[label]
         match = _match_where(label, tokens, include_description=include_description)
         tagged = _tag_where(label, tags, include_untagged=include_untagged)
+        located = _data_where(label, data)
 
         if label == LABEL_TERM:
             if aliases:
                 match = or_(match, _synonym_exists(aliases))
             selects[label] = select(table.c.id).where(
-                _term_is_visible(), _all_of(match, tagged)
+                _term_is_visible(), _all_of(match, tagged, located)
             )
         elif label in _ATTRIBUTE_TERM_LINKS:
             selects[label] = select(table.c.id).where(
-                _attribute_is_visible(label), _all_of(match, tagged)
+                _attribute_is_visible(label), _all_of(match, tagged, located)
             )
         else:
-            selects[label] = select(table.c.id).where(_all_of(match, tagged))
+            selects[label] = select(table.c.id).where(_all_of(match, tagged, located))
 
     if Labels.TABLE in object_types or SEARCH_TYPE_VIEW in object_types:
         selects[Labels.TABLE] = select(s.catalog_table.c.id).where(
@@ -1118,6 +1233,7 @@ def matching_id_selects(
                     tokens, object_types, include_description=include_description
                 ),
                 _tag_where(Labels.TABLE, tags, include_untagged=include_untagged),
+                _data_where(Labels.TABLE, data),
             )
         )
 

@@ -34,6 +34,20 @@ export type DiscoveryFilters = {
 	 * with no tags" — that third reading is what the sentinel is for.
 	 */
 	tags: string[] | null;
+	/**
+	 * Database and schema ids a hit must live under, in one list.
+	 *
+	 * One list rather than two because the tree they are ticked in is one
+	 * tree: a whole database and a schema picked out of another are a single
+	 * selection. A ticked database stays one id instead of being expanded
+	 * into its schemas, so it keeps meaning "this database" as schemas are
+	 * added to it.
+	 *
+	 * Null and empty read as they do for `objects`. Unlike the other two,
+	 * a non-empty selection also narrows the *kinds* returned: only tables,
+	 * views and columns live under a schema, so nothing else can match.
+	 */
+	data: string[] | null;
 };
 
 /**

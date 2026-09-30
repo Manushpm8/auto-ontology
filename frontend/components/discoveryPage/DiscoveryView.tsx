@@ -52,7 +52,7 @@ import { DiscoveryFiltersPanel, discoveryFiltersMatchNothing } from './Discovery
  */
 const discoveryRequest = (search: DiscoverySearch, tabId: string): GlobalSearchRequest => {
 	const tabbed = tabId !== GLOBAL_SEARCH_ALL_TAB && isSearchObjectType(tabId);
-	const { objects, description, tags } = search.filters;
+	const { objects, description, tags, data } = search.filters;
 
 	return {
 		search_term: search.term,
@@ -70,6 +70,7 @@ const discoveryRequest = (search: DiscoverySearch, tabId: string): GlobalSearchR
 			// itself instead of asking; see `appliedMatchesNothing`.
 			objects: tabbed ? [tabId] : (objects ?? undefined),
 			tags: tags ?? undefined,
+			data: data ?? undefined,
 		},
 	};
 };
