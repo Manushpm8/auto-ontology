@@ -66,6 +66,14 @@ export type RuleFilters = {
 	description: boolean;
 	synonyms: boolean;
 	objects: SearchObjectType[] | null;
+	/**
+	 * Optional where the first three are not: a rule saved before the tags
+	 * filter existed has no such key in its stored JSON, and nothing rewrites
+	 * those rows. Absent and null both mean the rule narrows by no tag.
+	 *
+	 * Never carries the untagged sentinel — the create route refuses it.
+	 */
+	tags?: string[] | null;
 };
 
 /** A stored rule, as every read returns it. */

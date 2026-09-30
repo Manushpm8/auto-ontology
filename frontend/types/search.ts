@@ -31,11 +31,23 @@ export type GlobalSearchItem = {
  * description, and a Term's aliases. Both are omissible, and the backend's
  * defaults are not the same: `description` is off, `synonyms` on. See
  * `GlobalSearchFilters` in `auto_ontology/server/search/router.py` for why.
+ *
+ * `objects` and `tags` narrow instead, and omitting either narrows by nothing.
  */
 export type GlobalSearchFilters = {
 	description?: boolean;
 	synonyms?: boolean;
 	objects?: SearchObjectType[];
+	/**
+	 * Tag ids a hit may carry, plus `UNTAGGED_TAG_FILTER` for the objects
+	 * carrying none. Any one entry is enough, so two tags widen the selection
+	 * within the narrowing.
+	 *
+	 * Only five kinds can be tagged, so this also drops Databases, Schemas and
+	 * both analysis kinds — unless the untagged sentinel is present, since a
+	 * kind that cannot be tagged is untagged.
+	 */
+	tags?: string[];
 };
 
 export type GlobalSearchRequest = {

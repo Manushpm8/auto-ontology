@@ -1122,6 +1122,7 @@ TRIGRAM_SEARCH_TABLES = (
     column_attribute,
     sql_attribute,
     pql_analysis,
+    tag,
 )
 
 #: Global search matches a *substring*: typing ``mount`` has to find
@@ -1136,8 +1137,17 @@ TRIGRAM_SEARCH_TABLES = (
 #: only when the caller asks for it. Neither carries ``lower()``: ``gin_trgm_ops``
 #: folds case itself, so ``ILIKE`` uses these exactly as written -- adding
 #: ``lower()`` here would build an index that ``ILIKE`` then could not match.
+#:
+#: ``tag`` is searched but has no ``description`` column -- a tag is a name and
+#: its authorship, nothing more -- so it takes the one index it can. Skipped
+#: here rather than kept out of the tuple above, which would leave the table
+#: searched and unindexed.
+#: ``auto_ontology.dal.search._LABELS_WITHOUT_DESCRIPTION`` is the same fact on
+#: the query side.
 for _table in TRIGRAM_SEARCH_TABLES:
     for _column in ("name", "description"):
+        if _column not in _table.c:
+            continue
         Index(
             f"ix_{_table.name}_{_column}_trgm",
             _table.c[_column],

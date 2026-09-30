@@ -238,16 +238,23 @@ def test_the_stored_search_is_what_gets_replayed() -> None:
         "objects": None,
         "include_description": False,
         "include_synonyms": True,
+        "tags": None,
     }
 
 
 def test_stored_filters_reach_the_uncapped_search_too() -> None:
-    filters = {"objects": ["Column"], "description": True, "synonyms": False}
+    filters = {
+        "objects": ["Column"],
+        "description": True,
+        "synonyms": False,
+        "tags": ["tag-9"],
+    }
     _totals, match, _remove, _apply = _reapply([_rule(filters=filters)])
 
     assert match[0].kwargs["objects"] == ["Column"]
     assert match[0].kwargs["include_description"] is True
     assert match[0].kwargs["include_synonyms"] is False
+    assert match[0].kwargs["tags"] == ["tag-9"]
 
 
 def test_every_rule_runs_and_the_labels_are_totalled() -> None:

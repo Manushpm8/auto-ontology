@@ -23,3 +23,12 @@ TEXT_MATCH_CONTAINS = "contains"
 # identifiers. A two-character search is an accepted seq-scan, not a missed
 # optimisation.
 MIN_SEARCH_LENGTH = 2
+
+# The value ``filters.tags`` carries to mean "objects with no tags at all",
+# alongside the tag ids it otherwise holds.
+#
+# A sentinel in the list rather than a flag beside it, because that is what the
+# control on screen is: the panel offers "(Blanks)" as one more option in the
+# tag picker, and a person ticking it beside two tags is asking for either.
+# Parenthesised so it cannot collide with an id -- ids are UUIDs.
+UNTAGGED_FILTER_VALUE = "(blanks)"

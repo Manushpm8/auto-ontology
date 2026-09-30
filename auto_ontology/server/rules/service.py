@@ -138,6 +138,7 @@ def find_targets(
         objects=filters.get("objects"),
         include_description=filters.get("description", False),
         include_synonyms=filters.get("synonyms", True),
+        tags=filters.get("tags"),
     )
     hits = found["data"]
     targets = _taggable_targets(hits)
@@ -216,6 +217,7 @@ def replay_search(rule: dict[str, Any]) -> dict[str, Select]:
         objects=filters.get("objects"),
         include_description=filters.get("description", False),
         include_synonyms=filters.get("synonyms", True),
+        tags=filters.get("tags"),
     )
     return _taggable_selects(selects)
 

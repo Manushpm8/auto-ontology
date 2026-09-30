@@ -118,7 +118,15 @@ const GlobalSearchBody = ({
 	<div className="min-h-0 flex-1 overflow-y-auto" aria-busy={showSkeleton}>
 		{showSkeleton ? <GlobalSearchResultsSkeleton /> : null}
 		{items.length > 0 ? (
-			<GlobalSearchResults items={items} query={query} onNavigate={onNavigate} />
+			<GlobalSearchResults
+				items={items}
+				query={query}
+				// Constant, because this dialog offers no filters: it always
+				// searches descriptions, so a match in one is always a reason
+				// the row is here.
+				descriptionSearched={DEFAULT_SEARCH_FILTERS.description}
+				onNavigate={onNavigate}
+			/>
 		) : null}
 		{error !== null ? (
 			<EmptyState

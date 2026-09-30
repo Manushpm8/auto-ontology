@@ -143,6 +143,21 @@ class World:
                 attribute_id=self.hidden_term_attribute, term_id=self.orphan_term
             )
         )
+        # Two tags over two kinds, and deliberately not over everything: the
+        # view, the column, the attribute and the containers above them stay
+        # unlabelled, which is what the ``(blanks)`` half of the filter has to
+        # find.
+        self.tag = _add(s.tag, name=f"{p}_pii")
+        self.other_tag = _add(s.tag, name=f"{p}_curated")
+        store().query_write(
+            s.tag_target.insert().values(tag_id=self.tag, table_id=self.table)
+        )
+        store().query_write(
+            s.tag_target.insert().values(tag_id=self.tag, term_id=self.term)
+        )
+        store().query_write(
+            s.tag_target.insert().values(tag_id=self.other_tag, column_id=self.column)
+        )
 
 
 @pytest.fixture(scope="module")
@@ -151,11 +166,16 @@ def world() -> Iterator[World]:
 
     Deleting the database cascades to its schema, table, columns and the
     ``table__term`` link; the semantic rows hang off nothing and go by hand.
+    The tags go the same way, and take their ``tag_target`` rows with them --
+    every one of those columns is ``ondelete="CASCADE"`` from both ends.
     """
     with write_transaction():
         built = World()
     yield built
     with write_transaction():
+        store().query_write(
+            s.tag.delete().where(s.tag.c.id.in_([built.tag, built.other_tag]))
+        )
         store().query_write(
             s.catalog_database.delete().where(s.catalog_database.c.id == built.database)
         )
@@ -289,6 +309,181 @@ def test_tables_and_views_together_return_both(world: World) -> None:
         f"{world.prefix}_rental",
         f"{world.prefix}_rental_summary",
     }
+
+
+# --------------------------------------------------------------------------
+# Tags
+# --------------------------------------------------------------------------
+#
+# Two halves that combine rather than compete: the tag ids, satisfied by any
+# one of them, and ``include_untagged`` for the objects carrying none. The
+# service takes them apart from the one list the API carries — see
+# ``auto_ontology.server.search.service.resolve_tag_filter``.
+
+
+def test_a_tag_filter_keeps_only_what_carries_the_tag(world: World) -> None:
+    hits = _find(world, world.prefix, include_description=False, tag_ids=[world.tag])
+    assert _names(hits) == {f"{world.prefix}_rental", f"{world.prefix}_Revenue"}
+
+
+def test_any_one_of_the_tags_is_enough(world: World) -> None:
+    """Two tags is a union, not an intersection.
+
+    Nothing in the fixture carries both, so an ``AND`` reading of this would
+    return an empty list rather than a shorter one — and the count would have
+    to agree with it, which is what makes the distinction visible on the tabs
+    rather than only in the list.
+    """
+    names = _names(
+        _find(
+            world,
+            world.prefix,
+            include_description=False,
+            tag_ids=[world.tag, world.other_tag],
+        )
+    )
+    assert f"{world.prefix}_rental" in names
+    assert f"{world.prefix}_total_amount" in names
+
+
+def test_a_tag_filter_leaves_out_the_kinds_that_cannot_carry_one(
+    world: World,
+) -> None:
+    """``tag_target`` has no column for a Database or a Schema.
+
+    So neither can ever satisfy a tag, and a search narrowed to one has no
+    reason to scan them — which is ``_tag_filter_rules_out`` dropping the
+    branch rather than the union filtering its rows away.
+    """
+    hits = _find(world, world.prefix, include_description=False, tag_ids=[world.tag])
+    assert {Labels.DB, Labels.SCHEMA}.isdisjoint({row["label"] for row in hits})
+
+
+def test_the_untagged_sentinel_returns_what_carries_no_tag(world: World) -> None:
+    """Including the kinds that cannot be tagged, which are untagged by nature."""
+    names = _names(
+        _find(world, world.prefix, include_description=False, include_untagged=True)
+    )
+    assert f"{world.prefix}_rental_summary" in names
+    assert f"{world.prefix}_warehouse" in names
+    assert f"{world.prefix}_rental" not in names
+    assert f"{world.prefix}_Revenue" not in names
+
+
+def test_tags_and_the_untagged_sentinel_together_narrow_nothing(
+    world: World,
+) -> None:
+    """ "Tagged one of these, or tagged nothing" over every tag is everything.
+
+    The two halves being unioned is what makes this hold; an ``AND`` of them
+    would be the empty set, since nothing is both tagged and untagged.
+    """
+    both = _find(
+        world,
+        world.prefix,
+        include_description=False,
+        tag_ids=[world.tag, world.other_tag],
+        include_untagged=True,
+    )
+    unfiltered = _find(world, world.prefix, include_description=False)
+    assert _names(both) == _names(unfiltered)
+
+
+def test_no_tag_filter_asks_nothing_about_tags(world: World) -> None:
+    """The twin of the tests above: absent, the filter must not narrow at all."""
+    names = _names(_find(world, world.prefix, include_description=False))
+    assert f"{world.prefix}_rental" in names
+    assert f"{world.prefix}_rental_summary" in names
+
+
+def test_an_alias_only_term_respects_the_tag_filter(world: World) -> None:
+    """The synonym branch is a second route to a Term, not an exemption.
+
+    It is a separate statement so the cap cannot evict it (see
+    ``_synonym_term_select``), and that is the reason it would be easy to leave
+    the narrowing off — a tag-filtered search would then return untagged Terms
+    its own count does not include.
+    """
+    alias = search.synonym_word_tokens(f"{world.prefix} Takings")
+    tagged = search.fetch_global_search(
+        search.search_tokens("zzzznomatch"),
+        {LABEL_TERM},
+        include_description=False,
+        synonym_tokens=alias,
+        tag_ids=[world.tag],
+    )
+    assert f"{world.prefix}_Revenue" in _names(tagged)
+
+    untagged = search.fetch_global_search(
+        search.search_tokens("zzzznomatch"),
+        {LABEL_TERM},
+        include_description=False,
+        synonym_tokens=alias,
+        include_untagged=True,
+    )
+    assert f"{world.prefix}_Revenue" not in _names(untagged)
+
+
+def test_counts_respect_the_tag_filter(world: World) -> None:
+    counts = search.count_global_search(
+        search.search_tokens(world.prefix),
+        ALL_TYPES,
+        include_description=False,
+        tag_ids=[world.tag],
+    )
+    assert set(counts) == {Labels.TABLE, LABEL_TERM}
+    assert counts[Labels.TABLE] == 1
+
+
+# --------------------------------------------------------------------------
+# Tag as an object of its own
+# --------------------------------------------------------------------------
+#
+# A tag is the one searchable kind with no ``description`` column, so it is
+# also the one that would break the union by selecting a column that is not
+# there -- see ``_LABELS_WITHOUT_DESCRIPTION``.
+
+
+def test_a_tag_is_a_hit_in_its_own_right(world: World) -> None:
+    hits = _find(
+        world, f"{world.prefix}_curated", {search.LABEL_TAG}, include_description=False
+    )
+    assert [(row["name"], row["label"]) for row in hits] == [
+        (f"{world.prefix}_curated", search.LABEL_TAG)
+    ]
+
+
+def test_searching_descriptions_does_not_break_the_tag_branch(world: World) -> None:
+    """The column does not exist, so the flag has to be dropped for this kind.
+
+    Left in, the branch either selects a missing column or matches against one
+    -- and either way the failure is the whole union, not just the tag: every
+    other kind's hits disappear with it.
+    """
+    hits = _find(world, world.prefix, {search.LABEL_TAG}, include_description=True)
+    assert _names(hits) == {f"{world.prefix}_pii", f"{world.prefix}_curated"}
+    assert all(row["description"] is None for row in hits)
+
+
+def test_tags_are_counted_and_tabbed_like_any_other_kind(world: World) -> None:
+    counts = search.count_global_search(
+        search.search_tokens(world.prefix), ALL_TYPES, include_description=False
+    )
+    assert counts[search.LABEL_TAG] == 2
+
+
+def test_the_object_filter_can_leave_tags_out(world: World) -> None:
+    """Which is what the Objects picker does, and what every other tab does."""
+    names = _names(
+        _find(
+            world,
+            world.prefix,
+            ALL_TYPES - {search.LABEL_TAG},
+            include_description=False,
+        )
+    )
+    assert f"{world.prefix}_pii" not in names
+    assert f"{world.prefix}_rental" in names
 
 
 # --------------------------------------------------------------------------
@@ -562,10 +757,15 @@ def test_list_limit_ranks_before_cutting_so_later_union_branches_survive(
     an unordered ``LIMIT 2`` on this fixture would keep those two and drop the
     table even though its name is shorter — the same shape as All omitting
     tables while the Tables tab still has a count.
+
+    Tags are left out of the types rather than out of the assertion: the
+    fixture's own tag names are shorter still, so they would take both slots
+    and the test would stop saying anything about where Table sits in the
+    union.
     """
     hits = search.fetch_global_search(
         search.search_tokens(world.prefix),
-        ALL_TYPES,
+        ALL_TYPES - {search.LABEL_TAG},
         include_description=False,
         limit=2,
     )
@@ -690,7 +890,7 @@ def _matching_ids(
     world: World,
     term: str,
     types: set[str] | None = None,
-    **kwargs: bool,
+    **kwargs,
 ) -> dict[str, set[str]]:
     """Run every statement :func:`matching_id_selects` built, as a rule would."""
     selects = search.matching_id_selects(
@@ -842,6 +1042,22 @@ def test_descriptions_are_matched_only_when_asked(world: World) -> None:
             Labels.COLUMN
         ]
     )
+
+
+def test_the_matching_statements_respect_the_tag_filter(world: World) -> None:
+    """What a rule filtering on a tag would label, which is the tagged rows only.
+
+    The third path has its own loop over the labels, so the narrowing has to be
+    repeated there — and it is the path where getting it wrong is worst: this
+    one is uncapped and it *writes*, so a rule saved over "tagged PII" would
+    label the whole match instead.
+    """
+    ids = _matching_ids(
+        world, world.prefix, include_description=False, tag_ids=[world.tag]
+    )
+    assert ids[Labels.TABLE] == {world.table}
+    assert ids[LABEL_TERM] == {world.term}
+    assert Labels.DB not in ids
 
 
 def test_a_query_that_matches_nothing_builds_no_statements() -> None:
