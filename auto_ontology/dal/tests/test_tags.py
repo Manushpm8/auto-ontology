@@ -77,6 +77,8 @@ from auto_ontology.dal.tags import (  # noqa: E402
     existing_tag_ids,
     fetch_tags_map,
     get_tag,
+    get_tag_by_name,
+    get_or_create_tag,
     list_tag_targets,
     list_tags,
     apply_labels_now_matched,
@@ -108,6 +110,23 @@ def test_create_returns_the_stored_tag(prefix) -> None:
 
     assert tag["name"] == f"{prefix}-pii"
     assert tag["id"]
+
+
+def test_get_tag_by_name_ignores_case_and_whitespace(prefix) -> None:
+    tag = create_tag(name=f"{prefix}-PII")
+
+    found = get_tag_by_name(f"  {prefix}-pii  ")
+
+    assert found is not None
+    assert found["id"] == tag["id"]
+
+
+def test_get_or_create_tag_reuses_existing_case_insensitive_name(prefix) -> None:
+    tag = create_tag(name=f"{prefix}-PII")
+
+    ensured = get_or_create_tag(name=f"{prefix}-pii")
+
+    assert ensured["id"] == tag["id"]
 
 
 def test_the_same_name_twice_is_rejected(prefix) -> None:

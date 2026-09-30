@@ -241,6 +241,36 @@ def get_tag(tag_id: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+def get_tag_by_name(name: str) -> dict[str, Any] | None:
+    """One tag by its case-insensitive, trimmed name."""
+
+    rows = store().query_read(
+        select(*_COLUMNS).where(_FOLDED_NAME == name.strip().lower())
+    )
+    return rows[0] if rows else None
+
+
+def get_or_create_tag(*, name: str, created_by: str | None = None) -> dict[str, Any]:
+    """Return the named tag, creating it safely when it does not exist.
+
+    The unique index remains the concurrency guard. If another worker creates
+    the same tag after our initial read, :func:`create_tag` reports the
+    collision and this function re-reads the winning row.
+    """
+
+    normalized_name = name.strip()
+    existing = get_tag_by_name(normalized_name)
+    if existing is not None:
+        return existing
+    try:
+        return create_tag(name=normalized_name, created_by=created_by)
+    except ValueError:
+        existing = get_tag_by_name(normalized_name)
+        if existing is None:
+            raise
+        return existing
+
+
 def existing_tag_ids(tag_ids: list[str]) -> set[str]:
     """Which of *tag_ids* name a tag, as a set.
 
