@@ -134,6 +134,20 @@ const DiscoveryResults = ({
 	);
 };
 
+/**
+ * The search a `?q=` arrives as, or null for a term too short to run.
+ *
+ * Always at the panel's defaults, which is what makes the handover honest: the
+ * dialog searches with no narrowing, so the page it hands over to has to open
+ * with none either — landing on a narrowed view of somebody else's search
+ * would report fewer hits than the dialog just showed.
+ */
+const openingSearch = (term: string): DiscoverySearch | null => {
+	const trimmed = term.trim();
+	if (trimmed.length < GLOBAL_SEARCH_MIN_QUERY_LENGTH) return null;
+	return { term: trimmed, filters: DEFAULT_DISCOVERY_FILTERS };
+};
+
 export type DiscoveryViewProps = {
 	/**
 	 * A search to open on, from `?q=` — the term the top bar's dialog was
@@ -159,11 +173,9 @@ export type DiscoveryViewProps = {
 export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 	const [query, setQuery] = useState(initialQuery);
 	const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_DISCOVERY_FILTERS);
-	const [applied, setApplied] = useState<DiscoverySearch | null>(() => {
-		const term = initialQuery.trim();
-		if (term.length < GLOBAL_SEARCH_MIN_QUERY_LENGTH) return null;
-		return { term, filters: DEFAULT_DISCOVERY_FILTERS };
-	});
+	const [applied, setApplied] = useState<DiscoverySearch | null>(() =>
+		openingSearch(initialQuery),
+	);
 	const [selectedTab, setSelectedTab] = useState<string>(GLOBAL_SEARCH_ALL_TAB);
 	const [items, setItems] = useState<GlobalSearchItem[]>([]);
 	const [counts, setCounts] = useState<Record<string, number>>({});
@@ -256,6 +268,33 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 		clearResults();
 		setApplied(null);
 	};
+
+	/**
+	 * Take over a `?q=` that arrived while this page was already on screen.
+	 *
+	 * The dialog opens from the top bar, so Discovery is one of the pages
+	 * Advanced Search is pressed *from*. That navigation keeps this component
+	 * mounted — same route, same position in the tree — so the initial state
+	 * above never runs again and the handed-over term would land nowhere.
+	 *
+	 * Adjusted during render rather than from an effect, which is what React
+	 * prescribes for state derived from a changed prop: the corrected values
+	 * are what reach the DOM, so there is no paint showing the previous search
+	 * under the new term, and no effect that has to be kept from running twice.
+	 *
+	 * The filters go back to their defaults with it. They belong to the search
+	 * that was on screen, not to the one arriving, and leaving them on would
+	 * narrow somebody else's search without saying so.
+	 */
+	const [handedOverQuery, setHandedOverQuery] = useState(initialQuery);
+	if (initialQuery !== handedOverQuery) {
+		setHandedOverQuery(initialQuery);
+		setQuery(initialQuery);
+		setFilters(DEFAULT_DISCOVERY_FILTERS);
+		clearResults();
+		setEpoch((value) => value + 1);
+		setApplied(openingSearch(initialQuery));
+	}
 
 	/**
 	 * Save a rule over the search these results came from.
