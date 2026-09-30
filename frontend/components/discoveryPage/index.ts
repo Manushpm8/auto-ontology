@@ -2,5 +2,5 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export { DiscoveryView } from './DiscoveryView';
+export { DiscoveryView, type DiscoveryViewProps } from './DiscoveryView';
 export { DiscoveryFiltersPanel, changedDiscoveryFilterCount } from './DiscoveryFiltersPanel';

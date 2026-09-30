@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
 	globalSearchCountsFromResponse,
 	globalSearchItemsFromResponse,
@@ -13,6 +14,7 @@ import {
 import { Placeholders } from '@/assets/images/placeholders';
 import { EmptyState } from '@/common/EmptyState';
 import { searchObjectTypeFromHit } from '@/common/globalSearchMeta';
+import { Icon, IconName } from '@/common/icons';
 import { GlobalSearchResults, GlobalSearchResultsSkeleton } from '@/common/GlobalSearchResults';
 import {
 	GlobalSearchTabs,
@@ -154,6 +156,7 @@ export type GlobalSearchModalProps = {
  * and part of what gets stored.
  */
 export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => {
+	const router = useRouter();
 	const [query, setQuery] = useState('');
 	const [selectedTab, setSelectedTab] = useState(GLOBAL_SEARCH_ALL_TAB);
 	const [items, setItems] = useState<GlobalSearchItem[]>([]);
@@ -238,6 +241,33 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 		onClose();
 	};
 
+	/**
+	 * Leave for Discovery, carrying the term across.
+	 *
+	 * The term as typed rather than the debounced one: the dialog is being left,
+	 * so there is nothing left to wait for — a person who presses this mid-word
+	 * means the word they typed, not the one the debounce still holds.
+	 *
+	 * Discovery re-runs it rather than only prefilling the field, and lands on
+	 * the same results: its default filters search descriptions and synonyms,
+	 * which is what this dialog searches. So the page opens where the dialog
+	 * left off and the filters are there to narrow from, which is the whole
+	 * reason to walk through this door.
+	 *
+	 * A term too short to search is dropped instead of sent, since Discovery
+	 * would refuse to run it and the field would then hold something the
+	 * results do not answer.
+	 */
+	const handleAdvancedSearch = () => {
+		const term = query.trim();
+		handleClose();
+		router.push(
+			term.length >= GLOBAL_SEARCH_MIN_QUERY_LENGTH
+				? `/discovery?q=${encodeURIComponent(term)}`
+				: '/discovery',
+		);
+	};
+
 	const queryActive = liveQuery.length >= GLOBAL_SEARCH_MIN_QUERY_LENGTH;
 	const searchSettled = searching && !awaitingSearch && queryActive;
 	const visibleItems = searchSettled ? items : [];
@@ -302,6 +332,20 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 					onNavigate={handleClose}
 				/>
 			</div>
+			{/* Outside the scrolling list rather than the last row of it: this is
+			    the way on from a search the dialog cannot narrow, and a way on
+			    that scrolls off the end of two hundred results is one nobody
+			    finds. Shown whether or not anything was typed — Discovery is
+			    also where a search starts from its filters rather than from a
+			    term. */}
+			<button
+				type="button"
+				onClick={handleAdvancedSearch}
+				className="flex shrink-0 cursor-pointer items-center gap-2 border-t border-zinc-200 px-4 py-2.5 text-sm text-blue-600 transition-colors hover:bg-zinc-50 hover:text-blue-700 dark:border-zinc-800 dark:text-blue-400 dark:hover:bg-zinc-900/60 dark:hover:text-blue-300"
+			>
+				<Icon name={IconName.Filter} className="h-4 w-4 shrink-0" />
+				Advanced Search
+			</button>
 		</Modal>
 	);
 };

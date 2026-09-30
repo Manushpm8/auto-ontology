@@ -134,6 +134,14 @@ const DiscoveryResults = ({
 	);
 };
 
+export type DiscoveryViewProps = {
+	/**
+	 * A search to open on, from `?q=` — the term the top bar's dialog was
+	 * showing results for when Advanced Search was pressed.
+	 */
+	initialQuery?: string;
+};
+
 /**
  * Discovery: the global search as a page of its own, with the filters it
  * accepts beside it.
@@ -142,11 +150,20 @@ const DiscoveryResults = ({
  * a person narrowing several of them would otherwise have every intermediate
  * combination run as a query, and a rule saved from the results would be
  * saved over whichever one happened to land last.
+ *
+ * An `initialQuery` is the one search that runs without Apply, because it was
+ * already applied elsewhere: arriving with results is the point of coming here
+ * from the dialog. It is applied in the initial state rather than by an effect,
+ * so there is no first paint with the term in the field and nothing beneath it.
  */
-export const DiscoveryView = () => {
-	const [query, setQuery] = useState('');
+export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
+	const [query, setQuery] = useState(initialQuery);
 	const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_DISCOVERY_FILTERS);
-	const [applied, setApplied] = useState<DiscoverySearch | null>(null);
+	const [applied, setApplied] = useState<DiscoverySearch | null>(() => {
+		const term = initialQuery.trim();
+		if (term.length < GLOBAL_SEARCH_MIN_QUERY_LENGTH) return null;
+		return { term, filters: DEFAULT_DISCOVERY_FILTERS };
+	});
 	const [selectedTab, setSelectedTab] = useState<string>(GLOBAL_SEARCH_ALL_TAB);
 	const [items, setItems] = useState<GlobalSearchItem[]>([]);
 	const [counts, setCounts] = useState<Record<string, number>>({});
