@@ -142,7 +142,8 @@ const ObjectsFilter = ({
 		const next = effective.includes(type)
 			? effective.filter((item) => item !== type)
 			: [...effective, type];
-		onChange(next.length === SEARCH_TYPE_TAB_ORDER.length ? null : next);
+
+		onChange(SEARCH_TYPE_TAB_ORDER.every((item) => next.includes(item)) ? null : next);
 	};
 
 	return (
@@ -289,10 +290,11 @@ const TagsFilter = ({
 	const allSelected = selected === null;
 
 	const toggle = (value: string) => {
-		const next = effective.includes(value)
-			? effective.filter((item) => item !== value)
-			: [...effective, value];
-		onChange(next.length === everyOption.length ? null : next);
+		const held = effective.filter((item) => everyOption.includes(item));
+		const next = held.includes(value)
+			? held.filter((item) => item !== value)
+			: [...held, value];
+		onChange(everyOption.every((option) => next.includes(option)) ? null : next);
 	};
 
 	// Named by count rather than by name: tag names run to 25 characters and

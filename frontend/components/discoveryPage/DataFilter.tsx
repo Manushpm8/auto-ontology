@@ -47,10 +47,9 @@ const toDataIds = (databases: Database[], selection: Set<string>): string[] => {
 	const ids: string[] = [];
 	databases.forEach((database) => {
 		const { schemas } = database;
-		const loadedAll = schemas.length > 0 && schemas.length === database.num_of_schemas;
 		const picked = schemas.filter((schema) => selection.has(schema.id));
 
-		if (loadedAll && picked.length === schemas.length) {
+		if (schemas.length > 0 && picked.length === schemas.length) {
 			ids.push(database.id);
 			return;
 		}

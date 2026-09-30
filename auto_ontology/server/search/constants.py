@@ -16,7 +16,7 @@ TEXT_MATCH_CONTAINS = "contains"
 #
 # Two characters cannot use the ``gin_trgm_ops`` indexes -- Postgres only
 # considers a ``LIKE``/``ILIKE`` pattern indexable when it has three
-# consecutive non-wildcard characters, so ``%id%`` seq-scans all nine tables.
+# consecutive non-wildcard characters, so ``%id%`` seq-scans all ten tables.
 # The floor stays at 2 anyway: ``id``, ``BU``, ``fk`` are real catalog queries,
 # and the UI's 1000 ms debounce is what stops this firing per keystroke.
 # Raising it to 3 would make every query indexable, but would drop those
