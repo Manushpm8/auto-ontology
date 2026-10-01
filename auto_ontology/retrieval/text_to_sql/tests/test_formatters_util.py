@@ -221,26 +221,6 @@ def test_prompt_renders_confidence_for_every_column_and_match_provenance() -> No
     assert "semantic" not in region_line
 
 
-def test_semantic_prompt_excludes_columns_without_positive_confidence() -> None:
-    rendered = format_tables_for_prompt(
-        [
-            {
-                "name": "sales",
-                "columns": [
-                    {"name": "revenue", "confidence": 0.7},
-                    {"name": "region", "confidence": 0.0},
-                    {"name": "legacy"},
-                ],
-            }
-        ],
-        exclude_zero_confidence_columns=True,
-    )
-
-    assert "- revenue " in rendered
-    assert "- region " not in rendered
-    assert "- legacy " not in rendered
-
-
 def test_prompt_renders_date_format_when_present() -> None:
     rendered = format_tables_for_prompt(
         [

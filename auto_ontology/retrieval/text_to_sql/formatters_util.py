@@ -216,7 +216,6 @@ def format_tables_for_prompt(
     tables: list[dict],
     target_db: str | None = None,
     dialect: str | None = None,
-    exclude_zero_confidence_columns: bool = False,
 ) -> str:
     """Format tables and their columns as schema context for a prompt.
 
@@ -232,9 +231,6 @@ def format_tables_for_prompt(
     the same table with its catalog — and on a catalog-qualified engine the
     short one does not resolve.
 
-    When *exclude_zero_confidence_columns* is true, only columns with positive
-    semantic confidence are rendered. This is used after semantic preparation,
-    where every candidate column has been scored.
     """
     if not tables:
         return "No tables available"
@@ -262,13 +258,6 @@ def format_tables_for_prompt(
         columns = table.get("columns")
         if not isinstance(columns, list):
             columns = []
-        if exclude_zero_confidence_columns:
-            columns = [
-                column
-                for column in columns
-                if isinstance(column, dict)
-                and float(column.get("confidence") or 0.0) > 0.0
-            ]
         if columns:
             table_parts.append(
                 "  AVAILABLE COLUMNS (only use these columns for this table):"

@@ -253,7 +253,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                     relevant_tables,
                     target_db=target_db,
                     dialect=dialect,
-                    exclude_zero_confidence_columns=True,
                 )
                 if relevant_tables
                 else "No tables available."
