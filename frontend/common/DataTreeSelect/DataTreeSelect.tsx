@@ -68,7 +68,7 @@ export const DataTreeSelect = ({
 	};
 
 	const getSchemaDescendantIds = (schema: Schema): string[] =>
-		schema.tables.map((table) => table.id);
+		showTables ? schema.tables.map((table) => table.id) : [];
 
 	const getDatabaseDescendantIds = (db: Database): string[] =>
 		db.schemas.flatMap((schema) => [schema.id, ...getSchemaDescendantIds(schema)]);
@@ -132,7 +132,7 @@ export const DataTreeSelect = ({
 			nextPreviousChildren[db.id] = dbChildrenSet;
 
 			db.schemas.forEach((schema) => {
-				const schemaChildren = schema.tables.map((table) => table.id);
+				const schemaChildren = showTables ? schema.tables.map((table) => table.id) : [];
 				const schemaChildrenSet = new Set(schemaChildren);
 				const previousSchemaChildren =
 					previousChildrenRef.current[schema.id] ?? new Set<string>();
@@ -153,7 +153,7 @@ export const DataTreeSelect = ({
 		if (hasChanges) {
 			onSelectedItemsChange(next);
 		}
-	}, [databases, selectedItems, onSelectedItemsChange]);
+	}, [databases, selectedItems, onSelectedItemsChange, showTables]);
 
 	useEffect(() => {
 		if (expandSelectedOnlyKey == null) return;
