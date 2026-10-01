@@ -347,8 +347,8 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.Discovery} className="h-5 w-5 text-[#76b900]" />
-				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+				<Icon name={IconName.Discovery} className="h-5 w-5 text-body dark:text-zinc-300" />
+				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
 					Discovery
 				</h1>
 			</header>
@@ -403,7 +403,7 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 							    only be offered once the search has matched something. */}
 							{items.length > 0 &&
 								(untaggedSearch ? (
-									<p className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
+									<p className="shrink-0 text-xs text-secondary dark:text-zinc-400">
 										A search for untagged objects cannot be saved as a rule
 									</p>
 								) : (
@@ -428,9 +428,9 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 							</div>
 						)}
 						{showLimitBanner && (
-							<p className="shrink-0 px-6 py-2 text-sm text-zinc-500 dark:text-zinc-400">
-								Viewing top {GLOBAL_SEARCH_LIST_LIMIT} results - Try filtering to
-								get a more accurate search results
+							<p className="shrink-0 px-6 py-2 text-sm text-secondary dark:text-zinc-400">
+								Viewing the top {GLOBAL_SEARCH_LIST_LIMIT} results. Try filtering
+								for more accurate results.
 							</p>
 						)}
 						<div className="min-h-0 flex-1 overflow-y-auto px-3" aria-busy={loading}>

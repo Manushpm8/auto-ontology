@@ -159,7 +159,7 @@ export const DataFilter = ({ selected, onChange }: DataFilterProps) => {
 					<span className="truncate">{summary}</span>
 					<Icon
 						name={IconName.ChevronRight}
-						className="h-4 w-4 shrink-0 rotate-90 text-zinc-400"
+						className="h-4 w-4 shrink-0 rotate-90 text-secondary dark:text-zinc-400"
 					/>
 				</SelectButton>
 			)}
@@ -167,7 +167,7 @@ export const DataFilter = ({ selected, onChange }: DataFilterProps) => {
 			{() => (
 				<div className="flex flex-col">
 					<div className="flex items-center justify-between gap-2 px-2 py-1">
-						<span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+						<span className="text-xs font-medium text-secondary dark:text-zinc-400">
 							Filter By
 						</span>
 						<Button
@@ -181,7 +181,7 @@ export const DataFilter = ({ selected, onChange }: DataFilterProps) => {
 						</Button>
 					</div>
 					{emptyMessage !== null ? (
-						<p className="px-2 py-3 text-center text-xs text-zinc-400">
+						<p className="px-2 py-3 text-center text-xs text-secondary dark:text-zinc-400">
 							{emptyMessage}
 						</p>
 					) : (
