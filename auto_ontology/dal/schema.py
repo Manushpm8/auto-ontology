@@ -239,6 +239,10 @@ catalog_column = Table(
     # A genuine integer, despite the parser handing the write path a string --
     # something coerces on the way in.
     Column("ordinal_position", Integer, nullable=True),
+    # Set only after automatic PII classification completes. Tag edits are
+    # deliberately independent: removing an automatically assigned PII tag is
+    # a user override and must not make the next ingest add it back.
+    Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
     _imported_id(),
     UniqueConstraint("table_id", "name", name="uq_catalog_column_table_name"),
 )

@@ -55,6 +55,13 @@ def _frame() -> pd.DataFrame:
     )
 
 
+@pytest.fixture(autouse=True)
+def persist_processed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        service, "mark_columns_pii_processed", lambda column_ids: len(column_ids)
+    )
+
+
 def test_applies_one_shared_tag_and_reuses_existing_membership(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -79,6 +86,7 @@ def test_applies_one_shared_tag_and_reuses_existing_membership(
     result = service.detect_and_tag_pii(_frame(), detector=PiiDetector(backend))
 
     assert result.scanned == 3
+    assert result.processed == 3
     assert result.rules_decided == 2
     assert result.llm_decided == 1
     assert result.tagged == 1
@@ -107,6 +115,7 @@ def test_below_threshold_does_not_create_a_tag(
     )
 
     assert result.tagged == 0
+    assert result.processed == 1
     assert result.llm_decided == 1
 
 
@@ -137,3 +146,57 @@ def test_missing_column_identity_is_skipped(
     result = service.detect_and_tag_pii(frame, detector=PiiDetector())
 
     assert result.scanned == 0
+
+
+def test_processed_column_is_not_classified_or_retagged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected(**_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("processed column must not touch the tag vocabulary")
+
+    monkeypatch.setattr(service, "get_or_create_tag", unexpected)
+    frame = _frame().iloc[[0]].assign(pii_processed=True)
+
+    result = service.detect_and_tag_pii(frame)
+
+    assert result == service.PiiTaggingResult()
+
+
+def test_marks_negative_decision_as_processed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    processed: list[str] = []
+    monkeypatch.setattr(
+        service,
+        "mark_columns_pii_processed",
+        lambda column_ids: processed.extend(column_ids) or len(column_ids),
+    )
+
+    result = service.detect_and_tag_pii(_frame().iloc[[2]], detector=PiiDetector())
+
+    assert result.rules_decided == 1
+    assert result.tagged == 0
+    assert processed == ["product-id"]
+
+
+def test_classifier_failure_remains_unprocessed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingBackend:
+        def classify(self, _column: ColumnInput) -> PiiDecision:
+            raise RuntimeError("temporary failure")
+
+    processed: list[str] = []
+    monkeypatch.setattr(
+        service,
+        "mark_columns_pii_processed",
+        lambda column_ids: processed.extend(column_ids) or len(column_ids),
+    )
+
+    result = service.detect_and_tag_pii(
+        _frame().iloc[[1]], detector=PiiDetector(FailingBackend())
+    )
+
+    assert result.review == 1
+    assert result.processed == 0
+    assert processed == []

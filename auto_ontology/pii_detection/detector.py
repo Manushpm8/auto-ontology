@@ -32,7 +32,8 @@ You classify database columns for personally identifiable information (PII).
 Use the column name, table name, and description together.
 PII is information that identifies a person directly or can identify them when combined
 with other data. Do not classify business, product, or aggregate information as PII.
-Use "review" when context is insufficient.
+If context is insufficient or you are unsure whether the column is PII, classify it as
+"pii". This is a conservative policy: uncertainty must be treated as PII, not "review".
 Always return status, category, confidence, and a short reason.
 Never include hidden reasoning."""
 
@@ -99,15 +100,22 @@ class LlmPiiClassifier:
             raise RuntimeError("PII classifier returned no valid response")
 
         category = response.category
-        if response.status is PiiStatus.PII and not category:
+        status = response.status
+        confidence = response.confidence
+        if status is PiiStatus.REVIEW:
+            # Illumex's PII policy is deliberately conservative: an uncertain
+            # classification is positive. Normalise here as well as prompting
+            # for it so a model returning REVIEW cannot bypass that policy.
+            status = PiiStatus.PII
+            confidence = 1.0
+        if status is PiiStatus.PII and not category:
             category = "other"
 
         return PiiDecision(
-            status=response.status,
+            status=status,
             category=category,
-            confidence=response.confidence,
-            reason=response.reason
-            or f"LLM classified the column as {response.status.value}.",
+            confidence=confidence,
+            reason=response.reason or f"LLM classified the column as {status.value}.",
             source="llm",
         )
 

@@ -204,3 +204,25 @@ def test_llm_classifier_accepts_missing_optional_explanation(
     assert decision.status is PiiStatus.NOT_PII
     assert decision.confidence == 0.78
     assert decision.reason == "LLM classified the column as not_pii."
+
+
+def test_llm_uncertainty_is_conservatively_treated_as_pii(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def invoke(_llm: object, _messages: list, schema: type) -> object:
+        return schema.model_validate(
+            {
+                "status": "review",
+                "confidence": 0.2,
+                "reason": "The available metadata is ambiguous.",
+            }
+        )
+
+    monkeypatch.setattr(detector_module, "invoke_with_structured_output", invoke)
+    classifier = LlmPiiClassifier(llm=object())  # type: ignore[arg-type]
+
+    decision = classifier.classify(ColumnInput(column_name="id", table_name="case"))
+
+    assert decision.status is PiiStatus.PII
+    assert decision.confidence == 1.0
+    assert decision.should_auto_tag()
