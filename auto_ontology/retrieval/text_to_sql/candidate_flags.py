@@ -115,3 +115,33 @@ def decomposition_tree() -> bool:
     close enough to the query plan that the two candidates often agree.
     """
     return _bool("BIRD_DECOMP_TREE", False)
+
+
+def selection_enabled() -> bool:
+    """Whether to elect a winner from the pool (``BIRD_SQL_SELECT``).
+
+    Off by default: with it off the pool still rides out on ``sql_candidates``
+    for measurement, and slot 0 ships, which is the previous behaviour.
+    """
+    return _bool("BIRD_SQL_SELECT", False)
+
+
+def selection_pattern_alpha() -> float:
+    """Weight of structural-pattern fit in cluster scoring (``BIRD_SQL_PATTERN_ALPHA``).
+
+    In units of votes, so 1.0 lets a perfect pattern match outweigh one extra
+    agreeing candidate. Measured flat across 0.5-3.0 on BIRD dev; 0 disables
+    the tie-break and leaves a pure vote.
+    """
+    return max(0.0, _float("BIRD_SQL_PATTERN_ALPHA", 1.0))
+
+
+def selection_drop_empty() -> bool:
+    """Whether an empty result disqualifies a candidate (``BIRD_SQL_DROP_EMPTY``).
+
+    On by default, and the single highest-value rule in the selector: an
+    over-constrained predicate returns no rows, several candidates make that
+    same mistake, and the resulting agreement outvotes the one candidate that
+    found the data.
+    """
+    return _bool("BIRD_SQL_DROP_EMPTY", True)
