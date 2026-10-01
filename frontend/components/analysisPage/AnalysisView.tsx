@@ -343,7 +343,7 @@ export const AnalysisView = () => {
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
 				<Icon name={IconName.ChartBar} className="h-5 w-5 text-body dark:text-zinc-300" />
 				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
-					{isPql ? 'PQL analyses' : 'Custom analyses'}
+					{isPql ? 'PQL Analyses' : 'Custom Analyses'}
 				</h1>
 				<div className="ml-4 flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
 					<SelectButton
@@ -370,7 +370,7 @@ export const AnalysisView = () => {
 						shadow
 					>
 						<Icon name={IconName.Plus} className="h-4 w-4" />
-						Create New Analysis
+						Create New {MODE_LABEL[mode]} Analysis
 					</Button>
 				</div>
 			</header>
@@ -386,7 +386,7 @@ export const AnalysisView = () => {
 					<SearchInput
 						value={searchQuery}
 						onChange={setSearchQuery}
-						placeholder={`Search ${MODE_LABEL[mode]} analyses…`}
+						placeholder={`Search ${MODE_LABEL[mode]} Analyses…`}
 						aria-label={`Search ${MODE_LABEL[mode]} analyses`}
 						className="mb-6 w-full"
 					/>
@@ -434,7 +434,7 @@ export const AnalysisView = () => {
 						title={
 							debouncedSearchQuery
 								? `No ${MODE_LABEL[mode]} Analyses Match Your Search`
-								: `No ${MODE_LABEL[mode]} Analyses Found`
+								: `No ${MODE_LABEL[mode]} Analyses Created Yet`
 						}
 					/>
 				)}
@@ -532,7 +532,11 @@ export const AnalysisView = () => {
 			<ModalCreateNewItem
 				open={modalOpen}
 				onClose={handleClose}
-				title={`${isEditing ? 'Edit' : 'Add'} ${MODE_LABEL[mode]} Analysis`}
+				title={
+					isEditing
+						? `Edit ${MODE_LABEL[mode]} Analysis`
+						: `Create New ${MODE_LABEL[mode]} Analysis`
+				}
 				submitLabel={submitting ? 'Saving…' : 'Save'}
 				onSubmit={handleSubmit}
 				canSubmit={canSubmit}
@@ -594,7 +598,7 @@ export const AnalysisView = () => {
 				open={deletingItem !== null}
 				onCancel={handleDeleteClose}
 				onConfirm={handleDeleteConfirm}
-				title={`Delete ${MODE_LABEL[mode]} analysis`}
+				title={`Delete ${MODE_LABEL[mode]} Analysis`}
 				message={
 					<>
 						Are you sure you want to delete <strong>{deletingItem?.name}</strong>? This
