@@ -393,6 +393,7 @@ export const TermsView = () => {
 		error,
 		hasMore: hasMoreTerms,
 		loadMore: loadMoreTerms,
+		reload: reloadTerms,
 	} = useInfiniteList(fetchTermsPage, {
 		pageSize: DEFAULT_PAGE_SIZE,
 		itemKey: (term) => term.id,
@@ -1618,6 +1619,19 @@ export const TermsView = () => {
 						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-red-900/80 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
 							{error}
 						</pre>
+						{/* `reload`, not `loadMore`: a failed first page leaves
+						    nothing fetched, so `loadMore` sees the list as ended
+						    and returns without asking for anything. */}
+						<div className="mt-4 flex justify-center">
+							<Button
+								theme={ButtonTheme.Secondary}
+								size={Size.SMALL}
+								type="button"
+								onClick={reloadTerms}
+							>
+								Retry
+							</Button>
+						</div>
 					</div>
 				)}
 
