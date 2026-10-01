@@ -73,6 +73,21 @@ def test_selects_database_by_entity_coverage_before_total_hits() -> None:
     assert selected == "db-a"
 
 
+def test_full_column_matches_preserve_distances_per_entity() -> None:
+    matches = candidates_retrieval._dedupe_column_matches(
+        [
+            _hit("shared", "db-a", 0.4, query_entity="revenue"),
+            _hit("shared", "db-a", 0.2, query_entity="revenue"),
+            _hit("shared", "db-a", 0.6, query_entity="region"),
+        ]
+    )
+
+    assert [(match["query_entity"], match["score"]) for match in matches] == [
+        ("region", 0.6),
+        ("revenue", 0.2),
+    ]
+
+
 @pytest.mark.parametrize(
     ("column_hits", "custom_hits", "expected"),
     [
@@ -131,13 +146,13 @@ def test_unscoped_retrieval_filters_database_and_backfills_entities(
         if label == LABEL_COLUMN_ATTRIBUTE:
             initial_hits = {
                 "revenue": [
-                    _hit("a-revenue", "db-a", 0.2),
-                    _hit("b-revenue", "db-b", 0.1),
-                    _hit("missing-db", None, 0.01),
+                    _hit("a-revenue", "db-a", 0.1),
+                    _hit("b-revenue", "db-b", 0.2),
+                    _hit("missing-db", None, 0.3),
                 ],
                 "region": [
-                    _hit("a-region", "db-a", 0.2),
-                    _hit("b-region", "db-b", 0.1),
+                    _hit("a-region", "db-a", 0.1),
+                    _hit("b-region", "db-b", 0.2),
                 ],
                 "customer": [_hit("missing-customer-db", None, 0.1)],
             }
@@ -280,16 +295,21 @@ def test_bridge_sourced_sql_attrs_skip_llm_filter_but_custom_still_filtered(
 def test_explicit_target_db_preserves_existing_search_behavior(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[tuple[str, str, str | None]] = []
+    calls: list[tuple[str, str, int, str | None]] = []
 
     def fake_search(
         _retriever: object,
         entity: str,
         label: str,
-        _k: int,
+        k: int,
         database_name: str | None = None,
     ) -> list[dict]:
-        calls.append((entity, label, database_name))
+        calls.append((entity, label, k, database_name))
+        if label == LABEL_COLUMN_ATTRIBUTE:
+            return [
+                _hit(f"{label}-{entity}-{rank}", "db-a", rank / 100)
+                for rank in range(1, 11)
+            ]
         return [_hit(f"{label}-{entity}", "db-a", 0.2)]
 
     monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
@@ -305,6 +325,57 @@ def test_explicit_target_db_preserves_existing_search_behavior(
     )
 
     assert len(calls) == 4
-    assert {database_name for _, _, database_name in calls} == {"db-a"}
+    assert {database_name for _, _, _, database_name in calls} == {"db-a"}
+    assert {k for _, label, k, _ in calls if label == LABEL_COLUMN_ATTRIBUTE} == {10}
     assert result["path_state"]["target_db"] == "db-a"
-    assert len(result["path_state"]["retrieved_column_attributes"]) == 2
+    assert len(result["path_state"]["retrieved_column_attributes"]) == 4
+    matches = result["path_state"]["retrieved_column_attribute_matches"]
+    assert len(matches) == 20
+    assert {match["query_entity"] for match in matches} == {"revenue", "region"}
+    assert {match["score"] for match in matches} == {
+        rank / 100 for rank in range(1, 11)
+    }
+
+
+def test_database_selection_uses_only_top_two_column_hits_per_entity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_search(
+        _retriever: object,
+        entity: str,
+        label: str,
+        _k: int,
+        database_name: str | None = None,
+    ) -> list[dict]:
+        if label == LABEL_COLUMN_ATTRIBUTE:
+            if database_name == "db-a":
+                return [
+                    _hit(f"a-{entity}-{rank}", "db-a", rank / 10)
+                    for rank in range(1, 11)
+                ]
+            return [
+                _hit(f"a-{entity}-1", "db-a", 0.1),
+                _hit(f"a-{entity}-2", "db-a", 0.2),
+                *[
+                    _hit(f"b-{entity}-{rank}", "db-b", rank / 10)
+                    for rank in range(3, 11)
+                ],
+            ]
+        return []
+
+    monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
+    monkeypatch.setattr(
+        candidates_retrieval, "custom_analysis_exists", lambda *_: False
+    )
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "_llm_filter_both",
+        lambda _llm, _question, custom, sql: (custom, sql),
+    )
+
+    result = CandidateRetrievalAgent().execute(_state(["revenue", "region"]))
+
+    path_state = result["path_state"]
+    assert path_state["target_db"] == "db-a"
+    assert len(path_state["retrieved_column_attributes"]) == 4
+    assert len(path_state["retrieved_column_attribute_matches"]) == 4

@@ -50,6 +50,9 @@ from auto_ontology.retrieval.text_to_sql.state import (
 
 logger = logging.getLogger(__name__)
 
+_COLUMN_ATTRIBUTE_SEARCH_K = 10
+_COLUMN_ATTRIBUTE_PREPARATION_K = 2
+
 
 # ---------------------------------------------------------------------------
 # Search / dedup helpers
@@ -110,6 +113,47 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
     return sorted(
         result,
         key=lambda h: float(h.get("score") or float("inf")),
+    )
+
+
+def _top_hits_per_entity(hits: list[dict], k: int) -> list[dict]:
+    """Return the best *k* distance-ranked hits for each query entity."""
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for hit in hits:
+        entity = str(hit.get("query_entity") or "").strip()
+        if entity:
+            grouped[entity].append(hit)
+
+    selected: list[dict] = []
+    for entity in sorted(grouped):
+        selected.extend(
+            sorted(
+                grouped[entity],
+                key=lambda hit: (_score(hit), str(hit.get("id") or "")),
+            )[:k]
+        )
+    return selected
+
+
+def _dedupe_column_matches(hits: list[dict]) -> list[dict]:
+    """Keep one best-distance hit per entity and ColumnAttribute id."""
+    best: dict[tuple[str, str], dict] = {}
+    for hit in hits:
+        entity = str(hit.get("query_entity") or "").strip()
+        hit_id = str(hit.get("id") or "").strip()
+        if not entity or not hit_id:
+            continue
+        key = (entity, hit_id)
+        previous = best.get(key)
+        if previous is None or _score(hit) < _score(previous):
+            best[key] = dict(hit)
+    return sorted(
+        best.values(),
+        key=lambda hit: (
+            str(hit.get("query_entity") or "").casefold(),
+            _score(hit),
+            str(hit.get("id") or ""),
+        ),
     )
 
 
@@ -464,6 +508,7 @@ class CandidateRetrievalAgent(BaseAgent):
         target_db = path_state.get("target_db")
 
         all_col_attr_hits: list[dict] = []
+        preparation_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
         all_sql_attr_hits: list[dict] = []
         subject_term_hits: list[dict] = []
@@ -512,7 +557,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             semantic_retriever,
                             entity,
                             LABEL_COLUMN_ATTRIBUTE,
-                            2,
+                            _COLUMN_ATTRIBUTE_SEARCH_K,
                             target_db,
                         ),
                     )
@@ -555,9 +600,12 @@ class CandidateRetrievalAgent(BaseAgent):
                             tagged["query_entity"] = entity
                             all_col_attr_hits.append(tagged)
 
+            preparation_col_attr_hits = _top_hits_per_entity(
+                all_col_attr_hits, _COLUMN_ATTRIBUTE_PREPARATION_K
+            )
             if target_db is None:
                 selected_database, database_stats = _select_candidate_database(
-                    all_col_attr_hits,
+                    preparation_col_attr_hits,
                     all_custom_hits,
                     all_sql_attr_hits,
                 )
@@ -570,6 +618,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         + len(all_sql_attr_hits),
                     )
                     all_col_attr_hits = []
+                    preparation_col_attr_hits = []
                     all_custom_hits = []
                     all_sql_attr_hits = []
                 else:
@@ -592,6 +641,9 @@ class CandidateRetrievalAgent(BaseAgent):
                     all_col_attr_hits = _filter_hits_to_database(
                         all_col_attr_hits, selected_database
                     )
+                    preparation_col_attr_hits = _filter_hits_to_database(
+                        preparation_col_attr_hits, selected_database
+                    )
                     all_custom_hits = _filter_hits_to_database(
                         all_custom_hits, selected_database
                     )
@@ -609,7 +661,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         selected_database,
                     )
 
-                    covered_entities = _covered_entities(all_col_attr_hits)
+                    covered_entities = _covered_entities(preparation_col_attr_hits)
                     uncovered_entities = [
                         entity
                         for entity in clean_entities
@@ -631,19 +683,29 @@ class CandidateRetrievalAgent(BaseAgent):
                                     semantic_retriever,
                                     entity,
                                     LABEL_COLUMN_ATTRIBUTE,
-                                    2,
+                                    _COLUMN_ATTRIBUTE_SEARCH_K,
                                     selected_database,
                                 ): entity
                                 for entity in uncovered_entities
                             }
                             for future in as_completed(futures):
                                 entity = futures[future]
-                                for hit in _filter_hits_to_database(
+                                scoped_hits = _filter_hits_to_database(
                                     future.result(), selected_database
-                                ):
+                                )
+                                for hit in scoped_hits:
                                     tagged = dict(hit)
                                     tagged["query_entity"] = entity
                                     all_col_attr_hits.append(tagged)
+                                preparation_col_attr_hits.extend(
+                                    _top_hits_per_entity(
+                                        [
+                                            {**hit, "query_entity": entity}
+                                            for hit in scoped_hits
+                                        ],
+                                        _COLUMN_ATTRIBUTE_PREPARATION_K,
+                                    )
+                                )
 
         if _all_bridge_sourced(all_sql_attr_hits):
             # All hits are structural bridge-table joins — nothing to judge
@@ -657,12 +719,14 @@ class CandidateRetrievalAgent(BaseAgent):
                 llm, question, all_custom_hits, all_sql_attr_hits
             )
 
-        deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
+        all_col_attr_matches = _dedupe_column_matches(all_col_attr_hits)
+        deduped_col_attr = _dedupe_best_score(preparation_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
         deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)
         subject_term = subject_term_hits[0] if subject_term_hits else None
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
+        path_state["retrieved_column_attribute_matches"] = all_col_attr_matches
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = deduped_sql_attr
         if subject:

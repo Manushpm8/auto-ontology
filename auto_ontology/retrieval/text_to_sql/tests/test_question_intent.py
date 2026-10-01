@@ -128,7 +128,7 @@ def test_agent_rewrites_question_and_merges_extracted_evidence(
     assert result["path_state"]["extracted_evidence"] == ""
     assert result["path_state"]["normalized_question"] == "find revenue"
     assert result["path_state"]["target_db"] == "test_dataset"
-    assert "AVG(T1.height_cm)" in result["path_state"]["sql_template"]
+    assert "sql_template" not in result["path_state"]
     assert result["evidence"] == "Revenue means gross_sales minus refunds."
 
 
@@ -165,6 +165,59 @@ def test_prompt_lists_configured_databases() -> None:
     assert "Set target_db to an exact name from this list" in prompt
     assert "Correct an obvious typo or very close variant" in prompt
     assert "If no listed name is close, return null" in prompt
+
+
+def test_prompt_requests_structural_sql_example_filtering() -> None:
+    prompt = create_question_intent_prompt(
+        "Which product has the highest revenue?",
+        sql_examples=[
+            {
+                "question": "Which customer has the most orders?",
+                "sql": "SELECT customer_id FROM orders GROUP BY customer_id "
+                "ORDER BY COUNT(*) DESC LIMIT 1",
+            },
+            {
+                "question": "How many products exist?",
+                "sql": "SELECT COUNT(*) FROM products",
+            },
+        ],
+    )
+
+    assert "## Candidate SQL examples" in prompt
+    assert "1. Question: Which customer has the most orders?" in prompt
+    assert "2. Question: How many products exist?" in prompt
+    assert "same requested output shape" in prompt
+    assert "Different business subjects may still share a useful pattern" in prompt
+    assert "Reject examples with a different aggregation" in prompt
+
+
+def test_agent_replaces_sql_examples_with_structurally_relevant_subset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    examples = [
+        {"question": "Count users", "sql": "SELECT COUNT(*) FROM users"},
+        {
+            "question": "Top customer",
+            "sql": "SELECT customer_id FROM orders ORDER BY total DESC LIMIT 1",
+        },
+        {"question": "Revenue by region", "sql": "SELECT region, SUM(revenue)"},
+    ]
+    monkeypatch.setattr(
+        question_intent,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionIntentModel(
+            question_type=QuestionType.CALCULATION,
+            calculation_subtype=CalculationSubtype.RANKING,
+            rewritten_question="Top product",
+            extracted_evidence="",
+            target_db=None,
+            relevant_sql_example_numbers=[2, 2, 99],
+        ),
+    )
+
+    result = QuestionIntentAgent().execute(_state(sql_examples=examples))
+
+    assert result["sql_examples"] == [examples[1]]
 
 
 def test_agent_preserves_existing_target_when_question_does_not_select_one(
@@ -251,7 +304,7 @@ def test_failed_classification_defaults_to_calculation_and_original_question(
 
     assert result["path_state"]["question_type"] == "calculation"
     assert result["path_state"]["calculation_subtype"] == "match_based"
-    assert "COUNT(GasStationID)" in result["path_state"]["sql_template"]
+    assert "sql_template" not in result["path_state"]
     assert result["path_state"]["normalized_question"] == (
         "find revenue in test_dataset dataset"
     )
@@ -290,7 +343,7 @@ def test_calculation_only_skips_type_selection_but_keeps_subtype_and_evidence(
     def invoke(_llm: object, messages: list, model: type) -> object:
         requested_models.append(model)
         prompt = str(messages[0].content)
-        assert "Perform three tasks" in prompt
+        assert "Perform four tasks" in prompt
         assert "Do not select a top-level question type" in prompt
         assert "## Question types" not in prompt
         return CalculationOnlyQuestionIntentModel(
@@ -316,7 +369,7 @@ def test_calculation_only_skips_type_selection_but_keeps_subtype_and_evidence(
     assert result["path_state"]["calculation_subtype"] == "aggregation"
     assert result["path_state"]["normalized_question"] == "Find revenue by region"
     assert result["path_state"]["target_db"] == "finance"
-    assert result["path_state"]["sql_template"]
+    assert "sql_template" not in result["path_state"]
     assert result["evidence"] == ("Use booked revenue.\nRevenue excludes refunds.")
 
 
@@ -335,7 +388,7 @@ def test_calculation_only_failure_defaults_to_calculation_subtype(
 
     assert result["path_state"]["question_type"] == "calculation"
     assert result["path_state"]["calculation_subtype"] == "match_based"
-    assert result["path_state"]["sql_template"]
+    assert "sql_template" not in result["path_state"]
 
 
 def test_graph_entry_starts_with_intent_but_preserves_resume() -> None:

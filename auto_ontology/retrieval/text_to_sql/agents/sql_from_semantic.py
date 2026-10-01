@@ -37,7 +37,6 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
 )
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
-    format_important_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
 )
@@ -66,25 +65,6 @@ logger = logging.getLogger(__name__)
 # so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
 # right step event and ``NODE_LABELS`` entry.
 _GRAPH_NODE_NAME = "construct_sql_from_candidates"
-
-
-def format_calculation_sql_template(path_state: dict[str, Any]) -> str:
-    """Render the intent subtype's SQL example as structural guidance only."""
-    sql_template = (path_state.get("sql_template") or "").strip()
-    if not sql_template:
-        return ""
-    subtype = path_state.get("calculation_subtype") or "calculation"
-    return f"""## Calculation SQL shape reference
-
-The question was classified as `{subtype}`. Use this example only as a structural
-pattern. Adapt it to the available schema and SQL dialect. Never copy its table names,
-column names, or literal values unless the schema and question independently require
-the same identifiers or values.
-
-```sql
-{sql_template}
-```
-"""
 
 
 class SQLFromCandidatesAgent(BaseAgent):
@@ -149,7 +129,6 @@ class SQLFromCandidatesAgent(BaseAgent):
         evidence = state.get("evidence", "")
         sql_examples_section = format_sql_examples_section(state.get("sql_examples"))
         value_anchors_section = format_value_anchors_section(state.get("value_anchors"))
-        calculation_template_section = format_calculation_sql_template(path_state)
         main_question = format_dual_question_block(
             original_question, sanitized_question
         )
@@ -194,11 +173,6 @@ class SQLFromCandidatesAgent(BaseAgent):
             self.logger.info(
                 "Injecting %d verified database value(s) into the SQL prompt.",
                 len(state.get("value_anchors") or []),
-            )
-        if calculation_template_section:
-            self.logger.info(
-                "Injecting the %s calculation SQL shape into the SQL prompt.",
-                path_state.get("calculation_subtype"),
             )
 
         def build_messages() -> list:
@@ -276,19 +250,14 @@ class SQLFromCandidatesAgent(BaseAgent):
             tables_section = (
                 "AVAILABLE TABLES (schema context):\n"
                 + format_tables_for_prompt(
-                    relevant_tables, target_db=target_db, dialect=dialect
+                    relevant_tables,
+                    target_db=target_db,
+                    dialect=dialect,
+                    exclude_zero_confidence_columns=True,
                 )
                 if relevant_tables
                 else "No tables available."
             )
-            important_columns = format_important_columns_for_prompt(
-                primary_attribute,
-                attribute_join_paths,
-                relevant_tables,
-                target_db=target_db,
-                dialect=dialect,
-            )
-
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
                 dialect=dialect,
@@ -301,7 +270,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
-                important_columns=important_columns,
                 join_paths=join_paths,
                 custom_analyses=ca_section + sa_section,
             )
@@ -318,8 +286,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                 messages.append(
                     SystemMessage(content=format_authoritative_evidence(evidence))
                 )
-            if calculation_template_section:
-                messages.append(SystemMessage(content=calculation_template_section))
             # Before the query patterns: anchors state what this database
             # contains, which constrains the SQL more tightly than precedent
             # from another database does.
@@ -329,6 +295,16 @@ class SQLFromCandidatesAgent(BaseAgent):
             # the one the model read first and the advisory one qualifies it.
             if sql_examples_section:
                 messages.append(SystemMessage(content=sql_examples_section))
+            if state.get("shorten_answer", False):
+                messages.append(
+                    SystemMessage(
+                        content=(
+                            "STRICT OUTPUT PROJECTION CONTRACT — this overrides "
+                            "default display-name conventions:\n"
+                            + format_projection_rules(shorten_answer=True)
+                        )
+                    )
+                )
             messages.append(HumanMessage(content=user_prompt))
 
             # Add calendar time window reminder if needed

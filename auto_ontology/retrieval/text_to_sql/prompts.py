@@ -14,12 +14,14 @@ _PROJECTION_RULES = (
     "(most/least/top/highest/lowest/peak/best/worst), select ONLY the item named "
     "the ranking key OR the aggregated value, never both, and never add the "
     "ORDER BY metric unless its value is asked. To identify an entity "
-    "(who/which/what), return one identifying column (name if it exists, else id), "
-    "not both.\n"
+    "(who/which/what), return one identifying column, not both name and ID.\n"
     "- If the user asks for name, project the requested name fields and never add "
     "IDs unless the user explicitly asks for them.\n"
     "- Preserve the question's field order in SELECT: project explicitly requested "
     "outputs from left to right in the same order the user names them.\n"
+    "- Ignore confidence when deciding which outputs to project or their SELECT "
+    "order. Confidence may only help map a requested concept to its physical column; "
+    "the question determines the output fields and their order.\n"
     "- If evidence maps an answer concept to specific columns, preserve that "
     "projection exactly; do not collapse, reshape, or replace those columns "
     "unless the question explicitly asks for a transformed value.\n"
@@ -30,10 +32,18 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
     """Render benchmark-strict guidance only when shorter answers are requested."""
 
     if not shorten_answer:
-        return _PROJECTION_RULES
+        return (
+            _PROJECTION_RULES
+            + "- When the question does not specify which identifying field to use, "
+            "prefer a name/label/title when available, otherwise use the ID.\n"
+        )
     return (
         _PROJECTION_RULES
         + "- Return exactly the requested output fields and NO others.\n"
+        "- When identifying an entity, use its ID unless the question "
+        "explicitly asks for its name, label, title, or says to list names. Generic "
+        "'who', 'which', 'what', or 'list' wording does not request a name. Never "
+        "return both ID and name unless both are explicitly requested.\n"
     )
 
 
@@ -53,20 +63,18 @@ create_sql_user_prompt = (
     "{observation_block}\n\n"
     "## Available Schema\n"
     "Use ONLY the tables and columns listed below. "
-    "Do NOT invent tables, schemas, or columns.\n\n"
+    "Do NOT invent tables, schemas, or columns.\n"
+    "- Every column has a confidence from 0 to 1. Higher confidence means a stronger "
+    "direct match to entities extracted from the question. A small nonzero confidence "
+    "may instead mark a column used by a verified semantic join path; 0 means neither "
+    "signal applies.\n"
+    "- Prefer a semantically matched column when it fits the requested meaning, "
+    "filter, or output, but use a different available column when it fits more clearly.\n"
+    "- A semantic match does not itself make a column an output. Project it only "
+    "when it represents an output the user requested.\n"
+    "- Treat constraints in a matched column's description, format, and sample "
+    "values as requirements when using it.\n\n"
     "{tables}\n\n"
-    "## Semantically Important Columns\n"
-    "The columns below were matched directly to entities extracted from the "
-    "question, so give them extra weight when resolving ambiguity.\n"
-    "- Prefer a matched column when it fits the requested meaning, filter, or output.\n"
-    "- Give matched columns a preference for projection only when they represent "
-    "an output the user requested. Do not project extra columns merely because "
-    "they are listed here.\n"
-    "- Treat constraints stated in their descriptions, formats, and sample values "
-    "as requirements when using those columns.\n"
-    "- This is a strong hint, not a mandate; use a different available column when "
-    "it more clearly matches the question.\n\n"
-    "{important_columns}\n\n"
     "## Example SQL Queries\n"
     "{queries}\n\n"
     "## Conversation History\n"
@@ -362,6 +370,8 @@ ORDER BY total_sales DESC;"""
 - SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.
   If one matches the question's intent, incorporate its expression or SQL pattern
   into your query. Treat them like reusable building blocks for calculations.
+- Never apply an aggregate function to a column whose name or description indicates
+  that its stored values are already aggregated. Use the stored aggregate directly.
 - Prefer the fewest joins that still correctly answer the question. If all
   required fields exist in a single table, use only that table. If a shorter
   join path covers the question equally well, choose it over a longer chain.
