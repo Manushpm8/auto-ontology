@@ -5,7 +5,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { tagsApi } from '@/api/tags';
 import { Button } from '@/common/Button';
@@ -17,6 +18,7 @@ import { SkeletonBlock } from '@/common/Skeleton';
 import { MAX_TAG_NAME_LENGTH } from '@/constants/tags';
 import { ButtonTheme, Size } from '@/enums/button';
 import { SkeletonVariant } from '@/enums/skeleton';
+import { addTagToVocabulary, tagQueries } from '@/lib/queries/tags';
 import type { RuleTagDraft } from '@/types/rules';
 import type { TagChip } from '@/types/tags';
 
@@ -84,8 +86,9 @@ const itemsToTagLabel = (count: number, matched: number | undefined): string => 
  * The rule being built.
  *
  * Split from the panel so that it is mounted only while the panel is open,
- * which is what discards a half-filled rule on dismissal — there is no reset to
- * write, and the tags are read once per opening.
+ * which is what discards a half-filled rule on dismissal — there is no reset
+ * to write. Only the half-filled rule goes: the tags it offers live in the
+ * shared cache and outlast the mounting.
  */
 const RuleTagForm = ({
 	itemsCount,
@@ -94,39 +97,29 @@ const RuleTagForm = ({
 	onNavigate,
 	onDone,
 }: RuleTagFormProps) => {
-	const [options, setOptions] = useState<TagChip[]>([]);
+	const queryClient = useQueryClient();
 	const [selected, setSelected] = useState<TagChip[]>([]);
 	const [search, setSearch] = useState('');
 	const [name, setName] = useState('');
-	const [loading, setLoading] = useState(true);
 	const [creating, setCreating] = useState(false);
 	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+	const [writeError, setWriteError] = useState<string | null>(null);
 
-	useEffect(() => {
-		let cancelled = false;
-		void tagsApi.getAll().then((response) => {
-			if (cancelled) return;
-			if (response.error) {
-				setError(response.message ?? 'Failed to load tags.');
-				setOptions([]);
-			} else {
-				// Reduced to what a chip is, rather than held whole: the rest of a
-				// tag — its dates, its author — is what this list happens to arrive
-				// with, not anything the rule has a use for, and the create posts
-				// these on.
-				setOptions(
-					(response.data ?? [])
-						.map((tag) => ({ id: tag.id, name: tag.name }))
-						.sort(byName),
-				);
-			}
-			setLoading(false);
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
+	// The vocabulary the rest of the app is already holding, rather than a read
+	// of this panel's own: the layout has usually finished it before anyone
+	// reaches the button, so the panel opens on the tags instead of on the
+	// skeleton below.
+	const {
+		data: options = [],
+		isPending: loading,
+		error: loadError,
+	} = useQuery(tagQueries.vocabulary());
+	// One box for both: a panel that couldn't read the tags and one whose write
+	// was refused each have a single thing to say. Both can hold at once — a
+	// failed read leaves `offerCreate` open, since a vocabulary that never
+	// arrived matches nothing — and the refused write is then the newer of the
+	// two, so it is the one shown.
+	const error = writeError ?? loadError?.message ?? null;
 
 	const trimmedSearch = search.trim();
 	const selectedIds = new Set(selected.map((tag) => tag.id));
@@ -151,14 +144,17 @@ const RuleTagForm = ({
 		setCreating(false);
 
 		if (response.error) {
-			setError(response.message ?? 'Failed to create tag.');
+			setWriteError(response.message ?? 'Failed to create tag.');
 			return;
 		}
 		const created = response.data;
 		if (created == null) return;
 
-		setError(null);
-		setOptions((prev) => [...prev, created].sort(byName));
+		setWriteError(null);
+		// Written into the shared vocabulary, not into a list of this panel's
+		// own: a tag made here exists for every picker in the app, and putting
+		// it there saves re-reading the whole list to learn about it.
+		await addTagToVocabulary(queryClient, { id: created.id, name: created.name });
 		setSelected((prev) => [...prev, { id: created.id, name: created.name }].sort(byName));
 		setSearch('');
 	};
@@ -177,7 +173,7 @@ const RuleTagForm = ({
 		const message = await onSubmit({ name: name.trim(), tags: selected });
 
 		if (message !== null) {
-			setError(message);
+			setWriteError(message);
 			setSaving(false);
 			return;
 		}
@@ -189,12 +185,12 @@ const RuleTagForm = ({
 			<div className="flex items-baseline gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
 				<Icon
 					name={IconName.Lightning}
-					className="h-4 w-4 shrink-0 self-center text-[#76b900]"
+					className="h-4 w-4 shrink-0 self-center text-body dark:text-zinc-300"
 				/>
-				<h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+				<h3 className="text-sm font-semibold text-heading dark:text-zinc-100">
 					Create a New Rule Based Tag
 				</h3>
-				<span className="text-xs text-zinc-500 dark:text-zinc-400">
+				<span className="text-xs text-secondary dark:text-zinc-400">
 					({itemsToTagLabel(itemsCount, matchedCount)})
 				</span>
 			</div>
@@ -203,7 +199,7 @@ const RuleTagForm = ({
 				<div>
 					<label
 						htmlFor="rule-name"
-						className="mb-1.5 block text-sm font-semibold text-zinc-900 dark:text-zinc-100"
+						className="mb-1.5 block text-sm font-semibold text-heading dark:text-zinc-100"
 					>
 						Rule Name
 					</label>
@@ -212,23 +208,23 @@ const RuleTagForm = ({
 						type="text"
 						value={name}
 						onChange={(event) => setName(event.target.value)}
-						placeholder="Name this rule and save it!"
+						placeholder="Name This Rule and Save It!"
 						autoFocus
 						// Same frame and height as the search field below it, so the two
 						// controls in this panel read as one set.
-						className="h-9 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
+						className="h-9 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 					/>
-					<p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+					<p className="mt-1.5 text-xs text-secondary dark:text-zinc-400">
 						Every item this search matches is labelled with these tags, and so is every
 						item that matches it later.
 					</p>
 				</div>
 
 				<div>
-					<p className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					<p className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-heading dark:text-zinc-100">
 						<Icon
 							name={IconName.Tag}
-							className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400"
+							className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-400"
 						/>
 						Add Tag/s…
 					</p>
@@ -254,7 +250,7 @@ const RuleTagForm = ({
 						<SearchInput
 							value={search}
 							onChange={setSearch}
-							placeholder="Select or search to add a tag…"
+							placeholder="Select or Search to Add a Tag…"
 							aria-label="Search tags"
 							className="h-9 w-full"
 						/>
@@ -303,7 +299,7 @@ const RuleTagForm = ({
 									{`${trimmedSearch} (Create Tag - Max. ${MAX_TAG_NAME_LENGTH})`}
 								</button>
 							) : (
-								<p className="px-2 text-xs text-zinc-500 dark:text-zinc-400">
+								<p className="px-2 text-xs text-secondary dark:text-zinc-400">
 									{options.length === 0
 										? 'No tags exist yet'
 										: unselected.length === 0
@@ -326,7 +322,7 @@ const RuleTagForm = ({
 				<Link
 					href="/settings/rules"
 					onClick={onNavigate}
-					className="inline-flex items-center gap-1.5 text-xs text-zinc-500 no-underline transition-colors hover:text-[#4d7a00] dark:text-zinc-400 dark:hover:text-[#a3d63a]"
+					className="inline-flex items-center gap-1.5 text-xs text-secondary no-underline transition-colors hover:text-[#4d7a00] dark:text-zinc-400 dark:hover:text-[#a3d63a]"
 				>
 					<Icon name={IconName.Tag} className="h-3.5 w-3.5 shrink-0" />
 					Manage Rule Based Tags

@@ -6,9 +6,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { Placeholders } from '@/assets/images/placeholders';
-import { Breadcrumbs } from '@/common/Breadcrumbs';
+import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 import { Button } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
@@ -28,6 +29,7 @@ import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import { CertificationStatus } from '@/enums/certification';
+import { useBreadcrumbTrail } from '@/contexts/BreadcrumbContext';
 import { TagItemType } from '@/enums/tags';
 import { ToastVariant } from '@/enums/toast';
 import { attributeStatus } from '@/lib/certification';
@@ -43,6 +45,32 @@ import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
 import type { ColumnAttribute, SqlAttribute, Term, TermCount, TermDetail } from '@/types/terms';
+
+const termFocusTrail = ({
+	focusId,
+	sqlAttrId,
+	colAttrId,
+	termName,
+	sqlAttrName,
+	colAttrName,
+}: {
+	focusId: string | null;
+	sqlAttrId: string | null;
+	colAttrId: string | null;
+	termName?: string;
+	sqlAttrName?: string;
+	colAttrName?: string;
+}): BreadcrumbItem[] => {
+	if (focusId == null) return [];
+
+	const term: BreadcrumbItem = {
+		label: termName ?? focusId,
+		href: `/terms?focus=${encodeURIComponent(focusId)}`,
+	};
+	if (sqlAttrId != null) return [term, { label: sqlAttrName ?? sqlAttrId }];
+	if (colAttrId != null) return [term, { label: colAttrName ?? colAttrId }];
+	return [term];
+};
 
 type TermCardProps = {
 	term: Term;
@@ -95,7 +123,13 @@ const TermCard = ({
 		{/* Card header */}
 		<div className="flex items-start justify-between gap-3">
 			<div className="min-w-0 space-y-0.5">
-				<Text as="h2" text={term.name} variant={TextVariant.CardTitle} />
+				<div className="flex min-w-0 items-center gap-2">
+					<Icon
+						name={IconName.Terms}
+						className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
+					/>
+					<Text as="h2" text={term.name} variant={TextVariant.CardTitle} fill />
+				</div>
 				{term.synonyms && term.synonyms.length > 0 && (
 					<Text as="p" text={term.synonyms.join(', ')} variant={TextVariant.Caption} />
 				)}
@@ -107,7 +141,7 @@ const TermCard = ({
 			{term.description != null && term.description.trim() !== '' ? (
 				<Text as="p" text={term.description} lines={3} variant={TextVariant.Body} />
 			) : (
-				<p className="text-sm italic text-zinc-400 dark:text-zinc-500">
+				<p className="text-sm italic text-secondary dark:text-zinc-500">
 					No Description Available
 				</p>
 			)}
@@ -118,14 +152,14 @@ const TermCard = ({
 			{/* Column Attributes */}
 			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
 						Column Attributes
 					</span>
 				</div>
 				<div className="flex items-center">
-					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
 						<span>Column Attributes</span>
-						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
+						<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
 							{columnAttributeCount}
 						</span>
 					</span>
@@ -135,14 +169,14 @@ const TermCard = ({
 			{/* SQL Attributes */}
 			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
 						SQL Attributes
 					</span>
 				</div>
 				<div className="flex items-center">
-					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
 						<span>SQL Attributes</span>
-						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
+						<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
 							{sqlAttributeCount}
 						</span>
 					</span>
@@ -152,13 +186,13 @@ const TermCard = ({
 			{/* Related Terms */}
 			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
 						Related Terms
 					</span>
 				</div>
-				<div className="flex items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+				<div className="flex items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
 					<span>Related Terms</span>
-					<span className="font-medium text-zinc-900 dark:text-zinc-100">
+					<span className="font-medium text-heading dark:text-zinc-100">
 						{relatedCount}
 					</span>
 				</div>
@@ -167,7 +201,7 @@ const TermCard = ({
 			{/* Zones */}
 			<div>
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
 						Zones
 					</span>
 				</div>
@@ -182,7 +216,7 @@ const TermCard = ({
 							/>
 						))
 					) : (
-						<span className="text-sm text-zinc-500 dark:text-zinc-400">-</span>
+						<span className="text-sm text-secondary dark:text-zinc-400">-</span>
 					)}
 				</div>
 			</div>
@@ -214,12 +248,16 @@ const withCounts = (held: Map<string, number>, rows: TermCount[] | undefined) =>
 };
 
 const FIELD_INPUT_CLASSNAME =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
 
-const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
+const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100';
 
 export const TermsView = () => {
 	const router = useRouter();
+	// The tag picker's options come from the shared cache rather than a read of
+	// this page's own, so opening a term after a column attribute doesn't ask
+	// for the vocabulary twice.
+	const queryClient = useQueryClient();
 	const searchParams = useSearchParams();
 	const focusId = searchParams.get('focus');
 	const sqlAttrId = searchParams.get('sqlAttr');
@@ -355,6 +393,7 @@ export const TermsView = () => {
 		error,
 		hasMore: hasMoreTerms,
 		loadMore: loadMoreTerms,
+		reload: reloadTerms,
 	} = useInfiniteList(fetchTermsPage, {
 		pageSize: DEFAULT_PAGE_SIZE,
 		itemKey: (term) => term.id,
@@ -905,7 +944,7 @@ export const TermsView = () => {
 			if (focusId == null) {
 				return {
 					sections: [],
-					header: { header: { title: 'Column Attribute not found' } },
+					header: { header: { title: 'Column Attribute Not Found' } },
 				};
 			}
 			// TODO: viewer zone-scoping handled in a separate PR — for now the
@@ -913,14 +952,14 @@ export const TermsView = () => {
 			// userZoneIds = null → all zones accessible).
 			const [res, tagOptions] = await Promise.all([
 				termsApi.getColumnAttributes(focusId),
-				fetchTagOptions(),
+				fetchTagOptions(queryClient),
 			]);
 			const attrs = res.error ? [] : (res.data ?? []);
 			const attr = attrs.find((a) => a.id === attrId);
 			if (attr == null) {
 				return {
 					sections: [],
-					header: { header: { title: 'Column Attribute not found' } },
+					header: { header: { title: 'Column Attribute Not Found' } },
 				};
 			}
 			setColumnAttrs(attrs);
@@ -936,6 +975,7 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
+						icon: IconName.Column,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -1001,19 +1041,19 @@ export const TermsView = () => {
 				],
 			};
 		},
-		[focusId],
+		[focusId, queryClient],
 	);
 
 	const getSqlAttributeSinglePage = useCallback(
 		async (attrId: string): Promise<SinglePageFormat> => {
 			const [res, tagOptions] = await Promise.all([
 				sqlAttributesApi.get(attrId),
-				fetchTagOptions(),
+				fetchTagOptions(queryClient),
 			]);
 			if (res.error || !res.data) {
 				return {
 					sections: [],
-					header: { header: { title: 'SQL Attribute not found' } },
+					header: { header: { title: 'SQL Attribute Not Found' } },
 				};
 			}
 			const attr = res.data;
@@ -1032,6 +1072,7 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
+						icon: IconName.Link,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -1067,144 +1108,151 @@ export const TermsView = () => {
 				],
 			};
 		},
-		[],
+		[queryClient],
 	);
 
-	const getSinglePage = useCallback(async (termId: string): Promise<SinglePageFormat> => {
-		const [res, attrsRes, sqlAttrsRes, tagOptions] = await Promise.all([
-			termsApi.get(termId),
-			termsApi.getColumnAttributes(termId),
-			termsApi.getSqlAttributes(termId),
-			fetchTagOptions(),
-		]);
-		if (res.error || !res.data) {
-			return {
-				sections: [],
-				header: { header: { title: 'Term not found' } },
-			};
-		}
-		const term = res.data;
-		const termAttrs = attrsRes?.data ?? [];
-		const termSqlAttrs = sqlAttrsRes?.data ?? [];
-		// The header reads this when the term isn't on a page the list loaded,
-		// which is the normal case for a link straight into a term.
-		setFocusedTermDetail(term);
-		const relatedTerms = term.related_terms ?? [];
-		// Populate the sqlAttrs/columnAttrs caches from this term's own
-		// attributes (fetched per-term above) rather than a global list —
-		// the Terms list endpoint only returns counts, not the attribute
-		// nodes themselves, to avoid pulling every attribute in the graph
-		// on every page load. This keeps breadcrumb titles working once
-		// the user has opened this term's detail page.
-		setSqlAttrs(termSqlAttrs);
-		setColumnAttrs(termAttrs);
+	const getSinglePage = useCallback(
+		async (termId: string): Promise<SinglePageFormat> => {
+			const [res, attrsRes, sqlAttrsRes, tagOptions] = await Promise.all([
+				termsApi.get(termId),
+				termsApi.getColumnAttributes(termId),
+				termsApi.getSqlAttributes(termId),
+				fetchTagOptions(queryClient),
+			]);
+			if (res.error || !res.data) {
+				return {
+					sections: [],
+					header: { header: { title: 'Term Not Found' } },
+				};
+			}
+			const term = res.data;
+			const termAttrs = attrsRes?.data ?? [];
+			const termSqlAttrs = sqlAttrsRes?.data ?? [];
+			// The header reads this when the term isn't on a page the list loaded,
+			// which is the normal case for a link straight into a term.
+			setFocusedTermDetail(term);
+			const relatedTerms = term.related_terms ?? [];
+			// Populate the sqlAttrs/columnAttrs caches from this term's own
+			// attributes (fetched per-term above) rather than a global list —
+			// the Terms list endpoint only returns counts, not the attribute
+			// nodes themselves, to avoid pulling every attribute in the graph
+			// on every page load. This keeps breadcrumb titles working once
+			// the user has opened this term's detail page.
+			setSqlAttrs(termSqlAttrs);
+			setColumnAttrs(termAttrs);
 
-		return {
-			header: {
+			return {
 				header: {
-					title: term.name,
-					titleEditable: true,
-					certification: { certified: term.name_certified },
+					header: {
+						title: term.name,
+						icon: IconName.Terms,
+						titleEditable: true,
+						certification: { certified: term.name_certified },
+						// Same server-rolled-up value the list card shows, so the two
+						// can't disagree.
+						status: term.certification,
+					},
 				},
-			},
-			sections: [
-				{
-					type: ComposerSectionKind.TEXT_CARD,
-					id: 'description',
-					title: 'Description',
-					body: term.description ?? '',
-					editable: true,
-					certification: { certified: term.description_certified },
-				},
-				{
-					type: ComposerSectionKind.TAG_LIST,
-					id: 'synonyms',
-					title: 'Synonyms',
-					values: term.synonyms ?? [],
-				},
-				{
-					type: ComposerSectionKind.ENTITY_CHIPS,
-					id: 'entities',
-					title: 'Entities',
-					entities: (term.tables ?? []).map((table) => ({
-						id: table.id,
-						name: table.name,
-						focusId: [table.db_id, table.schema_id, table.id].join('|'),
-					})),
-				},
-				entityTagsSection(term.tags, tagOptions),
-				{
-					type: ComposerSectionKind.ZONES_CHIPS,
-					id: 'zones',
-					title: 'Zones',
-					zones: term.zones.map((z) => ({
-						id: z.id,
-						name: z.name,
-						color: z.color,
-						enabled: z.enabled,
-					})),
-				},
-				{
-					type: ComposerSectionKind.RELATED_TERMS_CHIPS,
-					id: 'related_terms',
-					title: 'Related Terms',
-					terms: relatedTerms.map((t) => ({
-						id: t.id,
-						name: t.name,
-					})),
-				},
-				{
-					type: ComposerSectionKind.DATA_TABLE,
-					id: 'column_attributes',
-					title: 'Column Attributes',
-					rowIdKey: 'id',
-					layout: 'fixed',
-					columns: [
-						{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
-						{ key: 'description', label: 'Description', truncate: true },
-						{
-							key: 'certification',
-							label: 'Certification',
-							type: ComposerColumnType.CERTIFICATION,
-							align: 'center',
-							width: 'w-44',
-						},
-					],
-					rows: termAttrs.map((attr) => ({
-						id: attr.id,
-						name: attr.name,
-						description: attr.description ?? '',
-						certification: attributeStatus(attr),
-					})),
-				},
-				{
-					type: ComposerSectionKind.DATA_TABLE,
-					id: 'sql_attributes',
-					title: 'SQL Attributes',
-					rowIdKey: 'id',
-					layout: 'fixed',
-					columns: [
-						{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
-						{ key: 'description', label: 'Description', truncate: true },
-						{
-							key: 'certification',
-							label: 'Certification',
-							type: ComposerColumnType.CERTIFICATION,
-							align: 'center',
-							width: 'w-44',
-						},
-					],
-					rows: termSqlAttrs.map((attr) => ({
-						id: attr.id,
-						name: attr.name,
-						description: attr.description ?? '',
-						certification: attributeStatus(attr),
-					})),
-					emptyMessage: 'SQL attribute does not exist',
-				},
-			],
-		};
-	}, []);
+				sections: [
+					{
+						type: ComposerSectionKind.TEXT_CARD,
+						id: 'description',
+						title: 'Description',
+						body: term.description ?? '',
+						editable: true,
+						certification: { certified: term.description_certified },
+					},
+					{
+						type: ComposerSectionKind.TAG_LIST,
+						id: 'synonyms',
+						title: 'Synonyms',
+						values: term.synonyms ?? [],
+					},
+					{
+						type: ComposerSectionKind.ENTITY_CHIPS,
+						id: 'entities',
+						title: 'Entities',
+						entities: (term.tables ?? []).map((table) => ({
+							id: table.id,
+							name: table.name,
+							focusId: [table.db_id, table.schema_id, table.id].join('|'),
+						})),
+					},
+					entityTagsSection(term.tags, tagOptions),
+					{
+						type: ComposerSectionKind.ZONES_CHIPS,
+						id: 'zones',
+						title: 'Zones',
+						zones: term.zones.map((z) => ({
+							id: z.id,
+							name: z.name,
+							color: z.color,
+							enabled: z.enabled,
+						})),
+					},
+					{
+						type: ComposerSectionKind.RELATED_TERMS_CHIPS,
+						id: 'related_terms',
+						title: 'Related Terms',
+						terms: relatedTerms.map((t) => ({
+							id: t.id,
+							name: t.name,
+						})),
+					},
+					{
+						type: ComposerSectionKind.DATA_TABLE,
+						id: 'column_attributes',
+						title: 'Column Attributes',
+						rowIdKey: 'id',
+						layout: 'fixed',
+						columns: [
+							{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
+							{ key: 'description', label: 'Description', truncate: true },
+							{
+								key: 'certification',
+								label: 'Certification',
+								type: ComposerColumnType.CERTIFICATION,
+								align: 'center',
+								width: 'w-44',
+							},
+						],
+						rows: termAttrs.map((attr) => ({
+							id: attr.id,
+							name: attr.name,
+							description: attr.description ?? '',
+							certification: attributeStatus(attr),
+						})),
+					},
+					{
+						type: ComposerSectionKind.DATA_TABLE,
+						id: 'sql_attributes',
+						title: 'SQL Attributes',
+						rowIdKey: 'id',
+						layout: 'fixed',
+						columns: [
+							{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
+							{ key: 'description', label: 'Description', truncate: true },
+							{
+								key: 'certification',
+								label: 'Certification',
+								type: ComposerColumnType.CERTIFICATION,
+								align: 'center',
+								width: 'w-44',
+							},
+						],
+						rows: termSqlAttrs.map((attr) => ({
+							id: attr.id,
+							name: attr.name,
+							description: attr.description ?? '',
+							certification: attributeStatus(attr),
+						})),
+						emptyMessage: 'SQL Attribute Does Not Exist',
+					},
+				],
+			};
+		},
+		[queryClient],
+	);
 
 	const listedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 	const focusedTerm =
@@ -1215,68 +1263,68 @@ export const TermsView = () => {
 	const focusedColAttr =
 		colAttrId != null ? (columnAttrs.find((attr) => attr.id === colAttrId) ?? null) : null;
 
-	// Same server-rolled-up value the list card shows, so the two can't disagree.
-	const termCertificationStatus = focusedTerm?.certification ?? CertificationStatus.Pending;
+	useBreadcrumbTrail(
+		termFocusTrail({
+			focusId,
+			sqlAttrId,
+			colAttrId,
+			termName: focusedTerm?.name ?? focusedSqlAttr?.term_name ?? focusedColAttr?.term_name,
+			sqlAttrName: focusedSqlAttr?.name,
+			colAttrName: focusedColAttr?.name,
+		}),
+	);
 
 	if (focusId != null && sqlAttrId != null) {
-		const termTitle = focusedTerm?.name ?? focusedSqlAttr?.term_name ?? focusId;
 		const sqlAttrTitle = focusedSqlAttr?.name ?? sqlAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
-				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<Breadcrumbs
-						items={[
-							{ label: 'Terms', href: '/terms' },
-							{
-								label: termTitle,
-								href: `/terms?focus=${encodeURIComponent(focusId)}`,
-							},
-							{ label: sqlAttrTitle },
-						]}
-					/>
-					<div className="ml-auto flex shrink-0 items-center gap-1">
-						{sqlAttrEditing ? null : (
-							<>
-								<Button
-									theme={ButtonTheme.Primary}
-									size={Size.REGULAR}
-									type="button"
-									onClick={() => {
-										setSqlAttrEditError(null);
-										setSqlAttrEditing(true);
-									}}
-									aria-label={`Edit ${sqlAttrTitle}`}
-									title="Edit"
-									iconPosition="left"
-								>
-									<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-									Edit
-								</Button>
-								<Button
-									theme={ButtonTheme.DangerSubtle}
-									size={Size.REGULAR}
-									type="button"
-									onClick={() => {
-										setDeletingSqlAttr({ id: sqlAttrId, name: sqlAttrTitle });
-										setDeleteSqlAttrError(null);
-									}}
-									aria-label={`Delete ${sqlAttrTitle}`}
-									title="Delete"
-									iconPosition="left"
-								>
-									<Icon name={IconName.Trash} className="h-3.5 w-3.5" />
-									Delete
-								</Button>
-							</>
-						)}
-					</div>
-				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
 						key={sqlAttrId}
 						dataId={sqlAttrId}
 						getSinglePage={getSqlAttributeSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
+						headerActions={
+							<>
+								{sqlAttrEditing ? null : (
+									<>
+										<Button
+											theme={ButtonTheme.Primary}
+											size={Size.REGULAR}
+											type="button"
+											onClick={() => {
+												setSqlAttrEditError(null);
+												setSqlAttrEditing(true);
+											}}
+											aria-label={`Edit ${sqlAttrTitle}`}
+											title="Edit"
+											iconPosition="left"
+										>
+											<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+											Edit
+										</Button>
+										<Button
+											theme={ButtonTheme.DangerSubtle}
+											size={Size.REGULAR}
+											type="button"
+											onClick={() => {
+												setDeletingSqlAttr({
+													id: sqlAttrId,
+													name: sqlAttrTitle,
+												});
+												setDeleteSqlAttrError(null);
+											}}
+											aria-label={`Delete ${sqlAttrTitle}`}
+											title="Delete"
+											iconPosition="left"
+										>
+											<Icon name={IconName.Trash} className="h-3.5 w-3.5" />
+											Delete
+										</Button>
+									</>
+								)}
+							</>
+						}
 						isEditing={sqlAttrEditing}
 						onPatchEdits={handleSqlAttrEditSave}
 						onSave={() => {
@@ -1315,7 +1363,7 @@ export const TermsView = () => {
 					open={deletingSqlAttr !== null}
 					onCancel={handleDeleteSqlAttrClose}
 					onConfirm={handleDeleteSqlAttrConfirm}
-					title="Delete SQL attribute"
+					title="Delete SQL Attribute"
 					message={[
 						'Are you sure you want to delete ',
 						<strong key="name">{deletingSqlAttr?.name}</strong>,
@@ -1348,7 +1396,7 @@ export const TermsView = () => {
 					/>
 
 					{sqlEditValidationMessage != null && (
-						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
 							{sqlEditValidationMessage}
 						</p>
 					)}
@@ -1364,47 +1412,36 @@ export const TermsView = () => {
 	}
 
 	if (focusId != null && colAttrId != null) {
-		const termTitle = focusedTerm?.name ?? focusedColAttr?.term_name ?? focusId;
 		const colAttrTitle = focusedColAttr?.name ?? colAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
-				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<Breadcrumbs
-						items={[
-							{ label: 'Terms', href: '/terms' },
-							{
-								label: termTitle,
-								href: `/terms?focus=${encodeURIComponent(focusId)}`,
-							},
-							{ label: colAttrTitle },
-						]}
-					/>
-					<div className="ml-auto flex shrink-0 items-center gap-1">
-						{columnAttrEditing ? null : (
-							<Button
-								theme={ButtonTheme.Primary}
-								size={Size.REGULAR}
-								type="button"
-								onClick={() => {
-									setColumnAttrEditError(null);
-									setColumnAttrEditing(true);
-								}}
-								aria-label={`Edit ${colAttrTitle}`}
-								title="Edit"
-								iconPosition="left"
-							>
-								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-								Edit
-							</Button>
-						)}
-					</div>
-				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
 						key={colAttrId}
 						dataId={colAttrId}
 						getSinglePage={getColumnAttributeSinglePage}
 						treeDataEpoch={columnAttrsEpoch}
+						headerActions={
+							<>
+								{columnAttrEditing ? null : (
+									<Button
+										theme={ButtonTheme.Primary}
+										size={Size.REGULAR}
+										type="button"
+										onClick={() => {
+											setColumnAttrEditError(null);
+											setColumnAttrEditing(true);
+										}}
+										aria-label={`Edit ${colAttrTitle}`}
+										title="Edit"
+										iconPosition="left"
+									>
+										<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+										Edit
+									</Button>
+								)}
+							</>
+						}
 						isEditing={columnAttrEditing}
 						onPatchEdits={handleColumnAttrEditSave}
 						onSave={() => {
@@ -1432,48 +1469,43 @@ export const TermsView = () => {
 	}
 
 	if (focusId != null) {
-		const termTitle = focusedTerm?.name ?? focusId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
-				<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-					<Breadcrumbs
-						items={[{ label: 'Terms', href: '/terms' }, { label: termTitle }]}
-					/>
-					<CertificationBadge status={termCertificationStatus} />
-					<div className="ml-auto flex items-center gap-2">
-						{termEditing ? null : (
-							<Button
-								theme={ButtonTheme.Primary}
-								size={Size.REGULAR}
-								type="button"
-								onClick={() => {
-									setTermEditing(true);
-								}}
-								iconPosition="left"
-							>
-								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
-								Edit
-							</Button>
-						)}
-						<Button
-							theme={ButtonTheme.Primary}
-							size={Size.REGULAR}
-							type="button"
-							onClick={() => setCreateSqlAttrModalOpen(true)}
-							iconPosition="left"
-							shadow
-						>
-							<Icon name={IconName.Plus} className="h-4 w-4" />
-							Create new sql attribute
-						</Button>
-					</div>
-				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
 						key={focusId}
 						dataId={focusId}
 						getSinglePage={getSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
+						headerActions={
+							<>
+								{termEditing ? null : (
+									<Button
+										theme={ButtonTheme.Primary}
+										size={Size.REGULAR}
+										type="button"
+										onClick={() => {
+											setTermEditing(true);
+										}}
+										iconPosition="left"
+									>
+										<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
+										Edit
+									</Button>
+								)}
+								<Button
+									theme={ButtonTheme.Primary}
+									size={Size.REGULAR}
+									type="button"
+									onClick={() => setCreateSqlAttrModalOpen(true)}
+									iconPosition="left"
+									shadow
+								>
+									<Icon name={IconName.Plus} className="h-4 w-4" />
+									Create New SQL Attribute
+								</Button>
+							</>
+						}
 						isEditing={termEditing}
 						onPatchEdits={handleTermEditSave}
 						onSave={() => {
@@ -1533,7 +1565,7 @@ export const TermsView = () => {
 					</div>
 
 					{sqlAttrValidationMessage != null && (
-						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+						<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
 							{sqlAttrValidationMessage}
 						</p>
 					)}
@@ -1551,8 +1583,8 @@ export const TermsView = () => {
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.Terms} className="h-5 w-5 text-[#76b900]" />
-				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+				<Icon name={IconName.Terms} className="h-5 w-5 text-body dark:text-zinc-300" />
+				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
 					Terms
 				</h1>
 			</header>
@@ -1571,7 +1603,7 @@ export const TermsView = () => {
 					<SearchInput
 						value={searchQuery}
 						onChange={setSearchQuery}
-						placeholder="Search terms…"
+						placeholder="Search Terms…"
 						aria-label="Search terms"
 						className="mb-6 w-full"
 					/>
@@ -1587,6 +1619,19 @@ export const TermsView = () => {
 						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-red-900/80 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
 							{error}
 						</pre>
+						{/* `reload`, not `loadMore`: a failed first page leaves
+						    nothing fetched, so `loadMore` sees the list as ended
+						    and returns without asking for anything. */}
+						<div className="mt-4 flex justify-center">
+							<Button
+								theme={ButtonTheme.Secondary}
+								size={Size.SMALL}
+								type="button"
+								onClick={reloadTerms}
+							>
+								Retry
+							</Button>
+						</div>
 					</div>
 				)}
 
