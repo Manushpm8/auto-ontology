@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
-import { CertificationBadge } from '@/common/CertificationBadge';
+import { CertificationBadge, CERTIFICATION_LABEL } from '@/common/CertificationBadge';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { Icon, IconName } from '@/common/icons';
 import { fieldStatus } from '@/lib/certification';
@@ -75,10 +75,16 @@ export const CertificationSelect = ({
 					type="button"
 					onClick={toggle}
 					disabled={saving}
-					title={saving ? 'Saving Certification…' : 'Set Certification'}
+					// The badge inside is decorative, so the trigger has to name the
+					// status it is about to change as well as the action.
+					title={
+						saving
+							? 'Saving Certification…'
+							: `Set Certification (${CERTIFICATION_LABEL[status]})`
+					}
 					className={`inline-flex items-center gap-1 ${saving ? 'cursor-default opacity-70' : 'cursor-pointer'}`}
 				>
-					<CertificationBadge status={status} iconOnly={!showLabel} />
+					<CertificationBadge status={status} iconOnly={!showLabel} decorative />
 					{saving ? (
 						<Spinner aria-label="Saving certification" className="h-3.5 w-3.5" />
 					) : (

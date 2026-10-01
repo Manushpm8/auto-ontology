@@ -76,6 +76,12 @@ export type ComposerPageHeader = {
 	entityId?: string;
 	titleEditable?: boolean;
 	certification?: ComposerCertification;
+	/**
+	 * Rolled-up status for the whole entity, shown as a read-only pill beside
+	 * the title. Unlike `certification`, which edits one field's flag, this is
+	 * the aggregate the server computes over the entity and its children.
+	 */
+	status?: CertificationStatus;
 	pdfProps?: {
 		pageName?: string;
 		handleIsPDF?: (isPDF: boolean) => void;
@@ -327,7 +333,7 @@ const EditableTagListCard = ({
 					value={tags}
 					onChange={handleChange}
 					autoFocus={autoFocus}
-					placeholder="Type a Value and Press Enter"
+					placeholder="Type a Value And Press Enter"
 					ariaLabel={section.title}
 				/>
 			</div>
@@ -648,7 +654,14 @@ function renderComposerSection(
 													/>
 												</span>
 											) : (
-												<CertificationBadge status={status} iconOnly />
+												// A clickable row is one tab stop, and
+												// the badge's name folds into it, so the
+												// badge does not take focus of its own.
+												<CertificationBadge
+													status={status}
+													iconOnly
+													focusable={!isClickable}
+												/>
 											);
 										return col.align === 'center' ? (
 											<span className="flex justify-center">{control}</span>
@@ -837,6 +850,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			icon: headerIcon,
 			entityId = '',
 			certification: headerCertification,
+			status: headerStatus,
 		} = header.header;
 		const titleEditable = header.header.titleEditable === true;
 		const shouldAutofocusTitle = titleEditable;
@@ -1069,6 +1083,15 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				</>
 			) : null;
 
+		const certControl = headerCertification
+			? renderCertControl('name', headerCertification)
+			: null;
+
+		const statusBadge =
+			headerStatus != null ? <CertificationBadge status={headerStatus} /> : null;
+
+		// The name's own certification sits beside the name it certifies, so the
+		// title shrinks to its text to keep the two together.
 		const titleBlock = (
 			<div className="flex min-w-0 flex-1 items-center gap-2">
 				{headerIcon ? (
@@ -1077,30 +1100,27 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						className="h-6 w-6 shrink-0 text-body dark:text-zinc-300"
 					/>
 				) : null}
-				<div className="min-w-0 flex-1">
-					{isEditingActive && titleEditable ? (
-						<input
-							ref={titleInputRef}
-							key={title}
-							type="text"
-							autoFocus
-							defaultValue={title}
-							onChange={(e) => {
-								pendingEditsRef.current.name = e.target.value;
-							}}
-							className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-							aria-label="Name"
-						/>
-					) : (
+				{isEditingActive && titleEditable ? (
+					<input
+						ref={titleInputRef}
+						key={title}
+						type="text"
+						autoFocus
+						defaultValue={title}
+						onChange={(e) => {
+							pendingEditsRef.current.name = e.target.value;
+						}}
+						className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-heading outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+						aria-label="Name"
+					/>
+				) : (
+					<div className="min-w-0">
 						<Text as="h1" text={title} variant={TextVariant.PageTitle} />
-					)}
-				</div>
+					</div>
+				)}
+				{certControl ? <div className="shrink-0">{certControl}</div> : null}
 			</div>
 		);
-
-		const certControl = headerCertification
-			? renderCertControl('name', headerCertification)
-			: null;
 
 		return (
 			<div
@@ -1116,7 +1136,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				{headerActions != null ? (
 					<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800">
 						{titleBlock}
-						{certControl ? <div className="shrink-0">{certControl}</div> : null}
+						{statusBadge ? <div className="shrink-0">{statusBadge}</div> : null}
 						<div className="ml-auto flex shrink-0 items-center gap-2">
 							{editControls}
 							{headerActions}
@@ -1158,8 +1178,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 							{headerActions == null ? (
 								<div className="flex items-start justify-between gap-3">
 									{titleBlock}
-									{certControl ? (
-										<div className="shrink-0 pt-1">{certControl}</div>
+									{statusBadge ? (
+										<div className="shrink-0 pt-1">{statusBadge}</div>
 									) : null}
 								</div>
 							) : null}

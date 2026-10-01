@@ -214,7 +214,11 @@ export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchRe
 							<span className="min-w-0 truncate text-sm font-medium text-heading dark:text-zinc-100">
 								<HighlightedText text={item.name ?? item.id} query={query} />
 							</span>
-							{status != null && <CertificationBadge status={status} iconOnly />}
+							{/* The whole card is one link, and the badge's name folds
+							    into it, so the badge does not take focus of its own. */}
+							{status != null && (
+								<CertificationBadge status={status} iconOnly focusable={false} />
+							)}
 							<span className="ml-auto shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-body dark:bg-zinc-800 dark:text-zinc-300">
 								{typeLabel}
 							</span>

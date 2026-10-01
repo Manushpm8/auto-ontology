@@ -37,7 +37,6 @@ export type SinglePageViewProps = {
 	) => void | Promise<void>;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
-	/** Page-level controls for the composer's title bar. See `SinglePageComposerProps`. */
 	headerActions?: ReactNode;
 };
 

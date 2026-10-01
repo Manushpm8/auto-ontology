@@ -226,9 +226,6 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 		if (path != null) router.push(path);
 	};
 
-	// The tag's crumb joins the Settings › Tags trail the top bar already draws,
-	// and only once the name is known: the id in the URL is not a label, and an
-	// empty crumb after the separator reads as a tag whose name is blank.
 	useBreadcrumbTrail(tag == null ? [] : [{ label: tag.name }]);
 
 	// Nothing to head the page with, so it gets its own screen rather than an
@@ -239,7 +236,7 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 			<div className={`w-full space-y-5 ${TAGS_PANEL_PADDING}`}>
 				<EmptyState
 					icon={IconName.Tag}
-					title="This Tag Could Not Be Opened"
+					title="This tag could not be opened"
 					description={error}
 					action={{ label: 'Back to Tags', onClick: () => router.push(TAGS_PATH) }}
 				/>
@@ -310,7 +307,7 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 					<EmptyState
 						variant={EmptyStateVariant.Inline}
 						icon={IconName.Tag}
-						title="Nothing Is Tagged with This Tag"
+						title="Nothing is tagged with this tag"
 						description="Terms, tables, columns, column attributes and SQL attributes carrying this tag will be listed here."
 						className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
 					/>

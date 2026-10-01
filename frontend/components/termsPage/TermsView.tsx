@@ -976,7 +976,7 @@ export const TermsView = () => {
 						title: attr.name,
 						icon: IconName.Column,
 						titleEditable: true,
-						certification: { certified: attr.certified },
+						certification: { certified: attr.certified, showLabel: true },
 					},
 				},
 				sections: [
@@ -1073,7 +1073,7 @@ export const TermsView = () => {
 						title: attr.name,
 						icon: IconName.Link,
 						titleEditable: true,
-						certification: { certified: attr.certified },
+						certification: { certified: attr.certified, showLabel: true },
 					},
 				},
 				sections: [
@@ -1147,6 +1147,9 @@ export const TermsView = () => {
 						icon: IconName.Terms,
 						titleEditable: true,
 						certification: { certified: term.name_certified },
+						// Same server-rolled-up value the list card shows, so the two
+						// can't disagree.
+						status: term.certification,
 					},
 				},
 				sections: [

@@ -402,6 +402,7 @@ const TagsList = () => {
 							rows={tags}
 							rowKey={(tag) => tag.id}
 							onRowClick={(tag) => router.push(tagPath(tag.id))}
+							rowClickIsPointerShortcut
 							containerClassName="overflow-hidden rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
 							bodyClassName="divide-y divide-zinc-200/90 dark:divide-zinc-700/90"
 						/>

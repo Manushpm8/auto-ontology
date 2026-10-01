@@ -72,12 +72,15 @@ export const Table = <T,>({
 	scrollClassName,
 	className,
 	onRowClick,
+	rowClickIsPointerShortcut = false,
 	emptyMessage,
 }: TableProps<T>) => {
 	const baseRowClassName = rowClassName ?? DEFAULT_ROW;
 	const interactiveRowClassName = onRowClick
 		? cx(baseRowClassName, 'cursor-pointer')
 		: stripHoverClasses(baseRowClassName);
+	// A row answers the keyboard only when it is the sole way into its target.
+	const rowIsButton = onRowClick != null && !rowClickIsPointerShortcut;
 
 	if (rows.length === 0) {
 		return (
@@ -113,9 +116,20 @@ export const Table = <T,>({
 					<tr
 						key={rowKey(row, index)}
 						className={interactiveRowClassName}
-						onClick={onRowClick ? () => onRowClick(row, index) : undefined}
-						onKeyDown={
+						onClick={
 							onRowClick
+								? (e) => {
+										// A modified click asks for another tab or
+										// window, which a scripted navigation cannot
+										// give — so it is left to a link in the row
+										// rather than answered in this one.
+										if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+										onRowClick(row, index);
+									}
+								: undefined
+						}
+						onKeyDown={
+							rowIsButton
 								? (e) => {
 										// Only the row's own keystrokes. Enter and Space
 										// belong to whatever is focused, so a nested
@@ -131,8 +145,8 @@ export const Table = <T,>({
 									}
 								: undefined
 						}
-						role={onRowClick ? 'button' : undefined}
-						tabIndex={onRowClick ? 0 : undefined}
+						role={rowIsButton ? 'button' : undefined}
+						tabIndex={rowIsButton ? 0 : undefined}
 					>
 						{columns.map((column) => (
 							<td key={column.key} className={bodyCellClasses(column, cellClassName)}>
