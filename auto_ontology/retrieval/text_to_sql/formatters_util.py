@@ -53,24 +53,6 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
         line += " | is_nullable: false"
     else:
         line += " | is_nullable: unknown"
-    confidence = float(column.get("confidence") or 0.0)
-    semantic_matches = column.get("semantic_matches")
-    line += f" | confidence: {confidence:.4f}"
-    if isinstance(semantic_matches, list) and semantic_matches:
-        rendered_matches = []
-        for match in semantic_matches:
-            if not isinstance(match, dict):
-                continue
-            entity = str(match.get("entity") or "").strip()
-            attribute = str(match.get("attribute") or "").strip()
-            match_confidence = match.get("confidence")
-            if not (entity and attribute) or match_confidence is None:
-                continue
-            rendered_matches.append(
-                f"{entity!r} -> {attribute} [{float(match_confidence):.4f}]"
-            )
-        if rendered_matches:
-            line += " | semantic matches: " + ", ".join(rendered_matches)
     return line
 
 
@@ -212,11 +194,88 @@ def format_semantic_context(
     return "\n".join(lines)
 
 
+def format_important_columns_for_prompt(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict],
+    tables: list[dict],
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Render columns selected by semantic retrieval with full catalog details.
+
+    ``primary_attribute`` and named entries in ``attribute_join_paths`` identify
+    columns whose ColumnAttributes matched extracted question entities. Their
+    owning tables also appear in the ordinary schema section; this deliberately
+    repeats the matched columns so the SQL model can distinguish them from the
+    rest of a potentially wide table.
+    """
+    entries = [
+        entry
+        for entry in [primary_attribute, *attribute_join_paths]
+        if entry
+        and entry.get("table_name")
+        and entry.get("col_name")
+        and entry.get("attr_name")
+    ]
+    if not entries:
+        return "No semantically matched columns."
+
+    lines: list[str] = []
+    for entry in entries:
+        database = entry.get("database_name") or target_db or ""
+        schema = entry.get("schema_name") or ""
+        table_name = entry.get("table_name") or ""
+        column_name = entry.get("col_name") or ""
+
+        matching_table = next(
+            (
+                table
+                for table in tables
+                if str(table.get("name") or "").casefold() == table_name.casefold()
+                and (
+                    not schema
+                    or str(table.get("schema_name") or "").casefold()
+                    == schema.casefold()
+                )
+                and (
+                    not database
+                    or not table.get("database_name")
+                    or str(table.get("database_name") or "").casefold()
+                    == database.casefold()
+                )
+            ),
+            None,
+        )
+        # The relevance filter may have removed an attribute's table after join
+        # paths were built. Do not reintroduce a column from a table absent from
+        # AVAILABLE TABLES, where the model is explicitly forbidden to use it.
+        if matching_table is None:
+            continue
+        catalog_column = next(
+            (
+                column
+                for column in (matching_table or {}).get("columns", [])
+                if isinstance(column, dict)
+                and str(column.get("name") or "").casefold() == column_name.casefold()
+            ),
+            None,
+        )
+        column = catalog_column or {
+            "name": column_name,
+            "data_type": entry.get("datatype") or "UNKNOWN",
+        }
+        full_table = qualify_table(database, schema, table_name, dialect)
+        lines.append(f"Semantic match: {entry['attr_name']}")
+        lines.append(f"  Table: {full_table}")
+        lines.append(_format_column_for_prompt(column, indent="  "))
+
+    return "\n".join(lines) or "No semantically matched columns."
+
+
 def format_tables_for_prompt(
     tables: list[dict],
     target_db: str | None = None,
     dialect: str | None = None,
-    exclude_zero_confidence_columns: bool = False,
 ) -> str:
     """Format tables and their columns as schema context for a prompt.
 
@@ -231,10 +290,6 @@ def format_tables_for_prompt(
     table renders unqualified here while :func:`format_semantic_context` names
     the same table with its catalog — and on a catalog-qualified engine the
     short one does not resolve.
-
-    When *exclude_zero_confidence_columns* is true, only columns with positive
-    semantic confidence are rendered. This is used after semantic preparation,
-    where every candidate column has been scored.
     """
     if not tables:
         return "No tables available"
@@ -262,13 +317,6 @@ def format_tables_for_prompt(
         columns = table.get("columns")
         if not isinstance(columns, list):
             columns = []
-        if exclude_zero_confidence_columns:
-            columns = [
-                column
-                for column in columns
-                if isinstance(column, dict)
-                and float(column.get("confidence") or 0.0) > 0.0
-            ]
         if columns:
             table_parts.append(
                 "  AVAILABLE COLUMNS (only use these columns for this table):"

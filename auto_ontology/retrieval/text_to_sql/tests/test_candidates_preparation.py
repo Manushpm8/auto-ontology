@@ -17,119 +17,6 @@ from auto_ontology.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 
 
-def test_semantic_annotations_use_best_distance_on_retained_columns_only() -> None:
-    tables = [
-        {
-            "id": "kept",
-            "name": "sales",
-            "columns": [
-                {"name": "revenue", "data_type": "numeric"},
-                {"name": "region", "data_type": "text"},
-            ],
-        }
-    ]
-    contexts = {
-        "a1": {
-            "table_id": "kept",
-            "col_name": "revenue",
-            "attr_name": "Revenue",
-        },
-        "a2": {
-            "table_id": "kept",
-            "col_name": "revenue",
-            "attr_name": "Net Revenue",
-        },
-        "a3": {
-            "table_id": "filtered-out",
-            "col_name": "secret",
-            "attr_name": "Secret",
-        },
-    }
-    matches = [
-        {"id": "a1", "query_entity": "sales", "score": 0.42},
-        {"id": "a2", "query_entity": "revenue", "score": 0.18},
-        {"id": "a3", "query_entity": "secret", "score": 0.01},
-    ]
-
-    annotated = candidates_preparation._annotate_semantic_columns(
-        tables,
-        matches,
-        contexts,
-        [
-            {
-                "path": [
-                    {
-                        "source_table": "sales",
-                        "source_column": "region",
-                        "target_table": "territories",
-                        "target_column": "id",
-                    }
-                ]
-            }
-        ],
-    )
-
-    assert [table["name"] for table in annotated] == ["sales"]
-    revenue, region = annotated[0]["columns"]
-    assert round(revenue["confidence"], 4) == 0.8475
-    assert [
-        (match["entity"], match["attribute"], round(match["confidence"], 4))
-        for match in revenue["semantic_matches"]
-    ] == [
-        ("revenue", "Net Revenue", 0.8475),
-        ("sales", "Revenue", 0.7042),
-    ]
-    assert region["confidence"] == 0.25
-    assert "semantic_matches" not in region
-    assert "confidence" not in tables[0]["columns"][0]
-
-
-def test_join_path_columns_receive_nonzero_confidence() -> None:
-    tables = [
-        {
-            "id": "orders",
-            "name": "orders",
-            "schema_name": "public",
-            "database_name": "db",
-            "columns": [
-                {"name": "customer_id"},
-                {"name": "total"},
-            ],
-        },
-        {
-            "id": "customers",
-            "name": "customers",
-            "schema_name": "public",
-            "database_name": "db",
-            "columns": [{"name": "id"}],
-        },
-    ]
-    join_paths = [
-        {
-            "path": [
-                {
-                    "source_database": "db",
-                    "source_schema": "public",
-                    "source_table": "orders",
-                    "source_column": "customer_id",
-                    "target_database": "db",
-                    "target_schema": "public",
-                    "target_table": "customers",
-                    "target_column": "id",
-                }
-            ]
-        }
-    ]
-
-    annotated = candidates_preparation._annotate_semantic_columns(
-        tables, [], {}, join_paths
-    )
-
-    assert annotated[0]["columns"][0]["confidence"] == 0.25
-    assert annotated[1]["columns"][0]["confidence"] == 0.25
-    assert annotated[0]["columns"][1]["confidence"] == 0.0
-
-
 def test_column_metadata_backfill_requires_samples_and_nullability() -> None:
     assert candidates_preparation._needs_column_metadata_backfill(
         {
@@ -224,9 +111,10 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
     monkeypatch.setattr(
         candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
     )
-
-    def fake_contexts(ids, database_name=None):
-        contexts = {
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_attr_column_contexts",
+        lambda ids, database_name=None: {
             "a1": {
                 "attr_name": "Revenue",
                 "col_name": "rev",
@@ -235,21 +123,8 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
                 "table_name": "sales",
                 "schema_name": "main",
                 "database_name": "db",
-            },
-            "a2": {
-                "attr_name": "Long-tail metric",
-                "col_name": "metric",
-                "col_id": "c2",
-                "table_id": "t2",
-                "table_name": "long_tail",
-                "schema_name": "main",
-                "database_name": "db",
-            },
-        }
-        return {attr_id: contexts[attr_id] for attr_id in ids}
-
-    monkeypatch.setattr(
-        candidates_preparation, "fetch_attr_column_contexts", fake_contexts
+            }
+        },
     )
     monkeypatch.setattr(candidates_preparation, "fetch_term_synonyms", lambda ids: {})
     monkeypatch.setattr(
@@ -257,15 +132,7 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
         "get_relevant_tables_from_candidates",
         lambda candidates: [],
     )
-    fetched_table_ids: list[list[str]] = []
-
-    def fake_fetch_tables(ids):
-        fetched_table_ids.append(list(ids))
-        return []
-
-    monkeypatch.setattr(
-        candidates_preparation, "fetch_tables_by_ids", fake_fetch_tables
-    )
+    monkeypatch.setattr(candidates_preparation, "fetch_tables_by_ids", lambda ids: [])
     monkeypatch.setattr(candidates_preparation, "find_join_path", lambda *a, **k: [])
     monkeypatch.setattr(
         candidates_preparation,
@@ -283,18 +150,6 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
                 "entities": ["revenue"],
                 "target_db": "db",
                 "retrieved_column_attributes": [{"id": "a1"}],
-                "retrieved_column_attribute_matches": [
-                    {
-                        "id": "a1",
-                        "query_entity": "revenue",
-                        "score": 0.1,
-                    },
-                    {
-                        "id": "a2",
-                        "query_entity": "metric",
-                        "score": 0.2,
-                    },
-                ],
             },
         },
     )
@@ -304,7 +159,6 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
     assert retrieve_was_running == [True]
     names = [t.get("name") for t in result["path_state"]["relevant_tables"]]
     assert "extra" in names
-    assert all("t2" not in ids for ids in fetched_table_ids)
 
 
 def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> None:

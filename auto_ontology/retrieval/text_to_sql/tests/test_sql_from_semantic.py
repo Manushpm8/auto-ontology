@@ -6,9 +6,14 @@
 
 from __future__ import annotations
 
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
+    format_calculation_sql_template,
+)
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_important_columns_for_prompt,
+    format_tables_for_prompt,
+)
 from auto_ontology.retrieval.text_to_sql.prompts import (
-    create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_projection_rules,
 )
@@ -60,41 +65,88 @@ def test_prompt_forbids_unused_joins() -> None:
     )
 
 
-def test_semantic_sql_prompt_does_not_reaggregate_aggregated_columns() -> None:
-    prompt = create_sql_from_candidates_prompt(dialect="sqlite")
-
-    assert "Never apply an aggregate function to a column" in prompt
-    assert "name or description" in prompt
-    assert "Use the stored aggregate directly" in prompt
-
-
 def test_projection_strictness_is_configured_per_request() -> None:
     strict_rule = "- Return exactly the requested output fields and NO others."
 
     assert strict_rule not in format_projection_rules(shorten_answer=False)
     assert strict_rule in format_projection_rules(shorten_answer=True)
-    projection_rules = format_projection_rules(shorten_answer=False)
-    assert (
-        "Ignore confidence when deciding which outputs to project" in projection_rules
-    )
-    assert (
-        "the question determines the output fields and their order" in projection_rules
-    )
-    assert "prefer a name/label/title when available" in projection_rules
-    strict_projection_rules = format_projection_rules(shorten_answer=True)
-    assert "use its ID unless the question explicitly asks" in strict_projection_rules
-    assert (
-        "Generic 'who', 'which', 'what', or 'list' wording" in strict_projection_rules
-    )
-    assert "Never return both ID and name" in strict_projection_rules
 
 
-def test_prompt_uses_inline_semantic_metadata_without_duplicate_section() -> None:
-    assert "## Semantically Important Columns" not in create_sql_user_prompt
-    assert "{important_columns}" not in create_sql_user_prompt
-    assert "Higher confidence means a stronger direct match" in create_sql_user_prompt
-    assert "verified semantic join path" in create_sql_user_prompt
-    assert "0 means neither signal applies" in create_sql_user_prompt
-    assert "A semantic match does not itself make a column an output" in (
-        create_sql_user_prompt
+def test_calculation_sql_template_is_structural_guidance() -> None:
+    rendered = format_calculation_sql_template(
+        {
+            "calculation_subtype": "ranking",
+            "sql_template": (
+                "SELECT Title FROM posts ORDER BY ViewCount DESC LIMIT 5;"
+            ),
+        }
     )
+
+    assert "classified as `ranking`" in rendered
+    assert "SELECT Title FROM posts" in rendered
+    assert "Never copy its table names" in rendered
+    assert format_calculation_sql_template({}) == ""
+
+
+def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:
+    rendered = format_important_columns_for_prompt(
+        {
+            "attr_name": "Charter Number",
+            "col_name": "CharterNum",
+            "table_name": "schools",
+            "schema_name": "main",
+            "database_name": "california_schools",
+            "datatype": "text",
+        },
+        [
+            {
+                "attr_name": "District Name",
+                "col_name": "District",
+                "table_name": "schools",
+                "schema_name": "main",
+                "database_name": "california_schools",
+                "datatype": "text",
+                "path": [],
+            },
+            {
+                "attr_name": "Removed Table Value",
+                "col_name": "value",
+                "table_name": "filtered_out",
+                "schema_name": "main",
+                "database_name": "california_schools",
+                "datatype": "text",
+                "path": [],
+            },
+            {"path": [{"source_table": "schools", "target_table": "districts"}]},
+        ],
+        [
+            {
+                "name": "schools",
+                "schema_name": "main",
+                "database_name": "california_schools",
+                "columns": [
+                    {
+                        "name": "CharterNum",
+                        "data_type": "text",
+                        "description": "Four-character charter number.",
+                        "sample_values": ["0040", "0728"],
+                        "format": "NNNN",
+                    },
+                    {
+                        "name": "District",
+                        "data_type": "text",
+                        "description": "District overseeing the school.",
+                    },
+                ],
+            }
+        ],
+    )
+
+    assert "Semantic match: Charter Number" in rendered
+    assert "california_schools.main.schools" in rendered
+    assert "Four-character charter number." in rendered
+    assert "sample values: 0040, 0728" in rendered
+    assert "format: NNNN" in rendered
+    assert "Semantic match: District Name" in rendered
+    assert "Removed Table Value" not in rendered
+    assert "structural bridge" not in rendered

@@ -24,7 +24,6 @@ Design Decisions:
 """
 
 import logging
-import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
@@ -152,7 +151,6 @@ _HUB_SIBLING_RANK_K = 30
 #: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
 #: wide candidate set cannot starve the rest of the request.
 _JOIN_PATH_WORKERS = 4
-_JOIN_COLUMN_CONFIDENCE = 0.25
 
 
 def _format_relevance_filter_column(c: dict) -> str:
@@ -225,105 +223,6 @@ def _needs_column_metadata_backfill(table: dict) -> bool:
         isinstance(column, dict) and "is_nullable" in column for column in columns
     )
     return not has_samples or not has_complete_nullability
-
-
-def _annotate_semantic_columns(
-    tables: list[dict],
-    matches: list[dict],
-    attribute_contexts: dict[str, dict],
-    join_paths: list[dict] | None = None,
-) -> list[dict]:
-    """Attach semantic confidence and match provenance to retained columns."""
-    matches_by_column: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for match in matches:
-        context = attribute_contexts.get(str(match.get("id") or ""))
-        if not context:
-            continue
-        table_id = str(context.get("table_id") or "")
-        column_name = str(context.get("col_name") or "")
-        entity = str(match.get("query_entity") or "").strip()
-        attribute_name = str(context.get("attr_name") or "").strip()
-        try:
-            distance = float(match["score"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if not (table_id and column_name and entity and attribute_name):
-            continue
-        if not math.isfinite(distance):
-            continue
-        confidence = 1.0 / (1.0 + max(distance, 0.0))
-        key = (table_id, column_name.casefold())
-        matches_by_column.setdefault(key, []).append(
-            {
-                "entity": entity,
-                "attribute": attribute_name,
-                "confidence": confidence,
-            }
-        )
-
-    join_columns: list[tuple[str, str, str, str]] = []
-    for entry in join_paths or []:
-        for hop in entry.get("path") or []:
-            if not isinstance(hop, dict):
-                continue
-            for side in ("source", "target"):
-                table_name = str(hop.get(f"{side}_table") or "").casefold()
-                column_name = str(hop.get(f"{side}_column") or "").casefold()
-                if table_name and column_name:
-                    join_columns.append(
-                        (
-                            str(hop.get(f"{side}_database") or "").casefold(),
-                            str(hop.get(f"{side}_schema") or "").casefold(),
-                            table_name,
-                            column_name,
-                        )
-                    )
-
-    annotated_tables: list[dict] = []
-    for table in tables:
-        table_copy = dict(table)
-        table_id = str(table.get("id") or "")
-        database_name = str(table.get("database_name") or "").casefold()
-        schema_name = str(table.get("schema_name") or "").casefold()
-        table_name = str(table.get("name") or "").casefold()
-        columns: list[Any] = []
-        for column in table.get("columns") or []:
-            if not isinstance(column, dict):
-                columns.append(column)
-                continue
-            column_copy = dict(column)
-            key = (table_id, str(column.get("name") or "").casefold())
-            semantic_matches = sorted(
-                matches_by_column.get(key, []),
-                key=lambda item: (
-                    -item["confidence"],
-                    item["entity"].casefold(),
-                    item["attribute"].casefold(),
-                ),
-            )
-            column_name = str(column.get("name") or "").casefold()
-            is_join_column = any(
-                join_table == table_name
-                and join_column == column_name
-                and (not join_schema or not schema_name or join_schema == schema_name)
-                and (
-                    not join_database
-                    or not database_name
-                    or join_database == database_name
-                )
-                for join_database, join_schema, join_table, join_column in join_columns
-            )
-            confidence = semantic_matches[0]["confidence"] if semantic_matches else 0.0
-            if is_join_column:
-                confidence = max(confidence, _JOIN_COLUMN_CONFIDENCE)
-            column_copy["confidence"] = confidence
-            if semantic_matches:
-                column_copy["semantic_matches"] = semantic_matches
-            columns.append(column_copy)
-        if isinstance(table.get("columns"), list):
-            table_copy["columns"] = columns
-        annotated_tables.append(table_copy)
-    return annotated_tables
 
 
 logger = logging.getLogger(__name__)
@@ -404,9 +303,6 @@ class CandidatePreparationAgent(BaseAgent):
                 target_db = getattr(connectors[0], "database_name", None)
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
-        column_attribute_matches = list(
-            path_state.get("retrieved_column_attribute_matches") or []
-        )
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
         candidates = custom_analyses + column_attributes + sql_attributes_raw
 
@@ -437,7 +333,6 @@ class CandidatePreparationAgent(BaseAgent):
         primary_attribute: dict | None = None
         attribute_join_paths: list[dict] = []
         attr_contexts: dict[str, dict] = {}
-        semantic_attr_contexts: dict[str, dict] = {}
         term_synonyms: dict[str, list[str]] = {}
         # Table ids to force back into relevant_tables after the relevance
         # filter runs (§5b-§5c), regardless of what it decides — see rationale
@@ -446,43 +341,23 @@ class CandidatePreparationAgent(BaseAgent):
 
         try:
             if column_attributes:
-                preparation_attr_ids = [
+                attr_ids = [
                     str(hit.get("id") or "")
                     for hit in column_attributes
                     if hit.get("id")
                 ]
-                preparation_attr_ids = list(dict.fromkeys(preparation_attr_ids))
-                all_attr_ids = list(
-                    dict.fromkeys(
-                        [
-                            *preparation_attr_ids,
-                            *(
-                                str(hit.get("id") or "")
-                                for hit in column_attribute_matches
-                                if hit.get("id")
-                            ),
-                        ]
-                    )
-                )
+                attr_ids = list(dict.fromkeys(attr_ids))
 
-                semantic_attr_contexts = fetch_attr_column_contexts(
-                    all_attr_ids,
+                attr_contexts = fetch_attr_column_contexts(
+                    attr_ids,
                     database_name=target_db,
                 )
-                attr_contexts = {
-                    attr_id: semantic_attr_contexts[attr_id]
-                    for attr_id in preparation_attr_ids
-                    if attr_id in semantic_attr_contexts
-                }
                 self.logger.info(
-                    "Fetched store context for %d/%d preparation attributes "
-                    "and %d/%d semantic matches",
+                    "Fetched store context for %d/%d column attributes",
                     len(attr_contexts),
-                    len(preparation_attr_ids),
-                    len(semantic_attr_contexts),
-                    len(all_attr_ids),
+                    len(attr_ids),
                 )
-                term_synonyms = fetch_term_synonyms(preparation_attr_ids)
+                term_synonyms = fetch_term_synonyms(attr_ids)
                 self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
                 anchor_id, anchor_reasoning = self._identify_anchor(
@@ -858,13 +733,6 @@ class CandidatePreparationAgent(BaseAgent):
                 len(forced_tables),
                 [t["name"] for t in forced_tables],
             )
-
-        relevant_tables = _annotate_semantic_columns(
-            relevant_tables,
-            column_attribute_matches,
-            semantic_attr_contexts,
-            attribute_join_paths,
-        )
 
         self.logger.info(
             "Final %d table(s) reaching SQL generation: %s",

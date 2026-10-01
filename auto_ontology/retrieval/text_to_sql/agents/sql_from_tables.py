@@ -141,6 +141,7 @@ class SQLFromTablesAgent(BaseAgent):
                 target_db=path_state.get("target_db"),
                 dialect=dialect,
             ),
+            important_columns="No semantically matched columns.",
             join_paths="",
             qa_from_conversations=similar_questions,
             custom_analyses="",
@@ -150,16 +151,6 @@ class SQLFromTablesAgent(BaseAgent):
         if evidence:
             messages.append(
                 SystemMessage(content=format_authoritative_evidence(evidence))
-            )
-        if state.get("shorten_answer", False):
-            messages.append(
-                SystemMessage(
-                    content=(
-                        "STRICT OUTPUT PROJECTION CONTRACT — this overrides "
-                        "default display-name conventions:\n"
-                        + format_projection_rules(shorten_answer=True)
-                    )
-                )
             )
         messages.append(HumanMessage(content=user_prompt))
 

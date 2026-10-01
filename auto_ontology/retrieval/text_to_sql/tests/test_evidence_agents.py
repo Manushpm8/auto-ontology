@@ -110,8 +110,3 @@ def test_tables_agent_uses_request_projection_configuration(
     assert "Return exactly the requested output fields and NO others" in (
         messages[-1].content
     )
-    assert any(
-        "STRICT OUTPUT PROJECTION CONTRACT" in message.content
-        and "Generic 'who', 'which', 'what', or 'list' wording" in message.content
-        for message in messages[:-1]
-    )
