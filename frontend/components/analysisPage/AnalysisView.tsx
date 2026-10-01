@@ -33,9 +33,9 @@ type AnalysisMode = 'sql' | 'pql';
 type AnalysisItem = { id: string; name: string; description: string; code: string };
 
 const FIELD_INPUT_CLASSNAME =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
 
-const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
+const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100';
 
 const MODE_LABEL: Record<AnalysisMode, string> = { sql: 'SQL', pql: 'PQL' };
 const SKELETON_CARD_HEIGHT = 184;
@@ -341,8 +341,8 @@ export const AnalysisView = () => {
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.ChartBar} className="h-5 w-5 text-[#76b900]" />
-				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+				<Icon name={IconName.ChartBar} className="h-5 w-5 text-body dark:text-zinc-300" />
+				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
 					{isPql ? 'PQL analyses' : 'Custom analyses'}
 				</h1>
 				<div className="ml-4 flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
@@ -370,7 +370,7 @@ export const AnalysisView = () => {
 						shadow
 					>
 						<Icon name={IconName.Plus} className="h-4 w-4" />
-						Create new analysis
+						Create New Analysis
 					</Button>
 				</div>
 			</header>
@@ -452,7 +452,18 @@ export const AnalysisView = () => {
 								}`}
 							>
 								<div className="flex items-start justify-between gap-3">
-									<Text as="h2" text={a.name} variant={TextVariant.CardTitle} />
+									<div className="flex min-w-0 flex-1 items-center gap-2">
+										<Icon
+											name={IconName.ChartBar}
+											className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
+										/>
+										<Text
+											as="h2"
+											text={a.name}
+											variant={TextVariant.CardTitle}
+											fill
+										/>
+									</div>
 									<PopoverMenu
 										className="shrink-0"
 										items={[
@@ -567,7 +578,7 @@ export const AnalysisView = () => {
 				</div>
 
 				{validationMessage != null && (
-					<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+					<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
 						{validationMessage}
 					</p>
 				)}
