@@ -11,11 +11,7 @@ type ListResult = ResponseWithCount<PqlAnalysis[]> & { total: number };
 type ListResponse = ApiPagedResponse<PqlAnalysis[]>;
 
 export type PqlAnalysesListParams = PageParams & {
-	/**
-	 * Case-insensitive substring filter on the analysis name.
-	 *
-	 * Goes up as `?q=`, which is what the route calls it.
-	 */
+	/** Case-insensitive substring filter on the analysis name. */
 	query?: string;
 };
 
@@ -32,7 +28,7 @@ type DeleteResponse = ResponseWithError<{ data: { id: string } }>;
 export const pqlAnalyses = {
 	list: (params?: PqlAnalysesListParams): Promise<ListResponse> =>
 		requests.get<ListResult>('pql-analyses', {
-			...(params?.query ? { q: params.query } : {}),
+			...(params?.query ? { query: params.query } : {}),
 			...pageQuery(params),
 		}),
 	create: (payload: PqlAnalysisCreatePayload): Promise<CreateResponse> =>

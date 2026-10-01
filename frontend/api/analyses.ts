@@ -11,11 +11,7 @@ type ListResult = ResponseWithCount<CustomAnalysis[]> & { total: number };
 type ListResponse = ApiPagedResponse<CustomAnalysis[]>;
 
 export type CustomAnalysesListParams = PageParams & {
-	/**
-	 * Case-insensitive substring filter on the analysis name.
-	 *
-	 * Goes up as `?q=`, which is what the route calls it.
-	 */
+	/** Case-insensitive substring filter on the analysis name. */
 	query?: string;
 };
 
@@ -33,7 +29,7 @@ type ValidateResponse = ResponseWithError<{ data: { valid: boolean; sql: string 
 export const analyses = {
 	list: (params?: CustomAnalysesListParams): Promise<ListResponse> =>
 		requests.get<ListResult>('custom-analyses', {
-			...(params?.query ? { q: params.query } : {}),
+			...(params?.query ? { query: params.query } : {}),
 			...pageQuery(params),
 		}),
 	validate: (sql: string): Promise<ValidateResponse> =>

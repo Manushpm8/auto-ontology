@@ -150,7 +150,7 @@ def list_databases() -> dict:
 
 @router.get("/custom-analyses", response_model=CustomAnalysisPageResponse)
 def list_custom_analyses(
-    q: str | None = Query(
+    query: str | None = Query(
         default=None,
         description="Case-insensitive substring filter on the analysis name.",
     ),
@@ -159,7 +159,7 @@ def list_custom_analyses(
 ) -> dict:
     """CustomAnalysis nodes joined with their HAS_SQL neighbour.
 
-    *q*, when given, keeps the analyses whose name contains it
+    *query*, when given, keeps the analyses whose name contains it
     (case-insensitive).
 
     Analyses come back ordered by name, and *skip*/*limit* select one page of
@@ -167,12 +167,12 @@ def list_custom_analyses(
     asking. Omitting *limit* returns every matching analysis.
     """
     rows = custom_analyses_dal.list_custom_analyses(
-        zone_ids=None, search=q, skip=skip, limit=limit
+        zone_ids=None, search=query, skip=skip, limit=limit
     )
     # The count is a second read, so it is worth skipping for the request that
     # asked for everything: a whole unpaged list already is its own total.
     total = (
-        custom_analyses_dal.count_custom_analyses(zone_ids=None, search=q)
+        custom_analyses_dal.count_custom_analyses(zone_ids=None, search=query)
         if skip or limit is not None
         else len(rows)
     )
@@ -281,7 +281,7 @@ def delete_custom_analysis(analysis_id: str) -> dict:
 
 @router.get("/pql-analyses", response_model=PqlAnalysisPageResponse)
 def list_pql_analyses(
-    q: str | None = Query(
+    query: str | None = Query(
         default=None,
         description="Case-insensitive substring filter on the analysis name.",
     ),
@@ -290,13 +290,13 @@ def list_pql_analyses(
 ) -> dict:
     """PqlAnalysis nodes ``{id, name, description, pql}``.
 
-    *q*, ``skip`` and ``limit`` behave as they do on ``/custom-analyses``:
+    *query*, ``skip`` and ``limit`` behave as they do on ``/custom-analyses``:
     a name filter over a page of the name order, with ``total`` counting
     every match rather than the rows on this page.
     """
-    rows = pql_analyses_dal.list_pql_analyses(search=q, skip=skip, limit=limit)
+    rows = pql_analyses_dal.list_pql_analyses(search=query, skip=skip, limit=limit)
     total = (
-        pql_analyses_dal.count_pql_analyses(search=q)
+        pql_analyses_dal.count_pql_analyses(search=query)
         if skip or limit is not None
         else len(rows)
     )

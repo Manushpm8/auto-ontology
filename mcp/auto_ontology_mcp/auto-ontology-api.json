@@ -2540,7 +2540,7 @@
           {
             "description": "Case-insensitive substring filter on the analysis name.",
             "in": "query",
-            "name": "q",
+            "name": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -2552,7 +2552,7 @@
                 }
               ],
               "description": "Case-insensitive substring filter on the analysis name.",
-              "title": "Q"
+              "title": "Query"
             }
           },
           {
@@ -4334,7 +4334,7 @@
           {
             "description": "Case-insensitive substring filter on the analysis name.",
             "in": "query",
-            "name": "q",
+            "name": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -4346,7 +4346,7 @@
                 }
               ],
               "description": "Case-insensitive substring filter on the analysis name.",
-              "title": "Q"
+              "title": "Query"
             }
           },
           {
@@ -4665,7 +4665,7 @@
           {
             "description": "Case-insensitive substring filter on the rule name or on the name of a tag it applies.",
             "in": "query",
-            "name": "q",
+            "name": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -4677,7 +4677,7 @@
                 }
               ],
               "description": "Case-insensitive substring filter on the rule name or on the name of a tag it applies.",
-              "title": "Q"
+              "title": "Query"
             }
           },
           {
@@ -5876,7 +5876,7 @@
           {
             "description": "Case-insensitive substring filter on the tag name.",
             "in": "query",
-            "name": "q",
+            "name": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -5888,7 +5888,7 @@
                 }
               ],
               "description": "Case-insensitive substring filter on the tag name.",
-              "title": "Q"
+              "title": "Query"
             }
           },
           {
@@ -6455,7 +6455,7 @@
           {
             "description": "Case-insensitive substring filter on the term name.",
             "in": "query",
-            "name": "q",
+            "name": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -6467,7 +6467,7 @@
                 }
               ],
               "description": "Case-insensitive substring filter on the term name.",
-              "title": "Q"
+              "title": "Query"
             }
           },
           {
