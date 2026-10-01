@@ -102,7 +102,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{
 			key: 'schema',
 			label: 'Schema',
-			placeholder: 'Leave Empty To Choose From a List',
+			placeholder: 'Leave Empty to Choose from a List',
 			hint: 'Ingest only this schema. The connection test verifies it exists, and the schema selection step is skipped. Leave empty to pick schemas from a list instead.',
 			optional: true,
 			testOnly: true,
@@ -222,7 +222,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{
 			key: 'schema',
 			label: 'Schema',
-			placeholder: 'Leave Empty To Choose From a List',
+			placeholder: 'Leave Empty to Choose from a List',
 			hint: 'Ingest only this schema. Leave empty to pick schemas from a list instead.',
 			optional: true,
 		},
@@ -283,7 +283,7 @@ export const COMMON_CONNECTION_FIELDS: ConnectionField[] = [
 	{
 		key: 'table_deny_regex',
 		label: 'Table Denylist (Regex)',
-		placeholder: 'Leave Empty To Exclude Nothing',
+		placeholder: 'Leave Empty to Exclude Nothing',
 		optional: true,
 		hint: 'Skip tables whose name matches, even if the allowlist also matches them. Use this for relations the warehouse lists but cannot actually read, such as a broken Distributed table or a Kafka queue.',
 	},
