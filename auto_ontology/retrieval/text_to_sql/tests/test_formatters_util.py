@@ -184,6 +184,63 @@ def test_prompt_renders_column_nullability_states() -> None:
     assert "legacy_value (text) | is_nullable: unknown" in rendered
 
 
+def test_prompt_renders_confidence_for_every_column_and_match_provenance() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "sales",
+                "columns": [
+                    {
+                        "name": "revenue",
+                        "data_type": "numeric",
+                        "confidence": 0.8442,
+                        "semantic_matches": [
+                            {
+                                "entity": "revenue",
+                                "attribute": "Net Revenue",
+                                "confidence": 0.8442,
+                            },
+                            {
+                                "entity": "sales",
+                                "attribute": "Revenue",
+                                "confidence": 0.7143,
+                            },
+                        ],
+                    },
+                    {"name": "region", "data_type": "text"},
+                ],
+            }
+        ]
+    )
+
+    assert "confidence: 0.8442" in rendered
+    assert "'revenue' -> Net Revenue [0.8442]" in rendered
+    assert "'sales' -> Revenue [0.7143]" in rendered
+    region_line = next(line for line in rendered.splitlines() if "- region " in line)
+    assert "confidence: 0.0000" in region_line
+    assert "semantic" not in region_line
+
+
+def test_semantic_prompt_excludes_columns_without_positive_confidence() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "sales",
+                "columns": [
+                    {"name": "revenue", "confidence": 0.7},
+                    {"name": "region", "confidence": 0.0},
+                    {"name": "legacy"},
+                ],
+            }
+        ],
+        exclude_zero_confidence_columns=True,
+    )
+
+    assert "- revenue " in rendered
+    assert "- region " not in rendered
+    assert "- legacy " not in rendered
+
+
 def test_prompt_renders_date_format_when_present() -> None:
     rendered = format_tables_for_prompt(
         [
