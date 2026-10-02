@@ -140,10 +140,14 @@ class CatalogEmbeddingRowsOp(AbstractOperator, CPUOperator):
                 column_description = (
                     "" if pd.isna(v := column.get("description")) else str(v).strip()
                 )
+                usage_evidence = (
+                    "" if pd.isna(v := column.get("usage_evidence")) else str(v).strip()
+                )
                 sample_values = (column.get("sample_values") or [])[:5]
                 column_text = build_column_text(
                     column_name=column_name,
                     column_description=column_description,
+                    usage_evidence=usage_evidence,
                     data_type=data_type,
                     sample_values=sample_values,
                     schema_name=schema_name,
@@ -214,6 +218,7 @@ def build_column_text(
     table_name: str,
     schema_name: str,
     database_name: str,
+    usage_evidence: str = "",
 ) -> str:
     """Build the embedding text for a column.
 
@@ -229,6 +234,8 @@ def build_column_text(
     )
     if column_description:
         text += f", column_description: {column_description}"
+    if usage_evidence:
+        text += f", usage_evidence: {usage_evidence}"
     if len(sample_values) > 0:
         text += f", sample_values: {', '.join(str(x) for x in sample_values)}"
     return text

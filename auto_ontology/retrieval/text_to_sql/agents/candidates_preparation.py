@@ -216,7 +216,7 @@ def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
 
 
 def _needs_column_metadata_backfill(table: dict) -> bool:
-    """Whether a relevant table lacks samples or nullability metadata."""
+    """Whether a relevant table lacks catalog-backed column metadata."""
     columns = table.get("columns") or []
     has_samples = any(
         isinstance(column, dict) and column.get("sample_values") for column in columns
@@ -224,7 +224,15 @@ def _needs_column_metadata_backfill(table: dict) -> bool:
     has_complete_nullability = bool(columns) and all(
         isinstance(column, dict) and "is_nullable" in column for column in columns
     )
-    return not has_samples or not has_complete_nullability
+    has_normalized_metadata = bool(columns) and all(
+        isinstance(column, dict)
+        and "constraints" in column
+        and "usage_evidence" in column
+        for column in columns
+    )
+    return (
+        not has_samples or not has_complete_nullability or not has_normalized_metadata
+    )
 
 
 def _annotate_semantic_columns(

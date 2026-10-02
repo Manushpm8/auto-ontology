@@ -9,11 +9,13 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from auto_ontology.semantic.deterministic import (
+    _describe_column_batch,
     column_attribute_specs,
     fk_source_columns,
     fk_target_table_names,
     to_term_name,
 )
+from auto_ontology.semantic.models import ColumnDescription, ColumnDescriptionResult
 
 
 @patch(
@@ -70,7 +72,7 @@ def test_llm_description_used_as_fallback(_mock_desc) -> None:
     "auto_ontology.semantic.deterministic._generate_column_descriptions",
     return_value={},
 )
-def test_date_column_description_states_stored_notation(_mock_desc) -> None:
+def test_date_format_is_not_duplicated_in_description(_mock_desc) -> None:
     columns = [
         {
             "name": "game_date",
@@ -80,18 +82,81 @@ def test_date_column_description_states_stored_notation(_mock_desc) -> None:
     ]
     profiling = {"game_date": {"format": "YYMMDD", "sample_values": []}}
     specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
-    assert specs[0].description == ("Date the match was played. — format: YYMMDD")
+    assert specs[0].description == "Date the match was played."
 
 
 @patch(
     "auto_ontology.semantic.deterministic._generate_column_descriptions",
     return_value={"game_date": "When the match took place."},
 )
-def test_llm_date_description_also_gets_the_notation(_mock_desc) -> None:
+def test_llm_date_description_does_not_duplicate_notation(_mock_desc) -> None:
     columns = [{"name": "game_date", "data_type": "date"}]
     profiling = {"game_date": {"format": "YYYY-MM-DD"}}
     specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
-    assert specs[0].description == ("When the match took place. — format: YYYY-MM-DD")
+    assert specs[0].description == "When the match took place."
+
+
+@patch("auto_ontology.semantic.deterministic.get_non_reasoning_llm_client")
+@patch("auto_ontology.semantic.deterministic.invoke_with_structured_output")
+def test_normalizes_description_samples_constraints_and_usage(
+    mock_invoke, _mock_client
+) -> None:
+    mock_invoke.return_value = ColumnDescriptionResult(
+        descriptions=[
+            ColumnDescription(
+                column_name="FRPM Count (K-12)",
+                description="Free or Reduced Price Meal Count (K-12).",
+                usage_evidence="eligible FRPM rate = FRPM / Enrollment",
+            ),
+            ColumnDescription(
+                column_name="frameEffects",
+                description="The visual frame effects.",
+                sample_values=["colorshifted", "companion", "devoid"],
+            ),
+            ColumnDescription(
+                column_name="CharterNum",
+                description="The charter school number.",
+                constraints="A four-digit number stored as a string.",
+            ),
+        ]
+    )
+    columns = [
+        {
+            "name": "FRPM Count (K-12)",
+            "data_type": "numeric",
+            "description": (
+                "Free or Reduced Price Meal Count (K-12), commonsense evidence:"
+                "eligible FRPM rate = FRPM / Enrollment"
+            ),
+        },
+        {
+            "name": "frameEffects",
+            "data_type": "text",
+            "description": 'The visual frame effects., "colorshifted", "companion"',
+        },
+        {
+            "name": "CharterNum",
+            "data_type": "text",
+            "description": (
+                "The charter school number,, 4-digit number assigned to a "
+                "charter school."
+            ),
+        },
+    ]
+
+    result = _describe_column_batch(columns, {})
+
+    assert result["FRPM Count (K-12)"].usage_evidence == (
+        "eligible FRPM rate = FRPM / Enrollment"
+    )
+    assert result["frameEffects"].sample_values == [
+        "colorshifted",
+        "companion",
+        "devoid",
+    ]
+    assert result["CharterNum"].constraints == (
+        "A four-digit number stored as a string."
+    )
 
 
 def test_to_term_name() -> None:

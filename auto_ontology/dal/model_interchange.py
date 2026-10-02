@@ -300,6 +300,8 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
             s.column_attribute.c.id,
             s.column_attribute.c.name,
             s.column_attribute.c.description,
+            s.column_attribute.c.constraints,
+            s.column_attribute.c.usage_evidence,
             s.column__has_attribute.c.column_id,
         )
         .select_from(
@@ -320,6 +322,8 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
                 "id": row["id"],
                 "name": row["name"],
                 "description": row["description"] or "",
+                "constraints": row["constraints"] or "",
+                "usage_evidence": row["usage_evidence"] or "",
                 "column_id": row["column_id"],
             }
         )
@@ -511,6 +515,8 @@ def assemble_export_document(
                     id=str(attr["id"]),
                     name=attr.get("name") or "",
                     description=attr.get("description") or "",
+                    constraints=attr.get("constraints") or "",
+                    usage_evidence=attr.get("usage_evidence") or "",
                     column_id=str(attr.get("column_id") or ""),
                 )
                 for attr in (row.get("columns_attributes") or [])
@@ -1429,6 +1435,8 @@ def _import_column_attributes(
                     {
                         "name": attr.name,
                         "description": attr.description,
+                        "constraints": attr.constraints,
+                        "usage_evidence": attr.usage_evidence,
                         "source": SEMANTIC_SOURCE,
                         "term_name": term.name,
                         "source_column": col_ctx.name if col_ctx else "",
@@ -1479,6 +1487,7 @@ def _import_column_attributes(
                     is_unique=col_ctx.is_unique,
                     sample_values=col_ctx.sample_values,
                     schema_name=col_ctx.schema_name,
+                    usage_evidence=attr.usage_evidence,
                 ),
             )
 

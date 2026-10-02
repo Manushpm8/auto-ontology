@@ -34,6 +34,12 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
     line = f"{indent}- {name} ({data_type})"
     if description:
         line += f" - {description}"
+    constraints = str(column.get("constraints") or "").strip()
+    if constraints:
+        line += f" | constraints: {constraints}"
+    usage_evidence = str(column.get("usage_evidence") or "").strip()
+    if usage_evidence:
+        line += f" | usage evidence: {usage_evidence}"
     if sample_values:
         if "json" in (data_type or "").lower():
             line += (

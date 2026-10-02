@@ -60,6 +60,8 @@ def merge_column_attribute(
     attr_name: str,
     datatype: str,
     description: str | None,
+    constraints: str | None = None,
+    usage_evidence: str | None = None,
 ) -> str | None:
     """Upsert a ColumnAttribute and link it to its column and Term.
 
@@ -93,6 +95,8 @@ def merge_column_attribute(
         source=SEMANTIC_SOURCE,
         datatype=datatype,
         description=description,
+        constraints=constraints,
+        usage_evidence=usage_evidence,
     )
     # One transaction: the attribute and its two links are a single fact. Without
     # this each statement autocommits, so a failure on the second leaves a
@@ -109,6 +113,14 @@ def merge_column_attribute(
                     "description": func.coalesce(
                         statement.excluded.description,
                         s.column_attribute.c.description,
+                    ),
+                    "constraints": func.coalesce(
+                        statement.excluded.constraints,
+                        s.column_attribute.c.constraints,
+                    ),
+                    "usage_evidence": func.coalesce(
+                        statement.excluded.usage_evidence,
+                        s.column_attribute.c.usage_evidence,
                     ),
                 },
             ).returning(s.column_attribute.c.id)
@@ -158,6 +170,8 @@ def update_column_attribute(
     *,
     name: str | None = None,
     description: str | None = None,
+    constraints: str | None = None,
+    usage_evidence: str | None = None,
     certified: bool | None = None,
 ) -> dict[str, Any] | None:
     """Update an attribute's metadata and return the context an embed needs.
@@ -190,6 +204,10 @@ def update_column_attribute(
         .values(
             name=func.coalesce(name, s.column_attribute.c.name),
             description=func.coalesce(description, s.column_attribute.c.description),
+            constraints=func.coalesce(constraints, s.column_attribute.c.constraints),
+            usage_evidence=func.coalesce(
+                usage_evidence, s.column_attribute.c.usage_evidence
+            ),
             certified=func.coalesce(certified, s.column_attribute.c.certified),
         )
         .returning(s.column_attribute.c.id)
@@ -204,6 +222,8 @@ def update_column_attribute(
             s.column_attribute.c.id,
             s.column_attribute.c.name,
             s.column_attribute.c.description,
+            s.column_attribute.c.constraints,
+            s.column_attribute.c.usage_evidence,
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
             s.column_attribute.c.certified,

@@ -539,6 +539,8 @@ class ColumnAttribute(ApiModel):
     id: str
     name: str | None = None
     description: str | None = None
+    constraints: str | None = None
+    usage_evidence: str | None = None
     term_name: str | None = None
     source_column: str | None = None
     datatype: str | None = None

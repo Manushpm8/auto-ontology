@@ -124,6 +124,26 @@ def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:
     assert "TABLE: lakehouse.lakehouse.events" in rendered
 
 
+def test_prompt_renders_constraints_and_usage_evidence() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "schools",
+                "columns": [
+                    {
+                        "name": "CharterNum",
+                        "data_type": "text",
+                        "constraints": "Exactly four digits, including leading zeros.",
+                        "usage_evidence": "Use to identify a charter school.",
+                    }
+                ],
+            }
+        ]
+    )
+    assert "constraints: Exactly four digits, including leading zeros." in rendered
+    assert "usage evidence: Use to identify a charter school." in rendered
+
+
 def test_prompt_spells_out_sample_values_without_list_punctuation() -> None:
     rendered = format_tables_for_prompt(
         [

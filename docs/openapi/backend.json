@@ -111,6 +111,17 @@
             ],
             "title": "Certified"
           },
+          "constraints": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Constraints"
+          },
           "datatype": {
             "anyOf": [
               {
@@ -232,6 +243,17 @@
               }
             ],
             "title": "Term Name"
+          },
+          "usage_evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage Evidence"
           },
           "zones": {
             "anyOf": [
@@ -444,6 +466,17 @@
             ],
             "title": "Certified"
           },
+          "constraints": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Constraints"
+          },
           "description": {
             "anyOf": [
               {
@@ -480,6 +513,17 @@
               }
             ],
             "title": "Sample Values"
+          },
+          "usage_evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage Evidence"
           }
         },
         "title": "ColumnAttributeUpdate",

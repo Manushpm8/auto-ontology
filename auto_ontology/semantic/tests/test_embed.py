@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from auto_ontology.semantic.embed import _format_sample_values
+from auto_ontology.semantic.embed import _build_rows, _format_sample_values
 
 
 def test_format_sample_values_handles_legacy_json_string_and_native_list() -> None:
@@ -23,3 +23,20 @@ def test_format_sample_values_filters_long_values_and_handles_empty() -> None:
     assert _format_sample_values([]) == ""
     assert _format_sample_values(["a", None, "b"]) == " Sample values: a, b."
     assert _format_sample_values('["a", null, "b"]') == " Sample values: a, b."
+
+
+def test_column_attribute_embedding_includes_usage_evidence() -> None:
+    rows = _build_rows(
+        "schools",
+        {},
+        [
+            {
+                "id": "attr-1",
+                "name": "frpmCount",
+                "term_name": "School",
+                "description": "Free or reduced-price meal count.",
+                "usage_evidence": "eligible FRPM rate = FRPM / Enrollment",
+            }
+        ],
+    )
+    assert "Usage evidence: eligible FRPM rate = FRPM / Enrollment." in rows[0]["text"]

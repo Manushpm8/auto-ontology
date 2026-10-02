@@ -111,10 +111,12 @@ class ColumnAttributeSpec(BaseModel):
     display_name: str = ""
     datatype: str = ""
     description: str | None = None
+    constraints: str | None = None
+    usage_evidence: str | None = None
 
 
 class ColumnDescription(BaseModel):
-    """LLM-generated business description for a single column."""
+    """LLM-normalized metadata for a single catalog column."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -126,10 +128,25 @@ class ColumnDescription(BaseModel):
         default="",
         description="One concise sentence describing what the column represents.",
     )
+    sample_values: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Example values extracted from the source description only; do not "
+            "copy separately supplied catalog or database samples."
+        ),
+    )
+    constraints: str = Field(
+        default="",
+        description="Explicit validity, representation, or formatting requirements.",
+    )
+    usage_evidence: str = Field(
+        default="",
+        description="Explicit guidance, formulas, or evidence for using the column.",
+    )
 
 
 class ColumnDescriptionResult(BaseModel):
-    """LLM output: business descriptions for a table's columns."""
+    """LLM output: normalized metadata for a table's columns."""
 
     model_config = ConfigDict(extra="forbid")
 

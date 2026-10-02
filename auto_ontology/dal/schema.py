@@ -435,6 +435,10 @@ column_attribute = Table(
     _id(),
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
+    # Machine-extracted rules governing valid/stored values.
+    Column("constraints", Text, nullable=True),
+    # How or when to use the attribute, including formulas and evidence.
+    Column("usage_evidence", Text, nullable=True),
     Column("datatype", Text, nullable=True),
     Column("source", Text, nullable=False, server_default=text("'semantic'")),
     Column("source_column", Text, nullable=False),

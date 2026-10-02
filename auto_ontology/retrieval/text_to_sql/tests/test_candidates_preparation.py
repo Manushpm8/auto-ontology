@@ -159,6 +159,8 @@ def test_column_metadata_backfill_requires_samples_and_nullability() -> None:
                     "name": "status",
                     "sample_values": ["open"],
                     "is_nullable": None,
+                    "constraints": None,
+                    "usage_evidence": None,
                 }
             ]
         }

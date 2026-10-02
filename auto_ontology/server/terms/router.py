@@ -38,6 +38,8 @@ class TermUpdate(BaseModel):
 class ColumnAttributeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     description: str | None = None
+    constraints: str | None = None
+    usage_evidence: str | None = None
     sample_values: list[str] | None = None
     certified: bool | None = None
 
@@ -141,6 +143,8 @@ def update_column_attribute(
             attr_id,
             name=name if isinstance(name, str) else None,
             description=patch.get("description"),
+            constraints=patch.get("constraints"),
+            usage_evidence=patch.get("usage_evidence"),
             sample_values=patch.get("sample_values"),
             certified=patch.get("certified"),
         )

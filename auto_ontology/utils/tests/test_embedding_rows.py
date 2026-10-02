@@ -68,6 +68,7 @@ def test_column_text_is_exact() -> None:
     text = build_column_text(
         column_name="total",
         column_description="Order total.",
+        usage_evidence="gross margin = total - cost",
         data_type="numeric",
         sample_values=[1, 2],
         table_name="orders",
@@ -78,6 +79,7 @@ def test_column_text_is_exact() -> None:
         "database_name: shop, schema_name: public, table_name: orders"
         ", column_name: total, data_type: numeric"
         ", column_description: Order total."
+        ", usage_evidence: gross margin = total - cost"
         ", sample_values: 1, 2"
     )
 

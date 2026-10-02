@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,11 +15,16 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.semantic.date_format import is_date_type
-from auto_ontology.semantic.models import ColumnAttributeSpec, ColumnDescriptionResult
+from auto_ontology.semantic.models import (
+    ColumnAttributeSpec,
+    ColumnDescription,
+    ColumnDescriptionResult,
+)
 from auto_ontology.utils.llm_invoke import (
     get_non_reasoning_llm_client,
     invoke_with_structured_output,
 )
+from auto_ontology.utils.sample_values import stringify_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +36,23 @@ _DESCRIPTION_BATCH_SIZE = 15
 _DESCRIPTION_MAX_WORKERS = 1
 
 _DESCRIPTION_SYSTEM = """\
-You are a data analyst documenting the columns of a relational table for a \
-semantic layer. For every column you are given, write ONE concise sentence \
-describing what the column represents in business terms.
+You normalize relational-column metadata for a semantic layer. Return exactly \
+one entry per supplied column, using its physical column name.
 
-Rules:
-- Use the column name, data type, and sample values as evidence.
-- Keep each description to a single, factual sentence — no speculation.
-- Return exactly one entry per column provided, using the physical column name."""
+For each entry:
+- description: one concise factual sentence containing only what the column \
+represents in business terms. Remove embedded examples, constraints, formulas, \
+and usage instructions from it. If no source description exists, infer a \
+conservative description from the name, type, and database samples.
+- sample_values: only examples embedded inside source_description. Do not copy \
+catalog_sample_values or database_sample_values into this field.
+- constraints: explicit validity, padding, representation, or formatting rules \
+from source_description or existing_constraints. Do not infer constraints from \
+observed samples.
+- usage_evidence: explicit formulas, relationships, or how/when-to-use guidance \
+from source_description or existing_usage_evidence. Preserve equations exactly.
+
+Use empty strings/lists when a category has no evidence. Never speculate."""
 
 
 def to_term_name(table_name: str) -> str:
@@ -54,89 +69,42 @@ def to_term_name(table_name: str) -> str:
     )
 
 
-_FORMAT_MARKER = "format:"
-
-
 def fk_source_columns(fks: list[dict[str, Any]]) -> set[str]:
     return {fk["source_column"] for fk in fks if fk.get("source_column")}
-
-
-def _get_column_samples(
-    col: dict[str, Any],
-    columns_profiling_samples: dict[str, dict[str, Any]],
-) -> list[str]:
-    """Profiled sample values for a column.
-
-    Date/time columns are excluded — concrete dates add no business meaning
-    (to an LLM description prompt, or as a stand-in when no description
-    needed to be generated).
-    """
-    if is_date_type(col.get("data_type")):
-        return []
-    name = col.get("name", "")
-    samples = (columns_profiling_samples.get(name) or {}).get("sample_values") or []
-    return [str(s) for s in samples]
-
-
-def _add_samples_suffix(text: str, samples: list[str]) -> str:
-    """Append " — samples: v1, v2" to *text* when samples are present."""
-    if not samples:
-        return text
-    return f"{text} — samples: {', '.join(samples)}"
-
-
-def _date_format_clause(
-    col: dict[str, Any],
-    columns_profiling_samples: dict[str, dict[str, Any]],
-) -> str | None:
-    """How stored values are written, when a single notation fits them all.
-
-    ``format`` is the column's storage notation — currently filled only for
-    dates, but the same property would hold an id or address pattern later.
-    """
-    profile = columns_profiling_samples.get(col.get("name", "")) or {}
-    notation = profile.get("format") or col.get("format")
-    if not notation:
-        return None
-    return f"{_FORMAT_MARKER} {notation}"
-
-
-def _add_date_format_clause(text: str, clause: str | None) -> str:
-    """Append the notation, idempotently on its own marker."""
-    if not clause or _FORMAT_MARKER in text:
-        return text
-    return f"{text} — {clause}" if text else clause
-
-
-def _enrich_description(
-    col: dict[str, Any],
-    columns_profiling_samples: dict[str, dict[str, Any]],
-    text: str | None,
-) -> str | None:
-    """Attach date notation (and, for existing descriptions, samples)."""
-    enriched = _add_date_format_clause(
-        text or "", _date_format_clause(col, columns_profiling_samples)
-    )
-    return enriched or None
 
 
 def _describe_column_batch(
     columns: list[dict[str, Any]],
     columns_profiling_samples: dict[str, dict[str, Any]],
-) -> dict[str, str]:
-    """Ask the LLM for a business description of a single batch of columns.
+) -> dict[str, ColumnDescription]:
+    """Ask the LLM to normalize a single batch of columns.
 
-    Returns a ``{column_name: description}`` map; empty when the call fails.
+    Returns a ``{column_name: metadata}`` map; empty when the call fails.
     """
     lines = []
     for col in columns:
         name = col.get("name", "")
-        data_type = col.get("data_type") or "unknown"
-        samples = _get_column_samples(col, columns_profiling_samples)
-        line = _add_samples_suffix(f"  - {name} ({data_type})", samples)
-        lines.append(line)
+        profile = columns_profiling_samples.get(name) or {}
+        payload = {
+            "column_name": name,
+            "data_type": col.get("data_type") or "unknown",
+            "source_description": col.get("description") or "",
+            "existing_constraints": col.get("constraints") or "",
+            "existing_usage_evidence": col.get("usage_evidence") or "",
+            "catalog_sample_values": stringify_sample_values(col.get("sample_values"))
+            or [],
+            "database_sample_values": (
+                []
+                if is_date_type(col.get("data_type"))
+                else stringify_sample_values(
+                    profile.get("database_sample_values", profile.get("sample_values"))
+                )
+                or []
+            ),
+        }
+        lines.append(json.dumps(payload, ensure_ascii=False))
 
-    prompt = "Columns:\n" + "\n".join(lines)
+    prompt = "Columns (one JSON object per line):\n" + "\n".join(lines)
 
     try:
         result = invoke_with_structured_output(
@@ -157,38 +125,49 @@ def _describe_column_batch(
         logger.warning("column description batch failed — proceeding without them")
         return {}
 
-    # The prompt annotates each column as "<name> (<dtype>)". When a column name
-    # contains spaces or parentheses, the model sometimes echoes the annotation back as
-    # the column_name (e.g. "Academic Year (TEXT)"). Resolve each returned name
-    # to the requested physical name: exact match first, then the longest
-    # requested name the returned string starts with.
+    # Models sometimes echo type/context after the physical name, especially
+    # when that name contains spaces or parentheses. Resolve exact matches
+    # first, then the longest requested name that prefixes the returned text.
     requested_names = [c.get("name", "") for c in columns if c.get("name")]
     requested_set = set(requested_names)
-    out: dict[str, str] = {}
+    out: dict[str, ColumnDescription] = {}
     for d in result.descriptions:
         raw = d.column_name or ""
-        desc = (d.description or "").strip()
-        if not desc:
-            continue
+        resolved_name: str | None = None
         if raw in requested_set:
-            out.setdefault(raw, desc)
-            continue
-        prefixes = [n for n in requested_names if n and raw.startswith(n)]
-        if prefixes:
-            out.setdefault(max(prefixes, key=len), desc)
+            resolved_name = raw
+        else:
+            prefixes = [n for n in requested_names if n and raw.startswith(n)]
+            if prefixes:
+                resolved_name = max(prefixes, key=len)
+        if resolved_name:
+            normalized = d.model_copy(
+                update={
+                    "column_name": resolved_name,
+                    "description": (d.description or "").strip(),
+                    "constraints": (d.constraints or "").strip(),
+                    "usage_evidence": (d.usage_evidence or "").strip(),
+                    "sample_values": [
+                        value.strip()
+                        for value in d.sample_values
+                        if isinstance(value, str) and value.strip()
+                    ],
+                }
+            )
+            out.setdefault(resolved_name, normalized)
     return out
 
 
 def _generate_column_descriptions(
     columns: list[dict[str, Any]],
     columns_profiling_samples: dict[str, dict[str, Any]] | None,
-) -> dict[str, str]:
-    """Ask the LLM for a business description of each column.
+) -> dict[str, ColumnDescription]:
+    """Ask the LLM to normalize metadata for each column.
 
     Columns are bucketed into small batches described concurrently, so wide
     tables don't overflow a single structured-output response (which times out).
 
-    Returns a ``{column_name: description}`` map; empty when no columns are
+    Returns a ``{column_name: metadata}`` map; empty when no columns are
     provided. Batches that fail are simply skipped.
     """
     if not columns:
@@ -200,7 +179,7 @@ def _generate_column_descriptions(
         for i in range(0, len(columns), _DESCRIPTION_BATCH_SIZE)
     ]
 
-    descriptions: dict[str, str] = {}
+    descriptions: dict[str, ColumnDescription] = {}
     if len(batches) == 1:
         return _describe_column_batch(batches[0], profiling)
 
@@ -215,11 +194,20 @@ def _generate_column_descriptions(
     return descriptions
 
 
+def normalize_column_metadata(
+    columns: list[dict[str, Any]],
+    columns_profiling_samples: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, ColumnDescription]:
+    """Normalize all column metadata using the existing batched LLM call."""
+    return _generate_column_descriptions(columns, columns_profiling_samples)
+
+
 def column_attribute_specs(
     columns: list[dict[str, Any]],
     fks: list[dict[str, Any]],
     suggested_fk_columns: set[str] | None = None,
     columns_profiling_samples: dict[str, dict[str, Any]] | None = None,
+    normalized_metadata: dict[str, ColumnDescription] | None = None,
 ) -> list[ColumnAttributeSpec]:
     """Non-FK columns mapped 1:1 to ColumnAttribute candidates."""
     fk_cols = fk_source_columns(fks)
@@ -230,52 +218,45 @@ def column_attribute_specs(
         col for col in columns if (name := col.get("name", "")) and name not in fk_cols
     ]
 
-    # Only ask the LLM for columns that don't already have a description
-    cols_with_description = [col for col in candidates if col.get("description")]
-    cols_without_description = [col for col in candidates if not col.get("description")]
-    llm_descriptions = _generate_column_descriptions(
-        cols_without_description, columns_profiling_samples
+    normalized = (
+        normalized_metadata
+        if normalized_metadata is not None
+        else normalize_column_metadata(columns, columns_profiling_samples)
     )
 
-    profiling = columns_profiling_samples or {}
-
     def _build_column_attribute_spec(
-        col: dict[str, Any], description: str | None
+        col: dict[str, Any],
     ) -> ColumnAttributeSpec:
         name = col["name"]
+        normalized_description = normalized.get(name)
+        description = (
+            normalized_description.description
+            if isinstance(normalized_description, ColumnDescription)
+            and normalized_description.description
+            else normalized_description
+            if isinstance(normalized_description, str) and normalized_description
+            else col.get("description")
+        )
         return ColumnAttributeSpec(
             source_column=name,
             name=_column_to_attr_name(name),
             datatype=str(col.get("data_type") or ""),
             description=description,
+            constraints=(
+                normalized_description.constraints
+                if isinstance(normalized_description, ColumnDescription)
+                else col.get("constraints")
+            )
+            or None,
+            usage_evidence=(
+                normalized_description.usage_evidence
+                if isinstance(normalized_description, ColumnDescription)
+                else col.get("usage_evidence")
+            )
+            or None,
         )
 
-    # Columns with an existing description skip the LLM entirely, so unlike
-    # LLM descriptions (which were already generated with the samples as
-    # evidence) their description never saw the sample values — bundle them
-    # in now via the same " — samples: ..." suffix.
-    specs = [
-        _build_column_attribute_spec(
-            col,
-            _enrich_description(
-                col,
-                profiling,
-                _add_samples_suffix(
-                    col["description"], _get_column_samples(col, profiling)
-                ),
-            ),
-        )
-        for col in cols_with_description
-    ]
-    # Columns without a description: keep the LLM description as generated
-    specs += [
-        _build_column_attribute_spec(
-            col,
-            _enrich_description(col, profiling, llm_descriptions.get(col["name"])),
-        )
-        for col in cols_without_description
-    ]
-    return specs
+    return [_build_column_attribute_spec(col) for col in candidates]
 
 
 def fk_target_table_names(fks: list[dict[str, Any]]) -> list[str]:

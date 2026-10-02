@@ -88,6 +88,8 @@ class ModelColumnAttribute(BaseModel):
     id: str
     name: str = ""
     description: str = ""
+    constraints: str = ""
+    usage_evidence: str = ""
     column_id: str = ""
 
 

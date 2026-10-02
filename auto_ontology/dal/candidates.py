@@ -30,7 +30,11 @@ from sqlalchemy import literal, select
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store
-from auto_ontology.dal.sql_fragments import column_description_expr
+from auto_ontology.dal.sql_fragments import (
+    column_constraints_expr,
+    column_description_expr,
+    column_usage_evidence_expr,
+)
 from auto_ontology.utils.sample_values import stringify_sample_values
 
 logger = logging.getLogger(__name__)
@@ -91,6 +95,8 @@ def _table_payloads(table_ids: list[str]) -> dict[str, dict[str, Any]]:
             s.catalog_column.c.data_type,
             s.catalog_column.c.sample_values,
             s.catalog_column.c.format,
+            column_constraints_expr().label("constraints"),
+            column_usage_evidence_expr().label("usage_evidence"),
             column_description_expr().label("description"),
         )
         .where(s.catalog_column.c.table_id.in_(table_ids))
@@ -107,6 +113,8 @@ def _table_payloads(table_ids: list[str]) -> dict[str, dict[str, Any]]:
                 # this, so a null must become an empty string, not "None".
                 "data_type": str(row["data_type"] or ""),
                 "description": row["description"],
+                "constraints": row["constraints"],
+                "usage_evidence": row["usage_evidence"],
                 "format": row["format"],
                 "sample_values": sample_values if sample_values else None,
             }

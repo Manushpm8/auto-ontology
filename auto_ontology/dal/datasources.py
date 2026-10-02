@@ -39,7 +39,9 @@ from sqlalchemy import values as sa_values
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
+    column_constraints_expr,
     column_description_expr,
+    column_usage_evidence_expr,
     table_description_expr,
 )
 from auto_ontology.dal.tags import TARGET_COLUMN, TARGET_TABLE, fetch_tags_map
@@ -528,6 +530,24 @@ def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> No
     )
 
 
+def store_column_normalized_description(
+    table_id: str,
+    metadata: dict[str, dict[str, Any]],
+) -> None:
+    """Persist normalized business descriptions for columns in one table.
+
+    Only keys present in an entry are written. This lets a failed or partial
+    model response leave existing catalog metadata untouched while still
+    allowing a successful normalization to clear obsolete optional fields.
+    """
+    values = {
+        name: entry["description"]
+        for name, entry in metadata.items()
+        if "description" in entry
+    }
+    _set_column_property(table_id, values, "description")
+
+
 # ---------------------------------------------------------------------------
 # Metadata writes
 # ---------------------------------------------------------------------------
@@ -976,6 +996,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
+                column_constraints_expr().label("constraints"),
+                column_usage_evidence_expr().label("usage_evidence"),
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
@@ -1020,6 +1042,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "name": row["column_name"],
                     "data_type": row["data_type"],
                     "description": row["column_description"],
+                    "constraints": row["constraints"],
+                    "usage_evidence": row["usage_evidence"],
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
@@ -1047,6 +1071,8 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "name": r["name"],
             "data_type": r["data_type"],
             "description": r["description"],
+            "constraints": r["constraints"],
+            "usage_evidence": r["usage_evidence"],
             "ordinal_position": r["ordinal_position"],
             "sample_values": r["sample_values"],
             "format": r["format"],
@@ -1058,6 +1084,8 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
                 s.catalog_column.c.name,
                 s.catalog_column.c.data_type,
                 column_description_expr().label("description"),
+                column_constraints_expr().label("constraints"),
+                column_usage_evidence_expr().label("usage_evidence"),
                 s.catalog_column.c.ordinal_position,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.format,
@@ -1122,6 +1150,7 @@ def fetch_tables_and_columns_by_node_ids(
                     s.catalog_column.c.name.label("column_name"),
                     s.catalog_column.c.data_type,
                     column_description_expr().label("description"),
+                    column_usage_evidence_expr().label("usage_evidence"),
                     s.catalog_column.c.sample_values,
                     s.catalog_database.c.name.label("database_name"),
                 )

@@ -65,11 +65,13 @@ def build_column_data_row(
     table_name: str,
     schema_name: str,
     database_name: str,
+    usage_evidence: str = "",
 ) -> dict[str, Any]:
     """Build a data-layer embed row for a Column node."""
     text = build_column_text(
         column_name=column_name,
         column_description=column_description,
+        usage_evidence=usage_evidence,
         data_type=data_type,
         sample_values=sample_values[:5],
         table_name=table_name,
@@ -147,6 +149,7 @@ def build_column_attribute_semantic_rows(
     is_unique: bool,
     sample_values: list[Any] | None,
     schema_name: str | None = None,
+    usage_evidence: str = "",
 ) -> list[dict[str, Any]]:
     """Build semantic-layer embed rows for a ColumnAttribute."""
     return _build_rows(
@@ -162,6 +165,7 @@ def build_column_attribute_semantic_rows(
                 "table_name": table_name,
                 "is_unique": is_unique,
                 "sample_values": sample_values,
+                "usage_evidence": usage_evidence,
                 "id": live_id,
                 "schema_name": schema_name,
             },

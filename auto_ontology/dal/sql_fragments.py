@@ -30,17 +30,18 @@ def _non_blank(column: ColumnElement) -> ColumnElement:
     return func.nullif(func.trim(func.coalesce(column, "")), "")
 
 
-def _attribute_description(column_id: ColumnElement, link_table) -> ColumnElement:
-    """First non-blank ColumnAttribute description reachable via *link_table*."""
+def _attribute_field(column_id: ColumnElement, link_table, field: str) -> ColumnElement:
+    """First non-blank ColumnAttribute field reachable via *link_table*."""
     attribute = s.column_attribute
+    value = attribute.c[field]
     return (
-        select(attribute.c.description)
+        select(value)
         .select_from(
             link_table.join(attribute, attribute.c.id == link_table.c.attribute_id)
         )
         .where(
             link_table.c.column_id == column_id,
-            _non_blank(attribute.c.description).isnot(None),
+            _non_blank(value).isnot(None),
         )
         # Ordering by id keeps the answer the same between calls. Which
         # attribute wins when a column has several is still arbitrary, but it
@@ -69,9 +70,19 @@ def column_description_expr(column=s.catalog_column) -> ColumnElement:
     """
     return func.coalesce(
         _non_blank(column.c.description),
-        _attribute_description(column.c.id, s.column__has_attribute),
-        _attribute_description(column.c.id, s.column__semantic_fk),
+        _attribute_field(column.c.id, s.column__has_attribute, "description"),
+        _attribute_field(column.c.id, s.column__semantic_fk, "description"),
     )
+
+
+def column_constraints_expr(column=s.catalog_column) -> ColumnElement:
+    """Constraints from the ColumnAttribute owned by a catalog column."""
+    return _attribute_field(column.c.id, s.column__has_attribute, "constraints")
+
+
+def column_usage_evidence_expr(column=s.catalog_column) -> ColumnElement:
+    """Usage evidence from the ColumnAttribute owned by a catalog column."""
+    return _attribute_field(column.c.id, s.column__has_attribute, "usage_evidence")
 
 
 def table_description_expr(table=s.catalog_table) -> ColumnElement:

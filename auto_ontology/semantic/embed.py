@@ -251,9 +251,15 @@ def _build_rows(
             continue
         owner = a.get("term_name") or term_name or ""
         sample_block = _format_sample_values(a.get("sample_values"), a.get("datatype"))
+        usage_block = (
+            f" Usage evidence: {a['usage_evidence']}."
+            if a.get("usage_evidence")
+            else ""
+        )
         text = (
             f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}. "
             f"{a.get('description') or ''}"
+            f"{usage_block}"
             f"{sample_block}"
         ).strip()
         path = (

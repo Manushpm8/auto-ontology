@@ -25,6 +25,7 @@ from auto_ontology.dal.attributes import merge_column_attribute
 from auto_ontology.dal.datasources import (
     mark_table_as_junction,
     store_column_date_formats,
+    store_column_normalized_description,
     store_column_sample_values,
     store_column_uniqueness,
 )
@@ -33,15 +34,23 @@ from auto_ontology.dal.terms import (
     fetch_terms_and_attributes_for_table,
     upsert_table_term,
 )
-from auto_ontology.semantic.deterministic import column_attribute_specs
+from auto_ontology.semantic.deterministic import (
+    column_attribute_specs,
+    normalize_column_metadata,
+)
 from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
 from auto_ontology.semantic.fk_suggester import suggest_potential_foreign_keys
-from auto_ontology.semantic.models import ColumnAttributeSpec, ProcessTableResult
+from auto_ontology.semantic.models import (
+    ColumnAttributeSpec,
+    ColumnDescription,
+    ProcessTableResult,
+)
 from auto_ontology.semantic.term_extractor import (
     apply_display_names_to_specs,
     extract_term,
 )
+from auto_ontology.utils.sample_values import parse_sample_values
 from auto_ontology.utils.sql_identifiers import quoted_identifier
 
 if TYPE_CHECKING:
@@ -342,6 +351,22 @@ def _sample_key(value: Any) -> str:
         return json.dumps(value, sort_keys=True, default=str)
     except (TypeError, ValueError):
         return str(value)
+
+
+def _merge_sample_values(*groups: Sequence[Any] | None) -> list[Any]:
+    """Stable typed union of sample groups, preserving the first occurrence."""
+    merged: list[Any] = []
+    seen: set[str] = set()
+    for group in groups:
+        for value in group or []:
+            if value is None:
+                continue
+            key = _sample_key(value)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(value)
+    return merged
 
 
 def _keep_persisted_sample(value: Any) -> bool:
@@ -742,12 +767,71 @@ def calculate_columns_profiling(
         if filtered:
             sample_values[col_name] = filtered
 
+    # Existing catalog samples are metadata-owned and stay first. Fresh
+    # warehouse values extend them instead of replacing them.
+    columns_by_name = {str(col.get("name")): col for col in columns if col.get("name")}
+    for name, profile in profiling.items():
+        database_values = list(profile.get("sample_values") or [])
+        profile["database_sample_values"] = database_values
+        existing = parse_sample_values(
+            (columns_by_name.get(name) or {}).get("sample_values")
+        )
+        persisted_database_values = sample_values.get(name) or []
+        merged_persisted = _merge_sample_values(existing, persisted_database_values)
+        profile["sample_values"] = _merge_sample_values(existing, database_values)
+        profile["persisted_sample_values"] = merged_persisted
+        if merged_persisted:
+            sample_values[name] = merged_persisted
+
     table_id = table["id"]
     store_column_sample_values(table_id, sample_values)
     store_column_uniqueness(table_id, uniqueness)
     store_column_date_formats(table_id, date_formats)
 
     return profiling
+
+
+def _persist_normalized_column_metadata(
+    table_id: str,
+    columns: list[dict[str, Any]],
+    normalized: dict[str, ColumnDescription],
+    profiling: dict[str, dict[str, Any]],
+) -> None:
+    """Persist normalized fields and metadata-first merged sample values."""
+    catalog_updates: dict[str, dict[str, Any]] = {}
+    merged_samples: dict[str, list[Any]] = {}
+
+    for col in columns:
+        name = str(col.get("name") or "")
+        entry = normalized.get(name)
+        if not name or entry is None:
+            continue
+
+        description = entry.description or str(col.get("description") or "")
+        constraints = entry.constraints or str(col.get("constraints") or "")
+        usage_evidence = entry.usage_evidence or str(col.get("usage_evidence") or "")
+        catalog_updates[name] = {
+            "description": description or None,
+        }
+
+        profile = profiling.get(name) or {}
+        existing = parse_sample_values(col.get("sample_values"))
+        profiled = profile.get("persisted_sample_values") or []
+        samples = _merge_sample_values(entry.sample_values, existing, profiled)
+        if samples:
+            merged_samples[name] = samples
+            profile["sample_values"] = _merge_sample_values(
+                entry.sample_values, profile.get("sample_values")
+            )
+            profile["persisted_sample_values"] = samples
+            col["sample_values"] = samples
+
+        col["description"] = description or None
+        col["constraints"] = constraints or None
+        col["usage_evidence"] = usage_evidence or None
+
+    store_column_normalized_description(table_id, catalog_updates)
+    store_column_sample_values(table_id, merged_samples)
 
 
 def process_table(
@@ -810,6 +894,21 @@ def process_table(
             database_name,
         )
 
+    # The existing batched description call also separates embedded examples,
+    # constraints, and usage evidence. Normalize every column (including FKs)
+    # and persist the result before downstream semantic agents consume it.
+    with _step(table_name, "Normalizing column metadata"):
+        normalized_metadata = normalize_column_metadata(
+            ctx.get("columns", []),
+            columns_profiling_samples,
+        )
+        _persist_normalized_column_metadata(
+            table_id,
+            ctx.get("columns", []),
+            normalized_metadata,
+            columns_profiling_samples,
+        )
+
     # --- FK detection (LLM + declared); results not written to the store ---
     declared_fks = ctx.get("fks", [])
     with _step(table_name, "Detecting foreign keys"):
@@ -843,6 +942,7 @@ def process_table(
         declared_fks,
         suggested_fk_columns=all_fk_names,
         columns_profiling_samples=columns_profiling_samples,
+        normalized_metadata=normalized_metadata,
     )
     if not specs:
         logger.warning("[%s] no non-FK columns — skipping Term creation", table_name)
@@ -947,5 +1047,7 @@ def _commit_terms(
                 attr_name=spec.display_name,
                 datatype=spec.datatype,
                 description=spec.description,
+                constraints=spec.constraints,
+                usage_evidence=spec.usage_evidence,
             )
             result_attr_names.append(spec.display_name)

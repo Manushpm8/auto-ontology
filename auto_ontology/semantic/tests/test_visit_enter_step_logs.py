@@ -39,6 +39,10 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         visit_enter, "calculate_columns_profiling", lambda *_a, **_k: {}
     )
+    monkeypatch.setattr(visit_enter, "normalize_column_metadata", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        visit_enter, "_persist_normalized_column_metadata", lambda *_a, **_k: None
+    )
     monkeypatch.setattr(
         visit_enter,
         "suggest_potential_foreign_keys",
@@ -81,6 +85,7 @@ def test_each_step_is_logged(_stubbed: None, caplog: LogCaptureFixture) -> None:
 
     for expected in (
         "[orders] Sampling column values (2 columns)…",
+        "[orders] Normalizing column metadata…",
         "[orders] Detecting foreign keys…",
         "[orders] Generating terms and descriptions (1 columns)…",
         "[orders] Writing 1 term(s) to the graph…",
@@ -105,6 +110,7 @@ def test_steps_are_logged_in_pipeline_order(
     starts = [m for m in (r.getMessage() for r in caplog.records) if m.endswith("…")]
     order = [
         "Sampling column values (2 columns)",
+        "Normalizing column metadata",
         "Detecting foreign keys",
         "Generating terms and descriptions (1 columns)",
         "Writing 1 term(s) to the graph",

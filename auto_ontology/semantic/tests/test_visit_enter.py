@@ -22,6 +22,7 @@ from auto_ontology.semantic.visit_enter import (
     _PROFILING_QUERY_TIMEOUT_SECONDS,
     _json_ready_sample,
     _keep_persisted_sample,
+    _merge_sample_values,
     _sample_key,
     _sampling_breaker,
     calculate_columns_profiling,
@@ -44,6 +45,41 @@ def _mock_connector(dialect: str = "postgres") -> MagicMock:
         schema, table, dialect=dialect
     )
     return connector
+
+
+def test_merge_sample_values_keeps_metadata_first_and_typed() -> None:
+    assert _merge_sample_values(
+        ["metadata", "shared", "1"],
+        ["shared", "database", 1],
+    ) == ["metadata", "shared", "1", "database", 1]
+
+
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+def test_profiling_appends_database_samples_after_catalog_metadata(
+    mock_store_samples: MagicMock,
+    _mock_store_unique: MagicMock,
+    _mock_store_dates: MagicMock,
+) -> None:
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame({"status": ["database", "metadata"]})
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {
+            "name": "status",
+            "data_type": "text",
+            "sample_values": '["metadata"]',
+        }
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert result["status"]["sample_values"] == ["metadata", "database"]
+    assert mock_store_samples.call_args.args == (
+        "t1",
+        {"status": ["metadata", "database"]},
+    )
 
 
 @pytest.mark.parametrize(

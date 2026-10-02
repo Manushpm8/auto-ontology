@@ -554,6 +554,8 @@ def test_merge_creates_and_links(world) -> None:
         attr_name="customer id",
         datatype="integer",
         description="the identifier",
+        constraints="positive integer",
+        usage_evidence="Join customer facts by this identifier.",
     )
     assert attr_id
 
@@ -566,6 +568,14 @@ def test_merge_creates_and_links(world) -> None:
         )
     )
     assert len(linked) == 1
+    metadata = store().query_read(
+        select(
+            s.column_attribute.c.constraints,
+            s.column_attribute.c.usage_evidence,
+        ).where(s.column_attribute.c.id == attr_id)
+    )[0]
+    assert metadata["constraints"] == "positive integer"
+    assert metadata["usage_evidence"] == "Join customer facts by this identifier."
 
 
 def test_merge_is_idempotent_and_preserves_a_curated_description(world) -> None:

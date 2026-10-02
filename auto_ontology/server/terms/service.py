@@ -94,6 +94,8 @@ def update_column_attribute(
     *,
     name: str | None = None,
     description: str | None = None,
+    constraints: str | None = None,
+    usage_evidence: str | None = None,
     sample_values: list[str] | None = None,
     certified: bool | None = None,
 ) -> dict[str, Any] | None:
@@ -125,13 +127,19 @@ def update_column_attribute(
         term_id,
         name=name,
         description=description,
+        constraints=constraints,
+        usage_evidence=usage_evidence,
         certified=certified,
     )
     if row is None:
         return None
 
     content_changed = (
-        name is not None or description is not None or sample_values is not None
+        name is not None
+        or description is not None
+        or constraints is not None
+        or usage_evidence is not None
+        or sample_values is not None
     )
     if not content_changed:
         row["sample_values"] = stringify_sample_values(row.get("sample_values"))
@@ -162,6 +170,8 @@ def update_column_attribute(
             "id": row["id"],
             "name": row["name"],
             "description": row.get("description"),
+            "constraints": row.get("constraints"),
+            "usage_evidence": row.get("usage_evidence"),
             "term_name": row.get("term_name"),
             "source_column": row.get("source_column"),
             "sample_values": row.get("sample_values"),
