@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 _COLUMN_ATTRIBUTE_SEARCH_K = 10
 _COLUMN_ATTRIBUTE_PREPARATION_K = 2
+_EVIDENCE_COLUMN_ATTRIBUTE_PREPARATION_K = 2
 
 
 # ---------------------------------------------------------------------------
@@ -506,8 +507,11 @@ class CandidateRetrievalAgent(BaseAgent):
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
+        evidence = str(state.get("evidence") or "").strip()
 
         all_col_attr_hits: list[dict] = []
+        evidence_col_attr_hits: list[dict] = []
+        preparation_evidence_hits: list[dict] = []
         preparation_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
         all_sql_attr_hits: list[dict] = []
@@ -563,6 +567,22 @@ class CandidateRetrievalAgent(BaseAgent):
                     )
                     for entity in clean_entities
                 ],
+                *(
+                    [
+                        (
+                            "col_attr_evidence",
+                            (
+                                semantic_retriever,
+                                evidence,
+                                LABEL_COLUMN_ATTRIBUTE,
+                                _COLUMN_ATTRIBUTE_SEARCH_K,
+                                target_db,
+                            ),
+                        )
+                    ]
+                    if evidence
+                    else []
+                ),
             ]
             if subject:
                 search_tasks.append(
@@ -592,6 +612,8 @@ class CandidateRetrievalAgent(BaseAgent):
                         all_sql_attr_hits = result
                     elif key == "subject_term":
                         subject_term_hits = result
+                    elif key == "col_attr_evidence":
+                        evidence_col_attr_hits = result
                     else:
                         # key is "col_attr:{entity}" — tag each hit for coverage.
                         entity = key.split(":", 1)[1]
@@ -603,9 +625,13 @@ class CandidateRetrievalAgent(BaseAgent):
             preparation_col_attr_hits = _top_hits_per_entity(
                 all_col_attr_hits, _COLUMN_ATTRIBUTE_PREPARATION_K
             )
+            preparation_evidence_hits = sorted(
+                evidence_col_attr_hits,
+                key=lambda hit: (_score(hit), str(hit.get("id") or "")),
+            )[:_EVIDENCE_COLUMN_ATTRIBUTE_PREPARATION_K]
             if target_db is None:
                 selected_database, database_stats = _select_candidate_database(
-                    preparation_col_attr_hits,
+                    [*preparation_col_attr_hits, *preparation_evidence_hits],
                     all_custom_hits,
                     all_sql_attr_hits,
                 )
@@ -643,6 +669,9 @@ class CandidateRetrievalAgent(BaseAgent):
                     )
                     preparation_col_attr_hits = _filter_hits_to_database(
                         preparation_col_attr_hits, selected_database
+                    )
+                    preparation_evidence_hits = _filter_hits_to_database(
+                        preparation_evidence_hits, selected_database
                     )
                     all_custom_hits = _filter_hits_to_database(
                         all_custom_hits, selected_database
@@ -721,11 +750,13 @@ class CandidateRetrievalAgent(BaseAgent):
 
         all_col_attr_matches = _dedupe_column_matches(all_col_attr_hits)
         deduped_col_attr = _dedupe_best_score(preparation_col_attr_hits)
+        deduped_evidence_col_attr = _dedupe_best_score(preparation_evidence_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
         deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)
         subject_term = subject_term_hits[0] if subject_term_hits else None
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
+        path_state["retrieved_evidence_column_attributes"] = deduped_evidence_col_attr
         path_state["retrieved_column_attribute_matches"] = all_col_attr_matches
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = deduped_sql_attr

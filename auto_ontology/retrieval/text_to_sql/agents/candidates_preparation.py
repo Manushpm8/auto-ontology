@@ -167,6 +167,12 @@ def _format_relevance_filter_column(c: dict) -> str:
         extra = f" | JSONB keys: {', '.join(str(v) for v in sv[:12])}"
     if desc:
         extra = (extra + f" | {desc}") if extra else f" | {desc}"
+    constraints = str(c.get("constraints") or "").strip()
+    if constraints:
+        extra += f" | constraints: {constraints}"
+    usage_evidence = str(c.get("usage_evidence") or "").strip()
+    if usage_evidence:
+        extra += f" | usage evidence: {usage_evidence}"
     return f"    - {name} ({ctype}){extra}"
 
 
@@ -375,9 +381,17 @@ class CandidatePreparationAgent(BaseAgent):
         """Validate that retrieval produced at least one hit."""
         path_state = state.get("path_state", {})
         has_col_attrs = bool(path_state.get("retrieved_column_attributes"))
+        has_evidence_col_attrs = bool(
+            path_state.get("retrieved_evidence_column_attributes")
+        )
         has_custom = bool(path_state.get("retrieved_custom_analyses"))
         has_sql_attrs = bool(path_state.get("retrieved_sql_attributes"))
-        if not has_col_attrs and not has_custom and not has_sql_attrs:
+        if (
+            not has_col_attrs
+            and not has_evidence_col_attrs
+            and not has_custom
+            and not has_sql_attrs
+        ):
             connectors = state.get("connectors") or []
             if path_state.get("target_db") or (
                 len(connectors) == 1 and getattr(connectors[0], "database_name", None)
@@ -412,6 +426,9 @@ class CandidatePreparationAgent(BaseAgent):
                 target_db = getattr(connectors[0], "database_name", None)
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
+        evidence_column_attributes = list(
+            path_state.get("retrieved_evidence_column_attributes") or []
+        )
         column_attribute_matches = list(
             path_state.get("retrieved_column_attribute_matches") or []
         )
@@ -453,17 +470,26 @@ class CandidatePreparationAgent(BaseAgent):
         forced_table_ids: set[str] = set()
 
         try:
-            if column_attributes:
+            if column_attributes or evidence_column_attributes:
                 preparation_attr_ids = [
                     str(hit.get("id") or "")
                     for hit in column_attributes
                     if hit.get("id")
                 ]
                 preparation_attr_ids = list(dict.fromkeys(preparation_attr_ids))
+                evidence_attr_ids = [
+                    str(hit.get("id") or "")
+                    for hit in evidence_column_attributes
+                    if hit.get("id")
+                ]
+                evidence_attr_ids = list(dict.fromkeys(evidence_attr_ids))
+                anchor_candidate_ids = list(
+                    dict.fromkeys([*preparation_attr_ids, *evidence_attr_ids])
+                )
                 all_attr_ids = list(
                     dict.fromkeys(
                         [
-                            *preparation_attr_ids,
+                            *anchor_candidate_ids,
                             *(
                                 str(hit.get("id") or "")
                                 for hit in column_attribute_matches
@@ -482,23 +508,54 @@ class CandidatePreparationAgent(BaseAgent):
                     for attr_id in preparation_attr_ids
                     if attr_id in semantic_attr_contexts
                 }
+                anchor_contexts = {
+                    attr_id: semantic_attr_contexts[attr_id]
+                    for attr_id in anchor_candidate_ids
+                    if attr_id in semantic_attr_contexts
+                }
                 self.logger.info(
                     "Fetched store context for %d/%d preparation attributes "
-                    "and %d/%d semantic matches",
+                    "and %d/%d anchor candidates",
                     len(attr_contexts),
                     len(preparation_attr_ids),
-                    len(semantic_attr_contexts),
-                    len(all_attr_ids),
+                    len(anchor_contexts),
+                    len(anchor_candidate_ids),
                 )
-                term_synonyms = fetch_term_synonyms(preparation_attr_ids)
-                self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
                 anchor_id, anchor_reasoning = self._identify_anchor(
-                    state, question, attr_contexts
+                    state, question, anchor_contexts
                 )
                 self.logger.info("Anchor attribute id: %s", anchor_id)
                 if anchor_reasoning:
                     record_thought(path_state, _GRAPH_NODE_NAME, anchor_reasoning)
+
+                if anchor_id and anchor_id not in attr_contexts:
+                    selected_evidence_hit = next(
+                        (
+                            hit
+                            for hit in evidence_column_attributes
+                            if str(hit.get("id") or "") == anchor_id
+                        ),
+                        None,
+                    )
+                    selected_context = semantic_attr_contexts.get(anchor_id)
+                    if (
+                        selected_evidence_hit is not None
+                        and selected_context is not None
+                    ):
+                        column_attributes.append(selected_evidence_hit)
+                        candidates.append(selected_evidence_hit)
+                        preparation_attr_ids.append(anchor_id)
+                        attr_contexts[anchor_id] = selected_context
+                        column_attribute_matches.append(
+                            {
+                                **selected_evidence_hit,
+                                "query_entity": "authoritative evidence",
+                            }
+                        )
+
+                term_synonyms = fetch_term_synonyms(preparation_attr_ids)
+                self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
                 if anchor_id and anchor_id in attr_contexts:
                     anchor_ctx = attr_contexts[anchor_id]
@@ -510,6 +567,8 @@ class CandidatePreparationAgent(BaseAgent):
                         "schema_name": anchor_ctx["schema_name"],
                         "database_name": anchor_ctx["database_name"],
                         "datatype": anchor_ctx.get("datatype") or "",
+                        "constraints": anchor_ctx.get("constraints") or "",
+                        "usage_evidence": anchor_ctx.get("usage_evidence") or "",
                     }
 
                     dest_items = [
@@ -543,6 +602,9 @@ class CandidatePreparationAgent(BaseAgent):
                                     "schema_name": dest_ctx["schema_name"],
                                     "database_name": dest_ctx["database_name"],
                                     "datatype": dest_ctx.get("datatype") or "",
+                                    "constraints": dest_ctx.get("constraints") or "",
+                                    "usage_evidence": dest_ctx.get("usage_evidence")
+                                    or "",
                                     "path": join_path,
                                 }
                             )
@@ -1373,8 +1435,20 @@ class CandidatePreparationAgent(BaseAgent):
             f"- id: {aid} | {ctx['attr_name']} "
             f"(table: {ctx.get('table_name', '?')}, column: {ctx.get('col_name', '?')})"
             + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
+            + (
+                f" | constraints: {ctx['constraints']}"
+                if ctx.get("constraints")
+                else ""
+            )
+            + (
+                f" | usage evidence: {ctx['usage_evidence']}"
+                if ctx.get("usage_evidence")
+                else ""
+            )
             for aid, ctx in contexts.items()
         )
+        evidence = str(state.get("evidence") or "").strip()
+        evidence_block = f"\n\nAuthoritative evidence:\n{evidence}" if evidence else ""
         messages = [
             SystemMessage(
                 content=(
@@ -1384,10 +1458,12 @@ class CandidatePreparationAgent(BaseAgent):
             ),
             HumanMessage(
                 content=(
-                    f"Question: {question}\n\n"
+                    f"Question: {question}{evidence_block}\n\n"
                     f"Available column attributes:\n{attrs_block}\n\n"
                     "Return the id of the single column attribute that best represents "
-                    "the primary subject of the question."
+                    "the primary subject of the question. When authoritative evidence "
+                    "matches an attribute's usage evidence, prefer that connected "
+                    "attribute over a less precise semantic-name match."
                 )
             ),
         ]

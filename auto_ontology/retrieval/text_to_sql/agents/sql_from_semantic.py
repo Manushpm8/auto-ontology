@@ -248,7 +248,8 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             # Build the available-tables schema section.
             tables_section = (
-                "AVAILABLE TABLES (schema context):\n"
+                "AVAILABLE TABLES (schema context; column constraints and usage "
+                "evidence are authoritative):\n"
                 + format_tables_for_prompt(
                     relevant_tables,
                     target_db=target_db,

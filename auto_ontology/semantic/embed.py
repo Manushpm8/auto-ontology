@@ -281,6 +281,10 @@ def _build_rows(
             "database_name": database_name,
             "source_path": path,
         }
+        if a.get("constraints"):
+            fields["constraints"] = a["constraints"]
+        if a.get("usage_evidence"):
+            fields["usage_evidence"] = a["usage_evidence"]
         if a.get("schema_name"):
             fields["schema_name"] = a["schema_name"]
         if a.get("datatype"):

@@ -14,6 +14,27 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
     IntentValidationModel,
     SQLValidationAgent,
 )
+from auto_ontology.retrieval.text_to_sql.prompts import create_intent_validation_prompt
+
+
+def test_intent_validation_treats_normalized_metadata_as_authoritative() -> None:
+    prompt = create_intent_validation_prompt(
+        "question",
+        "question",
+        "question",
+        "SELECT 1",
+        used_schema_context=(
+            "schools.frpm_count (integer) | constraints: non-negative "
+            "| usage evidence: rate = frpm_count / enrollment"
+        ),
+    )
+
+    assert "USAGE-EVIDENCE COMPLIANCE" in prompt
+    assert "CONSTRAINT COMPLIANCE" in prompt
+    assert "usage evidence: rate = frpm_count / enrollment" in prompt
+    assert "usage_evidence_issues" in prompt
+    assert "constraint_issues" in prompt
+    assert "Do not hide a metadata" in prompt
 
 
 @patch(
@@ -207,6 +228,50 @@ def test_intent_validation_rejects_and_reports_evidence_violation(
     assert result["decision"] == "invalid_sql"
     assert "Critical evidence issues" in result["path_state"]["error"]
     assert "net_amount * exchange_rate" in result["path_state"]["error"]
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output",
+    return_value=IntentValidationModel(
+        is_valid=True,
+        usage_evidence_issues=[
+            "Uses low_grade/high_grade instead of the connected GSserved column."
+        ],
+        constraint_issues=[
+            "Compares a four-digit string code to the unpadded value 12."
+        ],
+    ),
+)
+def test_intent_validation_enforces_metadata_issue_lists(
+    _mock_invoke: MagicMock,
+) -> None:
+    state = {
+        "llm": MagicMock(),
+        "initial_question": "Find schools serving the requested grade span",
+        "connectors": [],
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code="SELECT name FROM schools WHERE low_grade <= 12"
+            )
+        },
+    }
+
+    result = SQLValidationAgent()._validate_intent(
+        state,
+        {
+            **state["path_state"],
+            "sql_code": state["path_state"]["sql_generation_result"].sql_code,
+        },
+        ["main.schools"],
+        ["main.schools.low_grade"],
+    )
+
+    assert result["decision"] == "invalid_sql"
+    error = result["path_state"]["error"]
+    assert "Critical usage-evidence issues" in error
+    assert "connected GSserved column" in error
+    assert "Critical constraint issues" in error
+    assert "four-digit string code" in error
 
 
 @patch(

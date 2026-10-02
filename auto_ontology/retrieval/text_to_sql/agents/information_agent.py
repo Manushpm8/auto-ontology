@@ -109,6 +109,8 @@ def _candidate_view(candidate: Any) -> dict[str, Any]:
         "source_column",
         "term_name",
         "source",
+        "constraints",
+        "usage_evidence",
     )
     result: dict[str, Any] = {}
     for key in keys:
@@ -133,13 +135,24 @@ def _initial_context(state: AgentState) -> dict[str, Any]:
             if (view := _candidate_view(item))
         ]
 
+    column_candidates = [
+        *candidates("retrieved_column_attributes"),
+        *candidates("retrieved_evidence_column_attributes"),
+    ]
+    column_candidates = list(
+        {
+            str(candidate.get("id") or candidate.get("name") or index): candidate
+            for index, candidate in enumerate(column_candidates)
+        }.values()
+    )[:MAX_CANDIDATES_PER_KIND]
+
     return {
         "question": get_question_for_processing(state),
         "entities": path_state.get("entities") or [],
         "subject": path_state.get("subject"),
         "dataset": path_state.get("target_db"),
         "extracted_evidence": path_state.get("extracted_evidence") or "",
-        "column_attribute_candidates": candidates("retrieved_column_attributes"),
+        "column_attribute_candidates": column_candidates,
         "sql_attribute_candidates": candidates("retrieved_sql_attributes"),
         "custom_analysis_candidates": candidates("retrieved_custom_analyses"),
         "subject_candidate": _candidate_view(path_state.get("retrieved_subject_term")),

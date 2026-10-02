@@ -175,6 +175,10 @@ def format_semantic_context(
         f"  Table: {anchor_full}",
         f"  Column: {anchor_col}  ({anchor_name}){anchor_datatype_tag}",
     ]
+    if primary_attribute.get("constraints"):
+        lines.append(f"  Constraints: {primary_attribute['constraints']}")
+    if primary_attribute.get("usage_evidence"):
+        lines.append(f"  Usage evidence: {primary_attribute['usage_evidence']}")
 
     if attribute_join_paths:
         lines.append("")
@@ -200,6 +204,10 @@ def format_semantic_context(
                 database = entry.get("database_name") or target_db or ""
                 full_table = qualify_table(database, schema, table, dialect)
                 lines.append(f"  {attr_name}: {full_table}.{col_name}{datatype_tag}")
+                if entry.get("constraints"):
+                    lines.append(f"    Constraints: {entry['constraints']}")
+                if entry.get("usage_evidence"):
+                    lines.append(f"    Usage evidence: {entry['usage_evidence']}")
             else:
                 lines.append("  (structural bridge — connects tables kept above)")
             path = entry.get("path") or []
@@ -331,6 +339,7 @@ def format_used_schema_for_prompt(
         table_lines.append(line)
 
     column_lines: list[str] = []
+    used_column_tails = {tail(name, 2) for name in used_columns}
     for used_name in used_columns:
         used_schema, used_table, used_column = tail(used_name, 3)
         table = matching_table(f"{used_schema}.{used_table}")
@@ -366,9 +375,45 @@ def format_used_schema_for_prompt(
         )
         column_lines.append(rendered)
 
-    return (
+    unused_usage_lines: list[str] = []
+    for table in tables:
+        full_table = qualify_table(
+            table.get("database_name") or target_db or "",
+            table.get("schema_name") or "",
+            table.get("name") or "",
+            dialect,
+        )
+        table_name = str(table.get("name") or "").casefold()
+        columns = table.get("columns")
+        if not isinstance(columns, list):
+            continue
+        for column in columns:
+            if not isinstance(column, dict):
+                continue
+            column_name = str(column.get("name") or "")
+            usage_evidence = str(column.get("usage_evidence") or "").strip()
+            if (
+                not column_name
+                or not usage_evidence
+                or (table_name, column_name.casefold()) in used_column_tails
+            ):
+                continue
+            line = f"- {full_table}.{column_name} | usage evidence: {usage_evidence}"
+            constraints = str(column.get("constraints") or "").strip()
+            if constraints:
+                line += f" | constraints: {constraints}"
+            unused_usage_lines.append(line)
+
+    rendered = (
         "TABLES USED IN SQL:\n"
         + ("\n".join(table_lines) or "- None resolved")
         + "\n\nCOLUMNS USED IN SQL:\n"
         + ("\n".join(column_lines) or "- None resolved")
     )
+    if unused_usage_lines:
+        rendered += (
+            "\n\nOTHER AVAILABLE COLUMNS WITH USAGE EVIDENCE "
+            "(use when the requested concept matches):\n"
+            + "\n".join(unused_usage_lines)
+        )
+    return rendered

@@ -35,8 +35,17 @@ def test_column_attribute_embedding_includes_usage_evidence() -> None:
                 "name": "frpmCount",
                 "term_name": "School",
                 "description": "Free or reduced-price meal count.",
+                "constraints": "Must be non-negative.",
                 "usage_evidence": "eligible FRPM rate = FRPM / Enrollment",
             }
         ],
     )
     assert "Usage evidence: eligible FRPM rate = FRPM / Enrollment." in rows[0]["text"]
+    metadata = rows[0]["metadata"]
+    assert metadata["constraints"] == "Must be non-negative."
+    assert metadata["usage_evidence"] == "eligible FRPM rate = FRPM / Enrollment"
+    assert metadata["content_metadata"]["constraints"] == "Must be non-negative."
+    assert (
+        metadata["content_metadata"]["usage_evidence"]
+        == "eligible FRPM rate = FRPM / Enrollment"
+    )

@@ -11,8 +11,26 @@ import pytest
 from auto_ontology.retrieval.text_to_sql.agents import sql_reconstruction
 from auto_ontology.retrieval.text_to_sql.agents.sql_reconstruction import (
     SQLReconstructionAgent,
+    _format_known_columns,
 )
 from auto_ontology.retrieval.text_to_sql.state import AgentState
+
+
+def test_known_columns_include_constraints_and_usage_evidence() -> None:
+    rendered = _format_known_columns(
+        {
+            "attr_name": "FRPM Count",
+            "table_name": "schools",
+            "col_name": "frpm_count",
+            "datatype": "integer",
+            "constraints": "Must be non-negative.",
+            "usage_evidence": "eligible rate = frpm_count / enrollment",
+        },
+        [],
+    )
+
+    assert "constraints: Must be non-negative." in rendered
+    assert "usage evidence: eligible rate = frpm_count / enrollment" in rendered
 
 
 def test_table_discovery_uses_target_database(

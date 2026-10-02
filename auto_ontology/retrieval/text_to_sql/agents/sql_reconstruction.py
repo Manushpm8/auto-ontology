@@ -91,7 +91,17 @@ def _collect_known_columns(
                 # this field was added — older rows just omit the tag.
                 datatype = entry.get("datatype")
                 tag = f" ({datatype})" if datatype else ""
-                column_lines.append(f"  {label}: {table_name}.{col_name}{tag}")
+                metadata = []
+                constraints = str(entry.get("constraints") or "").strip()
+                if constraints:
+                    metadata.append(f"constraints: {constraints}")
+                usage_evidence = str(entry.get("usage_evidence") or "").strip()
+                if usage_evidence:
+                    metadata.append(f"usage evidence: {usage_evidence}")
+                metadata_suffix = f" | {' | '.join(metadata)}" if metadata else ""
+                column_lines.append(
+                    f"  {label}: {table_name}.{col_name}{tag}{metadata_suffix}"
+                )
 
         # Multi-hop entries also carry the exact join key on each side of
         # every hop (e.g. treatmentbasics.encref = encounters.enckey) — this
@@ -644,6 +654,11 @@ class SQLReconstructionAgent(BaseAgent):
             "restate the assumptions that remain valid and clearly state any "
             "assumption that had to change because it conflicted with the "
             "user's question, the available schema, or the validation error.\n"
+            "When usage evidence directly defines a requested concept, mapping, "
+            "category, or formula, keep its connected physical column even when "
+            "another column has higher confidence. Ignore unrelated usage notes "
+            "and do not add extra columns or slots solely because a note mentions "
+            "them.\n"
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"

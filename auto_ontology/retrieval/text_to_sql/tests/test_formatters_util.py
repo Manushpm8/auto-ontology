@@ -92,6 +92,12 @@ def test_used_schema_context_keeps_details_only_for_referenced_columns() -> None
                         "sample_values": ["12.50"],
                     },
                     {"name": "unused", "data_type": "text"},
+                    {
+                        "name": "eligible_total",
+                        "data_type": "numeric",
+                        "constraints": "Must be non-negative.",
+                        "usage_evidence": "Use for the eligible-order total.",
+                    },
                 ],
             }
         ],
@@ -106,6 +112,12 @@ def test_used_schema_context_keeps_details_only_for_referenced_columns() -> None
     assert "public.orders.total (numeric) - Order total." in rendered
     assert "sample values: 12.50" in rendered
     assert "unused" not in rendered
+    assert "OTHER AVAILABLE COLUMNS WITH USAGE EVIDENCE" in rendered
+    assert (
+        "public.orders.eligible_total | usage evidence: "
+        "Use for the eligible-order total." in rendered
+    )
+    assert "constraints: Must be non-negative." in rendered
 
 
 def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:
@@ -274,6 +286,8 @@ def test_semantic_context_keeps_catalog_on_spark() -> None:
         "table_name": "clusters",
         "col_name": "cluster_id",
         "attr_name": "ClusterId",
+        "constraints": "Must be a known cluster identifier.",
+        "usage_evidence": "Use to scope events to a cluster.",
     }
     join_paths = [
         {
@@ -282,6 +296,8 @@ def test_semantic_context_keeps_catalog_on_spark() -> None:
             "database_name": "lakehouse",
             "schema_name": "lakehouse",
             "table_name": "events",
+            "constraints": "Must not be blank.",
+            "usage_evidence": "Use for event-name filters.",
             "path": [
                 {
                     "source_database": "lakehouse",
@@ -309,6 +325,10 @@ def test_semantic_context_keeps_catalog_on_spark() -> None:
     )
     assert "they are not a plan" in rendered
     assert "Never add a path merely because it is listed" in rendered
+    assert "Constraints: Must be a known cluster identifier." in rendered
+    assert "Usage evidence: Use to scope events to a cluster." in rendered
+    assert "Constraints: Must not be blank." in rendered
+    assert "Usage evidence: Use for event-name filters." in rendered
 
 
 def test_semantic_context_falls_back_to_target_db_for_bridge_hops() -> None:

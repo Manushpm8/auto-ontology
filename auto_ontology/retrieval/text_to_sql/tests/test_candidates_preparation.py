@@ -10,6 +10,7 @@ from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
 )
 from auto_ontology.retrieval.text_to_sql.models import (
+    AnchorColumnModel,
     TableRelevanceModel,
     TableRemovalModel,
 )
@@ -167,6 +168,72 @@ def test_column_metadata_backfill_requires_samples_and_nullability() -> None:
     )
 
 
+def test_relevance_filter_column_includes_normalized_metadata() -> None:
+    rendered = candidates_preparation._format_relevance_filter_column(
+        {
+            "name": "frpm_count",
+            "data_type": "integer",
+            "description": "Eligible meal-program students.",
+            "constraints": "Must be non-negative.",
+            "usage_evidence": "eligible rate = frpm_count / enrollment",
+        }
+    )
+
+    assert "constraints: Must be non-negative." in rendered
+    assert "usage evidence: eligible rate = frpm_count / enrollment" in rendered
+
+
+def test_anchor_selection_uses_request_and_attribute_evidence(monkeypatch) -> None:
+    captured_messages = []
+
+    class FakeLlm:
+        def bind(self, **_kwargs):
+            return self
+
+    def fake_invoke(_llm, messages, _model):
+        captured_messages.extend(messages)
+        return AnchorColumnModel(anchor_id="frpm", reasoning="Formula matches evidence")
+
+    monkeypatch.setattr(
+        candidates_preparation, "invoke_with_structured_output", fake_invoke
+    )
+    state = cast(
+        AgentState,
+        {
+            "llm": FakeLlm(),
+            "evidence": "eligible FRPM rate = FRPM / Enrollment",
+        },
+    )
+    contexts = {
+        "generic": {
+            "attr_name": "Enrollment",
+            "table_name": "schools",
+            "col_name": "enrollment",
+            "attr_description": "Student enrollment.",
+            "constraints": "",
+            "usage_evidence": "",
+        },
+        "frpm": {
+            "attr_name": "FRPM Count (K-12)",
+            "table_name": "frpm",
+            "col_name": "frpm_count_k12",
+            "attr_description": "Eligible meal-program students.",
+            "constraints": "Non-negative.",
+            "usage_evidence": "eligible FRPM rate = FRPM / Enrollment",
+        },
+    }
+
+    anchor_id, _ = CandidatePreparationAgent()._identify_anchor(
+        state, "Which school has the highest eligible rate?", contexts
+    )
+
+    prompt = captured_messages[-1].content
+    assert anchor_id == "frpm"
+    assert "Authoritative evidence:" in prompt
+    assert "constraints: Non-negative." in prompt
+    assert "usage evidence: eligible FRPM rate = FRPM / Enrollment" in prompt
+
+
 def test_retrieve_additional_tables_searches_question_and_entities(
     monkeypatch,
 ) -> None:
@@ -237,6 +304,8 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
                 "table_name": "sales",
                 "schema_name": "main",
                 "database_name": "db",
+                "constraints": "Must be non-negative.",
+                "usage_evidence": "Use as gross revenue.",
             },
             "a2": {
                 "attr_name": "Long-tail metric",
@@ -307,6 +376,12 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
     names = [t.get("name") for t in result["path_state"]["relevant_tables"]]
     assert "extra" in names
     assert all("t2" not in ids for ids in fetched_table_ids)
+    assert result["path_state"]["primary_attribute"]["constraints"] == (
+        "Must be non-negative."
+    )
+    assert result["path_state"]["primary_attribute"]["usage_evidence"] == (
+        "Use as gross revenue."
+    )
 
 
 def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> None:

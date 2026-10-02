@@ -71,6 +71,46 @@ def _answer_action() -> InformationAgentAction:
     )
 
 
+def test_initial_context_includes_metadata_and_evidence_candidates() -> None:
+    state = _state()
+    state["path_state"]["retrieved_column_attributes"][0].update(
+        {
+            "constraints": "Must be non-negative.",
+            "usage_evidence": "revenue = gross sales - refunds",
+        }
+    )
+    state["path_state"]["retrieved_evidence_column_attributes"] = [
+        {
+            "id": "attr-2",
+            "name": "Gross Sales",
+            "constraints": "Use the stored currency.",
+            "usage_evidence": "Used in the revenue formula.",
+        }
+    ]
+
+    candidates = information_agent._initial_context(state)[
+        "column_attribute_candidates"
+    ]
+
+    assert candidates == [
+        {
+            "id": "attr-1",
+            "name": "Revenue",
+            "table_id": "table-1",
+            "table_name": "orders",
+            "source_column": "revenue",
+            "constraints": "Must be non-negative.",
+            "usage_evidence": "revenue = gross sales - refunds",
+        },
+        {
+            "id": "attr-2",
+            "name": "Gross Sales",
+            "constraints": "Use the stored currency.",
+            "usage_evidence": "Used in the revenue formula.",
+        },
+    ]
+
+
 def test_agent_uses_multiple_tools_and_emits_terminal_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -41,19 +41,20 @@ def _state(
     entities: list[str],
     *,
     target_db: str | None = None,
+    evidence: str | None = None,
 ) -> AgentState:
     path_state: dict[str, Any] = {"entities": entities}
     if target_db is not None:
         path_state["target_db"] = target_db
-    return cast(
-        AgentState,
-        {
-            "initial_question": "question",
-            "llm": object(),
-            "path_state": path_state,
-            "semantic_retriever": object(),
-        },
-    )
+    state: dict[str, Any] = {
+        "initial_question": "question",
+        "llm": object(),
+        "path_state": path_state,
+        "semantic_retriever": object(),
+    }
+    if evidence is not None:
+        state["evidence"] = evidence
+    return cast(AgentState, state)
 
 
 def test_selects_database_by_entity_coverage_before_total_hits() -> None:
@@ -335,6 +336,64 @@ def test_explicit_target_db_preserves_existing_search_behavior(
     assert {match["score"] for match in matches} == {
         rank / 100 for rank in range(1, 11)
     }
+
+
+def test_evidence_search_promotes_matching_column_without_extra_llm_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_search(
+        _retriever: object,
+        query: str,
+        label: str,
+        _k: int,
+        database_name: str | None = None,
+    ) -> list[dict]:
+        calls.append((query, label))
+        if label == LABEL_COLUMN_ATTRIBUTE:
+            if query == "eligible FRPM rate = FRPM / Enrollment":
+                return [
+                    _hit("frpm-count", "db-a", 0.05),
+                    _hit("enrollment", "db-a", 0.06),
+                    _hit("unrelated", "db-a", 0.07),
+                ]
+            return [_hit("name-match", "db-a", 0.1)]
+        return []
+
+    llm_filter_calls: list[tuple[list[dict], list[dict]]] = []
+    monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
+    monkeypatch.setattr(
+        candidates_retrieval, "custom_analysis_exists", lambda *_: False
+    )
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "_llm_filter_both",
+        lambda _llm, _question, custom, sql: (
+            llm_filter_calls.append((custom, sql)) or (custom, sql)
+        ),
+    )
+
+    result = CandidateRetrievalAgent().execute(
+        _state(
+            ["eligible rate"],
+            target_db="db-a",
+            evidence="eligible FRPM rate = FRPM / Enrollment",
+        )
+    )
+
+    assert (
+        "eligible FRPM rate = FRPM / Enrollment",
+        LABEL_COLUMN_ATTRIBUTE,
+    ) in calls
+    assert {
+        hit["id"] for hit in result["path_state"]["retrieved_column_attributes"]
+    } == {"name-match"}
+    assert {
+        hit["id"]
+        for hit in result["path_state"]["retrieved_evidence_column_attributes"]
+    } == {"frpm-count", "enrollment"}
+    assert len(llm_filter_calls) == 1
 
 
 def test_database_selection_uses_only_top_two_column_hits_per_entity(

@@ -123,9 +123,31 @@ class IntentValidationModel(BaseModel):
             "or formula. Leave EMPTY [] when all evidence instructions are followed."
         ),
     )
+    usage_evidence_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List every way the SQL violates usage evidence attached to a referenced "
+            "column, including selecting a substitute physical column or failing to "
+            "apply an explicitly defined mapping, category, relationship, or formula. "
+            "Leave EMPTY [] when all applicable usage evidence is followed."
+        ),
+    )
+    constraint_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List every direct violation of constraints attached to a referenced "
+            "column, including invalid representation, padding, format, range, or "
+            "allowed-value handling. Leave EMPTY [] when all constraints are followed."
+        ),
+    )
 
     @field_validator(
-        "join_issues", "aggregation_issues", "evidence_issues", mode="before"
+        "join_issues",
+        "aggregation_issues",
+        "evidence_issues",
+        "usage_evidence_issues",
+        "constraint_issues",
+        mode="before",
     )
     @classmethod
     def _empty_string_means_no_issues(cls, value: Any) -> Any:
@@ -970,6 +992,12 @@ class SQLValidationAgent(BaseAgent):
             target_db=path_state.get("target_db"),
             dialect=dialect,
         )
+        if used_schema_context:
+            used_schema_context = (
+                "Column constraints and usage evidence below are authoritative "
+                "for referenced columns and directly matching alternatives.\n"
+                + used_schema_context
+            )
 
         join_paths = ""
         if not _JOINS_VALIDATED_ELSEWHERE:
@@ -1030,7 +1058,10 @@ class SQLValidationAgent(BaseAgent):
             )
 
         if validation_result is None or (
-            validation_result.is_valid and not validation_result.evidence_issues
+            validation_result.is_valid
+            and not validation_result.evidence_issues
+            and not validation_result.usage_evidence_issues
+            and not validation_result.constraint_issues
         ):
             self.logger.info(
                 "SQL passed static and intent validation, columns: %s",
@@ -1042,6 +1073,8 @@ class SQLValidationAgent(BaseAgent):
             validation_result.join_issues
             or validation_result.aggregation_issues
             or validation_result.evidence_issues
+            or validation_result.usage_evidence_issues
+            or validation_result.constraint_issues
         )
         if not has_real_issues:
             self.logger.info(
@@ -1054,6 +1087,11 @@ class SQLValidationAgent(BaseAgent):
             ("Critical join issues", validation_result.join_issues),
             ("Critical aggregation issues", validation_result.aggregation_issues),
             ("Critical evidence issues", validation_result.evidence_issues),
+            (
+                "Critical usage-evidence issues",
+                validation_result.usage_evidence_issues,
+            ),
+            ("Critical constraint issues", validation_result.constraint_issues),
         )
         for title, issues in issue_sections:
             if issues:

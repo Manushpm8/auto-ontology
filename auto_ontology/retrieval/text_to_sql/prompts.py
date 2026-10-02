@@ -72,9 +72,15 @@ create_sql_user_prompt = (
     "filter, or output, but use a different available column when it fits more clearly.\n"
     "- A semantic match does not itself make a column an output. Project it only "
     "when it represents an output the user requested.\n"
-    "- Treat a matched column's constraints, format, and sample values as "
-    "requirements when using it. Treat its usage evidence as authoritative "
-    "column-level guidance for calculations, filters, and selection.\n\n"
+    "- Treat a column's constraints, format, and sample values as requirements "
+    "when using it.\n"
+    "- When a candidate column's usage evidence directly defines a concept, category, "
+    "mapping, or formula requested by the question or authoritative evidence, use "
+    "that connected physical column (and any columns named by its formula); this "
+    "direct definition overrides a higher-confidence but less precise semantic match.\n"
+    "- Usage evidence is guidance for its connected column, not an independent reason "
+    "to select or project that column. Ignore unrelated notes, and do not broaden the "
+    "requested scope merely because a note mentions additional columns or slots.\n\n"
     "{tables}\n\n"
     "## Example SQL Queries\n"
     "{queries}\n\n"
@@ -891,7 +897,7 @@ def create_intent_validation_prompt(
             "one of those verified paths."
         )
     evidence_criterion = (
-        "\n3. Does the SQL follow EVERY instruction in the Authoritative Evidence "
+        "\n5. Does the SQL follow EVERY instruction in the Authoritative Evidence "
         "exactly? Evidence compliance is strict, not lenient. Flag any missing or "
         "substituted evidence-defined value, column/table mapping, filter, operator, "
         "or formula as a critical evidence issue."
@@ -913,12 +919,29 @@ Generated SQL Query:
 {sql_code}
 ```
 
-Check for CRITICAL issues ONLY (be lenient):
+Check for CRITICAL issues. Be lenient only for joins and aggregations; apply column
+metadata strictly when it is relevant to the requested operation:
 {join_criterion}
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
+3. USAGE-EVIDENCE COMPLIANCE — inspect the usage evidence of every referenced column
+   and every listed alternative column. When it defines a concept, mapping, category,
+   relationship, or formula requested by the question/evidence, the SQL MUST use that
+   evidence's connected physical column and MUST implement the definition exactly.
+   A semantically similar or higher-confidence substitute is invalid. Put EVERY
+   violation in usage_evidence_issues. Ignore a usage note only when it is genuinely
+   unrelated to the requested operation; never add extra output columns or slots merely
+   because a note mentions them.
+4. CONSTRAINT COMPLIANCE — inspect every explicit constraint of every referenced column.
+   The SQL MUST preserve required representation, padding, type, format, range, and
+   allowed-value semantics in projections, predicates, joins, grouping, ordering, and
+   calculations. Put EVERY direct violation in constraint_issues. Do not invent a
+   requirement that the constraint does not state.
 {evidence_criterion}
 
-Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
+Set is_valid=false whenever ANY issue list is non-empty. Do not hide a metadata
+violation only in reasoning: return it in its dedicated issue list.
+Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work
+and every applicable metadata instruction is followed, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \
 definitions — do not flag the generated query as invalid merely for following those \
 patterns.{authoritative_note}
@@ -1027,6 +1050,11 @@ Rules:
   you deem relevant.
 - If a selected custom analysis references a table in its SQL, do NOT
   remove that table.
+- Keep a table when a candidate column's usage evidence directly defines a
+  concept, mapping, category, or formula requested by the question. Usage
+  evidence is not an independent relevance signal: ignore unrelated notes, and
+  do not keep a table solely because a note mentions an extra column or slot
+  outside the requested scope.
 - When in doubt, do NOT remove — it is safer to include an extra table
   than to remove a necessary one.
 

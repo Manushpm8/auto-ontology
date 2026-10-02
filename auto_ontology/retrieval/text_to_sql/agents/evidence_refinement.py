@@ -53,7 +53,11 @@ You refine evidence before SQL generation by correcting only mistakes that are
 certain from the user's question, verified database value anchors, or supplied
 column sample values. Prefer an exact value anchor for the named table and column;
 only fall back to that column's sample values when no matching anchor proves the
-stored representation.
+stored representation. When column usage evidence directly defines a concept,
+mapping, category, or formula named by the request evidence, preserve that
+definition and its connected physical column. Ignore unrelated usage notes and
+never expand the requested scope merely because a note mentions extra columns or
+slots. Never propose a repair that violates an explicit column constraint.
 
 Return complete corrected lines, not substring patches. For every repair:
 - copy original_line exactly from the numbered evidence, without its ``N| `` prefix;
@@ -362,7 +366,8 @@ class EvidenceRefinementAgent(BaseAgent):
             f"Sanitized question:\n{question}\n\n"
             f"Evidence (line numbers are metadata only):\n{numbered_evidence}\n\n"
             f"{values_context}"
-            f"Relevant tables, columns, and fallback sample values:\n{tables_block}"
+            "Relevant tables and columns, including constraints, usage evidence, "
+            f"and fallback sample values:\n{tables_block}"
         )
 
         result = safe_invoke_structured_nr(
