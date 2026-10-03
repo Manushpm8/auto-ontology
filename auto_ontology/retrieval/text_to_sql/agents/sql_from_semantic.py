@@ -142,7 +142,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             - decision: "constructable" or "unconstructable"
         """
         path_state = state.get("path_state", {})
-        llm = state["llm"]
+        llm = state.get("reasoning_llm") or state["llm"]
         connectors = state.get("connectors") or []
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)

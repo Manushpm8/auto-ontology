@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+from auto_ontology.retrieval.text_to_sql.agents import sql_from_semantic
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
+    SQLFromCandidatesAgent,
     format_calculation_sql_template,
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
@@ -18,6 +20,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     create_sql_user_prompt,
     format_projection_rules,
 )
+from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
 
 
 def test_prompt_renders_date_format_when_present() -> None:
@@ -92,6 +95,42 @@ def test_calculation_sql_template_is_structural_guidance() -> None:
     assert "SELECT Title FROM posts" in rendered
     assert "Never copy its table names" in rendered
     assert format_calculation_sql_template({}) == ""
+
+
+def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
+    non_reasoning_llm = object()
+    reasoning_llm = object()
+    invoked_with: list[object] = []
+
+    def fake_invoke(llm, _messages, _schema):
+        invoked_with.append(llm)
+        return SQLGenerationModel(
+            thought="No assumptions.",
+            sql_code="SELECT COUNT(*) FROM accounts",
+            response="Counts all accounts.",
+        )
+
+    monkeypatch.setattr(
+        sql_from_semantic, "safe_invoke_with_structured_output", fake_invoke
+    )
+
+    result = SQLFromCandidatesAgent().execute(
+        {
+            "llm": non_reasoning_llm,
+            "reasoning_llm": reasoning_llm,
+            "initial_question": "How many accounts?",
+            "messages": [],
+            "connectors": [],
+            "path_state": {
+                "primary_attribute": None,
+                "relevant_tables": [],
+                "relevant_queries": [],
+            },
+        }
+    )
+
+    assert result["decision"] == "constructable"
+    assert invoked_with == [reasoning_llm]
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:

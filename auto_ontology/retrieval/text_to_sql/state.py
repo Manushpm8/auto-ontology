@@ -67,6 +67,7 @@ class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
     llm: ChatNVIDIA
+    reasoning_llm: NotRequired[ChatNVIDIA]
     initial_question: str
     evidence: NotRequired[str]
     sql_examples: NotRequired[list[dict[str, str]]]
