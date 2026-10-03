@@ -180,15 +180,6 @@ def _unwrap_projection(e: exp.Expression) -> exp.Expression:
     return e.this if isinstance(e, exp.Alias) else e
 
 
-def contains_like_predicate(sql: str, dialect: str | None = None) -> bool:
-    """Return whether SQL contains a LIKE/ILIKE predicate."""
-    try:
-        tree = sqlglot.parse_one(sql, read=dialect)
-    except Exception:
-        return False
-    return next(tree.find_all(exp.Like, exp.ILike), None) is not None
-
-
 def _is_always_false(cond: exp.Expression | None) -> bool:
     """True for constant-false predicates like ``1=0``, ``0=1``, ``FALSE``."""
     if cond is None:
@@ -830,24 +821,6 @@ class SQLValidationAgent(BaseAgent):
             error_msg = validation_result["error"]
             self.logger.info(f"SQL validation failed: {error_msg}")
             path_state["error"] = error_msg
-            return {
-                "decision": "invalid_sql",
-                "path_state": path_state,
-            }
-
-        if state.get("shorten_answer", False) and contains_like_predicate(
-            response.sql_code, degenerate_dialect
-        ):
-            self.logger.info(
-                "LIKE/ILIKE predicate rejected for strict short-answer SQL"
-            )
-            path_state["error"] = (
-                "Strict short-answer SQL must not use LIKE, ILIKE, NOT LIKE, or "
-                "NOT ILIKE. Rewrite every pattern predicate as exact equality or "
-                "an IN predicate using the requested stored values. Preserve all "
-                "requested filters and do not broaden the result."
-            )
-            path_state["error_known_fixable"] = True
             return {
                 "decision": "invalid_sql",
                 "path_state": path_state,

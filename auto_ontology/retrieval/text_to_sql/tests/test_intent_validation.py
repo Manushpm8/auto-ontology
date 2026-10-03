@@ -13,7 +13,6 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
     INTENT_VALIDATION_SKIPPED_AFTER,
     IntentValidationModel,
     SQLValidationAgent,
-    contains_like_predicate,
 )
 
 
@@ -364,59 +363,6 @@ def test_parse_result_without_catalog_table_is_invalid(_mock_parse: MagicMock) -
 
     assert "error" in result
     assert "known to the catalog" in result["error"]
-
-
-def test_like_predicate_detection_ignores_literals() -> None:
-    assert contains_like_predicate("SELECT * FROM t WHERE name LIKE 'Acme%'")
-    assert contains_like_predicate("SELECT * FROM t WHERE name ILIKE 'Acme%'")
-    assert contains_like_predicate("SELECT * FROM t WHERE name NOT LIKE 'Acme%'")
-    assert not contains_like_predicate("SELECT 'LIKE and ILIKE are words' FROM t")
-
-
-@patch(
-    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output"
-)
-@patch(
-    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.get_schemas_by_ids",
-    return_value={},
-)
-@patch(
-    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.fetch_all_schema_ids",
-    return_value=[],
-)
-def test_short_answer_validation_rejects_like_before_intent_llm(
-    _mock_schema_ids: MagicMock,
-    _mock_schemas: MagicMock,
-    mock_invoke: MagicMock,
-) -> None:
-    agent = SQLValidationAgent()
-    agent._sql_parse_validation = MagicMock(
-        return_value={
-            "success": True,
-            "sql_tables": ["table-id"],
-            "sql_columns": ["column-id"],
-            "used_tables": ["public.accounts"],
-            "used_columns": ["public.accounts.name"],
-        }
-    )
-    state = {
-        "llm": MagicMock(),
-        "shorten_answer": True,
-        "connectors": [],
-        "path_state": {
-            "sql_generation_result": SimpleNamespace(
-                sql_code="SELECT name FROM accounts WHERE name LIKE 'Acme%'"
-            ),
-            "relevant_tables": [],
-        },
-    }
-
-    result = agent.execute(state)
-
-    assert result["decision"] == "invalid_sql"
-    assert "must not use LIKE, ILIKE" in result["path_state"]["error"]
-    assert result["path_state"]["error_known_fixable"] is True
-    mock_invoke.assert_not_called()
 
 
 @patch(
