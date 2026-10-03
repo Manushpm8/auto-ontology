@@ -64,6 +64,7 @@ logger = logging.getLogger(__name__)
 # The unified validation node always performs deterministic parsing/static
 # checks. Only its LLM intent phase is skipped after this many reconstructions.
 INTENT_VALIDATION_SKIPPED_AFTER = 5
+_FINAL_FULL_PIPELINE_ATTEMPT = 3
 
 # See the former intent_validation.py for the rationale. When a deterministic
 # live join-path check is enabled, intent validation does not need to re-judge
@@ -902,6 +903,17 @@ class SQLValidationAgent(BaseAgent):
             "custom_analyses_used": custom_analyses_used,
             "sql_code": response.sql_code,  # Store SQL code for execution
         }
+
+        full_pipeline_attempt = state.get("full_pipeline_attempt", 1)
+        if full_pipeline_attempt >= _FINAL_FULL_PIPELINE_ATTEMPT:
+            self.logger.info(
+                "Skipping LLM intent validation on final full-pipeline attempt %s",
+                full_pipeline_attempt,
+            )
+            return {
+                "decision": "valid_sql",
+                "path_state": updated_path_state,
+            }
 
         failed_attempt_count = len(updated_path_state.get("failed_attempts") or [])
         if failed_attempt_count > INTENT_VALIDATION_SKIPPED_AFTER:

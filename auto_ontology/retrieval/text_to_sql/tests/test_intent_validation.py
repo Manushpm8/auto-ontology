@@ -412,6 +412,53 @@ def test_retry_threshold_skips_only_intent_llm(
     mock_invoke.assert_not_called()
 
 
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output"
+)
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.get_schemas_by_ids",
+    return_value={},
+)
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.fetch_all_schema_ids",
+    return_value=[],
+)
+def test_final_full_pipeline_attempt_skips_only_intent_llm(
+    _mock_schema_ids: MagicMock,
+    _mock_schemas: MagicMock,
+    mock_invoke: MagicMock,
+) -> None:
+    agent = SQLValidationAgent()
+    agent._sql_parse_validation = MagicMock(
+        return_value={
+            "success": True,
+            "sql_tables": ["table-id"],
+            "sql_columns": ["column-id"],
+            "used_tables": ["public.orders"],
+            "used_columns": ["public.orders.total"],
+        }
+    )
+    state = {
+        "llm": MagicMock(),
+        "connectors": [],
+        "full_pipeline_attempt": 3,
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code="SELECT total FROM orders"
+            ),
+            "relevant_tables": [],
+        },
+    }
+
+    result = agent.execute(state)
+
+    assert result["decision"] == "valid_sql"
+    assert result["path_state"]["sql_tables"] == ["table-id"]
+    assert result["path_state"]["sql_columns"] == ["column-id"]
+    agent._sql_parse_validation.assert_called_once()
+    mock_invoke.assert_not_called()
+
+
 def test_unconstructable_decision_passes_through_unified_validation() -> None:
     state = {"decision": "unconstructable", "path_state": {"error": "gave up"}}
 
