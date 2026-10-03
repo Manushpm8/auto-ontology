@@ -106,9 +106,11 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     non_reasoning_llm = object()
     reasoning_llm = object()
     invoked_with: list[object] = []
+    invoked_messages: list = []
 
-    def fake_invoke(llm, _messages, _schema):
+    def fake_invoke(llm, messages, _schema):
         invoked_with.append(llm)
+        invoked_messages.extend(messages)
         return SQLGenerationModel(
             thought="No assumptions.",
             sql_code="SELECT COUNT(*) FROM accounts",
@@ -124,6 +126,7 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
             "llm": non_reasoning_llm,
             "reasoning_llm": reasoning_llm,
             "initial_question": "How many accounts?",
+            "evidence": "Active means accounts.status = 'active'.",
             "messages": [],
             "connectors": [],
             "path_state": {
@@ -136,6 +139,10 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
 
     assert result["decision"] == "constructable"
     assert invoked_with == [reasoning_llm]
+    evidence = "Active means accounts.status = 'active'."
+    assert sum(evidence in message.content for message in invoked_messages) == 2
+    assert evidence in invoked_messages[-1].content
+    assert "## Authoritative Evidence" in invoked_messages[-1].content
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:
