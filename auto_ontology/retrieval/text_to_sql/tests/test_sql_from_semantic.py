@@ -76,9 +76,14 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
 
 def test_projection_strictness_is_configured_per_request() -> None:
     strict_rule = "- Return exactly the requested output fields and NO others."
+    combined_aggregate_rule = (
+        "return ONE aggregate and combine the category predicates with OR"
+    )
 
     assert strict_rule not in format_projection_rules(shorten_answer=False)
     assert strict_rule in format_projection_rules(shorten_answer=True)
+    assert combined_aggregate_rule not in format_projection_rules(False)
+    assert combined_aggregate_rule in format_projection_rules(True)
 
 
 def test_calculation_sql_template_is_structural_guidance() -> None:

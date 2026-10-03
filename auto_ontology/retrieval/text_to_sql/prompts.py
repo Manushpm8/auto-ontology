@@ -34,6 +34,13 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
     return (
         _PROJECTION_RULES
         + "- Return exactly the requested output fields and NO others.\n"
+        "- When the question or evidence requests one aggregate over two "
+        "alternative categories joined by 'and' (for example, a count for X and Y), "
+        "return ONE aggregate and combine the category predicates with OR in the "
+        "filter. Do NOT project separate conditional aggregates for X and Y. Apply "
+        "this only to one aggregate over alternatives; if separate results, a "
+        "comparison, a per-category breakdown, or distinct metrics are explicitly "
+        "requested, preserve those separate outputs.\n"
     )
 
 
@@ -858,6 +865,7 @@ def create_intent_validation_prompt(
     joins_validated_elsewhere: bool = False,
     has_evidence: bool = False,
     used_schema_context: str = "",
+    shorten_answer: bool = False,
 ) -> str:
     question_block = format_dual_question_block(
         original_question, sanitized_question, processing_question
@@ -900,6 +908,18 @@ def create_intent_validation_prompt(
         if has_evidence
         else ""
     )
+    projection_criterion = (
+        "\n4. STRICT PROJECTION CHECK (this overrides all leniency instructions): "
+        "Compare the outermost SELECT output with the exact output fields requested "
+        "by the question and Authoritative Evidence. The SQL must return every "
+        "requested field, exactly once, in the requested shape, and NO additional "
+        "fields. Aggregates and transformed values count as output fields. Never "
+        "accept extra context as helpful, and never remove a requested field. Record "
+        "every extra, missing, duplicated, reordered, or reshaped field in "
+        "projection_issues and mark the SQL invalid."
+        if shorten_answer
+        else ""
+    )
     parsed_usage_block = (
         "\nUSED SQL OBJECTS "
         "(catalog metadata only for tables and columns referenced by the query):\n"
@@ -919,6 +939,7 @@ Check for CRITICAL issues ONLY (be lenient):
 {join_criterion}
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 {evidence_criterion}
+{projection_criterion}
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \

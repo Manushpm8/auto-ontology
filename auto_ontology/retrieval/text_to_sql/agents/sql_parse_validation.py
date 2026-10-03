@@ -115,6 +115,15 @@ class IntentValidationModel(BaseModel):
             "issues — do NOT add explanatory text like 'no aggregation issues'."
         ),
     )
+    projection_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "When strict short-answer validation is requested, list every extra, "
+            "missing, duplicated, reordered, or reshaped output field compared with "
+            "the exact projection requested by the question and evidence. Leave "
+            "EMPTY [] only when the projection matches exactly."
+        ),
+    )
     evidence_issues: list[str] = Field(
         default_factory=list,
         description=(
@@ -125,7 +134,11 @@ class IntentValidationModel(BaseModel):
     )
 
     @field_validator(
-        "join_issues", "aggregation_issues", "evidence_issues", mode="before"
+        "join_issues",
+        "aggregation_issues",
+        "projection_issues",
+        "evidence_issues",
+        mode="before",
     )
     @classmethod
     def _empty_string_means_no_issues(cls, value: Any) -> Any:
@@ -998,12 +1011,21 @@ class SQLValidationAgent(BaseAgent):
             joins_validated_elsewhere=_JOINS_VALIDATED_ELSEWHERE,
             has_evidence=bool(evidence),
             used_schema_context=used_schema_context,
+            shorten_answer=state.get("shorten_answer", False),
         )
         system_prompt = (
             INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE
             if _JOINS_VALIDATED_ELSEWHERE
             else INTENT_VALIDATION_SYSTEM_PROMPT
         )
+        if state.get("shorten_answer", False):
+            system_prompt += (
+                "\n\nSTRICT SHORT-ANSWER OVERRIDE: Projection matching is not "
+                "lenient. The outermost SELECT must return exactly every output "
+                "field requested by the question and evidence, with no extra fields "
+                "and no missing fields. Any mismatch is a critical "
+                "projection_issues failure."
+            )
         messages = [SystemMessage(content=system_prompt)]
         if evidence:
             messages.append(
@@ -1030,7 +1052,9 @@ class SQLValidationAgent(BaseAgent):
             )
 
         if validation_result is None or (
-            validation_result.is_valid and not validation_result.evidence_issues
+            validation_result.is_valid
+            and not validation_result.evidence_issues
+            and not validation_result.projection_issues
         ):
             self.logger.info(
                 "SQL passed static and intent validation, columns: %s",
@@ -1041,6 +1065,7 @@ class SQLValidationAgent(BaseAgent):
         has_real_issues = (
             validation_result.join_issues
             or validation_result.aggregation_issues
+            or validation_result.projection_issues
             or validation_result.evidence_issues
         )
         if not has_real_issues:
@@ -1053,6 +1078,7 @@ class SQLValidationAgent(BaseAgent):
         issue_sections = (
             ("Critical join issues", validation_result.join_issues),
             ("Critical aggregation issues", validation_result.aggregation_issues),
+            ("Critical projection issues", validation_result.projection_issues),
             ("Critical evidence issues", validation_result.evidence_issues),
         )
         for title, issues in issue_sections:
