@@ -92,6 +92,13 @@ def test_build_state_keeps_evidence_separate_from_every_question_value(
     assert state["initial_question"] == "How many accounts?"
     assert state["path_state"]["processing_question"] == "How many active accounts?"
     assert state["messages"][1].content == "How many active accounts?"
+    assert state["full_pipeline_attempt"] == 1
+    assert state["restore_from"]["initial_question"] == "How many accounts?"
+    assert state["restore_from"]["evidence"] == "active refers to accounts.status_code"
+    assert [message.content for message in state["restore_from"]["messages"]] == [
+        state["messages"][0].content,
+        "How many active accounts?",
+    ]
 
 
 @pytest.mark.parametrize(

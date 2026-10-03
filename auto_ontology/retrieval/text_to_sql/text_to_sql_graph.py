@@ -117,6 +117,14 @@ def route_sql_validation(state: AgentState) -> str:
     return "valid_sql"
 
 
+def route_sql_execution(state: AgentState) -> str:
+    """Route successful short answers around the empty-LIKE repair node."""
+    route = route_sql_validation(state)
+    if route == "valid_sql" and state.get("shorten_answer", False):
+        return "valid_sql_without_like_check"
+    return route
+
+
 def _make_soft_check_router(check_name: str):
     """Build a router for a post-construction "soft" check (jsonb/join/value
     prechecks, empty-LIKE check, value-repair check).
@@ -528,9 +536,10 @@ def create_graph():
     # SQL execution → route (use route_sql_validation to enforce attempt limits)
     graph.add_conditional_edges(
         "execute_sql_query",
-        route_sql_validation,
+        route_sql_execution,
         {
             "valid_sql": "check_empty_like_result",
+            "valid_sql_without_like_check": "check_value_repair",
             "invalid_sql": "reconstruct_sql",
             "unconstructable": "unconstructable_sql_response",
         },
@@ -572,4 +581,5 @@ __all__ = [
     "create_graph",
     "get_question_for_processing",
     "route_after_candidate_retrieval",
+    "route_sql_execution",
 ]

@@ -41,6 +41,15 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
         "this only to one aggregate over alternatives; if separate results, a "
         "comparison, a per-category breakdown, or distinct metrics are explicitly "
         "requested, preserve those separate outputs.\n"
+        "- When the question asks whether a proposition or condition is true and "
+        "neither the question nor evidence specifies another output representation, "
+        "return the status as uppercase text using CASE WHEN <condition> THEN 'YES' "
+        "ELSE 'NO' END. Never return lowercase yes/no, a boolean, a count, or matching "
+        "rows as the default substitute. If the question or evidence instead requires "
+        "a source field, label, code, category, or exact output values, project that "
+        "specified representation and do NOT convert it to YES/NO. For one proposition, "
+        "project only the required status representation; for a per-row status, retain "
+        "only identifiers or labels explicitly requested alongside it.\n"
     )
 
 
