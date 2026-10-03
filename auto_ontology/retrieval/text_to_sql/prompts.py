@@ -47,6 +47,8 @@ main_system_prompt_template = (
 create_sql_user_prompt = (
     "## Task\n"
     "Construct a SQL query that answers the user's question.\n"
+    "When Authoritative Evidence is provided, fulfill every rule in it. Never "
+    "ignore, omit, weaken, or substitute any evidence rule.\n"
     "Dialect: {dialect}.\n\n"
     "## Question\n"
     "{main_question}\n"
@@ -82,13 +84,10 @@ create_sql_user_prompt = (
     "- ORDER BY must only reference aggregated aliases or columns "
     "present in SELECT/GROUP BY.\n\n"
     "**Joins**\n"
-    "- Treat the listed join paths as a menu of valid options, not as instructions "
-    "to use every path. Join a table only when it contributes a value used by the "
-    "question in SELECT, WHERE, GROUP BY, HAVING, or ORDER BY, or when it is a "
-    "necessary intermediate table connecting another required table. If removing "
-    "a join would not change the answer, omit it. Never join a table solely because "
-    "its path is listed. Choose the join type (INNER / LEFT / RIGHT) from the "
-    "question's intent and avoid fan-out from many-to-many joins.\n\n"
+    "- When evidence rules map to columns in different tables, include the joins "
+    "that connect those tables using the listed paths. Choose the join type "
+    "(INNER / LEFT / RIGHT) from the question's intent and avoid fan-out from "
+    "many-to-many joins.\n\n"
     "{join_paths}\n\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
@@ -107,10 +106,13 @@ create_sql_user_prompt = (
     "{dialect_rules}"
     "{projection_rules}"
     "**Style**\n"
-    "- For counts, preserve the grain of the entity being counted: use "
-    "COUNT(DISTINCT entity_identifier) when joins can produce multiple rows per "
-    "entity, and use COUNT(*) only when each row represents exactly one requested "
-    "entity.\n"
+    "- Preserve the natural row grain. Use SELECT DISTINCT only when the question "
+    "explicitly asks for distinct, different, or unique results; do not add it as "
+    "a precaution or to hide duplication caused by an incorrect join. For counts, "
+    "use COUNT(DISTINCT entity_identifier) when the question asks for unique "
+    "entities or a necessary one-to-many join would otherwise count the same "
+    "requested entity more than once. Use COUNT(*) when each input row represents "
+    "exactly one requested entity.\n"
     "- Time windows: apply a date/year filter ONLY when the question's data "
     "request names a period; 'last week/month/year' then means the most "
     "recent completed calendar period, not a rolling window.\n"
@@ -350,10 +352,8 @@ ORDER BY total_sales DESC;"""
   or CASE logic within the SQL.
 - SEMANTIC HINT (if present) shows a likely starting table and suggested join
   paths derived from the semantic model. Treat it as a strong hint: prefer it
-  when it fits, but if AVAILABLE TABLES provide a simpler or more direct answer,
-  use them instead. Never force the semantic hint if it doesn't match the question.
-- SUGGESTED JOIN PATHS show column-level join conditions. Use only the hops you
-  actually need:
+  when it fits. Never force the semantic hint if it doesn't match the question.
+- SUGGESTED JOIN PATHS show verified column-level join conditions:
 {join_template}
   Follow hops in order when the path spans more than one table.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
@@ -362,9 +362,6 @@ ORDER BY total_sales DESC;"""
 - SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.
   If one matches the question's intent, incorporate its expression or SQL pattern
   into your query. Treat them like reusable building blocks for calculations.
-- Prefer the fewest joins that still correctly answer the question. If all
-  required fields exist in a single table, use only that table. If a shorter
-  join path covers the question equally well, choose it over a longer chain.
 - When creating a JOIN, both sides of the ON condition must use columns with
   the same data type. Never join a text column to a numeric column or a date
   column to an integer column, or uuid column to a string column.
@@ -400,15 +397,31 @@ total sales.
 """
 
 
-def format_authoritative_evidence(evidence: str) -> str:
+def format_authoritative_evidence(
+    evidence: str, *, evidence_first_sql: bool = False
+) -> str:
     """Wrap evidence verbatim with strict instructions for SQL use and validation."""
     if not evidence:
         return ""
 
+    construction_order = (
+        "- Start SQL construction from the evidence, before adding anything else "
+        "from the question. Decompose it into individual rules. For every rule, "
+        "map each business entity or concept it names to the physical table and "
+        "column whose name and description in the Available Schema best match that "
+        "meaning. Build the evidence-required projections, formulas, filters, and "
+        "joins as the query's backbone; only then add the remaining requirements "
+        "from the question. Do not skip an evidence rule or map by name alone when "
+        "a column description resolves the meaning. Never invent a mapping that "
+        "the supplied schema does not support; state that limitation in thought.\n"
+        if evidence_first_sql
+        else ""
+    )
     return (
         "## Authoritative Evidence\n"
         "This evidence is critical. The generated SQL MUST follow every instruction "
         "in it exactly, even when another approach appears equivalent.\n"
+        f"{construction_order}"
         "- Whenever the evidence explains a value or where that value is stored, "
         "include the value in the SQL using the stated column, table, filter, and "
         "operator. Do not substitute another value or location.\n"

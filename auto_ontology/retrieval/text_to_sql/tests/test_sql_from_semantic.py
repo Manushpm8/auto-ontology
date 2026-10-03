@@ -14,6 +14,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_projection_rules,
 )
@@ -55,14 +56,19 @@ def test_prompt_omits_format_when_absent() -> None:
     assert "format:" not in rendered
 
 
-def test_prompt_forbids_unused_joins() -> None:
-    assert "menu of valid options" in create_sql_user_prompt
-    assert "If removing a join would not change the answer, omit it" in (
+def test_prompt_does_not_prefer_fewer_joins() -> None:
+    system_prompt = create_sql_from_candidates_prompt()
+
+    assert "fewest joins" not in system_prompt
+    assert "shorter join path" not in system_prompt
+    assert "Use only the hops" not in system_prompt
+    assert "If removing a join would not change the answer, omit it" not in (
         create_sql_user_prompt
     )
-    assert "Never join a table solely because its path is listed" in (
+    assert "Never join a table solely because its path is listed" not in (
         create_sql_user_prompt
     )
+    assert "include the joins that connect those tables" in create_sql_user_prompt
 
 
 def test_projection_strictness_is_configured_per_request() -> None:

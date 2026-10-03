@@ -316,7 +316,11 @@ class SQLFromCandidatesAgent(BaseAgent):
             messages = state["messages"] + [SystemMessage(content=system_prompt)]
             if evidence:
                 messages.append(
-                    SystemMessage(content=format_authoritative_evidence(evidence))
+                    SystemMessage(
+                        content=format_authoritative_evidence(
+                            evidence, evidence_first_sql=True
+                        )
+                    )
                 )
             if calculation_template_section:
                 messages.append(SystemMessage(content=calculation_template_section))
