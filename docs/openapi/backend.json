@@ -8428,7 +8428,7 @@
     },
     "/api/tags/{tag_id}": {
       "delete": {
-        "description": "Delete one tag by id.\n\n404 rather than 204 for an id that is not there: the settings page deletes\nfrom a list it has already read, so a missing tag means its list is stale,\nand answering \"done\" would leave the row on screen with nothing to explain\nit.",
+        "description": "Delete one tag by id.\n\n404 rather than 204 for an id that is not there: the settings page deletes\nfrom a list it has already read, so a missing tag means its list is stale,\nand answering \"done\" would leave the row on screen with nothing to explain\nit.\n\n403 for the system-managed ``PII`` tag: no caller may delete it.",
         "operationId": "delete_tag_api_tags__tag_id__delete",
         "parameters": [
           {
@@ -8510,7 +8510,7 @@
         ]
       },
       "patch": {
-        "description": "Rename a tag.\n\nAnswers with the whole tag rather than an echo of the name, because the\nrename has also advanced ``modified`` and recorded a ``modified_by`` \u2014 so\nthe settings page redraws the row it just edited from this one response\ninstead of re-reading the list to find out what they became.\n\nThe editor is read from the gateway's identity header, for the reason\n``create_tag`` reads the author from it.\n\n404 for an unknown id and 409 for a name another tag holds, as create and\ndelete answer: the page renames from a list it has already read, so either\nmeans that list is stale.\n\nA rename to the tag's own name is not a 409 \u2014 see ``update_tag`` in the DAL\n\u2014 and neither is one that only changes case, which is the ordinary way to\nfix a tag that was created shouting.",
+        "description": "Rename a tag.\n\nAnswers with the whole tag rather than an echo of the name, because the\nrename has also advanced ``modified`` and recorded a ``modified_by`` \u2014 so\nthe settings page redraws the row it just edited from this one response\ninstead of re-reading the list to find out what they became.\n\nThe editor is read from the gateway's identity header, for the reason\n``create_tag`` reads the author from it.\n\n404 for an unknown id and 409 for a name another tag holds, as create and\ndelete answer: the page renames from a list it has already read, so either\nmeans that list is stale.\n\nA rename to the tag's own name is not a 409 \u2014 see ``update_tag`` in the DAL\n\u2014 and neither is one that only changes case, which is the ordinary way to\nfix a tag that was created shouting.\n\n403 for the system-managed ``PII`` tag, which PII detection finds by name.",
         "operationId": "update_tag_api_tags__tag_id__patch",
         "parameters": [
           {

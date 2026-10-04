@@ -75,6 +75,17 @@ from auto_ontology.dal.session import store, write_transaction
 #: The rule ``uq_tag_name_lower`` indexes, as a comparison the DAL can run.
 _FOLDED_NAME = func.lower(func.trim(s.tag.c.name))
 
+#: The tag automatic PII detection attaches. Ingestion finds it by name, so it
+#: may be neither deleted nor renamed: either would silently fork PII labels
+#: across two tags. Mirrored by ``PII_TAG_NAME`` in ``frontend/constants/tags.ts``.
+PII_TAG_NAME = "PII"
+
+
+def is_protected_tag(tag: dict[str, Any]) -> bool:
+    """Whether *tag* is system-managed and must keep its name and existence."""
+    return str(tag["name"]).strip().lower() == PII_TAG_NAME.lower()
+
+
 #: Every column the API returns for a tag, in one place so the list and the
 #: create path cannot drift into returning different shapes.
 _COLUMNS = (

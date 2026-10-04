@@ -145,6 +145,19 @@ def _validated_name(raw: str) -> str:
     return name
 
 
+def _modifiable_tag(tag_id: str, action: str) -> None:
+    """404 for an unknown tag, 403 for a system-managed one."""
+    tag = dal.get_tag(tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
+    if dal.is_protected_tag(tag):
+        raise HTTPException(
+            status_code=403,
+            detail=f"The {tag['name']} tag is managed by the system and cannot "
+            f"be {action}",
+        )
+
+
 @router.post("/tags", status_code=201, response_model=TagResponse)
 def create_tag(request: Request, body: TagCreate) -> dict:
     """Create a tag.
@@ -187,7 +200,10 @@ def update_tag(request: Request, tag_id: str, body: TagUpdate) -> dict:
     A rename to the tag's own name is not a 409 — see ``update_tag`` in the DAL
     — and neither is one that only changes case, which is the ordinary way to
     fix a tag that was created shouting.
+
+    403 for the system-managed ``PII`` tag, which PII detection finds by name.
     """
+    _modifiable_tag(tag_id, "renamed")
     try:
         row = dal.update_tag(
             tag_id=tag_id,
@@ -209,7 +225,10 @@ def delete_tag(tag_id: str) -> dict:
     from a list it has already read, so a missing tag means its list is stale,
     and answering "done" would leave the row on screen with nothing to explain
     it.
+
+    403 for the system-managed ``PII`` tag: no caller may delete it.
     """
+    _modifiable_tag(tag_id, "deleted")
     if not dal.delete_tag(tag_id):
         raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
     return {"data": {"id": tag_id}}

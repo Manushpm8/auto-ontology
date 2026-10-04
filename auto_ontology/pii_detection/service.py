@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 
 from auto_ontology.dal.tags import (
+    PII_TAG_NAME,
     TARGET_COLUMN,
     attach_tag,
     fetch_tags_map,
@@ -24,7 +25,6 @@ from auto_ontology.pii_detection.models import ColumnInput, PiiStatus
 
 logger = logging.getLogger(__name__)
 
-PII_TAG_NAME = "PII"
 AUTO_TAG_THRESHOLD = 0.9
 
 
