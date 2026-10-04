@@ -199,9 +199,9 @@ wheels = [
 ]
 
 [[package]]
-name = "apache-ossie-nvidia-gsf"
+name = "apache-ossie-nvidia-auto-ontology"
 version = "0.1.0.dev0"
-source = { git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia#b5da5d66f0da4a0cd3388d52201dbf5523221a77" }
+source = { git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia&rev=eefebcaa140f4d865b38ddef6f585bba8e6efbaa#eefebcaa140f4d865b38ddef6f585bba8e6efbaa" }
 dependencies = [
     { name = "pyyaml" },
     { name = "sqlglot" },
@@ -268,7 +268,7 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
-    { name = "apache-ossie-nvidia-gsf" },
+    { name = "apache-ossie-nvidia-auto-ontology" },
     { name = "databricks-sql-connector" },
     { name = "duckdb" },
     { name = "fastapi" },
@@ -280,7 +280,6 @@ dependencies = [
     { name = "langgraph" },
     { name = "mysql-connector-python" },
     { name = "nemo-retriever" },
-    { name = "nvidia-sdfm", extra = ["kumorfm"] },
     { name = "pandas" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
@@ -299,6 +298,11 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+kumo = [
+    { name = "nvidia-sdfm", extra = ["kumorfm"] },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -308,7 +312,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.19.1" },
-    { name = "apache-ossie-nvidia-gsf", git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia" },
+    { name = "apache-ossie-nvidia-auto-ontology", git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia&rev=eefebcaa140f4d865b38ddef6f585bba8e6efbaa" },
     { name = "databricks-sql-connector", specifier = ">=4.4.0" },
     { name = "duckdb", specifier = ">=1.5.5" },
     { name = "fastapi", specifier = ">=0.141.1" },
@@ -320,7 +324,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "mysql-connector-python", specifier = ">=26.7.0" },
     { name = "nemo-retriever", specifier = ">=26.8.1" },
-    { name = "nvidia-sdfm", extras = ["kumorfm"], specifier = ">=0.2.1" },
+    { name = "nvidia-sdfm", extras = ["kumorfm"], marker = "extra == 'kumo'", specifier = ">=0.2.1" },
     { name = "pandas", specifier = ">=2.3.3,<3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
     { name = "psycopg-pool", specifier = ">=3.3.1" },
@@ -338,6 +342,7 @@ requires-dist = [
     { name = "trino", specifier = ">=0.339.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
 ]
+provides-extras = ["kumo"]
 
 [package.metadata.requires-dev]
 dev = [

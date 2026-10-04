@@ -30,13 +30,12 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "snowflake-connector-python>=4.7.2",
     "uvicorn[standard]>=0.52.4",
-    "nvidia-sdfm[kumorfm]>=0.2.1",
     "databricks-sql-connector>=4.4.0",
     "mysql-connector-python>=26.7.0",
     "pyyaml>=6.0.3",
     "sqlalchemy>=2.0.52",
     "alembic>=1.19.1",
-    "apache-ossie-nvidia-gsf",
+    "apache-ossie-nvidia-auto-ontology @ git+https://github.com/apache/ossie.git@eefebcaa140f4d865b38ddef6f585bba8e6efbaa#subdirectory=converters/nvidia",
     "langchain-postgres>=0.0.17",
     "pyhive[hive-pure-sasl]>=0.7.0",
     "thrift>=0.24.0",
@@ -46,12 +45,18 @@ dependencies = [
     "trino>=0.339.0",
 ]
 
+[project.optional-dependencies]
+kumo = ["nvidia-sdfm[kumorfm]>=0.2.1"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["auto_ontology"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.uv]
 package = true
@@ -72,13 +77,6 @@ override-dependencies = [
 name = "vendored-sdfm"
 url = "vendor/wheels"
 format = "flat"
-
-[tool.uv.sources]
-# Upstream moved this from `converters/gsf` to `converters/nvidia` and renamed
-# the distribution and its import package (`ossie_gsf` -> `ossie_nvidia_gsf`).
-# The three names Auto Ontology imports are unchanged.
-apache-ossie-nvidia-gsf = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/nvidia" }
-# apache-ossie-nvidia-gsf = { path = "../ossie/converters/nvidia", editable = true }
 
 [dependency-groups]
 dev = [

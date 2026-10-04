@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from ossie_nvidia_gsf import GSFConversionError, convert_gsf_to_ossie
+from ossie_nvidia_auto_ontology import AutoOntologyConversionError, convert_auto_ontology_to_ossie
 
 from auto_ontology.dal.model_interchange import (
     assemble_export_document,
@@ -418,7 +418,7 @@ def test_export_model_ossie_format_emits_ossie_document(
     payload = yaml.safe_load(yaml_text)
 
     assert "data_layer" not in payload
-    model = payload["semantic_model"][0]
+    model = payload
     assert [dataset["name"] for dataset in model["datasets"]] == ["Order"]
     assert model["datasets"][0]["source"] == "retail.main.orders"
 
@@ -468,7 +468,7 @@ def test_export_model_ossie_reports_all_duplicate_custom_analysis_names(
     mock_fetch.return_value = rows
 
     with pytest.raises(
-        GSFConversionError,
+        AutoOntologyConversionError,
         match=r"duplicate names.*'name25' \(2\), 'name3' \(2\)",
     ):
         service.export_model(ExportRequest(databases=[], format=ModelFormat.OSSIE))
@@ -550,7 +550,7 @@ def test_export_model_ossie_keeps_one_table_per_term(
         service.export_model(ExportRequest(databases=[], format=ModelFormat.OSSIE)),
     )
 
-    datasets = payload["semantic_model"][0]["datasets"]
+    datasets = payload["datasets"]
     assert [dataset["name"] for dataset in datasets] == ["Category"]
     assert datasets[0]["source"] == "retail.main.categories"
     assert [field["name"] for field in datasets[0]["fields"]] == [
@@ -581,6 +581,7 @@ def test_export_model_auto_ontology_keeps_every_represented_table(
 
 def test_detect_model_format_tells_the_vocabularies_apart() -> None:
     assert service.detect_model_format({"data_layer": {}}) is ModelFormat.AUTO_ONTOLOGY
+    assert service.detect_model_format({"datasets": []}) is ModelFormat.OSSIE
     assert service.detect_model_format({"semantic_model": []}) is ModelFormat.OSSIE
 
 
@@ -598,7 +599,7 @@ def test_import_model_converts_ossie_document_back_to_auto_ontology(
     auto_ontology_yaml = yaml.safe_dump(
         document.model_dump(mode="python"), sort_keys=False
     )
-    ossie_yaml = convert_gsf_to_ossie(auto_ontology_yaml)
+    ossie_yaml = convert_auto_ontology_to_ossie(auto_ontology_yaml)
 
     summary = service.import_model(ossie_yaml, replace=True, embed=False)
 
