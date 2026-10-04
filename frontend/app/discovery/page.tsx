@@ -13,12 +13,21 @@ import { DiscoveryView } from '@/components/discoveryPage';
  * it is only ever an opening value, and a hook would have the view re-read it
  * on every navigation and need a Suspense boundary to do so. Repeating the
  * parameter yields an array, which is nobody's search and is dropped.
+ *
+ * `?n=` is a one-off token the dialog adds to each hand-over. It is not part of
+ * any search: it exists so that handing over the term already on screen is a
+ * different URL, and therefore a navigation the view can tell apart.
  */
 export default async function DiscoveryPage({
 	searchParams,
 }: {
-	searchParams: Promise<{ q?: string | string[] }>;
+	searchParams: Promise<{ q?: string | string[]; n?: string | string[] }>;
 }) {
-	const { q } = await searchParams;
-	return <DiscoveryView initialQuery={typeof q === 'string' ? q : ''} />;
+	const { q, n } = await searchParams;
+	return (
+		<DiscoveryView
+			initialQuery={typeof q === 'string' ? q : ''}
+			handoverId={typeof n === 'string' ? n : ''}
+		/>
+	);
 }

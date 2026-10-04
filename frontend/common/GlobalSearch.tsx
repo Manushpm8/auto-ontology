@@ -228,10 +228,15 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 		setAttempt((value) => value + 1);
 	};
 
+	// Results are not cleared when the field drops below the minimum length.
+	// Nothing needs hiding: `queryActive` already keeps them off screen. And
+	// clearing them is what stranded the dialog on its skeleton — deleting the
+	// term and typing it again inside the debounce leaves the debounced value
+	// unchanged, so no request is sent, while the cleared key still reads as
+	// "not answered" for ever.
 	const handleQueryChange = (value: string) => {
 		setQuery(value);
 		setSelectedTab(GLOBAL_SEARCH_ALL_TAB);
-		if (value.trim().length < GLOBAL_SEARCH_MIN_QUERY_LENGTH) resetResults();
 	};
 
 	const handleClose = () => {
@@ -257,13 +262,19 @@ export const GlobalSearchModal = ({ open, onClose }: GlobalSearchModalProps) => 
 	 * A term too short to search is dropped instead of sent, since Discovery
 	 * would refuse to run it and the field would then hold something the
 	 * results do not answer.
+	 *
+	 * Every press carries a fresh `n`. Without it, pressing this for the term
+	 * Discovery is already showing yields the very same URL, so the page sees
+	 * no navigation at all and keeps the filters and results of whatever
+	 * search was narrowed in the meantime. `n` is never read as a search — it
+	 * only makes each hand-over a different URL.
 	 */
 	const handleAdvancedSearch = () => {
 		const term = query.trim();
 		handleClose();
 		router.push(
 			term.length >= GLOBAL_SEARCH_MIN_QUERY_LENGTH
-				? `/discovery?q=${encodeURIComponent(term)}`
+				? `/discovery?q=${encodeURIComponent(term)}&n=${Date.now()}`
 				: '/discovery',
 		);
 	};

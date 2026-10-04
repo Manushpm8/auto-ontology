@@ -154,6 +154,12 @@ export type DiscoveryViewProps = {
 	 * showing results for when Advanced Search was pressed.
 	 */
 	initialQuery?: string;
+	/**
+	 * A token that differs on every hand-over, from `?n=`. It lets the view take
+	 * over a search whose term is the one already on screen, which `initialQuery`
+	 * alone cannot tell apart from no navigation at all.
+	 */
+	handoverId?: string;
 };
 
 /**
@@ -170,7 +176,7 @@ export type DiscoveryViewProps = {
  * from the dialog. It is applied in the initial state rather than by an effect,
  * so there is no first paint with the term in the field and nothing beneath it.
  */
-export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
+export const DiscoveryView = ({ initialQuery = '', handoverId = '' }: DiscoveryViewProps) => {
 	const [query, setQuery] = useState(initialQuery);
 	const [filters, setFilters] = useState<DiscoveryFilters>(DEFAULT_DISCOVERY_FILTERS);
 	const [applied, setApplied] = useState<DiscoverySearch | null>(() =>
@@ -297,10 +303,16 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 	 * The filters go back to their defaults with it. They belong to the search
 	 * that was on screen, not to the one arriving, and leaving them on would
 	 * narrow somebody else's search without saying so.
+	 *
+	 * A hand-over is the term *and* its token. The term alone misses the one
+	 * that matters most: Advanced Search for the term already on screen, after
+	 * its filters were narrowed, changes nothing but the token — and must still
+	 * start over.
 	 */
-	const [handedOverQuery, setHandedOverQuery] = useState(initialQuery);
-	if (initialQuery !== handedOverQuery) {
-		setHandedOverQuery(initialQuery);
+	const handover = `${initialQuery}\u0000${handoverId}`;
+	const [handedOver, setHandedOver] = useState(handover);
+	if (handover !== handedOver) {
+		setHandedOver(handover);
 		setQuery(initialQuery);
 		setFilters(DEFAULT_DISCOVERY_FILTERS);
 		clearResults();
@@ -352,7 +364,11 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 	// see `RuleTagPopover`, which shows the two apart when they differ.
 	const matchedCount = tabTotal > 0 ? tabTotal : items.length;
 	const taggableCount = items.filter(isTaggableSearchHit).length;
+	// Not while loading: after a tab change `items` is still the previous tab's
+	// until the answer lands, while `tabTotal` already reads the new one, and
+	// the two together would describe a list that is not on screen.
 	const showLimitBanner =
+		!loading &&
 		items.length > 0 &&
 		(items.length >= GLOBAL_SEARCH_LIST_LIMIT || tabTotal > GLOBAL_SEARCH_LIST_LIMIT);
 
@@ -412,11 +428,20 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 								</Button>
 							)}
 							{/* A rule tags whatever the current search matched, so it can
-							    only be offered once the search has matched something. */}
-							{items.length > 0 &&
+							    only be offered once the search has matched something — and
+							    once the list in hand is the answer to the tab selected: during
+							    a tab change `items` is still the previous tab's, so the counts
+							    shown would belong to one list and the rule to another. */}
+							{!loading &&
+								items.length > 0 &&
 								(untaggedSearch ? (
 									<p className="shrink-0 text-xs text-secondary dark:text-zinc-400">
 										A search for untagged objects cannot be saved as a rule
+									</p>
+								) : taggableCount === 0 ? (
+									<p className="shrink-0 text-xs text-secondary dark:text-zinc-400">
+										These results cannot carry tags, so a rule cannot be saved
+										from them
 									</p>
 								) : (
 									<RuleTagPopover
