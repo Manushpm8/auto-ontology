@@ -6,18 +6,42 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Database, Schema, Table } from '@/types/datasources';
+import { DataModels, TableType } from '@/enums/datasources';
+import { Icon } from '@/common/icons';
+import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { Text } from '@/common/Text';
 
 const treeRowClassName =
 	'flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm text-heading hover:bg-zinc-100/90 dark:text-zinc-200 dark:hover:bg-zinc-800/70';
 
-export type ZonesDataTreeProps = {
+export type DataTreeSelectProps = {
 	databases: Database[];
 	selectedItems: Set<string>;
 	onSelectedItemsChange: (next: Set<string>) => void;
 	onLoadSchemas: (dbId: string) => Promise<Schema[]>;
 	onLoadTables: (schemaId: string) => Promise<void>;
 	expandSelectedOnlyKey?: number;
+	/**
+	 * Whether a schema opens onto its tables.
+	 *
+	 * Off for a caller that selects places rather than things — the Discovery
+	 * data filter picks where a search may look, and a table is what it
+	 * returns, so offering tables there would be asking somebody to find what
+	 * they are searching for.
+	 *
+	 * It stops the rows being drawn *and* the tables being loaded, so with it
+	 * off `onLoadTables` is never called: a schema with no tables in hand has
+	 * no table ids among its descendants, which is what keeps a selection
+	 * made here to databases and schemas alone.
+	 */
+	showTables?: boolean;
+	/**
+	 * Whether the tree draws its own bordered box.
+	 *
+	 * Off inside something that already is one — a popover panel — where a
+	 * second border reads as a frame around a frame.
+	 */
+	framed?: boolean;
 };
 
 type SelectionState = {
@@ -25,14 +49,16 @@ type SelectionState = {
 	indeterminate: boolean;
 };
 
-export const ZonesDataTree = ({
+export const DataTreeSelect = ({
 	databases,
 	selectedItems,
 	onSelectedItemsChange,
 	onLoadSchemas,
 	onLoadTables,
 	expandSelectedOnlyKey,
-}: ZonesDataTreeProps) => {
+	showTables = true,
+	framed = true,
+}: DataTreeSelectProps) => {
 	const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
 	const [loadingIds, setLoadingIds] = useState<Record<string, boolean>>({});
 	const lastAppliedExpandKeyRef = useRef<number | undefined>(undefined);
@@ -42,7 +68,7 @@ export const ZonesDataTree = ({
 	};
 
 	const getSchemaDescendantIds = (schema: Schema): string[] =>
-		schema.tables.map((table) => table.id);
+		showTables ? schema.tables.map((table) => table.id) : [];
 
 	const getDatabaseDescendantIds = (db: Database): string[] =>
 		db.schemas.flatMap((schema) => [schema.id, ...getSchemaDescendantIds(schema)]);
@@ -106,7 +132,7 @@ export const ZonesDataTree = ({
 			nextPreviousChildren[db.id] = dbChildrenSet;
 
 			db.schemas.forEach((schema) => {
-				const schemaChildren = schema.tables.map((table) => table.id);
+				const schemaChildren = showTables ? schema.tables.map((table) => table.id) : [];
 				const schemaChildrenSet = new Set(schemaChildren);
 				const previousSchemaChildren =
 					previousChildrenRef.current[schema.id] ?? new Set<string>();
@@ -127,7 +153,7 @@ export const ZonesDataTree = ({
 		if (hasChanges) {
 			onSelectedItemsChange(next);
 		}
-	}, [databases, selectedItems, onSelectedItemsChange]);
+	}, [databases, selectedItems, onSelectedItemsChange, showTables]);
 
 	useEffect(() => {
 		if (expandSelectedOnlyKey == null) return;
@@ -172,6 +198,7 @@ export const ZonesDataTree = ({
 	};
 
 	const toggleSchema = async (schema: Schema) => {
+		if (!showTables) return;
 		const isOpen = openIds[schema.id] === true;
 		const nextOpen = !isOpen;
 		setOpenIds((prev) => ({ ...prev, [schema.id]: nextOpen }));
@@ -239,16 +266,28 @@ export const ZonesDataTree = ({
 		}
 	};
 
-	const row = (
-		depth: number,
-		id: string,
-		label: string,
-		hasChildren: boolean,
-		isOpen: boolean,
-		selectionState: SelectionState,
-		onSelectionChange: () => void,
-		onToggle: () => void | Promise<void>,
-	) => (
+	const row = ({
+		depth,
+		id,
+		label,
+		node,
+		hasChildren,
+		isOpen,
+		selectionState,
+		onSelectionChange,
+		onToggle,
+	}: {
+		depth: number;
+		id: string;
+		label: string;
+		/** Which kind of catalog node the row stands for, for its icon. */
+		node: DataModels | TableType;
+		hasChildren: boolean;
+		isOpen: boolean;
+		selectionState: SelectionState;
+		onSelectionChange: () => void;
+		onToggle: () => void | Promise<void>;
+	}) => (
 		<div key={id} className={treeRowClassName} style={{ paddingLeft: 8 + depth * 14 }}>
 			<button
 				type="button"
@@ -271,6 +310,12 @@ export const ZonesDataTree = ({
 				onChange={onSelectionChange}
 				className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#76b900] focus:ring-[#76b900]/40 dark:border-zinc-600"
 			/>
+			<span className="inline-flex shrink-0" title={catalogNodeInfo[node].title} aria-hidden>
+				<Icon
+					name={catalogNodeInfo[node].icon}
+					className="h-4 w-4 text-zinc-500 dark:text-zinc-400"
+				/>
+			</span>
 			<Text text={label} />
 		</div>
 	);
@@ -279,25 +324,36 @@ export const ZonesDataTree = ({
 		const tableSelectionState = getSelectionState(table.id, []);
 		return (
 			<div key={table.id}>
-				{row(
+				{row({
 					depth,
-					table.id,
-					table.name,
-					false,
-					false,
-					tableSelectionState,
-					() => toggleSelection(table.id, [], tableSelectionState),
-					() => toggleTable(table),
-				)}
+					id: table.id,
+					label: table.name,
+					node: table.table_type,
+					hasChildren: false,
+					isOpen: false,
+					selectionState: tableSelectionState,
+					onSelectionChange: () => toggleSelection(table.id, [], tableSelectionState),
+					onToggle: () => toggleTable(table),
+				})}
 			</div>
 		);
 	};
 
 	return (
-		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-2 dark:border-zinc-700/90 dark:bg-zinc-950/40">
+		<div
+			className={
+				framed
+					? 'rounded-lg border border-zinc-200/90 bg-white/90 p-2 dark:border-zinc-700/90 dark:bg-zinc-950/40'
+					: ''
+			}
+		>
 			<div className="max-h-[min(50vh,420px)] overflow-y-auto">
 				{databases.map((db) => {
-					const isCompactDb = db.num_of_schemas === 1;
+					// Folding a lone schema into its database's row saves a
+					// step on the way to the tables. With tables hidden there
+					// is no way down to save, and the fold would hide the one
+					// schema the caller came to tick.
+					const isCompactDb = showTables && db.num_of_schemas === 1;
 					const dbOpen = openIds[db.id] === true;
 					const dbDescendantIds = getDatabaseDescendantIds(db);
 					const dbSelectionDescendantIds = isCompactDb
@@ -306,17 +362,24 @@ export const ZonesDataTree = ({
 					const dbSelectionState = getSelectionState(db.id, dbSelectionDescendantIds);
 					return (
 						<div key={db.id}>
-							{row(
-								0,
-								db.id,
-								isCompactDb ? getCompactDatabaseLabel(db) : db.name,
-								isCompactDb ? hasCompactDatabaseChildren(db) : true,
-								dbOpen,
-								dbSelectionState,
-								() => toggleSelection(db.id, dbDescendantIds, dbSelectionState),
-								() =>
+							{row({
+								depth: 0,
+								id: db.id,
+								label: isCompactDb ? getCompactDatabaseLabel(db) : db.name,
+								// A folded row names a path but is still the
+								// database's row, and the database is the part
+								// of that path the icon can speak for.
+								node: DataModels.DB,
+								hasChildren: isCompactDb
+									? hasCompactDatabaseChildren(db)
+									: db.num_of_schemas > 0,
+								isOpen: dbOpen,
+								selectionState: dbSelectionState,
+								onSelectionChange: () =>
+									toggleSelection(db.id, dbDescendantIds, dbSelectionState),
+								onToggle: () =>
 									isCompactDb ? toggleCompactDatabase(db) : toggleDatabase(db),
-							)}
+							})}
 							{dbOpen
 								? isCompactDb
 									? (() => {
@@ -339,22 +402,24 @@ export const ZonesDataTree = ({
 											);
 											return (
 												<div key={schema.id}>
-													{row(
-														1,
-														schema.id,
-														schema.schema_name,
-														schema.tables_count > 0,
-														schemaOpen,
-														schemaSelectionState,
-														() =>
+													{row({
+														depth: 1,
+														id: schema.id,
+														label: schema.schema_name,
+														node: DataModels.SCHEMA,
+														hasChildren:
+															showTables && schema.tables_count > 0,
+														isOpen: schemaOpen,
+														selectionState: schemaSelectionState,
+														onSelectionChange: () =>
 															toggleSelection(
 																schema.id,
 																schemaDescendantIds,
 																schemaSelectionState,
 															),
-														() => toggleSchema(schema),
-													)}
-													{schemaOpen
+														onToggle: () => toggleSchema(schema),
+													})}
+													{showTables && schemaOpen
 														? schema.tables.map((table) =>
 																renderTableRow(table, 2),
 															)

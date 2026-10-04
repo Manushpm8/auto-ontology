@@ -137,11 +137,11 @@
     "schema_state": "() -> 'SchemaState'"
   },
   "search": {
-    "count_global_search": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None) -> 'dict[str, int]'",
-    "fetch_global_search": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None, limit: 'int' = 200, synonym_limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
+    "count_global_search": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None, tag_ids: 'list[str] | None' = None, include_untagged: 'bool' = False, data_ids: 'list[str] | None' = None) -> 'dict[str, int]'",
+    "fetch_global_search": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None, tag_ids: 'list[str] | None' = None, include_untagged: 'bool' = False, data_ids: 'list[str] | None' = None, limit: 'int' = 200, synonym_limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "filter_special_characters": "(input_string: 'str') -> 'str'",
     "is_view_table_type": "(table_type: 'str | None') -> 'bool'",
-    "matching_id_selects": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None) -> 'dict[str, Select]'",
+    "matching_id_selects": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None, tag_ids: 'list[str] | None' = None, include_untagged: 'bool' = False, data_ids: 'list[str] | None' = None) -> 'dict[str, Select]'",
     "search_object_type": "(label: 'str | None', table_type: 'str | None' = None) -> 'str | None'",
     "search_tokens": "(search_term: 'str') -> 'list[str]'",
     "synonym_matches_tokens": "(synonym: 'str', tokens: 'list[str]') -> 'bool'",
