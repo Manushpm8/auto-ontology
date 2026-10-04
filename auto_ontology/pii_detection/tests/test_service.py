@@ -115,7 +115,7 @@ def test_below_threshold_does_not_create_a_tag(
     )
 
     assert result.tagged == 0
-    assert result.processed == 1
+    assert result.processed == 0
     assert result.llm_decided == 1
 
 

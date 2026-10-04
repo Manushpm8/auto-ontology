@@ -70,6 +70,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.pii import clear_tagged_pii_sample_values
 from auto_ontology.dal.session import store, write_transaction
 
 #: The rule ``uq_tag_name_lower`` indexes, as a comparison the DAL can run.
@@ -707,6 +708,8 @@ def update_tag(
             raise
         raise ValueError(f"Tag with name {name!r} already exists") from exc
 
+    if rows and name.strip().casefold() == "pii":
+        clear_tagged_pii_sample_values()
     return rows[0] if rows else None
 
 
@@ -808,6 +811,8 @@ def attach_tag(
             raise
         return None
 
+    if kind == TARGET_COLUMN:
+        clear_tagged_pii_sample_values([item_id])
     return fetch_tags_map(kind, [item_id]).get(item_id, [])
 
 
@@ -862,6 +867,7 @@ def attach_tags_by_rule(
                 .returning(s.tag_target.c.id)
             )
         )
+    clear_tagged_pii_sample_values()
     return applied
 
 
@@ -994,6 +1000,7 @@ def apply_labels_now_matched(
                     .returning(s.tag_target.c.id)
                 )
             )
+        clear_tagged_pii_sample_values()
     return applied
 
 

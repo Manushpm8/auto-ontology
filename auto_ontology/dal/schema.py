@@ -218,6 +218,14 @@ catalog_column = Table(
     # A JSON string, read back as a string by callers. Promoting it to jsonb is
     # a deliberate follow-up with its consumers updated, not a free change.
     Column("sample_values", Text, nullable=True),
+    # Retention clock for profiled or manually supplied sample values. NULL
+    # means no samples are retained; governance cleanup clears both fields.
+    Column(
+        "sample_values_updated_at",
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    ),
     # How the values are *written*, not what they are: 'YYMMDD', 'YYYY-MM-DD'.
     # Generic storage notation despite only date inference filling it today
     # (`auto_ontology.semantic.date_format`) -- an address or id profiler would write the

@@ -102,10 +102,13 @@ def detect_and_tag_pii(
     rules_decided = sum(decision.source == "rules" for _, decision in decisions)
     llm_decided = sum(decision.source == "llm" for _, decision in decisions)
     review = sum(decision.status is PiiStatus.REVIEW for _, decision in decisions)
+    # A PII decision below the auto-tag threshold stays unprocessed: data
+    # movement treats processed-and-untagged columns as safe.
     processed_ids = [
         column_id
         for (column_id, _), (_, decision) in zip(records, decisions, strict=True)
         if decision.source != "fallback"
+        and (not decision.is_pii or decision.should_auto_tag(threshold))
     ]
     candidates = [
         column_id

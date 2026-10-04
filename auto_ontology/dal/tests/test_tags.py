@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -59,6 +59,10 @@ from sqlalchemy import Select, select  # noqa: E402
 from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.pii import (  # noqa: E402
+    is_column_safe_for_data_movement,
+    purge_expired_sample_values,
+)
 from auto_ontology.dal.rules import delete_rule, update_rule  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.dal.tags import (  # noqa: E402
@@ -941,6 +945,67 @@ def test_attaching_works_for_every_kind(tagged) -> None:
         assert attach_tag(tag_id=tagged.tag, kind=kind, item_id=item_id) is not None
 
     assert len(list_tag_targets(tagged.tag)) == 5
+
+
+def test_attaching_pii_to_column_deletes_persisted_samples(tagged) -> None:
+    pii_tag = get_or_create_tag(name="PII")
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == tagged.column)
+        .values(sample_values='["person@example.com"]')
+    )
+
+    attach_tag(tag_id=pii_tag["id"], kind=TARGET_COLUMN, item_id=tagged.column)
+
+    row = store().query_read(
+        select(s.catalog_column.c.sample_values).where(
+            s.catalog_column.c.id == tagged.column
+        )
+    )[0]
+    assert row["sample_values"] is None
+
+
+def test_data_movement_policy_fails_closed_for_unprocessed_and_pii(tagged) -> None:
+    reference = {
+        "database_name": tagged.prefix,
+        "schema_name": "shop",
+        "table_name": "orders",
+        "column_name": "total",
+    }
+    assert is_column_safe_for_data_movement(**reference) is False
+
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == tagged.column)
+        .values(pii_processed=True)
+    )
+    assert is_column_safe_for_data_movement(**reference) is True
+
+    pii_tag = get_or_create_tag(name="PII")
+    attach_tag(tag_id=pii_tag["id"], kind=TARGET_COLUMN, item_id=tagged.column)
+    assert is_column_safe_for_data_movement(**reference) is False
+
+
+def test_expired_samples_are_deleted(tagged) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == tagged.column)
+        .values(
+            sample_values='["old"]',
+            sample_values_updated_at=datetime.now(timezone.utc) - timedelta(days=31),
+        )
+    )
+
+    assert purge_expired_sample_values(retention_days=30) >= 1
+
+    row = store().query_read(
+        select(
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.sample_values_updated_at,
+        ).where(s.catalog_column.c.id == tagged.column)
+    )[0]
+    assert row["sample_values"] is None
+    assert row["sample_values_updated_at"] is None
 
 
 def test_attaching_the_same_tag_twice_is_not_an_error(tagged) -> None:

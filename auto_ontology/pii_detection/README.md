@@ -7,15 +7,26 @@ SPDX-License-Identifier: Apache-2.0
 # PII Detection
 
 Rules-first PII classification for database columns. During catalog ingestion,
-high-confidence decisions are persisted through the project's existing `PII`
-tag; detection remains independently testable from storage.
+decisions are persisted through the project's existing `PII` tag and the
+`pii_processed` marker; detection remains independently testable from storage.
 
 ## Flow
 
 1. High-confidence rules handle obvious PII and obvious non-PII.
-2. Uncertain columns are sent to an optional LLM backend.
+2. Uncertain columns are sent to an optional LLM backend and conservatively
+   treated as PII.
 3. Results include status, category, confidence, reason, and source.
-4. Only results above the chosen confidence threshold are auto-tagged.
+4. Positive results above the chosen confidence threshold are auto-tagged.
+   Positive results below it are left unprocessed, so the column stays
+   blocked and is reclassified on the next ingestion.
+5. Profiling and live probes fail closed: they can read values only from
+   classified columns that do not carry `PII`.
+6. Applying `PII` deletes persisted samples and any data or semantic embedding
+   rows that may contain them. Probe audit entries retain purpose, counts, and
+   timing, but never SQL, errors, or result values.
+7. Persisted non-PII samples carry an update timestamp. Expired values and
+   sample-bearing embeddings are deleted before semantic compilation (30 days
+   by default, configurable up to one year).
 
 ## Usage
 
@@ -41,5 +52,5 @@ from auto_ontology.pii_detection import LlmPiiClassifier, PiiDetector
 detector = PiiDetector(LlmPiiClassifier())
 ```
 
-Do not send raw sample values to an external model unless the deployment's
-privacy policy explicitly allows it. Column metadata is usually sufficient.
+Raw sample values from PII or not-yet-classified columns are never selected,
+persisted, embedded, or included in model prompts.
