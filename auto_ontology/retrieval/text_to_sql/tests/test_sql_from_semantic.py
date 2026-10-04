@@ -74,6 +74,11 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
     assert "include the joins that connect those tables" in create_sql_user_prompt
 
 
+def test_prompt_filters_nulls_from_nullable_projected_fields() -> None:
+    assert "projected field has `is_nullable: true`" in create_sql_user_prompt
+    assert "add an `IS NOT NULL` predicate for that field" in create_sql_user_prompt
+
+
 def test_projection_strictness_is_configured_per_request() -> None:
     strict_rule = "- Return exactly the requested output fields and NO others."
     combined_aggregate_rule = (

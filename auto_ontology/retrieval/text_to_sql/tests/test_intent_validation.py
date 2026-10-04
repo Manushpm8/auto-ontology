@@ -207,6 +207,9 @@ def test_intent_validation_rejects_and_reports_evidence_violation(
     assert result["decision"] == "invalid_sql"
     assert "Critical evidence issues" in result["path_state"]["error"]
     assert "net_amount * exchange_rate" in result["path_state"]["error"]
+    assert result["path_state"]["last_intent_rejected_sql"] == (
+        "SELECT SUM(converted_amount) FROM orders"
+    )
 
 
 @patch(
@@ -376,11 +379,12 @@ def test_parse_result_without_catalog_table_is_invalid(_mock_parse: MagicMock) -
     "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.fetch_all_schema_ids",
     return_value=[],
 )
-def test_retry_threshold_skips_only_intent_llm(
+def test_retry_threshold_still_runs_intent_llm(
     _mock_schema_ids: MagicMock,
     _mock_schemas: MagicMock,
     mock_invoke: MagicMock,
 ) -> None:
+    mock_invoke.return_value = None
     agent = SQLValidationAgent()
     agent._sql_parse_validation = MagicMock(
         return_value={
@@ -409,7 +413,7 @@ def test_retry_threshold_skips_only_intent_llm(
     assert result["path_state"]["sql_tables"] == ["table-id"]
     assert result["path_state"]["sql_columns"] == ["column-id"]
     agent._sql_parse_validation.assert_called_once()
-    mock_invoke.assert_not_called()
+    mock_invoke.assert_called_once()
 
 
 @patch(
@@ -423,11 +427,12 @@ def test_retry_threshold_skips_only_intent_llm(
     "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.fetch_all_schema_ids",
     return_value=[],
 )
-def test_final_full_pipeline_attempt_skips_only_intent_llm(
+def test_final_full_pipeline_attempt_still_runs_intent_llm(
     _mock_schema_ids: MagicMock,
     _mock_schemas: MagicMock,
     mock_invoke: MagicMock,
 ) -> None:
+    mock_invoke.return_value = None
     agent = SQLValidationAgent()
     agent._sql_parse_validation = MagicMock(
         return_value={
@@ -441,7 +446,7 @@ def test_final_full_pipeline_attempt_skips_only_intent_llm(
     state = {
         "llm": MagicMock(),
         "connectors": [],
-        "full_pipeline_attempt": 3,
+        "full_pipeline_attempt": 2,
         "path_state": {
             "sql_generation_result": SimpleNamespace(
                 sql_code="SELECT total FROM orders"
@@ -456,7 +461,7 @@ def test_final_full_pipeline_attempt_skips_only_intent_llm(
     assert result["path_state"]["sql_tables"] == ["table-id"]
     assert result["path_state"]["sql_columns"] == ["column-id"]
     agent._sql_parse_validation.assert_called_once()
-    mock_invoke.assert_not_called()
+    mock_invoke.assert_called_once()
 
 
 def test_unconstructable_decision_passes_through_unified_validation() -> None:

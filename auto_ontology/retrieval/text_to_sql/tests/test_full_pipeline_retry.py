@@ -37,6 +37,10 @@ def _initial_state() -> AgentState:
             "value_anchors": [{"phrase": "active"}],
             "calculation_only": False,
             "shorten_answer": False,
+            "validate_sql_values": True,
+            "sql_value_validation_cache": {
+                "queries": {"SELECT status FROM accounts": {"ok": True}}
+            },
             "messages": list(base_messages),
             "decision": "",
             "connectors": [],
@@ -59,7 +63,18 @@ def _initial_state() -> AgentState:
     )
 
 
-def _unconstructable_update() -> dict[str, Any]:
+def _unconstructable_update(fallback_sql: str = "") -> dict[str, Any]:
+    path_state: dict[str, Any] = {
+        "normalized_question": "mutated question",
+        "failed_attempts": [{"sql": "SELECT bad"}],
+        "sql_generation_result": object(),
+        "final_response": {
+            "response": "SQL cannot be constructed.",
+            "sql_code": "",
+        },
+    }
+    if fallback_sql:
+        path_state["last_intent_rejected_sql"] = fallback_sql
     return {
         "unconstructable_sql_response": {
             "evidence": "mutated evidence",
@@ -67,15 +82,7 @@ def _unconstructable_update() -> dict[str, Any]:
             "glossary": [],
             "messages": [AIMessage(content="failed")],
             "decision": "unconstructable",
-            "path_state": {
-                "normalized_question": "mutated question",
-                "failed_attempts": [{"sql": "SELECT bad"}],
-                "sql_generation_result": object(),
-                "final_response": {
-                    "response": "SQL cannot be constructed.",
-                    "sql_code": "",
-                },
-            },
+            "path_state": path_state,
         }
     }
 
@@ -115,6 +122,8 @@ class _AttemptApp:
         outcome = self.outcomes[len(self.states) - 1]
         if outcome == "success":
             update = _success_update()
+        elif outcome == "failure_with_fallback":
+            update = _unconstructable_update("SELECT fallback")
         elif outcome == "information":
             update = {
                 "information_agent": {
@@ -164,6 +173,10 @@ def test_restore_discards_failed_attempt_mutations_and_messages() -> None:
     assert restored["sql_examples"] == [{"question": "original", "sql": "SELECT 1"}]
     assert restored["glossary"] == [{"name": "ARR"}]
     assert restored["decision"] == ""
+    assert restored["validate_sql_values"] is True
+    assert restored["sql_value_validation_cache"] == {
+        "queries": {"SELECT status FROM accounts": {"ok": True}}
+    }
     assert restored["path_state"] == {
         "processing_question": "original question",
         "target_db": "test_db",
@@ -171,10 +184,10 @@ def test_restore_discards_failed_attempt_mutations_and_messages() -> None:
     }
 
 
-def test_stream_retries_twice_then_returns_success(
+def test_stream_retries_once_then_returns_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app = _AttemptApp(["failure", "failure", "success"])
+    app = _AttemptApp(["failure", "success"])
     monkeypatch.setattr(main, "_build_state", lambda _payload: _initial_state())
     monkeypatch.setattr(main, "app", app)
 
@@ -187,7 +200,7 @@ def test_stream_retries_twice_then_returns_success(
             "answer": {"response": "Success.", "sql_code": "SELECT 42"},
         }
     ]
-    assert [state["full_pipeline_attempt"] for state in app.states] == [1, 2, 3]
+    assert [state["full_pipeline_attempt"] for state in app.states] == [1, 2]
     assert app.states[1]["initial_question"] == "original question"
     assert app.states[1]["evidence"] == "original evidence"
     assert [message.content for message in app.states[1]["messages"]] == [
@@ -197,16 +210,16 @@ def test_stream_retries_twice_then_returns_success(
     assert "failed_attempts" not in app.states[1]["path_state"]
 
 
-def test_stream_stops_after_three_unconstructable_attempts(
+def test_stream_stops_after_two_unconstructable_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app = _AttemptApp(["failure", "failure", "failure"])
+    app = _AttemptApp(["failure", "failure"])
     monkeypatch.setattr(main, "_build_state", lambda _payload: _initial_state())
     monkeypatch.setattr(main, "app", app)
 
     events = list(main.stream_agent_response(_payload()))
 
-    assert len(app.states) == 3
+    assert len(app.states) == 2
     assert events[-1]["type"] == "result"
     assert events[-1]["answer"]["sql_code"] == ""
     assert events[-1]["answer"]["response"] == "SQL cannot be constructed."
@@ -230,13 +243,26 @@ def test_stream_does_not_retry_success_or_legitimate_no_sql(
 def test_response_with_state_uses_the_same_full_retry_cycle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app = _AttemptApp(["failure", "failure", "success"])
+    app = _AttemptApp(["failure", "success"])
     monkeypatch.setattr(main, "_build_state", lambda _payload: _initial_state())
     monkeypatch.setattr(main, "app", app)
 
     result = main.get_agent_response_with_state(_payload())
 
-    assert len(app.states) == 3
+    assert len(app.states) == 2
     assert result["sql_code"] == "SELECT 42"
     assert result["path_state"]["sql_code"] == "SELECT 42"
     assert result["path_state"]["caller_context"] == "keep"
+
+
+def test_final_attempt_returns_last_sql_rejected_only_by_intent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _AttemptApp(["failure", "failure_with_fallback"])
+    monkeypatch.setattr(main, "_build_state", lambda _payload: _initial_state())
+    monkeypatch.setattr(main, "app", app)
+
+    events = list(main.stream_agent_response(_payload()))
+
+    assert len(app.states) == 2
+    assert events[-1]["answer"]["sql_code"] == "SELECT fallback"

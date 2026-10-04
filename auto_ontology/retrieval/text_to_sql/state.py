@@ -46,6 +46,7 @@ class TextToSQLPayload(TypedDict):
     # classifies the calculation subtype and extracts inline evidence.
     calculation_only: NotRequired[bool]
     shorten_answer: NotRequired[bool]
+    validate_sql_values: NotRequired[bool]
     # The clarified/merged question on its own — no hint blocks or SQL
     # references mixed in (unlike `evidence`, which carries those too).
     # Omitted by callers that never enrich the question.
@@ -86,6 +87,8 @@ class AgentState(TypedDict):
     value_anchors: NotRequired[list[dict[str, str]]]
     calculation_only: bool
     shorten_answer: bool
+    validate_sql_values: bool
+    sql_value_validation_cache: dict
     enriched_question: NotRequired[str]
     messages: list[HumanMessage]
     decision: str

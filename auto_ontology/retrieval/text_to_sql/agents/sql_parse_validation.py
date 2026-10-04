@@ -62,9 +62,9 @@ from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 logger = logging.getLogger(__name__)
 
 # The unified validation node always performs deterministic parsing/static
-# checks. Only its LLM intent phase is skipped after this many reconstructions.
+# checks. Soft post-construction checks stop blocking after this many
+# reconstructions, but intent validation continues through every inner attempt.
 INTENT_VALIDATION_SKIPPED_AFTER = 5
-_FINAL_FULL_PIPELINE_ATTEMPT = 3
 
 # See the former intent_validation.py for the rationale. When a deterministic
 # live join-path check is enabled, intent validation does not need to re-judge
@@ -904,28 +904,6 @@ class SQLValidationAgent(BaseAgent):
             "sql_code": response.sql_code,  # Store SQL code for execution
         }
 
-        full_pipeline_attempt = state.get("full_pipeline_attempt", 1)
-        if full_pipeline_attempt >= _FINAL_FULL_PIPELINE_ATTEMPT:
-            self.logger.info(
-                "Skipping LLM intent validation on final full-pipeline attempt %s",
-                full_pipeline_attempt,
-            )
-            return {
-                "decision": "valid_sql",
-                "path_state": updated_path_state,
-            }
-
-        failed_attempt_count = len(updated_path_state.get("failed_attempts") or [])
-        if failed_attempt_count > INTENT_VALIDATION_SKIPPED_AFTER:
-            self.logger.info(
-                "Skipping LLM intent validation after %s reconstructions",
-                failed_attempt_count,
-            )
-            return {
-                "decision": "valid_sql",
-                "path_state": updated_path_state,
-            }
-
         return self._validate_intent(
             state,
             updated_path_state,
@@ -1100,4 +1078,5 @@ class SQLValidationAgent(BaseAgent):
                 )
 
         path_state["error"] = "".join(error_parts)
+        path_state["last_intent_rejected_sql"] = sql_code
         return {"decision": "invalid_sql", "path_state": path_state}

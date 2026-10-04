@@ -69,7 +69,7 @@ app = graph.compile()
 # before execution. See ``_sql_about_to_run``.
 _COMBINED_PRECHECK_IN_GRAPH = "precheck_combined" in graph.nodes
 _TRANSPARENT_NODES = frozenset({"_entry_router"})
-_MAX_FULL_PIPELINE_ATTEMPTS = 3
+_MAX_FULL_PIPELINE_ATTEMPTS = 2
 _UNCONSTRUCTABLE_NODE = "unconstructable_sql_response"
 
 # Keys created or consumed within one question-to-SQL attempt. A full retry
@@ -100,7 +100,6 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
         "primary_attribute",
         "attribute_join_paths",
         "table_relevance_reasoning",
-        "evidence_original",
         "evidence_repairs_applied",
         "sql_code",
         "sql_generation_result",
@@ -111,6 +110,8 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
         "error_type",
         "error_analysis_done",
         "error_known_fixable",
+        "last_intent_rejected_sql",
+        "returned_deterministic_fallback",
         "unconstructable_explanation",
         "final_response",
         "formatted_response",
@@ -223,6 +224,8 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "value_anchors": initial_value_anchors,
         "calculation_only": calculation_only,
         "shorten_answer": payload.get("shorten_answer", False),
+        "validate_sql_values": payload.get("validate_sql_values", False),
+        "sql_value_validation_cache": {},
         "enriched_question": payload.get("enriched_question") or "",
         "connectors": connectors,
         "messages": messages,
@@ -291,6 +294,45 @@ def _should_retry_full_pipeline(
     if final_state.get("full_pipeline_attempt", 1) >= _MAX_FULL_PIPELINE_ATTEMPTS:
         return False
     return not str(_extract_answer(final_state).get("sql_code") or "").strip()
+
+
+def _apply_last_deterministic_sql_fallback(
+    final_state: dict,
+    terminal_node: str | None,
+) -> bool:
+    """Return the last static-valid SQL after the final intent retry is exhausted."""
+    if (
+        terminal_node != _UNCONSTRUCTABLE_NODE
+        or final_state.get("full_pipeline_attempt", 1) < _MAX_FULL_PIPELINE_ATTEMPTS
+    ):
+        return False
+
+    path_state = final_state.get("path_state") or {}
+    fallback_sql = str(path_state.get("last_intent_rejected_sql") or "").strip()
+    if (
+        not fallback_sql
+        or str(_extract_answer(final_state).get("sql_code") or "").strip()
+    ):
+        return False
+
+    path_state["sql_code"] = fallback_sql
+    path_state["returned_deterministic_fallback"] = True
+    final_response = path_state.get("final_response")
+    if isinstance(final_response, dict):
+        final_response = dict(final_response)
+        final_response["sql_code"] = fallback_sql
+    else:
+        final_response = {
+            "response": str(final_response or "SQL intent validation was exhausted."),
+            "sql_code": fallback_sql,
+        }
+    path_state["final_response"] = final_response
+    final_state["path_state"] = path_state
+    logger.warning(
+        "Returning the last deterministically valid SQL after two full-pipeline "
+        "attempts exhausted intent validation"
+    )
+    return True
 
 
 def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) -> str:
@@ -477,6 +519,7 @@ def stream_agent_response(
             streamed_sql = None
             last_node = None
 
+        _apply_last_deterministic_sql_fallback(final_state, terminal_node)
         answer = _extract_answer(final_state)
         thoughts_log = final_state.get("path_state", {}).get("thoughts_log") or []
         thoughts_summary = _build_thoughts_summary(thoughts_log)
@@ -534,6 +577,7 @@ def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
                 final_state.get("full_pipeline_attempt", 1),
             )
             state = _restore_for_full_pipeline_retry(final_state)
+        _apply_last_deterministic_sql_fallback(final_state, terminal_node)
     except Exception as exc:
         logger.exception("Error during agent stream in get_agent_response_with_state")
         # The stream may have already produced a valid, executed SQL query

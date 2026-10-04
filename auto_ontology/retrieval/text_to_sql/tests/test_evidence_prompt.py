@@ -31,6 +31,8 @@ def test_formula_instructions_require_exact_calculation_without_shortcut() -> No
     assert block.endswith(evidence)
     assert "calculate that exact formula" in block
     assert "Do not replace it with a shortcut or precomputed field" in block
+    assert "Preserve the evidence's stated order" in block
+    assert "never reorder them" in block
 
 
 def test_generation_can_require_evidence_first_schema_mapping() -> None:
