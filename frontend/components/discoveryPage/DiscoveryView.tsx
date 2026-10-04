@@ -33,7 +33,7 @@ import {
 	GLOBAL_SEARCH_MIN_QUERY_LENGTH,
 	UNTAGGED_TAG_FILTER,
 } from '@/constants/search';
-import { ButtonTheme } from '@/enums/button';
+import { ButtonTheme, Size } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { TextMatchOption } from '@/enums/search';
 import { notifyRulesChanged } from '@/hooks/useRulesChanged';
@@ -187,6 +187,10 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 	 */
 	const [epoch, setEpoch] = useState(0);
 	const [answeredKey, setAnsweredKey] = useState('');
+	const [countedKey, setCountedKey] = useState('');
+	const [countsFailed, setCountsFailed] = useState(false);
+	/** Bumped by retrying the counts alone, which leaves the list as it is. */
+	const [countsAttempt, setCountsAttempt] = useState(0);
 
 	/**
 	 * Whether the applied search asks for nothing, which is answered here
@@ -208,6 +212,10 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 	// loading: no response will arrive to settle it.
 	const searchKey = applied === null ? '' : `${epoch}::${selectedTab}`;
 	const loading = applied !== null && !appliedMatchesNothing && answeredKey !== searchKey;
+	// Tracked apart from the list, which can land first: the tab strip has to
+	// stay up as a skeleton until the counts it is drawn from have answered.
+	const countsKey = applied === null ? '' : `${epoch}::${countsAttempt}`;
+	const countsLoading = applied !== null && !appliedMatchesNothing && countedKey !== countsKey;
 
 	useEffect(() => {
 		if (applied === null || appliedMatchesNothing) return;
@@ -234,12 +242,14 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 		void searchApi
 			.globalSearchCount(discoveryRequest(applied, GLOBAL_SEARCH_ALL_TAB), abort)
 			.then((response) => {
-				if (abort.signal.aborted || response.error) return;
-				setCounts(globalSearchCountsFromResponse(response));
+				if (abort.signal.aborted) return;
+				if (!response.error) setCounts(globalSearchCountsFromResponse(response));
+				setCountsFailed(response.error === true);
+				setCountedKey(countsKey);
 			});
 
 		return () => abort.abort();
-	}, [applied, appliedMatchesNothing, epoch]);
+	}, [applied, appliedMatchesNothing, countsKey]);
 
 	const trimmedQuery = query.trim();
 	// The term is the only thing Apply waits on. A filter that excludes
@@ -252,6 +262,8 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 		setCounts({});
 		setListError(null);
 		setAnsweredKey('');
+		setCountedKey('');
+		setCountsFailed(false);
 		setSelectedTab(GLOBAL_SEARCH_ALL_TAB);
 	};
 
@@ -414,19 +426,35 @@ export const DiscoveryView = ({ initialQuery = '' }: DiscoveryViewProps) => {
 									/>
 								))}
 						</form>
-						{applied !== null && (hasCounts || loading) && (
-							<div className="shrink-0 border-b border-zinc-100 px-4 pt-2 dark:border-zinc-800">
-								{hasCounts ? (
-									<GlobalSearchTabs
-										counts={counts}
-										selected={selectedTab}
-										onSelect={setSelectedTab}
-									/>
-								) : (
-									<GlobalSearchTabsSkeleton />
-								)}
-							</div>
-						)}
+						{applied !== null &&
+							(hasCounts || loading || countsLoading || countsFailed) && (
+								<div className="shrink-0 border-b border-zinc-100 px-4 pt-2 dark:border-zinc-800">
+									{hasCounts ? (
+										<GlobalSearchTabs
+											counts={counts}
+											selected={selectedTab}
+											onSelect={setSelectedTab}
+										/>
+									) : countsFailed && !countsLoading ? (
+										<div className="flex items-center gap-2 px-2 pb-2 text-sm text-secondary dark:text-zinc-400">
+											<span>Result counts are unavailable.</span>
+											<Button
+												theme={ButtonTheme.Minimal}
+												size={Size.SMALL}
+												type="button"
+												onClick={() => {
+													setCountsFailed(false);
+													setCountsAttempt((value) => value + 1);
+												}}
+											>
+												Try Again
+											</Button>
+										</div>
+									) : (
+										<GlobalSearchTabsSkeleton />
+									)}
+								</div>
+							)}
 						{showLimitBanner && (
 							<p className="shrink-0 px-6 py-2 text-sm text-secondary dark:text-zinc-400">
 								Viewing the top {GLOBAL_SEARCH_LIST_LIMIT} results. Try filtering
