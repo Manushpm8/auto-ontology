@@ -151,6 +151,41 @@ def test_prompt_spells_out_sample_values_without_list_punctuation() -> None:
     assert "['open'" not in rendered
 
 
+def test_prompt_includes_value_description_when_present() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "schools",
+                "columns": [
+                    {
+                        "name": "StreetAbr",
+                        "data_type": "text",
+                        "description": "Abbreviated street.",
+                        "value_description": "Some closed schools have no value.",
+                    }
+                ],
+            }
+        ]
+    )
+    assert "value description" in rendered
+    assert "Some closed schools have no value." in rendered
+
+
+def test_prompt_omits_value_description_when_absent() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "orders",
+                "columns": [
+                    {"name": "id", "data_type": "int"},
+                    {"name": "note", "data_type": "text", "value_description": ""},
+                ],
+            }
+        ]
+    )
+    assert "value description" not in rendered
+
+
 def test_prompt_omits_sample_values_when_absent() -> None:
     rendered = format_tables_for_prompt(
         [

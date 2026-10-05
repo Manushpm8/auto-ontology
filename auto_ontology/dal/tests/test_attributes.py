@@ -580,16 +580,24 @@ def test_merge_is_idempotent_and_preserves_a_curated_description(world) -> None:
         "attr_name": "customer id",
     }
 
-    first = a.merge_column_attribute(**common, datatype="integer", description="mine")
+    first = a.merge_column_attribute(
+        **common,
+        datatype="integer",
+        description="mine",
+        value_description="how the id is written",
+    )
     second = a.merge_column_attribute(**common, datatype="bigint", description=None)
 
     assert first == second
     row = store().query_read(
-        select(s.column_attribute.c.description, s.column_attribute.c.datatype).where(
-            s.column_attribute.c.id == first
-        )
+        select(
+            s.column_attribute.c.description,
+            s.column_attribute.c.value_description,
+            s.column_attribute.c.datatype,
+        ).where(s.column_attribute.c.id == first)
     )[0]
     assert row["description"] == "mine"
+    assert row["value_description"] == "how the id is written"
     # datatype describes the column, not an opinion about it, so it is assigned.
     assert row["datatype"] == "bigint"
 
@@ -783,6 +791,20 @@ def test_unlinked_reports_a_declared_fk_target_when_there_is_one(world) -> None:
     # A column with no declared key still appears -- those are the ones the
     # semantic resolver exists for.
     assert rows["id"]["fk_target_col_id"] is None
+
+
+def test_unlinked_excludes_unusable_columns(world) -> None:
+    world.table("customers")
+    world.column("customers", "name")
+    world.column("customers", "retired_code")
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["customers.retired_code"])
+        .values(unusable=True)
+    )
+
+    names = {r["name"] for r in a.find_unlinked_fk_columns(f"{world.prefix}-shopdb")}
+    assert names == {"name"}
 
 
 def test_unlinked_scopes_to_one_database(world) -> None:

@@ -32,7 +32,8 @@ class Schema:
         self.tables_to_columns = {}  # key - table node object, value - list of column names (strings) in lower case
         self.tables_columns_pos = {}  # key - tuple of the form (table name, ordinal position), value - column name
         self.table_nodes = {}  # key - table name in lower case, value - table node object
-        self.column_nodes = {}  # key - tuple of the form (column name in lower case, table name in lower case), value - column node object
+        # key - (column name, table name), both lower case; value - column node
+        self.column_nodes = {}
         self.id_to_node = {}  # key - node id, value - column or table "full" names (schema_name.table_name.column_name
 
         self.tables_df = schema_tables_df
@@ -142,6 +143,12 @@ class Schema:
                     else int(x["ordinal_position"])
                 ),
                 "description": None if pd.isna(x["description"]) else x["description"],
+                "value_description": (
+                    None
+                    if "value_description" not in x.index
+                    or pd.isna(x["value_description"])
+                    else x["value_description"]
+                ),
                 "id": x.id,
             },
             axis=1,
@@ -244,6 +251,7 @@ class Schema:
         data_type=None,
         id=None,
         description=None,
+        value_description=None,
         is_nullable=None,
         ordinal_position=None,
     ):
@@ -255,6 +263,7 @@ class Schema:
             props,
             data_type,
             description,
+            value_description,
             is_nullable,
             ordinal_position,
         )
@@ -301,6 +310,12 @@ class Schema:
                 or pd.isna(column_df.iloc[0]["description"])
                 else column_df.iloc[0]["description"]
             )
+            value_description = (
+                None
+                if "value_description" not in column_df.iloc[0]
+                or pd.isna(column_df.iloc[0]["value_description"])
+                else column_df.iloc[0]["value_description"]
+            )
             is_nullable = (
                 None
                 if "is_nullable" not in column_df.iloc[0]
@@ -318,6 +333,7 @@ class Schema:
                 data_type,
                 id=id,
                 description=description,
+                value_description=value_description,
                 is_nullable=is_nullable,
                 ordinal_position=ordinal_position,
             )
@@ -506,6 +522,7 @@ class Schema:
         props,
         data_type,
         description,
+        value_description,
         is_nullable,
         ordinal_position,
     ):
@@ -513,6 +530,8 @@ class Schema:
             props.update({"data_type": data_type})
         if description:
             props.update({"description": description})
+        if value_description:
+            props.update({"value_description": value_description})
         # `is not None`, not truthiness: `is_nullable` is a boolean, and a
         # falsy-skip would drop every NOT NULL column's value on the floor and
         # leave it NULL -- which reads back as nullable, the exact bug this

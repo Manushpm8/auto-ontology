@@ -123,6 +123,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         # cannot determine nullability leaves it NULL.
         "is_nullable": "boolean",
         "description": "string",
+        "value_description": "string",
     }
     df = (
         df.copy()

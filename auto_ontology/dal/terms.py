@@ -641,6 +641,7 @@ def fetch_all_terms_and_attributes(
         select(
             s.column_attribute.c.name,
             s.column_attribute.c.description,
+            s.column_attribute.c.value_description,
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
             s.catalog_column.c.name.label("column_name"),
@@ -974,6 +975,7 @@ def _embedding_attrs_for_table(table_id: str):
         select(
             s.column_attribute.c.name,
             s.column_attribute.c.description,
+            s.column_attribute.c.value_description,
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
             s.catalog_column.c.sample_values,
@@ -1073,6 +1075,7 @@ def fetch_term_and_column_attributes_for_embedding(
         select(
             s.column_attribute.c.name,
             s.column_attribute.c.description,
+            s.column_attribute.c.value_description,
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
             s.catalog_column.c.sample_values,
@@ -1125,6 +1128,7 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
             s.catalog_database.c.name.label("database_name"),
             s.column_attribute.c.name,
             s.column_attribute.c.description,
+            s.column_attribute.c.value_description,
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
             s.catalog_column.c.sample_values,
@@ -1182,6 +1186,7 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
             {
                 "name": row["name"],
                 "description": row["description"],
+                "value_description": row["value_description"],
                 "term_name": row["term_name"],
                 "source_column": row["source_column"],
                 "sample_values": row["sample_values"],

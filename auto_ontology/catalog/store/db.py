@@ -141,11 +141,18 @@ def update_properties_in_graph_batch(items):
         spec = _spec_for(item["label"])
         props = {k: v for k, v in item["props"].items() if k in spec.columns}
         description = props.pop("description", None)
+        value_description = props.pop("value_description", None)
         props.pop("id", None)
 
         values = dict(props)
         if description is not None:
             values["description"] = func.coalesce(spec.table.c.description, description)
+        # Same rule as description: a curated value note survives a re-ingest
+        # that has nothing to say about it. Only catalog columns carry the field.
+        if value_description is not None and "value_description" in spec.columns:
+            values["value_description"] = func.coalesce(
+                spec.table.c.value_description, value_description
+            )
 
         if not values:
             continue

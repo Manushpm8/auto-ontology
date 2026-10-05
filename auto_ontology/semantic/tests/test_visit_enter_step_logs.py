@@ -14,6 +14,7 @@ import pytest
 from pytest import LogCaptureFixture, MonkeyPatch
 
 from auto_ontology.semantic import visit_enter
+from auto_ontology.semantic.deterministic import ColumnAttributeBuild
 from auto_ontology.semantic.models import ColumnAttributeSpec
 
 TABLE = {"id": "t1", "name": "orders", "schema_name": "public", "description": ""}
@@ -44,7 +45,13 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
         "suggest_potential_foreign_keys",
         lambda *_a, **_k: SimpleNamespace(suggestions=[]),
     )
-    monkeypatch.setattr(visit_enter, "column_attribute_specs", lambda *_a, **_k: [spec])
+    monkeypatch.setattr(
+        visit_enter,
+        "build_column_attributes",
+        lambda *_a, **_k: ColumnAttributeBuild(
+            specs=[spec], unusable_columns=(), judged_columns=()
+        ),
+    )
     monkeypatch.setattr(
         visit_enter, "extract_term", lambda *_a, **_k: SimpleNamespace(terms=[term])
     )

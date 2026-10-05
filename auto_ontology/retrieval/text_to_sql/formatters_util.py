@@ -305,6 +305,7 @@ _COLUMN_HEADERS = [
     "type",
     "is_nullable",
     "description",
+    "value description",
     "sample values",
     "format",
 ]
@@ -333,6 +334,7 @@ def _column_row(column: Any) -> dict[str, str]:
         "type": _plain_cell(column.get("data_type", "UNKNOWN")),
         "is_nullable": nullable,
         "description": description,
+        "value description": _plain_cell(column.get("value_description")),
         "sample values": _plain_cell(
             _format_sample_values(column.get("sample_values"))
         ),

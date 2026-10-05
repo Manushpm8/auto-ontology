@@ -423,6 +423,31 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     assert columns["total"]["is_nullable"] is None
 
 
+def test_tables_by_ids_drops_unusable_columns_and_keeps_value_description(
+    world,
+) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.total"])
+        .values(
+            unusable=True,
+            value_description="should not be fetched",
+        )
+    )
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.order_id"])
+        .values(value_description="Surrogate key.")
+    )
+    columns = {
+        column["name"]: column
+        for column in d.fetch_tables_by_ids([world.tables["orders"]])[0]["columns"]
+    }
+    assert "total" not in columns
+    assert columns["order_id"]["value_description"] == "Surrogate key."
+    assert columns["customer_id"]["value_description"] is None
+
+
 def test_tables_by_ids_is_empty_for_an_empty_list() -> None:
     assert d.fetch_tables_by_ids([]) == []
 

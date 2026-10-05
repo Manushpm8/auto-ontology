@@ -24,6 +24,7 @@ from auto_ontology.connectors.db_errors import is_infrastructure_error
 from auto_ontology.dal.attributes import merge_column_attribute
 from auto_ontology.dal.datasources import (
     mark_table_as_junction,
+    set_column_usability,
     store_column_date_formats,
     store_column_sample_values,
     store_column_uniqueness,
@@ -33,7 +34,7 @@ from auto_ontology.dal.terms import (
     fetch_terms_and_attributes_for_table,
     upsert_table_term,
 )
-from auto_ontology.semantic.deterministic import column_attribute_specs
+from auto_ontology.semantic.deterministic import build_column_attributes
 from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
 from auto_ontology.semantic.fk_suggester import suggest_potential_foreign_keys
@@ -837,13 +838,20 @@ def process_table(
             fk_suggestions.junction_table_rationale or "LLM table-grain decision",
         )
 
-    # --- Build attribute specs for non-FK columns ---
-    specs = column_attribute_specs(
+    # --- Build attribute specs for non-FK, usable columns ---
+    built = build_column_attributes(
         ctx.get("columns", []),
         declared_fks,
         suggested_fk_columns=all_fk_names,
         columns_profiling_samples=columns_profiling_samples,
     )
+    if built.judged_columns:
+        set_column_usability(
+            table_id,
+            unusable_names=set(built.unusable_columns),
+            usable_names=set(built.judged_columns) - set(built.unusable_columns),
+        )
+    specs = built.specs
     if not specs:
         logger.warning("[%s] no non-FK columns — skipping Term creation", table_name)
         return ProcessTableResult()
@@ -947,5 +955,6 @@ def _commit_terms(
                 attr_name=spec.display_name,
                 datatype=spec.datatype,
                 description=spec.description,
+                value_description=spec.value_description,
             )
             result_attr_names.append(spec.display_name)

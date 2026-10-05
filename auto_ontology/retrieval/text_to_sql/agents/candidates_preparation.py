@@ -203,7 +203,7 @@ def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
 
 
 def _needs_column_metadata_backfill(table: dict) -> bool:
-    """Whether a relevant table lacks samples or nullability metadata."""
+    """Whether a relevant table lacks samples, nullability, or value descriptions."""
     columns = table.get("columns") or []
     has_samples = any(
         isinstance(column, dict) and column.get("sample_values") for column in columns
@@ -211,7 +211,62 @@ def _needs_column_metadata_backfill(table: dict) -> bool:
     has_complete_nullability = bool(columns) and all(
         isinstance(column, dict) and "is_nullable" in column for column in columns
     )
-    return not has_samples or not has_complete_nullability
+    has_value_descriptions = bool(columns) and all(
+        isinstance(column, dict) and "value_description" in column for column in columns
+    )
+    return not has_samples or not has_complete_nullability or not has_value_descriptions
+
+
+def _apply_fetched_columns(
+    tables: list[dict],
+    fetched: list[dict],
+    requested_ids: list[str],
+) -> list[dict]:
+    """Keep only the columns the store fetch returned.
+
+    ``fetch_tables_by_ids`` omits unusable columns. A vector hit can still list
+    those columns, and a field-wise merge would keep them. The fetch is the
+    usable column set for every id that was requested, including a table the
+    fetch dropped because none of its columns are usable.
+
+    An empty fetch is left alone: that is also what a failed query returns, and
+    wiping every column then would hand the model no schema at all.
+    """
+    if not fetched:
+        return tables
+    requested = {str(table_id) for table_id in requested_ids}
+    fetched_by_id = {str(table.get("id") or ""): table for table in fetched}
+    for table in tables:
+        table_id = str(table.get("id") or "")
+        if table_id not in requested:
+            continue
+        store_table = fetched_by_id.get(table_id)
+        if store_table is None:
+            table["columns"] = []
+            continue
+        store_columns = {
+            column.get("name"): column
+            for column in store_table.get("columns") or []
+            if isinstance(column, dict) and column.get("name")
+        }
+        kept: list[dict] = []
+        seen: set[str] = set()
+        for column in table.get("columns") or []:
+            if not isinstance(column, dict):
+                continue
+            name = column.get("name")
+            store_column = store_columns.get(name)
+            if store_column is None:
+                continue
+            merged = dict(column)
+            merged["value_description"] = store_column.get("value_description")
+            kept.append(merged)
+            seen.add(name)
+        for name, store_column in store_columns.items():
+            if name not in seen:
+                kept.append(store_column)
+        table["columns"] = kept
+    return tables
 
 
 logger = logging.getLogger(__name__)
@@ -513,7 +568,11 @@ class CandidatePreparationAgent(BaseAgent):
         ]
         if metadata_incomplete_ids:
             enriched = fetch_tables_by_ids(metadata_incomplete_ids)
-            relevant_tables = _merge_tables(relevant_tables, enriched)
+            relevant_tables = _apply_fetched_columns(
+                _merge_tables(relevant_tables, enriched),
+                enriched,
+                metadata_incomplete_ids,
+            )
             self.logger.info(
                 "Back-filled column metadata for %d/%d table(s)",
                 len(enriched),

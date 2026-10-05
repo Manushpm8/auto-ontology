@@ -251,11 +251,17 @@ def _build_rows(
             continue
         owner = a.get("term_name") or term_name or ""
         sample_block = _format_sample_values(a.get("sample_values"), a.get("datatype"))
-        text = (
-            f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}. "
-            f"{a.get('description') or ''}"
-            f"{sample_block}"
-        ).strip()
+        value_description = str(a.get("value_description") or "").strip()
+        body = " ".join(
+            part
+            for part in (
+                f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}.",
+                str(a.get("description") or "").strip(),
+                value_description,
+            )
+            if part
+        )
+        text = f"{body}{sample_block}".strip()
         path = (
             f"semantic:attr:{a['id']}"
             if a.get("id")

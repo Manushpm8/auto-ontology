@@ -9,6 +9,30 @@ from __future__ import annotations
 from auto_ontology.semantic.embed import _format_sample_values
 
 
+def test_attribute_embedding_includes_value_description() -> None:
+    from auto_ontology.semantic.embed import _build_rows
+
+    rows = _build_rows(
+        "schools",
+        {"name": "School", "description": "A school"},
+        [
+            {
+                "name": "streetAbr",
+                "description": "Abbreviated street.",
+                "value_description": "Some closed schools have no value.",
+                "term_name": "School",
+                "source_column": "StreetAbr",
+                "id": "a1",
+            }
+        ],
+    )
+    attribute = next(
+        row for row in rows if row["metadata"]["label"] == "ColumnAttribute"
+    )
+    assert "Abbreviated street." in attribute["text"]
+    assert "Some closed schools have no value." in attribute["text"]
+
+
 def test_format_sample_values_handles_legacy_json_string_and_native_list() -> None:
     # Legacy Column nodes still store sample_values as a JSON string.
     assert _format_sample_values('["a", "b"]') == " Sample values: a, b."

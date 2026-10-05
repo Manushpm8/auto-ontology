@@ -99,10 +99,60 @@ def test_column_metadata_backfill_requires_samples_and_nullability() -> None:
                     "name": "status",
                     "sample_values": ["open"],
                     "is_nullable": None,
+                    "value_description": None,
                 }
             ]
         }
     )
+    assert candidates_preparation._needs_column_metadata_backfill(
+        {
+            "columns": [
+                {
+                    "name": "status",
+                    "sample_values": ["open"],
+                    "is_nullable": None,
+                }
+            ]
+        }
+    )
+
+
+def test_fetched_columns_drop_names_the_store_omitted() -> None:
+    tables = candidates_preparation._apply_fetched_columns(
+        [
+            {
+                "id": "schools",
+                "columns": [
+                    {"name": "StreetAbr", "data_type": "text"},
+                    {"name": "RetiredCode", "data_type": "text"},
+                ],
+            },
+            {
+                "id": "closed",
+                "columns": [{"name": "Legacy", "data_type": "text"}],
+            },
+        ],
+        [
+            {
+                "id": "schools",
+                "columns": [
+                    {
+                        "name": "StreetAbr",
+                        "data_type": "text",
+                        "value_description": "Some closed schools have no value.",
+                    }
+                ],
+            }
+        ],
+        ["schools", "closed"],
+    )
+    by_id = {table["id"]: table for table in tables}
+    assert [column["name"] for column in by_id["schools"]["columns"]] == ["StreetAbr"]
+    assert (
+        by_id["schools"]["columns"][0]["value_description"]
+        == "Some closed schools have no value."
+    )
+    assert by_id["closed"]["columns"] == []
 
 
 def test_retrieve_additional_tables_searches_question_and_entities(

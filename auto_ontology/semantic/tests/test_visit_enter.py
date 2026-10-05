@@ -16,6 +16,7 @@ import pandas as pd
 
 import pytest
 
+from auto_ontology.semantic.deterministic import ColumnAttributeBuild
 from auto_ontology.semantic.visit_enter import (
     _MAX_CONSECUTIVE_SAMPLE_FAILURES,
     _distinct_values_if_low_cardinality,
@@ -715,7 +716,10 @@ def test_process_table_marks_a_wide_llm_junction() -> None:
             return_value=decision,
         ),
         patch(
-            "auto_ontology.semantic.visit_enter.column_attribute_specs", return_value=[]
+            "auto_ontology.semantic.visit_enter.build_column_attributes",
+            return_value=ColumnAttributeBuild(
+                specs=[], unusable_columns=(), judged_columns=()
+            ),
         ),
         patch("auto_ontology.semantic.visit_enter.mark_table_as_junction") as mock_mark,
     ):
@@ -766,7 +770,10 @@ def test_process_table_rejects_insufficient_structural_junction_evidence(
             return_value=decision,
         ),
         patch(
-            "auto_ontology.semantic.visit_enter.column_attribute_specs", return_value=[]
+            "auto_ontology.semantic.visit_enter.build_column_attributes",
+            return_value=ColumnAttributeBuild(
+                specs=[], unusable_columns=(), judged_columns=()
+            ),
         ),
         patch("auto_ontology.semantic.visit_enter.mark_table_as_junction") as mock_mark,
     ):

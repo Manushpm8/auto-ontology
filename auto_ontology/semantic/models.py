@@ -111,6 +111,7 @@ class ColumnAttributeSpec(BaseModel):
     display_name: str = ""
     datatype: str = ""
     description: str | None = None
+    value_description: str | None = None
 
 
 class ColumnDescription(BaseModel):
@@ -125,6 +126,13 @@ class ColumnDescription(BaseModel):
     description: str = Field(
         default="",
         description="One concise sentence describing what the column represents.",
+    )
+    unusable: bool = Field(
+        default=False,
+        description=(
+            "True only when the description or value_description says the column "
+            "should not be used or is almost unusable."
+        ),
     )
 
 

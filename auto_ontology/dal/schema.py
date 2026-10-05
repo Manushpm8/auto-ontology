@@ -212,6 +212,16 @@ catalog_column = Table(
     ),
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
+    # What the stored values mean, beside the column's own description: how
+    # they are coded, populated, or missing. Curated text, so a re-ingest
+    # coalesces it the same way as ``description`` rather than clearing it.
+    Column("value_description", Text, nullable=True),
+    # Set by the per-table semantic compile when the description or
+    # value_description says the column should not be used. Flagged columns
+    # get no ColumnAttribute and drop out of semantic-FK resolution and the
+    # text-to-SQL field list. A later compile writes false again when the
+    # text no longer says that, so a stale flag does not stick.
+    Column("unusable", Boolean, nullable=False, server_default=text("false")),
     # As on catalog_table: written only by the UI's certification checkbox.
     _certified("description_certified"),
     Column("data_type", Text, nullable=True),
@@ -435,6 +445,9 @@ column_attribute = Table(
     _id(),
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
+    # Copied from the source column when the attribute is merged, and included
+    # in the attribute's embedding text.
+    Column("value_description", Text, nullable=True),
     Column("datatype", Text, nullable=True),
     Column("source", Text, nullable=False, server_default=text("'semantic'")),
     Column("source_column", Text, nullable=False),

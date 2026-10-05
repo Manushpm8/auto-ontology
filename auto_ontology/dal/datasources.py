@@ -533,6 +533,40 @@ def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> No
 # ---------------------------------------------------------------------------
 
 
+def set_column_usability(
+    table_id: str,
+    *,
+    unusable_names: set[str],
+    usable_names: set[str],
+) -> None:
+    """Record which columns of one table the semantic compile judged unusable.
+
+    Only the columns the compile actually judged are written. A failed model
+    call judges nothing, so it cannot clear a flag from an earlier compile.
+    """
+    if not unusable_names and not usable_names:
+        return
+    with write_transaction():
+        if unusable_names:
+            store().query_write(
+                update(s.catalog_column)
+                .where(
+                    s.catalog_column.c.table_id == table_id,
+                    s.catalog_column.c.name.in_(list(unusable_names)),
+                )
+                .values(unusable=True)
+            )
+        if usable_names:
+            store().query_write(
+                update(s.catalog_column)
+                .where(
+                    s.catalog_column.c.table_id == table_id,
+                    s.catalog_column.c.name.in_(list(usable_names)),
+                )
+                .values(unusable=False)
+            )
+
+
 def mark_table_as_junction(table_id: str) -> None:
     """Promote a catalog table to a junction table without ever clearing it."""
     store().query_write(
@@ -604,6 +638,7 @@ def apply_metadata_batch(
                 column("table_name", Text),
                 column("column_name", Text),
                 column("description", Text),
+                column("value_description", Text),
                 column("sample_values", Text),
                 name="incoming",
             ).data(
@@ -612,6 +647,7 @@ def apply_metadata_batch(
                         row["table_name"],
                         row["column_name"],
                         row.get("description"),
+                        row.get("value_description"),
                         row.get("sample_values"),
                     )
                     for row in column_rows
@@ -637,6 +673,10 @@ def apply_metadata_batch(
                 .values(
                     description=func.coalesce(
                         incoming.c.description, s.catalog_column.c.description
+                    ),
+                    value_description=func.coalesce(
+                        incoming.c.value_description,
+                        s.catalog_column.c.value_description,
                     ),
                     sample_values=func.coalesce(
                         incoming.c.sample_values, s.catalog_column.c.sample_values
@@ -961,6 +1001,9 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     restored so the back-fill isn't a no-op again. ``is_nullable`` is included
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
+
+    Columns marked ``unusable`` are omitted. A table whose every column is
+    unusable therefore does not appear, the same as a table with no columns.
     """
     if not table_ids:
         return []
@@ -976,6 +1019,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
+                s.catalog_column.c.value_description,
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
@@ -986,7 +1030,10 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     s.catalog_column.c.table_id == s.catalog_table.c.id,
                 )
             )
-            .where(s.catalog_table.c.id.in_(list(table_ids)))
+            .where(
+                s.catalog_table.c.id.in_(list(table_ids)),
+                s.catalog_column.c.unusable.is_(False),
+            )
             .order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
         )
     except Exception:
@@ -1020,6 +1067,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "name": row["column_name"],
                     "data_type": row["data_type"],
                     "description": row["column_description"],
+                    "value_description": row["value_description"],
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
@@ -1047,6 +1095,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "name": r["name"],
             "data_type": r["data_type"],
             "description": r["description"],
+            "value_description": r["value_description"],
             "ordinal_position": r["ordinal_position"],
             "sample_values": r["sample_values"],
             "format": r["format"],
@@ -1058,6 +1107,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
                 s.catalog_column.c.name,
                 s.catalog_column.c.data_type,
                 column_description_expr().label("description"),
+                s.catalog_column.c.value_description,
                 s.catalog_column.c.ordinal_position,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.format,

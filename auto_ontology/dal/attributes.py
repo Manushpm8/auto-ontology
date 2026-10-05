@@ -60,15 +60,17 @@ def merge_column_attribute(
     attr_name: str,
     datatype: str,
     description: str | None,
+    value_description: str | None = None,
 ) -> str | None:
     """Upsert a ColumnAttribute and link it to its column and Term.
 
     Returns ``None`` when the column or the Term does not exist — the guards
     below refuse rather than create an attribute that dangles.
 
-    ``description`` is coalesced, not assigned: a merge that has nothing to say
-    about the description must not erase a curated one. ``datatype`` *is*
-    assigned, as before — it describes the column, not the human's opinion of it.
+    ``description`` and ``value_description`` are coalesced, not assigned: a
+    merge that has nothing to say about either must not erase a curated one.
+    ``datatype`` *is* assigned, as before — it describes the column, not the
+    human's opinion of it.
     """
     column = store().query_read(
         select(s.catalog_column.c.id).where(
@@ -93,6 +95,7 @@ def merge_column_attribute(
         source=SEMANTIC_SOURCE,
         datatype=datatype,
         description=description,
+        value_description=value_description,
     )
     # One transaction: the attribute and its two links are a single fact. Without
     # this each statement autocommits, so a failure on the second leaves a
@@ -109,6 +112,10 @@ def merge_column_attribute(
                     "description": func.coalesce(
                         statement.excluded.description,
                         s.column_attribute.c.description,
+                    ),
+                    "value_description": func.coalesce(
+                        statement.excluded.value_description,
+                        s.column_attribute.c.value_description,
                     ),
                 },
             ).returning(s.column_attribute.c.id)
@@ -493,6 +500,9 @@ def find_unlinked_fk_columns(
             ~select(s.column__has_attribute.c.attribute_id)
             .where(s.column__has_attribute.c.column_id == s.catalog_column.c.id)
             .exists(),
+            # A column the semantic compile marked unusable never receives an
+            # attribute, so it would otherwise sit on this work list forever.
+            s.catalog_column.c.unusable.is_(False),
         )
     )
     if database_name is not None:

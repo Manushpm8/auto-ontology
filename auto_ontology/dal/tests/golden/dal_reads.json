@@ -3283,7 +3283,8 @@
           "is_foreign_key_target": true,
           "name": "film_id",
           "ordinal_position": 1,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "integer",
@@ -3293,7 +3294,8 @@
           "is_foreign_key_target": false,
           "name": "language_id",
           "ordinal_position": 5,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "integer",
@@ -3303,7 +3305,8 @@
           "is_foreign_key_target": false,
           "name": "original_language_id",
           "ordinal_position": 6,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "mpaa_rating",
@@ -3313,7 +3316,8 @@
           "is_foreign_key_target": false,
           "name": "rating",
           "ordinal_position": 11,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "numeric",
@@ -3323,7 +3327,8 @@
           "is_foreign_key_target": false,
           "name": "rental_rate",
           "ordinal_position": 8,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "numeric",
@@ -3333,7 +3338,8 @@
           "is_foreign_key_target": false,
           "name": "replacement_cost",
           "ordinal_position": 10,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "smallint",
@@ -3343,7 +3349,8 @@
           "is_foreign_key_target": false,
           "name": "length",
           "ordinal_position": 9,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "smallint",
@@ -3353,7 +3360,8 @@
           "is_foreign_key_target": false,
           "name": "rental_duration",
           "ordinal_position": 7,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "text",
@@ -3363,7 +3371,8 @@
           "is_foreign_key_target": false,
           "name": "title",
           "ordinal_position": 2,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "text",
@@ -3373,7 +3382,8 @@
           "is_foreign_key_target": false,
           "name": "description",
           "ordinal_position": 3,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "text[]",
@@ -3383,7 +3393,8 @@
           "is_foreign_key_target": false,
           "name": "special_features",
           "ordinal_position": 13,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "timestamp with time zone",
@@ -3393,7 +3404,8 @@
           "is_foreign_key_target": false,
           "name": "last_update",
           "ordinal_position": 12,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "tsvector",
@@ -3403,7 +3415,8 @@
           "is_foreign_key_target": false,
           "name": "fulltext",
           "ordinal_position": 14,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         },
         {
           "data_type": "year",
@@ -3413,7 +3426,8 @@
           "is_foreign_key_target": false,
           "name": "release_year",
           "ordinal_position": 4,
-          "sample_values": null
+          "sample_values": null,
+          "value_description": null
         }
       ],
       "fks": [
@@ -3595,7 +3609,8 @@
             "format": null,
             "is_nullable": false,
             "name": "customer_id",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "integer",
@@ -3603,7 +3618,8 @@
             "format": null,
             "is_nullable": false,
             "name": "inventory_id",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "integer",
@@ -3611,7 +3627,8 @@
             "format": null,
             "is_nullable": false,
             "name": "rental_id",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "integer",
@@ -3619,7 +3636,8 @@
             "format": null,
             "is_nullable": false,
             "name": "staff_id",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "timestamp with time zone",
@@ -3627,7 +3645,8 @@
             "format": null,
             "is_nullable": false,
             "name": "rental_date",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "timestamp with time zone",
@@ -3635,7 +3654,8 @@
             "format": null,
             "is_nullable": false,
             "name": "last_update",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "timestamp with time zone",
@@ -3643,7 +3663,8 @@
             "format": null,
             "is_nullable": true,
             "name": "return_date",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           }
         ],
         "database_name": "pagila",
@@ -3664,7 +3685,8 @@
             "format": null,
             "is_nullable": false,
             "name": "film_id",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "integer",
@@ -3672,7 +3694,8 @@
             "format": null,
             "is_nullable": false,
             "name": "language_id",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "integer",
@@ -3680,7 +3703,8 @@
             "format": null,
             "is_nullable": true,
             "name": "original_language_id",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "mpaa_rating",
@@ -3688,7 +3712,8 @@
             "format": null,
             "is_nullable": true,
             "name": "rating",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "numeric",
@@ -3696,7 +3721,8 @@
             "format": null,
             "is_nullable": false,
             "name": "rental_rate",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "numeric",
@@ -3704,7 +3730,8 @@
             "format": null,
             "is_nullable": false,
             "name": "replacement_cost",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "smallint",
@@ -3712,7 +3739,8 @@
             "format": null,
             "is_nullable": false,
             "name": "rental_duration",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "smallint",
@@ -3720,7 +3748,8 @@
             "format": null,
             "is_nullable": true,
             "name": "length",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "text",
@@ -3728,7 +3757,8 @@
             "format": null,
             "is_nullable": false,
             "name": "title",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "text",
@@ -3736,7 +3766,8 @@
             "format": null,
             "is_nullable": true,
             "name": "description",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "text[]",
@@ -3744,7 +3775,8 @@
             "format": null,
             "is_nullable": true,
             "name": "special_features",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "timestamp with time zone",
@@ -3752,7 +3784,8 @@
             "format": null,
             "is_nullable": false,
             "name": "last_update",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "tsvector",
@@ -3760,7 +3793,8 @@
             "format": null,
             "is_nullable": false,
             "name": "fulltext",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           },
           {
             "data_type": "year",
@@ -3768,7 +3802,8 @@
             "format": null,
             "is_nullable": true,
             "name": "release_year",
-            "sample_values": null
+            "sample_values": null,
+            "value_description": null
           }
         ],
         "database_name": "pagila",
@@ -6532,7 +6567,8 @@
           "source_column": "Name",
           "table_id": "<table:chinook.main.Track>",
           "table_name": "Track",
-          "term_name": "Track"
+          "term_name": "Track",
+          "value_description": null
         },
         {
           "column_name": "amount",
@@ -6546,7 +6582,8 @@
           "source_column": "amount",
           "table_id": "<table:pagila.public.payment>",
           "table_name": "payment",
-          "term_name": "Payment"
+          "term_name": "Payment",
+          "value_description": null
         },
         {
           "column_name": "customer_id",
@@ -6560,7 +6597,8 @@
           "source_column": "customer_id",
           "table_id": "<table:pagila.public.customer>",
           "table_name": "customer",
-          "term_name": "Customer"
+          "term_name": "Customer",
+          "value_description": null
         },
         {
           "column_name": "email",
@@ -6574,7 +6612,8 @@
           "source_column": "email",
           "table_id": "<table:pagila.public.customer>",
           "table_name": "customer",
-          "term_name": "Customer"
+          "term_name": "Customer",
+          "value_description": null
         },
         {
           "column_name": "film_id",
@@ -6588,7 +6627,8 @@
           "source_column": "film_id",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         },
         {
           "column_name": "rating",
@@ -6602,7 +6642,8 @@
           "source_column": "rating",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         },
         {
           "column_name": "rental_date",
@@ -6616,7 +6657,8 @@
           "source_column": "rental_date",
           "table_id": "<table:pagila.public.rental>",
           "table_name": "rental",
-          "term_name": "Rental"
+          "term_name": "Rental",
+          "value_description": null
         },
         {
           "column_name": "title",
@@ -6630,7 +6672,8 @@
           "source_column": "title",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         }
       ]
     ],
@@ -6678,7 +6721,8 @@
           "source_column": "film_id",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         },
         {
           "column_name": "rating",
@@ -6692,7 +6736,8 @@
           "source_column": "rating",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         },
         {
           "column_name": "title",
@@ -6706,7 +6751,8 @@
           "source_column": "title",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         }
       ]
     ],
@@ -6748,7 +6794,8 @@
             "name": "film id",
             "sample_values": null,
             "source_column": "film_id",
-            "term_name": "Film"
+            "term_name": "Film",
+            "value_description": null
           }
         ],
         {
@@ -6932,7 +6979,8 @@
           "source_column": "rating",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         },
         {
           "description": "Primary key of film.",
@@ -6943,7 +6991,8 @@
           "source_column": "film_id",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         },
         {
           "description": "The film's title.",
@@ -6954,7 +7003,8 @@
           "source_column": "title",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         }
       ],
       {
@@ -7117,7 +7167,8 @@
           "source_column": "rating",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         },
         {
           "description": "Primary key of film.",
@@ -7129,7 +7180,8 @@
           "source_column": "film_id",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         },
         {
           "description": "The film's title.",
@@ -7141,7 +7193,8 @@
           "source_column": "title",
           "table_id": "<table:pagila.public.film>",
           "table_name": "film",
-          "term_name": "Film"
+          "term_name": "Film",
+          "value_description": null
         }
       ]
     ],
