@@ -1043,6 +1043,10 @@ def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select])
     fills exactly one of the five columns and leaves the rest null: ``NULL IN
     (...)`` is null, and a null inside the negation would leave the row
     undecided rather than deleted.
+
+    Taking the system ``PII`` tag off a column also takes it off that column's
+    attributes -- the same cascade as the tags API. Propagated attribute labels
+    have no ``rule_id``, so this statement would otherwise leave them behind.
     """
     kept = [
         and_(_target_column(kind).is_not(None), _target_column(kind).in_(matched))
@@ -1051,11 +1055,38 @@ def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select])
     conditions: list[ColumnElement[bool]] = [s.tag_target.c.rule_id == rule_id]
     if kept:
         conditions.append(not_(or_(*kept)))
-    return len(
-        store().query_write(
-            s.tag_target.delete().where(*conditions).returning(s.tag_target.c.id)
-        )
+    rows = store().query_write(
+        s.tag_target.delete()
+        .where(*conditions)
+        .returning(s.tag_target.c.tag_id, s.tag_target.c.column_id)
     )
+    _cascade_pii_off_columns(rows)
+    return len(rows)
+
+
+def _cascade_pii_off_columns(deleted: list[dict[str, Any]]) -> None:
+    """Drop ``PII`` from attributes of columns a rule just unlabelled.
+
+    Call after those column labels are gone -- a replay DELETE, or
+    ``delete_rule``'s ``rule_id`` cascade. Propagated attribute labels have
+    no ``rule_id``, so neither statement would take them on its own.
+
+    Imported lazily: :mod:`auto_ontology.dal.pii` imports this module, so a
+    top-level import would cycle.
+    """
+    pii_tag = get_tag_by_name(PII_TAG_NAME)
+    if pii_tag is None:
+        return
+    pii_id = str(pii_tag["id"])
+    from auto_ontology.dal.pii import untag_attributes_of_column
+
+    seen: set[str] = set()
+    for row in deleted:
+        column_id = row["column_id"]
+        if row["tag_id"] != pii_id or not column_id or column_id in seen:
+            continue
+        seen.add(column_id)
+        untag_attributes_of_column(column_id, pii_id)
 
 
 def detach_tag(*, tag_id: str, kind: str, item_id: str) -> list[dict[str, Any]] | None:

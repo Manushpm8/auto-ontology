@@ -33,6 +33,7 @@ from auto_ontology.catalog.diff import (  # noqa: F401
 from auto_ontology.catalog.store.registry import entity_spec
 from auto_ontology.catalog.store.rows import upsert_row
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.pii import untag_attributes_of_columns_being_deleted
 from auto_ontology.dal.session import store
 
 logger = logging.getLogger(__name__)
@@ -88,8 +89,39 @@ def _spec_for(label: str):
     return entity_spec(aliases.get(str(label).lower(), label))
 
 
+def _drop_pii_from_attributes_of(column_ids: list[str]) -> None:
+    """Realign PII on attributes before *column_ids* cascade away.
+
+    A failure here must not block the catalog delete: the source no longer
+    has these columns, and leaving a stale PII chip is better than aborting
+    ingest with ghosts in the catalog.
+    """
+    try:
+        untag_attributes_of_columns_being_deleted(column_ids)
+    except Exception:
+        logger.exception(
+            "could not drop PII from attributes of %d dropped column(s)",
+            len(column_ids),
+        )
+
+
 def delete_schema(schema_node_id):
     """Delete a schema. Its tables and columns go with it, by cascade."""
+    _drop_pii_from_attributes_of(
+        [
+            row["id"]
+            for row in store().query_read(
+                select(s.catalog_column.c.id)
+                .select_from(
+                    s.catalog_column.join(
+                        s.catalog_table,
+                        s.catalog_table.c.id == s.catalog_column.c.table_id,
+                    )
+                )
+                .where(s.catalog_table.c.schema_id == schema_node_id)
+            )
+        ]
+    )
     store().query_write(
         s.catalog_schema.delete().where(s.catalog_schema.c.id == schema_node_id)
     )
@@ -97,6 +129,16 @@ def delete_schema(schema_node_id):
 
 def delete_table(table_id):
     """Delete a table. Its columns cascade."""
+    _drop_pii_from_attributes_of(
+        [
+            row["id"]
+            for row in store().query_read(
+                select(s.catalog_column.c.id).where(
+                    s.catalog_column.c.table_id == table_id
+                )
+            )
+        ]
+    )
     store().query_write(
         s.catalog_table.delete().where(s.catalog_table.c.id == table_id)
     )
@@ -105,6 +147,7 @@ def delete_table(table_id):
 def delete_columns_batch(column_ids):
     if not column_ids:
         return
+    _drop_pii_from_attributes_of(list(column_ids))
     store().query_write(
         s.catalog_column.delete().where(s.catalog_column.c.id.in_(list(column_ids)))
     )

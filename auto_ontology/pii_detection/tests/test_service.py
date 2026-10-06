@@ -200,3 +200,33 @@ def test_classifier_failure_remains_unprocessed(
     assert result.review == 1
     assert result.processed == 0
     assert processed == []
+
+
+def test_propagation_labels_attributes_of_the_existing_pii_tag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+    monkeypatch.setattr(service, "get_tag_by_name", lambda _name: {"id": "pii-tag"})
+    monkeypatch.setattr(
+        service,
+        "tag_attributes_of_tagged_columns",
+        lambda tag_id: seen.append(tag_id) or (2, 3),
+    )
+
+    result = service.propagate_pii_to_attributes()
+
+    assert seen == ["pii-tag"]
+    assert result == service.PiiPropagationResult(column_attributes=2, sql_attributes=3)
+
+
+def test_propagation_without_a_pii_tag_does_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(service, "get_tag_by_name", lambda _name: None)
+
+    def unexpected(_tag_id: str) -> tuple[int, int]:
+        raise AssertionError("no tag means nothing to propagate")
+
+    monkeypatch.setattr(service, "tag_attributes_of_tagged_columns", unexpected)
+
+    assert service.propagate_pii_to_attributes() == service.PiiPropagationResult()

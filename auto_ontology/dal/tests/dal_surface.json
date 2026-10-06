@@ -102,7 +102,11 @@
     "validate_database_ids": "(database_ids: 'list[str]') -> 'None'"
   },
   "pii": {
-    "mark_columns_pii_processed": "(column_ids: 'list[str]') -> 'int'"
+    "mark_columns_pii_processed": "(column_ids: 'list[str]') -> 'int'",
+    "realign_sql_attribute_pii": "(attr_id: 'str', tag_id: 'str | None') -> 'bool'",
+    "tag_attributes_of_tagged_columns": "(tag_id: 'str') -> 'tuple[int, int]'",
+    "untag_attributes_of_column": "(column_id: 'str', tag_id: 'str') -> 'None'",
+    "untag_attributes_of_columns_being_deleted": "(column_ids: 'list[str]') -> 'None'"
   },
   "pql_analyses": {
     "PqlAnalysisNameConflict": "class(Exception)",

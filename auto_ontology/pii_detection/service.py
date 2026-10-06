@@ -18,8 +18,12 @@ from auto_ontology.dal.tags import (
     attach_tag,
     fetch_tags_map,
     get_or_create_tag,
+    get_tag_by_name,
 )
-from auto_ontology.dal.pii import mark_columns_pii_processed
+from auto_ontology.dal.pii import (
+    mark_columns_pii_processed,
+    tag_attributes_of_tagged_columns,
+)
 from auto_ontology.pii_detection.detector import LlmPiiClassifier, PiiDetector
 from auto_ontology.pii_detection.models import ColumnInput, PiiStatus
 
@@ -158,4 +162,47 @@ def detect_and_tag_pii(
         result.tagged,
         result.already_tagged,
     )
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class PiiPropagationResult:
+    """Attributes newly labelled ``PII`` because a column they use is PII."""
+
+    column_attributes: int = 0
+    sql_attributes: int = 0
+
+
+def propagate_pii_to_attributes() -> PiiPropagationResult:
+    """Label the attributes built from PII columns with the shared ``PII`` tag.
+
+    A ColumnAttribute is tagged when one of its columns is, and a SqlAttribute
+    when its SQL reads one. Driven by the labels already on the columns rather
+    than by detector output, so hand-applied PII tags propagate too and the
+    pass is idempotent.
+
+    Run it after PII detection **and** after semantic compilation: attributes
+    are created by the latter, so on a first ingest there is nothing to label
+    yet and a later pass has to pick them up.
+
+    Does not create the tag: if no column was ever tagged, there is nothing to
+    propagate.
+    """
+
+    pii_tag = get_tag_by_name(PII_TAG_NAME)
+    if pii_tag is None:
+        return PiiPropagationResult()
+
+    column_attributes, sql_attributes = tag_attributes_of_tagged_columns(
+        str(pii_tag["id"])
+    )
+    result = PiiPropagationResult(
+        column_attributes=column_attributes, sql_attributes=sql_attributes
+    )
+    if column_attributes or sql_attributes:
+        logger.info(
+            "PII propagation: %d column attribute(s) and %d SQL attribute(s) tagged",
+            column_attributes,
+            sql_attributes,
+        )
     return result

@@ -103,9 +103,6 @@ class LlmPiiClassifier:
         status = response.status
         confidence = response.confidence
         if status is PiiStatus.REVIEW:
-            # Illumex's PII policy is deliberately conservative: an uncertain
-            # classification is positive. Normalise here as well as prompting
-            # for it so a model returning REVIEW cannot bypass that policy.
             status = PiiStatus.PII
             confidence = 1.0
         if status is PiiStatus.PII and not category:

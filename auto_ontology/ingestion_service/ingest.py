@@ -27,6 +27,7 @@ from auto_ontology.connectors.registry import (
 )
 from auto_ontology.dal.reset import delete_all_data, delete_semantic_layer
 from auto_ontology.ingestion_service.rules import replay_rules
+from auto_ontology.ingestion_service.pii import run_pii_propagation
 from auto_ontology.pii_detection.service import detect_and_tag_pii
 
 logger = logging.getLogger("ingestion_service.ingest")
@@ -73,6 +74,7 @@ def _run_pii_detection(columns_df: Any, database_name: str) -> None:
             "PII detection failed for database %s; catalog ingestion will continue",
             database_name,
         )
+    run_pii_propagation(database_name)
 
 
 def run_ingest(connector: SQLDatabase) -> None:

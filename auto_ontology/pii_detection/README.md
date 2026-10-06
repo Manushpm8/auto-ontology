@@ -32,6 +32,37 @@ if decision.should_auto_tag(threshold=0.9):
     ...
 ```
 
+## Propagation to attributes
+
+A column tagged `PII` also makes the attributes built from it `PII`:
+
+- **Column attributes** linked to the column through `column__has_attribute`
+  (`column__semantic_fk` is intentionally ignored: the column only references
+  the attribute, it is not an instance of it).
+- **SQL attributes** whose SQL reads the column
+  (`sql_attribute__sql` → `sql_query__column`).
+
+`propagate_pii_to_attributes()` reads the labels already on the columns, so
+hand-applied tags propagate too. It runs after PII detection in every ingest and
+again after semantic compilation, because attributes are created by the latter.
+Only attributes linked to a Term are tagged. It is additive: existing labels
+keep their source. Taking `PII` off a column — from the tags API, when a
+rule takes back a label it no longer matches, when that rule is deleted
+(without keeping its labels), or when ingest drops the column from the
+catalog — also takes it off that column's ColumnAttributes,
+and off any SQL attribute whose query no longer reads a tagged column
+(`pii_processed` is cleared so a later tag can still propagate). A SQL
+attribute that still reads another PII column keeps both the tag and
+`pii_processed`. A user-edited SQL expression follows the same rule.
+
+Each attribute is handled once, tracked by `column_attribute.pii_processed` and
+`sql_attribute.pii_processed` (like `catalog_column.pii_processed`). Once an
+attribute has been handled, removing its `PII` tag by hand is permanent: it is
+not re-added on the next pass. An attribute built from no PII column stays
+unprocessed, so it is still tagged if one of its columns is classified later.
+
+## LLM fallback
+
 For uncertain columns, the ingestion integration uses the project's configured
 LLM through `LlmPiiClassifier`:
 
