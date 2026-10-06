@@ -33,6 +33,8 @@ from auto_ontology.server.model_interchange.schemas import (
 
 logger = logging.getLogger(__name__)
 
+_AUTO_ONTOLOGY_ROOT_KEYS = frozenset(AutoOntologyModelDocument.model_fields)
+
 
 def _dialect_by_database_name() -> dict[str, str]:
     """Resolve SQL dialect strings keyed by catalog database name."""
@@ -60,16 +62,14 @@ def _dialect_by_database_name() -> dict[str, str]:
 def detect_model_format(payload: Mapping[str, Any]) -> ModelFormat:
     """Tell an Apache Ossie document apart from a native Auto Ontology one.
 
-    The vocabularies do not overlap at the root: current Ossie documents carry
-    ``datasets`` directly, while Auto Ontology uses ``data_layer`` and
-    ``semantic_layer``. ``semantic_model`` remains recognized for legacy Ossie
-    documents so callers receive the converter's migration error.
+    Only a root holding Auto Ontology's own keys is read as native. Anything
+    else goes to the Ossie converter, which rejects what it cannot read; read
+    as native, it would validate as an empty document, and an import with
+    ``replace`` would then wipe the catalog.
     """
-    if "data_layer" in payload or "semantic_layer" in payload:
+    if _AUTO_ONTOLOGY_ROOT_KEYS.intersection(payload):
         return ModelFormat.AUTO_ONTOLOGY
-    if "datasets" in payload or "semantic_model" in payload:
-        return ModelFormat.OSSIE
-    return ModelFormat.AUTO_ONTOLOGY
+    return ModelFormat.OSSIE
 
 
 def _table_id_by_column_id(document: AutoOntologyModelDocument) -> dict[str, str]:
@@ -168,7 +168,9 @@ def export_model(request: ExportRequest) -> str:
     )
     if request.format is ModelFormat.OSSIE:
         _validate_ossie_metric_names(document)
-        return convert_auto_ontology_to_ossie(_dump_yaml(_project_terms_onto_one_table(document)))
+        return convert_auto_ontology_to_ossie(
+            _dump_yaml(_project_terms_onto_one_table(document))
+        )
     return _dump_yaml(document)
 
 

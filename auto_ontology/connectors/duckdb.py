@@ -26,15 +26,26 @@ from __future__ import annotations
 
 
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 import duckdb
 import pandas as pd
 from typing import Optional
 
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 logger = logging.getLogger(__name__)
+
+
+def _execute(
+    conn: duckdb.DuckDBPyConnection, sql: str, parameters: Optional[list]
+) -> pd.DataFrame:
+    if parameters:
+        rel = conn.execute(sql, parameters)
+    else:
+        rel = conn.execute(sql)
+    return rel.df()
 
 
 class DuckDBDatabase(SQLDatabase):
@@ -50,6 +61,8 @@ class DuckDBDatabase(SQLDatabase):
         processes can hold a read-only connection simultaneously; set to
         ``False`` only when you need to write to the file.
     """
+
+    supports_statement_timeout = True
 
     def __init__(self, connection_string: str, *, read_only: bool = True) -> None:
         db_path = connection_string
@@ -80,7 +93,13 @@ class DuckDBDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
         """Execute a SQL statement and return a pandas DataFrame.
 
         Parameters
@@ -89,13 +108,39 @@ class DuckDBDatabase(SQLDatabase):
             SQL query to execute.
         parameters:
             Optional positional parameters.
+        timeout_s:
+            Interrupt the statement after this many seconds and raise
+            :class:`StatementTimeout`. DuckDB has no server-side cap, so a
+            timer thread calls ``interrupt()``.
         """
         logger.debug("DuckDB executing (→ DataFrame): %s", sql[:200])
-        if parameters:
-            rel = self.conn.execute(sql, parameters)
-        else:
-            rel = self.conn.execute(sql)
-        return rel.df()
+        if timeout_s is None:
+            return _execute(self.conn, sql, parameters)
+
+        # ``interrupt()`` stops whatever is running on the connection it is
+        # called on, and profiling runs tables in parallel. A cursor of its own
+        # (same database, separate client context) means the timer can only
+        # ever stop this statement.
+        cursor = self.conn.cursor()
+        fired = threading.Event()
+
+        def _interrupt() -> None:
+            fired.set()
+            cursor.interrupt()
+
+        timer = threading.Timer(timeout_s, _interrupt)
+        timer.daemon = True
+        timer.start()
+        try:
+            return _execute(cursor, sql, parameters)
+        except duckdb.InterruptException as exc:
+            if fired.is_set():
+                raise StatementTimeout(timeout_s) from exc
+            raise
+        finally:
+            timer.cancel()
+            timer.join()
+            cursor.close()
 
     # ------------------------------------------------------------------
     # Helpers

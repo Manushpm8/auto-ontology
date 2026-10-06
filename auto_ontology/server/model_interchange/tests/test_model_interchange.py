@@ -18,7 +18,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from ossie_nvidia_auto_ontology import AutoOntologyConversionError, convert_auto_ontology_to_ossie
+from ossie_nvidia_auto_ontology import (
+    AutoOntologyConversionError,
+    convert_auto_ontology_to_ossie,
+)
 
 from auto_ontology.dal.model_interchange import (
     assemble_export_document,
@@ -581,8 +584,32 @@ def test_export_model_auto_ontology_keeps_every_represented_table(
 
 def test_detect_model_format_tells_the_vocabularies_apart() -> None:
     assert service.detect_model_format({"data_layer": {}}) is ModelFormat.AUTO_ONTOLOGY
-    assert service.detect_model_format({"datasets": []}) is ModelFormat.OSSIE
+    assert (
+        service.detect_model_format({"semantic_layer": {}}) is ModelFormat.AUTO_ONTOLOGY
+    )
+    flat_ossie = {"version": "0.2.0", "name": "retail", "datasets": []}
+    assert service.detect_model_format(flat_ossie) is ModelFormat.OSSIE
     assert service.detect_model_format({"semantic_model": []}) is ModelFormat.OSSIE
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"semantic_model": [{"name": "retail", "datasets": []}]},
+        {"unrelated": "mapping"},
+    ],
+)
+@patch("auto_ontology.server.model_interchange.service.dal.apply_import_model")
+def test_import_model_rejects_unreadable_documents_before_touching_data(
+    mock_apply: MagicMock,
+    document: dict,
+) -> None:
+    """Read as native, these would validate as an empty model and wipe the
+    catalog on a replacing import."""
+    with pytest.raises(AutoOntologyConversionError):
+        service.import_model(yaml.safe_dump(document), replace=True, embed=False)
+
+    mock_apply.assert_not_called()
 
 
 @patch("auto_ontology.server.model_interchange.service.dal.apply_import_model")
