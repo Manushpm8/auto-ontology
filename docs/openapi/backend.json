@@ -8718,7 +8718,7 @@
     },
     "/api/tags/{tag_id}/targets/{target_type}/{item_id}": {
       "delete": {
-        "description": "Take this tag off one object.\n\nTaking ``PII`` off a column also takes it off that column's\nColumnAttributes, and off any SqlAttribute whose SQL no longer reads a\ntagged column. A SqlAttribute that still reads another PII column keeps\nthe label.\n\n404 when the object was not carrying it \u2014 including when either side no\nlonger exists. The page removed a chip it had just rendered, so all three\nmean its view is stale, and answering \"done\" would leave the chip gone from\nthe screen and still on the object.",
+        "description": "Take this tag off one object.\n\nTaking ``PII`` off a column also takes it off that column's\nColumnAttributes, and off any SqlAttribute whose SQL no longer reads a\ntagged column. A SqlAttribute that still reads another PII column keeps\nthe label. The column detach and that cleanup share one transaction.\n\n404 when the object was not carrying it \u2014 including when either side no\nlonger exists. The page removed a chip it had just rendered, so all three\nmean its view is stale, and answering \"done\" would leave the chip gone from\nthe screen and still on the object.",
         "operationId": "detach_tag_api_tags__tag_id__targets__target_type___item_id__delete",
         "parameters": [
           {

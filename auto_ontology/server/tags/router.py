@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from auto_ontology.dal import tags as dal
 from auto_ontology.dal.pii import untag_attributes_of_column
+from auto_ontology.dal.session import write_transaction
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.models import TagTargetType
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
@@ -314,21 +315,33 @@ def detach_tag(tag_id: str, target_type: TagTargetType, item_id: str) -> dict:
     Taking ``PII`` off a column also takes it off that column's
     ColumnAttributes, and off any SqlAttribute whose SQL no longer reads a
     tagged column. A SqlAttribute that still reads another PII column keeps
-    the label.
+    the label. The column detach and that cleanup share one transaction.
 
     404 when the object was not carrying it — including when either side no
     longer exists. The page removed a chip it had just rendered, so all three
     mean its view is stale, and answering "done" would leave the chip gone from
     the screen and still on the object.
     """
+    cascade = False
+    if target_type is TagTargetType.COLUMN:
+        tag = dal.get_tag(tag_id)
+        cascade = tag is not None and dal.is_protected_tag(tag)
+
+    if cascade:
+        with write_transaction():
+            tags = dal.detach_tag(tag_id=tag_id, kind=target_type, item_id=item_id)
+            if tags is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Tag {tag_id!r} is not on {target_type.value} {item_id!r}",
+                )
+            untag_attributes_of_column(item_id, tag_id)
+        return _chips(tags)
+
     tags = dal.detach_tag(tag_id=tag_id, kind=target_type, item_id=item_id)
     if tags is None:
         raise HTTPException(
             status_code=404,
             detail=f"Tag {tag_id!r} is not on {target_type.value} {item_id!r}",
         )
-    if target_type is TagTargetType.COLUMN:
-        tag = dal.get_tag(tag_id)
-        if tag is not None and dal.is_protected_tag(tag):
-            untag_attributes_of_column(item_id, tag_id)
     return _chips(tags)

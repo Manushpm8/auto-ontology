@@ -251,32 +251,36 @@ def untag_attributes_of_column(column_id: str, tag_id: str) -> None:
     tag on the column can still propagate. SQL attributes whose query reads
     this column are realigned: the label stays if they still read another
     tagged column.
+
+    One transaction: a later SQL realign must not leave column attributes
+    already untagged if it fails. Nested :func:`write_transaction` calls
+    reuse this one.
     """
-    column_attr_ids = [
-        row["attribute_id"]
-        for row in store().query_read(
-            select(s.column__has_attribute.c.attribute_id).where(
-                s.column__has_attribute.c.column_id == column_id
-            )
-        )
-    ]
-    sql_attr_ids = [
-        row["attribute_id"]
-        for row in store().query_read(
-            select(s.sql_attribute__sql.c.attribute_id)
-            .select_from(
-                s.sql_attribute__sql.join(
-                    s.sql_query__column,
-                    s.sql_query__column.c.sql_query_id
-                    == s.sql_attribute__sql.c.sql_query_id,
+    with write_transaction():
+        column_attr_ids = [
+            row["attribute_id"]
+            for row in store().query_read(
+                select(s.column__has_attribute.c.attribute_id).where(
+                    s.column__has_attribute.c.column_id == column_id
                 )
             )
-            .where(s.sql_query__column.c.column_id == column_id)
-            .distinct()
-        )
-    ]
-    if column_attr_ids:
-        with write_transaction():
+        ]
+        sql_attr_ids = [
+            row["attribute_id"]
+            for row in store().query_read(
+                select(s.sql_attribute__sql.c.attribute_id)
+                .select_from(
+                    s.sql_attribute__sql.join(
+                        s.sql_query__column,
+                        s.sql_query__column.c.sql_query_id
+                        == s.sql_attribute__sql.c.sql_query_id,
+                    )
+                )
+                .where(s.sql_query__column.c.column_id == column_id)
+                .distinct()
+            )
+        ]
+        if column_attr_ids:
             for attr_id in column_attr_ids:
                 detach_tag(
                     tag_id=tag_id,
@@ -288,8 +292,8 @@ def untag_attributes_of_column(column_id: str, tag_id: str) -> None:
                 .where(s.column_attribute.c.id.in_(column_attr_ids))
                 .values(pii_processed=False)
             )
-    for attr_id in sql_attr_ids:
-        realign_sql_attribute_pii(attr_id, tag_id)
+        for attr_id in sql_attr_ids:
+            realign_sql_attribute_pii(attr_id, tag_id)
 
 
 def untag_attributes_of_columns_being_deleted(column_ids: list[str]) -> None:
@@ -299,7 +303,8 @@ def untag_attributes_of_columns_being_deleted(column_ids: list[str]) -> None:
     through the tags API. Postgres then cascades the column's own label and
     the SQL / HAS_ATTRIBUTE edges, which would leave PII on the attributes.
     Take PII off the columns first so SQL realign does not still see them as
-    tagged, then reuse :func:`untag_attributes_of_column`.
+    tagged, then reuse :func:`untag_attributes_of_column`. One transaction
+    covers every detach and every untag; nested scopes reuse it.
     """
     ids = list(dict.fromkeys(column_id for column_id in column_ids if column_id))
     if not ids:
@@ -308,7 +313,8 @@ def untag_attributes_of_columns_being_deleted(column_ids: list[str]) -> None:
     if pii_tag is None:
         return
     pii_id = str(pii_tag["id"])
-    for column_id in ids:
-        detach_tag(tag_id=pii_id, kind=TARGET_COLUMN, item_id=column_id)
-    for column_id in ids:
-        untag_attributes_of_column(column_id, pii_id)
+    with write_transaction():
+        for column_id in ids:
+            detach_tag(tag_id=pii_id, kind=TARGET_COLUMN, item_id=column_id)
+        for column_id in ids:
+            untag_attributes_of_column(column_id, pii_id)

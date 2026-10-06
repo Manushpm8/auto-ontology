@@ -11,6 +11,7 @@ every caller -- the settings page and a direct API call alike -- goes through.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 import pytest
@@ -98,6 +99,7 @@ def test_detaching_pii_from_a_column_untags_its_attributes(
     monkeypatch.setattr(router.dal, "detach_tag", lambda **_k: [])
     monkeypatch.setattr(router.dal, "get_tag", lambda _tag_id: _tag("PII"))
     monkeypatch.setattr(router.dal, "is_protected_tag", lambda tag: True)
+    monkeypatch.setattr(router, "write_transaction", nullcontext)
     monkeypatch.setattr(
         router,
         "untag_attributes_of_column",
