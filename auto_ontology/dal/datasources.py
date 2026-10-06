@@ -40,6 +40,7 @@ from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.dal.sql_fragments import (
     column_description_expr,
+    column_prompt_description_expr,
     table_description_expr,
 )
 from auto_ontology.dal.tags import TARGET_COLUMN, TARGET_TABLE, fetch_tags_map
@@ -1029,7 +1030,7 @@ def fetch_tables_by_ids(
                 s.catalog_schema.c.name.label("schema_name"),
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
-                column_description_expr().label("column_description"),
+                column_prompt_description_expr().label("column_description"),
                 s.catalog_column.c.value_description,
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,

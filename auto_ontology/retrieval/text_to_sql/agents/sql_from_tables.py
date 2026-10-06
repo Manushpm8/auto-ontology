@@ -46,6 +46,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     format_authoritative_evidence,
     format_dialect_rules,
     format_dual_question_block,
+    format_grounding_filter_rules,
     format_projection_rules,
 )
 from auto_ontology.retrieval.data_access.relevant_tables import get_relevant_tables
@@ -134,6 +135,9 @@ class SQLFromTablesAgent(BaseAgent):
             dialect=dialect,
             dialect_rules=format_dialect_rules(dialect),
             projection_rules=format_projection_rules(
+                state.get("shorten_answer", False)
+            ),
+            grounding_filter_rules=format_grounding_filter_rules(
                 state.get("shorten_answer", False)
             ),
             main_question=main_question,

@@ -54,6 +54,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     format_custom_analyses_section,
     format_dialect_rules,
     format_dual_question_block,
+    format_grounding_filter_rules,
     format_projection_rules,
     format_sql_examples_section,
     format_value_anchors_section,
@@ -302,6 +303,9 @@ class SQLFromCandidatesAgent(BaseAgent):
                 dialect=dialect,
                 dialect_rules=format_dialect_rules(dialect),
                 projection_rules=format_projection_rules(
+                    state.get("shorten_answer", False)
+                ),
+                grounding_filter_rules=format_grounding_filter_rules(
                     state.get("shorten_answer", False)
                 ),
                 main_question=main_question,

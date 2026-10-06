@@ -40,7 +40,7 @@ business terms.
 says the column should not be used or is almost unusable: it is deprecated, \
 says do not use, is not populated, is unreliable, or is almost always empty. \
 A note that some records lack a value is not enough to mark it unusable. \
-Missing data for closed or retired records still leaves the column usable.
+Missing data for inactive or historical records still leaves the column usable.
 
 Rules:
 - Use the column name, data type, sample values, description, and \
@@ -57,6 +57,24 @@ def _column_text(col: dict[str, Any], key: str) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _description_repeats_column_name(col: dict[str, Any]) -> bool:
+    """True when the stored description is only the physical column name.
+
+    Ingest sometimes copies the name into the description. That is not a
+    curated sentence, so the compile replaces it with the model sentence.
+    """
+    name = str(col.get("name") or "").strip()
+    description = _column_text(col, "description")
+    return bool(name) and description.casefold() == name.casefold()
+
+
+def _curated_description(col: dict[str, Any]) -> str:
+    """Description worth keeping, excluding a copy of the column name."""
+    if _description_repeats_column_name(col):
+        return ""
+    return _column_text(col, "description")
 
 
 @dataclass(frozen=True)
@@ -172,7 +190,7 @@ def _column_prompt_line(
     data_type = col.get("data_type") or "unknown"
     samples = _get_column_samples(col, columns_profiling_samples)
     line = _add_samples_suffix(f"  - {name} ({data_type})", samples)
-    description = _column_text(col, "description")
+    description = _curated_description(col)
     value_description = _column_text(col, "value_description")
     if description:
         line += f"\n    description: {description}"
@@ -214,7 +232,7 @@ def _describe_column_batch(
 
     # The prompt annotates each column as "<name> (<dtype>)". When a column name
     # contains spaces or parentheses, the model sometimes echoes the annotation back as
-    # the column_name (e.g. "Academic Year (TEXT)"). Resolve each returned name
+    # the column_name (e.g. "Order Date (TEXT)"). Resolve each returned name
     # to the requested physical name: exact match first, then the longest
     # requested name the returned string starts with.
     requested_names = [c.get("name", "") for c in columns if c.get("name")]
@@ -285,7 +303,7 @@ def _columns_to_read(
         name = col.get("name") or ""
         if not name:
             continue
-        has_text = bool(_column_text(col, "description")) or bool(
+        has_text = bool(_curated_description(col)) or bool(
             _column_text(col, "value_description")
         )
         if name not in fk_cols or has_text:
@@ -325,13 +343,13 @@ def build_column_attributes(
         and name not in unusable_names
     ]
 
-    # An existing description is kept. The LLM still saw that column so it
-    # could judge unusable, but its generated sentence is not used.
-    cols_with_description = [
-        col for col in candidates if _column_text(col, "description")
-    ]
+    # A curated description is kept. The LLM still saw that column so it
+    # could judge unusable, but its generated sentence is not used. A
+    # description that only repeats the column name is not curated: ingest
+    # copied the name, and the model sentence replaces it.
+    cols_with_description = [col for col in candidates if _curated_description(col)]
     cols_without_description = [
-        col for col in candidates if not _column_text(col, "description")
+        col for col in candidates if not _curated_description(col)
     ]
     llm_descriptions = {
         name: read.description for name, read in reads.items() if read.description

@@ -160,33 +160,33 @@ def test_prompt_includes_value_description_when_present() -> None:
     rendered = format_tables_for_prompt(
         [
             {
-                "name": "schools",
+                "name": "accounts",
                 "columns": [
                     {
-                        "name": "StreetAbr",
+                        "name": "postal_code",
                         "data_type": "text",
-                        "description": "Abbreviated street.",
-                        "value_description": "Some closed schools have no value.",
+                        "description": "Postal code.",
+                        "value_description": "Some inactive accounts have no value.",
                     }
                 ],
             }
         ]
     )
     assert "value description" in rendered
-    assert "Some closed schools have no value." in rendered
+    assert "Some inactive accounts have no value." in rendered
 
 
 def test_prompt_marks_unusable_columns() -> None:
     rendered = format_tables_for_prompt(
         [
             {
-                "name": "schools",
+                "name": "accounts",
                 "columns": [
-                    {"name": "StreetAbr", "data_type": "text"},
+                    {"name": "postal_code", "data_type": "text"},
                     {
-                        "name": "AdmFName3",
+                        "name": "spare_name",
                         "data_type": "text",
-                        "description": "Third administrator first name.",
+                        "description": "Spare contact name.",
                         "unusable": True,
                     },
                 ],
@@ -194,9 +194,7 @@ def test_prompt_marks_unusable_columns() -> None:
         ]
     )
     assert "unusable" in rendered
-    assert "AdmFName3 | text | unknown | Third administrator first name. | true" in (
-        rendered
-    )
+    assert "spare_name | text | unknown | Spare contact name. | true" in (rendered)
 
 
 def test_sql_prompt_appends_unusable_columns_without_mutating(
@@ -204,21 +202,21 @@ def test_sql_prompt_appends_unusable_columns_without_mutating(
 ) -> None:
     tables = [
         {
-            "id": "schools",
-            "columns": [{"name": "StreetAbr", "data_type": "text"}],
+            "id": "accounts",
+            "columns": [{"name": "postal_code", "data_type": "text"}],
         }
     ]
 
     def fake_fetch(ids: list[str], *, include_unusable: bool = False) -> list[dict]:
-        assert ids == ["schools"]
+        assert ids == ["accounts"]
         assert include_unusable is True
         return [
             {
-                "id": "schools",
+                "id": "accounts",
                 "columns": [
-                    {"name": "StreetAbr", "unusable": False},
+                    {"name": "postal_code", "unusable": False},
                     {
-                        "name": "AdmFName3",
+                        "name": "spare_name",
                         "data_type": "text",
                         "unusable": True,
                         "value_description": "not useful",
@@ -234,10 +232,10 @@ def test_sql_prompt_appends_unusable_columns_without_mutating(
 
     prompt_tables = tables_for_sql_prompt(tables)
 
-    assert [column["name"] for column in tables[0]["columns"]] == ["StreetAbr"]
+    assert [column["name"] for column in tables[0]["columns"]] == ["postal_code"]
     assert [column["name"] for column in prompt_tables[0]["columns"]] == [
-        "StreetAbr",
-        "AdmFName3",
+        "postal_code",
+        "spare_name",
     ]
     assert prompt_tables[0]["columns"][1]["value_description"] == "not useful"
 
@@ -247,8 +245,8 @@ def test_sql_prompt_appends_missing_primary_key_columns(
 ) -> None:
     tables = [
         {
-            "id": "schools",
-            "columns": [{"name": "StreetAbr", "data_type": "text"}],
+            "id": "accounts",
+            "columns": [{"name": "postal_code", "data_type": "text"}],
         }
     ]
 
@@ -256,17 +254,17 @@ def test_sql_prompt_appends_missing_primary_key_columns(
         del ids, include_unusable
         return [
             {
-                "id": "schools",
-                "pk": ["CDSCode", "StreetAbr"],
+                "id": "accounts",
+                "pk": ["account_id", "postal_code"],
                 "columns": [
                     {
-                        "name": "CDSCode",
+                        "name": "account_id",
                         "data_type": "text",
-                        "description": "School identifier.",
+                        "description": "Account identifier.",
                         "unusable": False,
                     },
-                    {"name": "StreetAbr", "data_type": "text", "unusable": False},
-                    {"name": "StatusType", "data_type": "text", "unusable": False},
+                    {"name": "postal_code", "data_type": "text", "unusable": False},
+                    {"name": "status", "data_type": "text", "unusable": False},
                 ],
             }
         ]
@@ -278,14 +276,14 @@ def test_sql_prompt_appends_missing_primary_key_columns(
 
     prompt_tables = tables_for_sql_prompt(tables)
 
-    assert [column["name"] for column in tables[0]["columns"]] == ["StreetAbr"]
+    assert [column["name"] for column in tables[0]["columns"]] == ["postal_code"]
     assert "pk" not in tables[0]
     assert [column["name"] for column in prompt_tables[0]["columns"]] == [
-        "StreetAbr",
-        "CDSCode",
+        "postal_code",
+        "account_id",
     ]
-    assert prompt_tables[0]["pk"] == ["CDSCode", "StreetAbr"]
-    assert prompt_tables[0]["columns"][1]["description"] == "School identifier."
+    assert prompt_tables[0]["pk"] == ["account_id", "postal_code"]
+    assert prompt_tables[0]["columns"][1]["description"] == "Account identifier."
 
 
 def test_prompt_omits_value_description_when_absent() -> None:

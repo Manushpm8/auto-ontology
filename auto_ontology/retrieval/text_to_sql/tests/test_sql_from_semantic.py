@@ -18,6 +18,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
 from auto_ontology.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_grounding_filter_rules,
     format_projection_rules,
 )
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
@@ -112,6 +113,19 @@ def test_sql_prompt_limits_unusable_columns_to_explicit_requests() -> None:
     assert rule in format_projection_rules(shorten_answer=True)
 
 
+def test_short_answer_prefers_the_evidence_grounded_table() -> None:
+    rule = (
+        "The evidence-grounded table wins over a similarly named column, a "
+        "closer description, a matching stored value, or a semantically matched "
+        "column on any other table, including the table that holds the "
+        "requested output."
+    )
+
+    assert rule not in format_grounding_filter_rules(shorten_answer=False)
+    assert rule in format_grounding_filter_rules(shorten_answer=True)
+    assert rule not in format_projection_rules(shorten_answer=True)
+
+
 def test_projection_strictness_is_configured_per_request() -> None:
     strict_rule = "- Return exactly the requested output fields and NO others."
     combined_aggregate_rule = (
@@ -186,20 +200,20 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:
     rendered = format_important_columns_for_prompt(
         {
-            "attr_name": "Charter Number",
-            "col_name": "CharterNum",
-            "table_name": "schools",
-            "schema_name": "main",
-            "database_name": "california_schools",
+            "attr_name": "Order Number",
+            "col_name": "order_number",
+            "table_name": "orders",
+            "schema_name": "public",
+            "database_name": "shop",
             "datatype": "text",
         },
         [
             {
-                "attr_name": "District Name",
-                "col_name": "District",
-                "table_name": "schools",
-                "schema_name": "main",
-                "database_name": "california_schools",
+                "attr_name": "Customer Name",
+                "col_name": "customer_name",
+                "table_name": "orders",
+                "schema_name": "public",
+                "database_name": "shop",
                 "datatype": "text",
                 "path": [],
             },
@@ -207,41 +221,41 @@ def test_important_columns_include_full_details_and_ignore_structural_paths() ->
                 "attr_name": "Removed Table Value",
                 "col_name": "value",
                 "table_name": "filtered_out",
-                "schema_name": "main",
-                "database_name": "california_schools",
+                "schema_name": "public",
+                "database_name": "shop",
                 "datatype": "text",
                 "path": [],
             },
-            {"path": [{"source_table": "schools", "target_table": "districts"}]},
+            {"path": [{"source_table": "orders", "target_table": "customers"}]},
         ],
         [
             {
-                "name": "schools",
-                "schema_name": "main",
-                "database_name": "california_schools",
+                "name": "orders",
+                "schema_name": "public",
+                "database_name": "shop",
                 "columns": [
                     {
-                        "name": "CharterNum",
+                        "name": "order_number",
                         "data_type": "text",
-                        "description": "Four-character charter number.",
+                        "description": "Four-character order number.",
                         "sample_values": ["0040", "0728"],
                         "format": "NNNN",
                     },
                     {
-                        "name": "District",
+                        "name": "customer_name",
                         "data_type": "text",
-                        "description": "District overseeing the school.",
+                        "description": "Customer who placed the order.",
                     },
                 ],
             }
         ],
     )
 
-    assert "Semantic match: Charter Number" in rendered
-    assert "california_schools.main.schools" in rendered
-    assert "Four-character charter number." in rendered
+    assert "Semantic match: Order Number" in rendered
+    assert "shop.public.orders" in rendered
+    assert "Four-character order number." in rendered
     assert "sample values: 0040, 0728" in rendered
     assert "format: NNNN" in rendered
-    assert "Semantic match: District Name" in rendered
+    assert "Semantic match: Customer Name" in rendered
     assert "Removed Table Value" not in rendered
     assert "structural bridge" not in rendered

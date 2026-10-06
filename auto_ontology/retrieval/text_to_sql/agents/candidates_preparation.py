@@ -96,14 +96,14 @@ def _qualified_name(t: dict) -> str:
 
 
 # The relevance filter sees each table's columns, with sample values for
-# JSONB columns specifically, since their key names alone (e.g. "Res_Scr")
+# JSONB columns specifically, since their key names alone (e.g. "score")
 # can decoy-match unrelated tables. Flat columns get their description and
 # value description when present. JSONB sample values are already stored on
 # the Column row and reach here via fetch_tables_by_ids's nested `columns`,
 # so this adds no extra DB round trip, only extra prompt tokens.
 #
 # Truncation is silent and costs the answer when the cut column is the one
-# that justified the table: on BIRD dev, 5 wrong drops all named a column
+# that justified the table: on a wide table, 5 wrong drops all named a column
 # past position 25 in a 44-column table. Env-overridable because the right
 # value is schema-dependent — it has to exceed the widest table the filter
 # must reason about, not the median one.
@@ -120,7 +120,7 @@ _HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
 
 # Pools this size or smaller skip the relevance filter. Default 2 is the
 # long-standing behaviour. The filter drops a uniquely-needed table at a
-# near-constant rate whatever the pool size (BIRD dev: 2.0% at 2-4 candidates,
+# near-constant rate whatever the pool size (measured at 2.0% for 2-4 candidates,
 # 2.5% at 5-7, 2.2% at 8+), so raising this buys recoveries and perturbations
 # in roughly equal measure — 4 was the only value measured to recover more
 # than it risks, and every larger bypass lands at the same break-even.

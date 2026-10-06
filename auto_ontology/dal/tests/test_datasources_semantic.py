@@ -423,6 +423,25 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     assert columns["total"]["is_nullable"] is None
 
 
+def test_tables_by_ids_prefers_the_attribute_description(world) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.total"])
+        .values(description="from the column")
+    )
+    attribute = world.attribute("order-total", "from the attribute")
+    _link(
+        s.column__has_attribute,
+        column_id=world.columns["orders.total"],
+        attribute_id=attribute,
+    )
+    columns = {
+        column["name"]: column
+        for column in d.fetch_tables_by_ids([world.tables["orders"]])[0]["columns"]
+    }
+    assert columns["total"]["description"] == "from the attribute"
+
+
 def test_tables_by_ids_drops_unusable_columns_and_keeps_value_description(
     world,
 ) -> None:

@@ -29,7 +29,7 @@ def test_anchor_maps_evidence_to_schema_table_column(
 
     def fake_invoke(_llm, messages, _model):
         captured["prompt"] = messages[-1].content
-        return AnchorColumnModel(anchor_id="frpm", reasoning="Evidence matches")
+        return AnchorColumnModel(anchor_id="revenue", reasoning="Evidence matches")
 
     monkeypatch.setattr(
         candidates_preparation, "invoke_with_structured_output", fake_invoke
@@ -38,39 +38,39 @@ def test_anchor_maps_evidence_to_schema_table_column(
         AgentState,
         {
             "llm": FakeLlm(),
-            "evidence": "eligible rate = FRPM / Enrollment",
+            "evidence": "margin = revenue / orders",
         },
     )
     contexts = {
-        "frpm": {
-            "attr_name": "FRPM Count (K-12)",
+        "revenue": {
+            "attr_name": "Revenue Amount",
             "schema_name": "main",
-            "table_name": "frpm",
-            "col_name": "frpm_count_k12",
-            "attr_description": "Eligible meal-program students.",
-            "value_description": "Count of students eligible for free or reduced meals.",
+            "table_name": "orders",
+            "col_name": "revenue_amount",
+            "attr_description": "Recorded revenue.",
+            "value_description": "Amount stored in major currency units.",
         },
-        "enrollment": {
-            "attr_name": "Enrollment (K-12)",
+        "orders": {
+            "attr_name": "Order Count",
             "schema_name": "main",
-            "table_name": "frpm",
-            "col_name": "enrollment_k12",
-            "attr_description": "K-12 student enrollment.",
+            "table_name": "orders",
+            "col_name": "order_count",
+            "attr_description": "Number of orders.",
         },
     }
 
     anchor_id, _ = CandidatePreparationAgent()._identify_anchor(
-        state, "Which school has the highest eligible rate?", contexts
+        state, "Which account has the highest margin?", contexts
     )
 
-    assert anchor_id == "frpm"
+    assert anchor_id == "revenue"
     assert "Authoritative evidence:" in captured["prompt"]
-    assert "main.frpm.frpm_count_k12" in captured["prompt"]
-    assert "main.frpm.enrollment_k12" in captured["prompt"]
-    assert "FRPM Count (K-12)" not in captured["prompt"]
+    assert "main.orders.revenue_amount" in captured["prompt"]
+    assert "main.orders.order_count" in captured["prompt"]
+    assert "Revenue Amount" not in captured["prompt"]
     assert "schema.table.column physical references" in captured["prompt"]
     assert (
-        "value description: Count of students eligible for free or reduced meals."
+        "value description: Amount stored in major currency units."
         in captured["prompt"]
     )
 
@@ -78,18 +78,18 @@ def test_anchor_maps_evidence_to_schema_table_column(
 def test_relevance_filter_column_includes_value_description() -> None:
     rendered = candidates_preparation._format_relevance_filter_column(
         {
-            "name": "StreetAbr",
+            "name": "postal_code",
             "data_type": "text",
-            "description": "Abbreviated street.",
-            "value_description": "Some closed schools have no value.",
+            "description": "Postal code.",
+            "value_description": "Some inactive accounts have no value.",
         }
     )
     omitted = candidates_preparation._format_relevance_filter_column(
         {"name": "id", "data_type": "integer", "value_description": "  "}
     )
 
-    assert "Abbreviated street." in rendered
-    assert "value description: Some closed schools have no value." in rendered
+    assert "Postal code." in rendered
+    assert "value description: Some inactive accounts have no value." in rendered
     assert "value description" not in omitted
 
 
@@ -144,10 +144,10 @@ def test_fetched_columns_drop_names_the_store_omitted() -> None:
     tables = candidates_preparation._apply_fetched_columns(
         [
             {
-                "id": "schools",
+                "id": "accounts",
                 "columns": [
-                    {"name": "StreetAbr", "data_type": "text"},
-                    {"name": "RetiredCode", "data_type": "text"},
+                    {"name": "postal_code", "data_type": "text"},
+                    {"name": "retired_code", "data_type": "text"},
                 ],
             },
             {
@@ -157,23 +157,25 @@ def test_fetched_columns_drop_names_the_store_omitted() -> None:
         ],
         [
             {
-                "id": "schools",
+                "id": "accounts",
                 "columns": [
                     {
-                        "name": "StreetAbr",
+                        "name": "postal_code",
                         "data_type": "text",
-                        "value_description": "Some closed schools have no value.",
+                        "value_description": "Some inactive accounts have no value.",
                     }
                 ],
             }
         ],
-        ["schools", "closed"],
+        ["accounts", "closed"],
     )
     by_id = {table["id"]: table for table in tables}
-    assert [column["name"] for column in by_id["schools"]["columns"]] == ["StreetAbr"]
+    assert [column["name"] for column in by_id["accounts"]["columns"]] == [
+        "postal_code"
+    ]
     assert (
-        by_id["schools"]["columns"][0]["value_description"]
-        == "Some closed schools have no value."
+        by_id["accounts"]["columns"][0]["value_description"]
+        == "Some inactive accounts have no value."
     )
     assert by_id["closed"]["columns"] == []
 
@@ -604,16 +606,16 @@ def test_removal_is_declined_when_the_table_may_restrict_rows(monkeypatch) -> No
     _stub_filter_llm(
         monkeypatch,
         TableRelevanceModel(
-            reasoning="frpm supplies no output column",
+            reasoning="invoices supplies no output column",
             tables_to_remove=[
-                _removal("db.main.frpm", no_column=True, cannot_change_rows=False)
+                _removal("db.main.invoices", no_column=True, cannot_change_rows=False)
             ],
         ),
     )
 
-    kept = _run_filter([_table(n) for n in ("schools", "frpm", "satscores")])
+    kept = _run_filter([_table(n) for n in ("accounts", "invoices", "payments")])
 
-    assert "frpm" in [t["name"] for t in kept]
+    assert "invoices" in [t["name"] for t in kept]
 
 
 def test_removal_is_declined_when_the_table_supplies_a_needed_column(
@@ -624,11 +626,11 @@ def test_removal_is_declined_when_the_table_supplies_a_needed_column(
         TableRelevanceModel(
             reasoning="only used for scoping",
             tables_to_remove=[
-                _removal("db.main.frpm", no_column=False, cannot_change_rows=True)
+                _removal("db.main.invoices", no_column=False, cannot_change_rows=True)
             ],
         ),
     )
 
-    kept = _run_filter([_table(n) for n in ("schools", "frpm", "satscores")])
+    kept = _run_filter([_table(n) for n in ("accounts", "invoices", "payments")])
 
-    assert "frpm" in [t["name"] for t in kept]
+    assert "invoices" in [t["name"] for t in kept]

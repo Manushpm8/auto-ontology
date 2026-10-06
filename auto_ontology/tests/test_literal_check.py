@@ -239,8 +239,8 @@ def _high_card_values(n: int = 21) -> pd.DataFrame:
 def test_case_mismatch_found_on_high_cardinality_column():
     """badges.Name has far more than 20 distinct values, so the column can't be
     judged by its whole value set — but 'Outliers' vs. the stored 'outliers' is
-    still a plain case mismatch, and a point lookup finds it. (Mirrors BIRD
-    q650, where the exact-match filter silently returned nothing.)
+    still a plain case mismatch, and a point lookup finds it. An exact-match
+    filter on the original spelling silently returned nothing.
     """
     connector = _ScriptedConnector(
         [

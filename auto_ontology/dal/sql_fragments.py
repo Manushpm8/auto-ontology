@@ -14,7 +14,7 @@ query must order by something unique.
 
 from __future__ import annotations
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, case, func, select
 
 from auto_ontology.dal import schema as s
 
@@ -64,13 +64,41 @@ def _attribute_description(column_id: ColumnElement, link_table) -> ColumnElemen
     )
 
 
+def _description_unless_column_name(column) -> ColumnElement:
+    """The column's own description, or ``NULL`` when it only repeats the name.
+
+    Ingest often stores the column name in the description. That text is not a
+    description: it must not hide the sentence written on the column attribute.
+    """
+    own = _non_blank(column.c.description)
+    name = _non_blank(column.c.name)
+    return case((func.lower(own) == func.lower(name), None), else_=own)
+
+
+def column_prompt_description_expr(column=s.catalog_column) -> ColumnElement:
+    """Description shown in LLM prompts.
+
+    A ``HAS_ATTRIBUTE`` sentence comes first whenever the column has one. The
+    catalog description is the fallback, and a description that only repeats
+    the column name is still missing. A ``SEMANTIC_FK`` attribute is last: it
+    describes a column this one references, not this column.
+    """
+    return func.coalesce(
+        _attribute_description(column.c.id, s.column__has_attribute),
+        _description_unless_column_name(column),
+        _attribute_description(column.c.id, s.column__semantic_fk),
+    )
+
+
 def column_description_expr(column=s.catalog_column) -> ColumnElement:
     """A column's description, falling back through its attributes.
 
     Prefers the column's own description; then a ``HAS_ATTRIBUTE`` attribute's;
     then a ``SEMANTIC_FK`` one's. The order matters and is not alphabetical: an
     attribute the column *is* an instance of describes it better than one it
-    merely *references*.
+    merely *references*. A description that only repeats the column name is
+    missing, so the attribute sentence is used instead. Prompt text uses
+    :func:`column_prompt_description_expr`, which prefers the attribute.
 
     Takes the **table or alias** the caller is selecting from, not an id. Both
     are needed — ``description`` for the first branch and ``id`` to correlate
@@ -81,7 +109,7 @@ def column_description_expr(column=s.catalog_column) -> ColumnElement:
     answer, which is the good outcome; passing the alias avoids it entirely.
     """
     return func.coalesce(
-        _non_blank(column.c.description),
+        _description_unless_column_name(column),
         _attribute_description(column.c.id, s.column__has_attribute),
         _attribute_description(column.c.id, s.column__semantic_fk),
     )

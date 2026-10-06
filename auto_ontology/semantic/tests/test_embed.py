@@ -13,15 +13,15 @@ def test_attribute_embedding_includes_value_description() -> None:
     from auto_ontology.semantic.embed import _build_rows
 
     rows = _build_rows(
-        "schools",
-        {"name": "School", "description": "A school"},
+        "accounts",
+        {"name": "Account", "description": "A customer account"},
         [
             {
-                "name": "streetAbr",
-                "description": "Abbreviated street.",
-                "value_description": "Some closed schools have no value.",
-                "term_name": "School",
-                "source_column": "StreetAbr",
+                "name": "postalCode",
+                "description": "Postal code.",
+                "value_description": "Some inactive accounts have no value.",
+                "term_name": "Account",
+                "source_column": "postal_code",
                 "id": "a1",
             }
         ],
@@ -29,8 +29,8 @@ def test_attribute_embedding_includes_value_description() -> None:
     attribute = next(
         row for row in rows if row["metadata"]["label"] == "ColumnAttribute"
     )
-    assert "Abbreviated street." in attribute["text"]
-    assert "Some closed schools have no value." in attribute["text"]
+    assert "Postal code." in attribute["text"]
+    assert "Some inactive accounts have no value." in attribute["text"]
 
 
 def test_format_sample_values_handles_legacy_json_string_and_native_list() -> None:

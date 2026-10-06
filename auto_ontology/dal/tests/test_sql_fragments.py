@@ -32,6 +32,7 @@ from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.dal.sql_fragments import (  # noqa: E402
     column_description_expr,
+    column_prompt_description_expr,
     table_description_expr,
 )
 
@@ -92,6 +93,15 @@ def _describe_column(column_id: str) -> str | None:
     return rows[0]["d"]
 
 
+def _describe_prompt_column(column_id: str) -> str | None:
+    rows = store().query_read(
+        select(column_prompt_description_expr().label("d")).where(
+            s.catalog_column.c.id == column_id
+        )
+    )
+    return rows[0]["d"]
+
+
 def _describe_table(table_id: str) -> str | None:
     rows = store().query_read(
         select(table_description_expr().label("d")).where(
@@ -123,6 +133,40 @@ def test_the_columns_own_description_wins(fixture) -> None:
         )
     )
     assert _describe_column(fixture["column"]) == "from the column"
+
+
+def test_prompt_description_prefers_the_attribute(fixture) -> None:
+    """Prompt text takes the attribute sentence even when the catalog has one."""
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == fixture["column"])
+        .values(description="from the column")
+    )
+    attr = _attribute(fixture["prefix"], "from the attribute")
+    store().query_write(
+        s.column__has_attribute.insert().values(
+            column_id=fixture["column"], attribute_id=attr
+        )
+    )
+    assert _describe_prompt_column(fixture["column"]) == "from the attribute"
+    assert _describe_column(fixture["column"]) == "from the column"
+
+
+def test_prompt_description_uses_the_column_when_the_attribute_is_blank(
+    fixture,
+) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == fixture["column"])
+        .values(description="from the column")
+    )
+    attr = _attribute(fixture["prefix"], "   ")
+    store().query_write(
+        s.column__has_attribute.insert().values(
+            column_id=fixture["column"], attribute_id=attr
+        )
+    )
+    assert _describe_prompt_column(fixture["column"]) == "from the column"
 
 
 def test_falls_back_to_has_attribute(fixture) -> None:
@@ -164,6 +208,28 @@ def test_falls_back_to_semantic_fk_when_that_is_all_there_is(fixture) -> None:
         )
     )
     assert _describe_column(fixture["column"]) == "referenced"
+
+
+def test_a_description_that_copies_the_column_name_uses_the_attribute(
+    fixture,
+) -> None:
+    """The stored name is not a description.
+
+    Ingest copies the column name into the description. The sentence on the
+    column attribute is what readers should see.
+    """
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == fixture["column"])
+        .values(description="Email")
+    )
+    attr = _attribute(fixture["prefix"], "Address used to reach the customer.")
+    store().query_write(
+        s.column__has_attribute.insert().values(
+            column_id=fixture["column"], attribute_id=attr
+        )
+    )
+    assert _describe_column(fixture["column"]) == "Address used to reach the customer."
 
 
 def test_a_blank_description_does_not_mask_the_fallback(fixture) -> None:

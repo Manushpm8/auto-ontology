@@ -82,8 +82,7 @@ class TableRemovalModel(BaseModel):
             "True only if removing this table cannot change WHICH rows qualify. "
             "Joining a table also restricts the result to rows that have a "
             "match in it, so this is False whenever the question limits results "
-            "to rows having a related record there (only schools that appear in "
-            "frpm; only patients who have an examination record) — even though "
+            "to rows that have a related record in that table, even though "
             "none of that table's columns are returned."
         ),
     )

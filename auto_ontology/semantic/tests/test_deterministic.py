@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from auto_ontology.semantic.deterministic import (
     ColumnRead,
+    _column_prompt_line,
     _describe_column_batch,
     build_column_attributes,
     column_attribute_specs,
@@ -72,6 +73,27 @@ def test_llm_description_used_as_fallback(_mock_desc) -> None:
 
 @patch(
     "auto_ontology.semantic.deterministic._generate_column_descriptions",
+    return_value={
+        "OrderId": "Identifier of the order.",
+        "status": "Current state of the record.",
+    },
+)
+def test_description_that_copies_the_column_name_uses_the_llm_sentence(
+    _mock_desc,
+) -> None:
+    columns = [
+        {"name": "OrderId", "data_type": "text", "description": "orderid"},
+        {"name": "status", "data_type": "text", "description": "Record status."},
+    ]
+    specs = {s.source_column: s for s in column_attribute_specs(columns, [])}
+    assert specs["OrderId"].description == "Identifier of the order."
+    assert specs["status"].description == "Record status."
+    prompt = _column_prompt_line(columns[0], {})
+    assert "description:" not in prompt
+
+
+@patch(
+    "auto_ontology.semantic.deterministic._generate_column_descriptions",
     return_value={},
 )
 def test_date_column_description_states_stored_notation(_mock_desc) -> None:
@@ -105,7 +127,7 @@ def test_unusable_column_is_not_an_attribute(mock_desc) -> None:
         "retired_code": ColumnRead(
             description="Deprecated. Do not use.", unusable=True
         ),
-        "StreetAbr": ColumnRead(description="Abbreviated street.", unusable=False),
+        "postal_code": ColumnRead(description="Postal code.", unusable=False),
         "customer_id": ColumnRead(description="Customer reference.", unusable=True),
     }
     columns = [
@@ -115,12 +137,12 @@ def test_unusable_column_is_not_an_attribute(mock_desc) -> None:
             "description": "Deprecated. Do not use. Almost always empty.",
         },
         {
-            "name": "StreetAbr",
+            "name": "postal_code",
             "data_type": "text",
-            "description": "The abbreviated street address.",
+            "description": "The postal code.",
             "value_description": (
-                "Note: Some records (primarily records of closed or retired "
-                "schools) may not have data in this field."
+                "Note: Some records (primarily inactive or historical "
+                "records) may not have data in this field."
             ),
         },
         {
@@ -134,12 +156,12 @@ def test_unusable_column_is_not_an_attribute(mock_desc) -> None:
         columns,
         [{"source_column": "customer_id", "target_table": "customers"}],
     )
-    assert {spec.source_column for spec in built.specs} == {"StreetAbr", "amount"}
-    street = next(spec for spec in built.specs if spec.source_column == "StreetAbr")
-    assert street.value_description.startswith("Note: Some records")
+    assert {spec.source_column for spec in built.specs} == {"postal_code", "amount"}
+    postal = next(spec for spec in built.specs if spec.source_column == "postal_code")
+    assert postal.value_description.startswith("Note: Some records")
     assert set(built.unusable_columns) == {"retired_code", "customer_id"}
     sent = {col["name"] for col in mock_desc.call_args.args[0]}
-    assert {"retired_code", "StreetAbr", "customer_id", "amount"} <= sent
+    assert {"retired_code", "postal_code", "customer_id", "amount"} <= sent
 
 
 def test_unusable_prompt_includes_value_description(monkeypatch) -> None:
@@ -151,8 +173,8 @@ def test_unusable_prompt_includes_value_description(monkeypatch) -> None:
         return ColumnDescriptionResult(
             descriptions=[
                 ColumnDescription(
-                    column_name="StreetAbr",
-                    description="Abbreviated street.",
+                    column_name="postal_code",
+                    description="Postal code.",
                     unusable=False,
                 )
             ]
@@ -168,12 +190,12 @@ def test_unusable_prompt_includes_value_description(monkeypatch) -> None:
     reads = _describe_column_batch(
         [
             {
-                "name": "StreetAbr",
+                "name": "postal_code",
                 "data_type": "text",
-                "description": "The abbreviated street address.",
+                "description": "The postal code.",
                 "value_description": (
-                    "Note: Some records (primarily records of closed or retired "
-                    "schools) may not have data in this field."
+                    "Note: Some records (primarily inactive or historical "
+                    "records) may not have data in this field."
                 ),
             }
         ],
@@ -181,8 +203,8 @@ def test_unusable_prompt_includes_value_description(monkeypatch) -> None:
     )
     assert "not enough to mark it unusable" in seen["system"]
     assert "value_description:" in seen["human"]
-    assert "closed or retired" in seen["human"]
-    assert reads["StreetAbr"].unusable is False
+    assert "inactive or historical" in seen["human"]
+    assert reads["postal_code"].unusable is False
 
 
 def test_to_term_name() -> None:

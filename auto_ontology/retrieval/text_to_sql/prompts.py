@@ -31,6 +31,28 @@ _UNUSABLE_COLUMN_RULE = (
 )
 
 
+_GROUNDED_FILTER_RULE = (
+    "- When evidence grounds one filter to a table, apply every other filter "
+    "that this table can express on that same table. The evidence-grounded "
+    "table wins over a similarly named column, a closer description, a matching "
+    "stored value, or a semantically matched column on any other table, "
+    "including the table that holds the requested output. A shared label is not "
+    "a reason to switch tables.\n"
+    "- Leave the evidence-grounded table only when it has no column that can "
+    "express that filter. A same-table column that stores the same kind of "
+    "label is enough; do not reject it because another table's column looks "
+    "more specific or more familiar.\n"
+)
+
+
+def format_grounding_filter_rules(shorten_answer: bool = False) -> str:
+    """Prefer the evidence-grounded table when a second filter is ambiguous."""
+
+    if not shorten_answer:
+        return ""
+    return _GROUNDED_FILTER_RULE
+
+
 def format_projection_rules(shorten_answer: bool = False) -> str:
     """Render benchmark-strict guidance only when shorter answers are requested."""
 
@@ -103,6 +125,7 @@ create_sql_user_prompt = (
     "- Ground each output and filter to the exact column meaning; similarly named "
     "IDs, codes, labels, and columns from other tables are not interchangeable. "
     "Use descriptions, evidence, formats, and sample values to disambiguate.\n"
+    "{grounding_filter_rules}"
     "- Use equality only for an exact value. For contains/includes/mentions-style "
     "wording, use an appropriate substring predicate.\n"
     "- GROUP BY must include all non-aggregated columns in SELECT.\n"
@@ -1062,9 +1085,9 @@ are actually needed to answer the question.
 Rules:
 - Only remove tables you are confident are NOT needed in the SQL query.
 - A table can be required even when none of its columns appear in the answer:
-  joining it may restrict WHICH rows qualify (only schools that appear in
-  frpm; only patients who have an examination record). "No column of mine is
-  returned" is NOT a reason to remove a table.
+  joining it may restrict WHICH rows qualify to those that have a related
+  record in that table. "No column of mine is returned" is NOT a reason to
+  remove a table.
 - Before removing a table, confirm BOTH: (a) it supplies no column the answer
   needs, AND (b) removing it cannot change the set of rows that qualify.
   Report both per table — a table stays unless both hold.

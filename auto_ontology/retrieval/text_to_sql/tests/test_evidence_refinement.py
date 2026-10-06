@@ -107,17 +107,17 @@ def test_grounding_catalog_includes_value_description() -> None:
     columns = _catalog_columns(
         [
             {
-                "name": "schools",
+                "name": "accounts",
                 "schema_name": "main",
                 "columns": [
                     {
-                        "name": "StreetAbr",
-                        "description": "Abbreviated street.",
-                        "value_description": "Some closed schools have no value.",
+                        "name": "postal_code",
+                        "description": "Postal code.",
+                        "value_description": "Some inactive accounts have no value.",
                     },
                     {
-                        "name": "CDSCode",
-                        "description": "CDSCode",
+                        "name": "account_id",
+                        "description": "account_id",
                         "value_description": " ",
                     },
                 ],
@@ -128,10 +128,10 @@ def test_grounding_catalog_includes_value_description() -> None:
     )
     by_name = {column["column"]: column["column_description"] for column in columns}
 
-    assert by_name["StreetAbr"] == (
-        "Abbreviated street. | value description: Some closed schools have no value."
+    assert by_name["postal_code"] == (
+        "Postal code. | value description: Some inactive accounts have no value."
     )
-    assert by_name["CDSCode"] == "CDSCode"
+    assert by_name["account_id"] == "account_id"
 
 
 def test_schema_grounding_uses_exact_evidence_column_and_rewrites_question() -> None:
