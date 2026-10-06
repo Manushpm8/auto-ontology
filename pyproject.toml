@@ -4,7 +4,7 @@
 
 [project]
 name = "auto-ontology-server"
-version = "1.0.0"
+version = "1.1.0"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "duckdb>=1.5.5",
@@ -36,7 +36,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "sqlalchemy>=2.0.52",
     "alembic>=1.19.1",
-    "apache-ossie-nvidia-gsf",
+    "apache-ossie-nvidia-auto-ontology",
     "langchain-postgres>=0.0.17",
     "pyhive[hive-pure-sasl]>=0.7.0",
     "thrift>=0.24.0",
@@ -55,6 +55,18 @@ packages = ["auto_ontology"]
 
 [tool.uv]
 package = true
+# Patched versions of transitive dependencies flagged by nSpect.
+# PyJWT is a constraint, so its dependents' upper bounds still apply. urllib3
+# is an override because nemo-retriever pins urllib3==2.7.0 exactly; an
+# override replaces every other range, so it keeps the <3 bound requests and
+# botocore declare.
+constraint-dependencies = [
+    "pyjwt>=2.15.1",  # BDSA-2026-35552 (via databricks/snowflake connectors, mcp)
+    "virtualenv>=21.14.2",  # CVE-2026-102930 (via ray)
+]
+override-dependencies = [
+    "urllib3>=2.8.0,<3",  # BDSA-2026-35861, BDSA-2026-35864 (via requests, botocore, nemo-retriever)
+]
 
 [[tool.uv.index]]
 name = "vendored-sdfm"
@@ -62,11 +74,8 @@ url = "vendor/wheels"
 format = "flat"
 
 [tool.uv.sources]
-# Upstream moved this from `converters/gsf` to `converters/nvidia` and renamed
-# the distribution and its import package (`ossie_gsf` -> `ossie_nvidia_gsf`).
-# The three names Auto Ontology imports are unchanged.
-apache-ossie-nvidia-gsf = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/nvidia" }
-# apache-ossie-nvidia-gsf = { path = "../ossie/converters/nvidia", editable = true }
+apache-ossie-nvidia-auto-ontology = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/nvidia" }
+# apache-ossie-nvidia-auto-ontology = { path = "../ossie/converters/nvidia", editable = true }
 
 [dependency-groups]
 dev = [

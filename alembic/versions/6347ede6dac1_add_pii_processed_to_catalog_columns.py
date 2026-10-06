@@ -4,7 +4,7 @@
 """add pii processed to catalog columns
 
 Revision ID: 6347ede6dac1
-Revises: c778a7d94c20
+Revises: 47ffb7499dfa
 Create Date: 2026-10-01 15:12:56.936774
 
 """
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "6347ede6dac1"
-down_revision: Union[str, Sequence[str], None] = "c778a7d94c20"
+down_revision: Union[str, Sequence[str], None] = "47ffb7499dfa"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
