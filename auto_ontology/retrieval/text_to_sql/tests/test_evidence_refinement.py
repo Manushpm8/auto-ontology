@@ -10,6 +10,7 @@ from auto_ontology.retrieval.text_to_sql.agents.evidence_refinement import (
     EvidenceRefinementAgent,
     EvidenceRefinementResult,
     EvidenceLineRepair,
+    _catalog_columns,
     apply_evidence_repairs,
     validate_schema_grounding,
 )
@@ -100,6 +101,37 @@ def _repair(
         column_name=column_name,
         reason="The question or samples prove the correction.",
     )
+
+
+def test_grounding_catalog_includes_value_description() -> None:
+    columns = _catalog_columns(
+        [
+            {
+                "name": "schools",
+                "schema_name": "main",
+                "columns": [
+                    {
+                        "name": "StreetAbr",
+                        "description": "Abbreviated street.",
+                        "value_description": "Some closed schools have no value.",
+                    },
+                    {
+                        "name": "CDSCode",
+                        "description": "CDSCode",
+                        "value_description": " ",
+                    },
+                ],
+            }
+        ],
+        None,
+        "sqlite",
+    )
+    by_name = {column["column"]: column["column_description"] for column in columns}
+
+    assert by_name["StreetAbr"] == (
+        "Abbreviated street. | value description: Some closed schools have no value."
+    )
+    assert by_name["CDSCode"] == "CDSCode"
 
 
 def test_schema_grounding_uses_exact_evidence_column_and_rewrites_question() -> None:

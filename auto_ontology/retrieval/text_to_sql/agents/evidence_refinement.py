@@ -216,6 +216,11 @@ def _catalog_columns(
                 for key in ("description", "usage_evidence", "constraints", "format")
                 if str(column.get(key) or "").strip()
             ]
+            value_description = " ".join(
+                str(column.get("value_description") or "").split()
+            )
+            if value_description:
+                column_details.append(f"value description: {value_description}")
             result.append(
                 {
                     "table": raw_table,

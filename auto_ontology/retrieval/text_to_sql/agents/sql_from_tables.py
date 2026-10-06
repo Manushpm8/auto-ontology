@@ -27,7 +27,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_tables_for_prompt,
+    tables_for_sql_prompt,
+)
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
@@ -137,7 +140,7 @@ class SQLFromTablesAgent(BaseAgent):
             observation_block=observation_block,
             queries=[],
             tables=format_tables_for_prompt(
-                relevant_tables,
+                tables_for_sql_prompt(relevant_tables),
                 target_db=path_state.get("target_db"),
                 dialect=dialect,
             ),

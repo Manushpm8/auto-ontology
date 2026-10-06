@@ -2,11 +2,14 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import pytest
+
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_semantic_context,
     format_tables_for_prompt,
     format_used_schema_for_prompt,
     qualify_table,
+    tables_for_sql_prompt,
 )
 
 
@@ -89,6 +92,7 @@ def test_used_schema_context_keeps_details_only_for_referenced_columns() -> None
                         "name": "total",
                         "data_type": "numeric",
                         "description": "Order total.",
+                        "value_description": "Stored in major currency units.",
                         "sample_values": ["12.50"],
                     },
                     {"name": "unused", "data_type": "text"},
@@ -104,6 +108,7 @@ def test_used_schema_context_keeps_details_only_for_referenced_columns() -> None
     assert "primary key: ['id']" in rendered
     assert "COLUMNS USED IN SQL:" in rendered
     assert "public.orders.total (numeric) - Order total." in rendered
+    assert "value description: Stored in major currency units." in rendered
     assert "sample values: 12.50" in rendered
     assert "unused" not in rendered
 
@@ -169,6 +174,118 @@ def test_prompt_includes_value_description_when_present() -> None:
     )
     assert "value description" in rendered
     assert "Some closed schools have no value." in rendered
+
+
+def test_prompt_marks_unusable_columns() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "schools",
+                "columns": [
+                    {"name": "StreetAbr", "data_type": "text"},
+                    {
+                        "name": "AdmFName3",
+                        "data_type": "text",
+                        "description": "Third administrator first name.",
+                        "unusable": True,
+                    },
+                ],
+            }
+        ]
+    )
+    assert "unusable" in rendered
+    assert "AdmFName3 | text | unknown | Third administrator first name. | true" in (
+        rendered
+    )
+
+
+def test_sql_prompt_appends_unusable_columns_without_mutating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tables = [
+        {
+            "id": "schools",
+            "columns": [{"name": "StreetAbr", "data_type": "text"}],
+        }
+    ]
+
+    def fake_fetch(ids: list[str], *, include_unusable: bool = False) -> list[dict]:
+        assert ids == ["schools"]
+        assert include_unusable is True
+        return [
+            {
+                "id": "schools",
+                "columns": [
+                    {"name": "StreetAbr", "unusable": False},
+                    {
+                        "name": "AdmFName3",
+                        "data_type": "text",
+                        "unusable": True,
+                        "value_description": "not useful",
+                    },
+                ],
+            }
+        ]
+
+    monkeypatch.setattr(
+        "auto_ontology.dal.datasources.fetch_tables_by_ids",
+        fake_fetch,
+    )
+
+    prompt_tables = tables_for_sql_prompt(tables)
+
+    assert [column["name"] for column in tables[0]["columns"]] == ["StreetAbr"]
+    assert [column["name"] for column in prompt_tables[0]["columns"]] == [
+        "StreetAbr",
+        "AdmFName3",
+    ]
+    assert prompt_tables[0]["columns"][1]["value_description"] == "not useful"
+
+
+def test_sql_prompt_appends_missing_primary_key_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tables = [
+        {
+            "id": "schools",
+            "columns": [{"name": "StreetAbr", "data_type": "text"}],
+        }
+    ]
+
+    def fake_fetch(ids: list[str], *, include_unusable: bool = False) -> list[dict]:
+        del ids, include_unusable
+        return [
+            {
+                "id": "schools",
+                "pk": ["CDSCode", "StreetAbr"],
+                "columns": [
+                    {
+                        "name": "CDSCode",
+                        "data_type": "text",
+                        "description": "School identifier.",
+                        "unusable": False,
+                    },
+                    {"name": "StreetAbr", "data_type": "text", "unusable": False},
+                    {"name": "StatusType", "data_type": "text", "unusable": False},
+                ],
+            }
+        ]
+
+    monkeypatch.setattr(
+        "auto_ontology.dal.datasources.fetch_tables_by_ids",
+        fake_fetch,
+    )
+
+    prompt_tables = tables_for_sql_prompt(tables)
+
+    assert [column["name"] for column in tables[0]["columns"]] == ["StreetAbr"]
+    assert "pk" not in tables[0]
+    assert [column["name"] for column in prompt_tables[0]["columns"]] == [
+        "StreetAbr",
+        "CDSCode",
+    ]
+    assert prompt_tables[0]["pk"] == ["CDSCode", "StreetAbr"]
+    assert prompt_tables[0]["columns"][1]["description"] == "School identifier."
 
 
 def test_prompt_omits_value_description_when_absent() -> None:

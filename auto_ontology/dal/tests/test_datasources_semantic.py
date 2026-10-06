@@ -447,6 +447,16 @@ def test_tables_by_ids_drops_unusable_columns_and_keeps_value_description(
     assert columns["order_id"]["value_description"] == "Surrogate key."
     assert columns["customer_id"]["value_description"] is None
 
+    included = {
+        column["name"]: column
+        for column in d.fetch_tables_by_ids(
+            [world.tables["orders"]], include_unusable=True
+        )[0]["columns"]
+    }
+    assert included["total"]["unusable"] is True
+    assert included["total"]["value_description"] == "should not be fetched"
+    assert included["order_id"]["unusable"] is False
+
 
 def test_tables_by_ids_is_empty_for_an_empty_list() -> None:
     assert d.fetch_tables_by_ids([]) == []

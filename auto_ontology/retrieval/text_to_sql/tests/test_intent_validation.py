@@ -68,6 +68,7 @@ def test_intent_validation_keeps_authoritative_attribute_join(
                         "name": "customer_id",
                         "data_type": "integer",
                         "description": "Customer placing the order.",
+                        "value_description": "Surrogate key of the customer.",
                         "sample_values": [10, 20],
                     },
                     {
@@ -115,6 +116,7 @@ def test_intent_validation_keeps_authoritative_attribute_join(
     assert "USED SQL OBJECTS" in prompt
     assert "- public.orders | description: Customer purchase records." in prompt
     assert "public.orders.customer_id (integer) - Customer placing the order." in prompt
+    assert "value description: Surrogate key of the customer." in prompt
     assert "sample values: 10, 20" in prompt
     assert "- public.customers | description: Customer directory." in prompt
     assert "public.customers.name (text) - Display name." in prompt

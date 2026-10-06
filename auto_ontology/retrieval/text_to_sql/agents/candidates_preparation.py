@@ -97,10 +97,10 @@ def _qualified_name(t: dict) -> str:
 
 # The relevance filter sees each table's columns, with sample values for
 # JSONB columns specifically, since their key names alone (e.g. "Res_Scr")
-# can decoy-match unrelated tables. Flat columns get their description when
-# one is present. JSONB sample values are already stored on the Column row
-# and reach here via fetch_tables_by_ids's nested `columns`, so this adds no
-# extra DB round trip, only extra prompt tokens.
+# can decoy-match unrelated tables. Flat columns get their description and
+# value description when present. JSONB sample values are already stored on
+# the Column row and reach here via fetch_tables_by_ids's nested `columns`,
+# so this adds no extra DB round trip, only extra prompt tokens.
 #
 # Truncation is silent and costs the answer when the cut column is the one
 # that justified the table: on BIRD dev, 5 wrong drops all named a column
@@ -151,6 +151,7 @@ def _format_relevance_filter_column(c: dict) -> str:
     name = c.get("name", "")
     ctype = c.get("data_type") or "unknown"
     desc = c.get("description")
+    value_description = " ".join(str(c.get("value_description") or "").split())
     sv = c.get("sample_values")
     extra = ""
     # sample_values is already normalized to list[str] | None by
@@ -159,6 +160,8 @@ def _format_relevance_filter_column(c: dict) -> str:
         extra = f" | JSONB keys: {', '.join(str(v) for v in sv[:12])}"
     if desc:
         extra = (extra + f" | {desc}") if extra else f" | {desc}"
+    if value_description:
+        extra += f" | value description: {value_description}"
     return f"    - {name} ({ctype}){extra}"
 
 
@@ -1289,11 +1292,18 @@ class CandidatePreparationAgent(BaseAgent):
             )
             return ".".join(str(part) for part in parts if part) or "(unknown)"
 
-        attrs_block = "\n".join(
-            f"- id: {aid} | physical column: {_physical_column(ctx)}"
-            + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
-            for aid, ctx in contexts.items()
-        )
+        def _anchor_line(aid: str, ctx: dict) -> str:
+            line = f"- id: {aid} | physical column: {_physical_column(ctx)}"
+            if ctx.get("attr_description"):
+                line += f" — {ctx['attr_description']}"
+            value_description = " ".join(
+                str(ctx.get("value_description") or "").split()
+            )
+            if value_description:
+                line += f" | value description: {value_description}"
+            return line
+
+        attrs_block = "\n".join(_anchor_line(aid, ctx) for aid, ctx in contexts.items())
         evidence = str(state.get("evidence") or "").strip()
         evidence_block = f"\n\nAuthoritative evidence:\n{evidence}" if evidence else ""
         messages = [

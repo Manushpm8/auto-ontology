@@ -75,9 +75,41 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
     assert "include the joins that connect those tables" in create_sql_user_prompt
 
 
-def test_prompt_filters_nulls_from_nullable_projected_fields() -> None:
-    assert "projected field has `is_nullable: true`" in create_sql_user_prompt
-    assert "add an `IS NOT NULL` predicate for that field" in create_sql_user_prompt
+def test_prompt_preserves_nullable_rows_and_ranking_population() -> None:
+    assert "Do not add `IS NOT NULL` merely because" in create_sql_user_prompt
+    assert "rank the full intended population" in create_sql_user_prompt
+    assert "add an `IS NOT NULL` predicate for that field" not in (
+        create_sql_user_prompt
+    )
+
+
+def test_prompt_requires_exact_shape_labels_and_grounding() -> None:
+    projection = format_projection_rules(shorten_answer=True)
+
+    assert "Match the requested result shape exactly" in projection
+    assert "similarly named IDs, codes, labels" in create_sql_user_prompt
+    assert "contains/includes/mentions-style wording" in create_sql_user_prompt
+
+
+def test_sql_prompt_projects_primary_key_when_fields_are_unspecified() -> None:
+    rule = (
+        "To identify an entity (who/which/what), or when the question asks to "
+        "list or show something without naming the output fields, select that "
+        "table's primary key columns and no others."
+    )
+
+    assert rule in format_projection_rules(shorten_answer=False)
+    assert rule in format_projection_rules(shorten_answer=True)
+
+
+def test_sql_prompt_limits_unusable_columns_to_explicit_requests() -> None:
+    rule = (
+        "Use a column marked unusable only when the question or the evidence "
+        "explicitly asks for that column."
+    )
+
+    assert rule in format_projection_rules(shorten_answer=False)
+    assert rule in format_projection_rules(shorten_answer=True)
 
 
 def test_projection_strictness_is_configured_per_request() -> None:

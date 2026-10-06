@@ -12,7 +12,8 @@
         "schema_name": "public",
         "table_id": "<table:pagila.public.film>",
         "table_name": "film",
-        "term_name": "Film"
+        "term_name": "Film",
+        "value_description": null
       }
     },
     "attributes.fetch_column_attribute_columns_map": {

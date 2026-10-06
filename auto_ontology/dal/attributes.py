@@ -335,6 +335,7 @@ def fetch_attr_column_contexts(
             s.column_attribute.c.id.label("attr_id"),
             s.column_attribute.c.name.label("attr_name"),
             s.column_attribute.c.description.label("attr_description"),
+            s.column_attribute.c.value_description.label("value_description"),
             s.column_attribute.c.datatype.label("datatype"),
             s.catalog_column.c.id.label("col_id"),
             s.catalog_column.c.name.label("col_name"),
@@ -383,6 +384,7 @@ def fetch_attr_column_contexts(
             {
                 "attr_name": row["attr_name"] or "",
                 "attr_description": row["attr_description"] or "",
+                "value_description": row["value_description"] or "",
                 "col_id": row["col_id"],
                 "col_name": row["col_name"] or "",
                 "table_id": row["table_id"],

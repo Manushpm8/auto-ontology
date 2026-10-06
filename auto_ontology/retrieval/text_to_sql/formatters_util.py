@@ -56,11 +56,14 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
     name = column.get("name", "UNKNOWN")
     data_type = column.get("data_type", "UNKNOWN")
     description = column.get("description", "")
+    value_description = _plain_cell(column.get("value_description"))
     sample_values = _format_sample_values(column.get("sample_values"))
 
     line = f"{indent}- {name} ({data_type})"
     if description:
         line += f" - {description}"
+    if value_description:
+        line += f" | value description: {value_description}"
     if sample_values:
         if "json" in (data_type or "").lower():
             line += (
@@ -308,6 +311,7 @@ _COLUMN_HEADERS = [
     "value description",
     "sample values",
     "format",
+    "unusable",
 ]
 _JSONB_SAMPLE_NOTE = (
     "JSONB sample values are keys (dot = nesting level, use as "
@@ -339,6 +343,7 @@ def _column_row(column: Any) -> dict[str, str]:
             _format_sample_values(column.get("sample_values"))
         ),
         "format": notation,
+        "unusable": "true" if column.get("unusable") else "",
     }
 
 
@@ -399,6 +404,58 @@ def format_tables_for_prompt(
         formatted_tables.append("\n".join(block for block in blocks if block))
 
     return "\n\n".join(formatted_tables)
+
+
+def tables_for_sql_prompt(tables: list[dict]) -> list[dict]:
+    """Copy *tables* with unusable and primary-key columns for the SQL prompt.
+
+    Other prompts keep the columns already on *tables*. This adds an omitted
+    unusable column, and any primary-key column that is not already listed,
+    and leaves the caller's list unchanged.
+    """
+    from auto_ontology.dal.datasources import fetch_tables_by_ids
+
+    ids = [table["id"] for table in tables if table.get("id")]
+    if not ids:
+        return tables
+    fetched = {
+        str(table.get("id") or ""): table
+        for table in fetch_tables_by_ids(ids, include_unusable=True)
+    }
+    prompt_tables: list[dict] = []
+    for table in tables:
+        store_table = fetched.get(str(table.get("id") or ""))
+        columns = table.get("columns")
+        if not isinstance(columns, list):
+            columns = []
+        names = {
+            str(column.get("name")).casefold()
+            for column in columns
+            if isinstance(column, dict) and column.get("name")
+        }
+        pk = list(table.get("pk") or (store_table or {}).get("pk") or [])
+        pk_names = {str(name).casefold() for name in pk if name}
+        extras = [
+            column
+            for column in (store_table or {}).get("columns") or []
+            if isinstance(column, dict)
+            and column.get("name")
+            and str(column.get("name")).casefold() not in names
+            and (
+                column.get("unusable") or str(column.get("name")).casefold() in pk_names
+            )
+        ]
+        pk_changed = pk != list(table.get("pk") or [])
+        if not extras and not pk_changed:
+            prompt_tables.append(table)
+            continue
+        copied = dict(table)
+        if pk_changed:
+            copied["pk"] = pk
+        if extras:
+            copied["columns"] = [*columns, *extras]
+        prompt_tables.append(copied)
+    return prompt_tables
 
 
 def format_used_schema_for_prompt(

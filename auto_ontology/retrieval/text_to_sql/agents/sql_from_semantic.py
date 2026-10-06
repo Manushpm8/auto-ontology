@@ -40,6 +40,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
+    tables_for_sql_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -281,7 +282,9 @@ class SQLFromCandidatesAgent(BaseAgent):
             tables_section = (
                 "AVAILABLE TABLES (schema context):\n"
                 + format_tables_for_prompt(
-                    relevant_tables, target_db=target_db, dialect=dialect
+                    tables_for_sql_prompt(relevant_tables),
+                    target_db=target_db,
+                    dialect=dialect,
                 )
                 if relevant_tables
                 else "No tables available."

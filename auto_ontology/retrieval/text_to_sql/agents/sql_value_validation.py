@@ -432,8 +432,9 @@ def _apply_proven_substitutions(
     )
 
 
-def _column_types(tables: list[dict]) -> dict[str, str]:
-    types: dict[str, str] = {}
+def _column_lookup(tables: list[dict]) -> dict[str, tuple[str, str]]:
+    """Bare column name to ``(data_type, value_description)``."""
+    found: dict[str, tuple[str, str]] = {}
     for table in tables:
         columns = table.get("columns")
         if not isinstance(columns, list):
@@ -441,16 +442,19 @@ def _column_types(tables: list[dict]) -> dict[str, str]:
         for column in columns:
             if not isinstance(column, dict) or not column.get("name"):
                 continue
-            types.setdefault(
+            found.setdefault(
                 str(column["name"]).casefold(),
-                str(column.get("data_type") or "unknown"),
+                (
+                    str(column.get("data_type") or "unknown"),
+                    " ".join(str(column.get("value_description") or "").split()),
+                ),
             )
-    return types
+    return found
 
 
 def _checked_columns_block(checks: list[dict[str, Any]], tables: list[dict]) -> str:
-    """Names and types of the columns the checklist actually binds."""
-    types = _column_types(tables)
+    """Names, types, and value descriptions of the columns the checklist binds."""
+    lookup = _column_lookup(tables)
     lines: list[str] = []
     seen: set[str] = set()
     for check in checks:
@@ -459,8 +463,11 @@ def _checked_columns_block(checks: list[dict[str, Any]], tables: list[dict]) -> 
         if key in seen:
             continue
         seen.add(key)
-        data_type = types.get(_column_name(column), "unknown")
-        lines.append(f"- {column} ({data_type})")
+        data_type, value_description = lookup.get(_column_name(column), ("unknown", ""))
+        line = f"- {column} ({data_type})"
+        if value_description:
+            line += f" | value description: {value_description}"
+        lines.append(line)
     return "\n".join(lines) or "(none)"
 
 

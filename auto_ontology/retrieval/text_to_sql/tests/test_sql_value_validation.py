@@ -39,7 +39,11 @@ def _tables() -> list[dict]:
             "schema_name": "main",
             "name": "accounts",
             "columns": [
-                {"name": "status", "data_type": "text"},
+                {
+                    "name": "status",
+                    "data_type": "text",
+                    "value_description": "Stored status label.",
+                },
                 {"name": "country", "data_type": "text"},
                 {"name": "age", "data_type": "integer"},
             ],
@@ -152,13 +156,31 @@ def test_prompt_lists_checked_columns_and_short_observations() -> None:
     )
 
     assert "value_1: 'actve' | status = 'actve'" in prompt
-    assert "- status (text)" in prompt
+    assert "- status (text) | value description: Stored status label." in prompt
     assert "country" not in prompt
     assert "age" not in prompt
     assert "is_string" not in prompt
     assert "elapsed_ms" not in prompt
     assert "Relevant schema" not in prompt
     assert "(+45 more)" in prompt
+
+
+def test_checked_columns_omit_blank_value_description() -> None:
+    checks = extract_value_checks(
+        "SELECT * FROM accounts WHERE status = 'actve'",
+        "sqlite",
+    )
+    tables = [
+        {
+            "columns": [
+                {"name": "status", "data_type": "text", "value_description": "  "},
+            ],
+        }
+    ]
+
+    block = sql_value_validation._checked_columns_block(checks, tables)
+
+    assert block == "- status (text)"
 
 
 def test_prompt_keeps_only_recent_observations() -> None:

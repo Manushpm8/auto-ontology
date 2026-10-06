@@ -14,15 +14,20 @@ _PROJECTION_RULES = (
     "(most/least/top/highest/lowest/peak/best/worst), select ONLY the item named "
     "the ranking key OR the aggregated value, never both, and never add the "
     "ORDER BY metric unless its value is asked. To identify an entity "
-    "(who/which/what), return one identifying column (name if it exists, else id), "
-    "not both.\n"
+    "(who/which/what), or when the question asks to list or show something "
+    "without naming the output fields, select that table's primary key columns "
+    "and no others.\n"
     "- If the user asks for name, project the requested name fields and never add "
     "IDs unless the user explicitly asks for them.\n"
     "- Preserve the question's field order in SELECT: project explicitly requested "
     "outputs from left to right in the same order the user names them.\n"
-    "- If evidence maps an answer concept to specific columns, preserve that "
-    "projection exactly; do not collapse, reshape, or replace those columns "
-    "unless the question explicitly asks for a transformed value.\n"
+)
+
+# Shown with the schema in every SQL-generation prompt. Short-answer requests
+# append stricter projection rules after it; this one stays on either path.
+_UNUSABLE_COLUMN_RULE = (
+    "- Use a column marked unusable only when the question or the evidence "
+    "explicitly asks for that column.\n"
 )
 
 
@@ -30,10 +35,11 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
     """Render benchmark-strict guidance only when shorter answers are requested."""
 
     if not shorten_answer:
-        return _PROJECTION_RULES
+        return _PROJECTION_RULES + _UNUSABLE_COLUMN_RULE
     return (
         _PROJECTION_RULES
         + "- Return exactly the requested output fields and NO others.\n"
+        "- Never project select *.\n"
         "- When the question or evidence requests one aggregate over two "
         "alternative categories joined by 'and' (for example, a count for X and Y), "
         "return ONE aggregate and combine the category predicates with OR in the "
@@ -41,6 +47,13 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
         "this only to one aggregate over alternatives; if separate results, a "
         "comparison, a per-category breakdown, or distinct metrics are explicitly "
         "requested, preserve those separate outputs.\n"
+        "- Match the requested result shape exactly: do not omit requested fields, "
+        "combine separate fields, or replace requested IDs/codes with a different "
+        "identifier.\n"
+        "- If evidence maps an answer concept to specific columns, preserve that "
+        "projection exactly; do not collapse, reshape, or replace those columns "
+        "unless the question explicitly asks for a transformed value.\n"
+        + _UNUSABLE_COLUMN_RULE
     )
 
 
@@ -71,8 +84,8 @@ create_sql_user_prompt = (
     "- Give matched columns a preference for projection only when they represent "
     "an output the user requested. Do not project extra columns merely because "
     "they are listed here.\n"
-    "- Treat constraints stated in their descriptions, formats, and sample values "
-    "as requirements when using those columns.\n"
+    "- Treat constraints stated in their descriptions, value descriptions, "
+    "formats, and sample values as requirements when using those columns.\n"
     "- This is a strong hint, not a mandate; use a different available column when "
     "it more clearly matches the question.\n\n"
     "{important_columns}\n\n"
@@ -87,6 +100,11 @@ create_sql_user_prompt = (
     "must be defined in FROM or JOIN. Never reference an undefined alias.\n"
     "- Verify each column exists in the table you reference it from. "
     "Do not confuse columns across tables.\n"
+    "- Ground each output and filter to the exact column meaning; similarly named "
+    "IDs, codes, labels, and columns from other tables are not interchangeable. "
+    "Use descriptions, evidence, formats, and sample values to disambiguate.\n"
+    "- Use equality only for an exact value. For contains/includes/mentions-style "
+    "wording, use an appropriate substring predicate.\n"
     "- GROUP BY must include all non-aggregated columns in SELECT.\n"
     "- ORDER BY must only reference aggregated aliases or columns "
     "present in SELECT/GROUP BY.\n\n"
@@ -120,9 +138,10 @@ create_sql_user_prompt = (
     "entities or a necessary one-to-many join would otherwise count the same "
     "requested entity more than once. Use COUNT(*) when each input row represents "
     "exactly one requested entity.\n"
-    "- When a projected field has `is_nullable: true` in the schema metadata, "
-    "add an `IS NOT NULL` predicate for that field so the result excludes rows "
-    "where the projected value is NULL.\n"
+    "- Do not add `IS NOT NULL` merely because a projected field is nullable; "
+    "preserve qualifying rows and natural multiplicity unless the request or "
+    "evidence explicitly excludes NULLs. For ranking/OFFSET/LIMIT, rank the full "
+    "intended population before any output-only cleanup.\n"
     "- Time windows: apply a date/year filter ONLY when the question's data "
     "request names a period; 'last week/month/year' then means the most "
     "recent completed calendar period, not a rolling window.\n"

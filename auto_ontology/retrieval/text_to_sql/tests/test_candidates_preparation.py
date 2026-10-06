@@ -48,6 +48,7 @@ def test_anchor_maps_evidence_to_schema_table_column(
             "table_name": "frpm",
             "col_name": "frpm_count_k12",
             "attr_description": "Eligible meal-program students.",
+            "value_description": "Count of students eligible for free or reduced meals.",
         },
         "enrollment": {
             "attr_name": "Enrollment (K-12)",
@@ -68,6 +69,28 @@ def test_anchor_maps_evidence_to_schema_table_column(
     assert "main.frpm.enrollment_k12" in captured["prompt"]
     assert "FRPM Count (K-12)" not in captured["prompt"]
     assert "schema.table.column physical references" in captured["prompt"]
+    assert (
+        "value description: Count of students eligible for free or reduced meals."
+        in captured["prompt"]
+    )
+
+
+def test_relevance_filter_column_includes_value_description() -> None:
+    rendered = candidates_preparation._format_relevance_filter_column(
+        {
+            "name": "StreetAbr",
+            "data_type": "text",
+            "description": "Abbreviated street.",
+            "value_description": "Some closed schools have no value.",
+        }
+    )
+    omitted = candidates_preparation._format_relevance_filter_column(
+        {"name": "id", "data_type": "integer", "value_description": "  "}
+    )
+
+    assert "Abbreviated street." in rendered
+    assert "value description: Some closed schools have no value." in rendered
+    assert "value description" not in omitted
 
 
 def test_column_metadata_backfill_requires_samples_and_nullability() -> None:

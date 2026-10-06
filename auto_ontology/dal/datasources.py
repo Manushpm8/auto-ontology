@@ -981,7 +981,11 @@ def fetch_columns_for_table(
     return table
 
 
-def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
+def fetch_tables_by_ids(
+    table_ids: list[str],
+    *,
+    include_unusable: bool = False,
+) -> list[dict[str, Any]]:
     """Tables with a name/type/description/sample_values summary of each column.
 
     Returns ``[]`` rather than raising if the query fails: this decorates
@@ -1002,11 +1006,18 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
 
-    Columns marked ``unusable`` are omitted. A table whose every column is
-    unusable therefore does not appear, the same as a table with no columns.
+    Columns marked ``unusable`` are omitted unless ``include_unusable`` is set.
+    SQL generation sets it so those columns appear in its schema prompt, each
+    marked unusable. Other callers leave them out. A table whose every column
+    is unusable therefore does not appear on the default call, the same as a
+    table with no columns. When they are included, each column carries
+    ``unusable``.
     """
     if not table_ids:
         return []
+    filters = [s.catalog_table.c.id.in_(list(table_ids))]
+    if not include_unusable:
+        filters.append(s.catalog_column.c.unusable.is_(False))
     try:
         rows = store().query_read(
             select(
@@ -1023,6 +1034,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
+                s.catalog_column.c.unusable,
             )
             .select_from(
                 _table_join().join(
@@ -1030,10 +1042,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     s.catalog_column.c.table_id == s.catalog_table.c.id,
                 )
             )
-            .where(
-                s.catalog_table.c.id.in_(list(table_ids)),
-                s.catalog_column.c.unusable.is_(False),
-            )
+            .where(*filters)
             .order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
         )
     except Exception:
@@ -1062,17 +1071,18 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
         # `name` is NOT NULL, so this cannot fire today -- kept so the shape
         # stays the same if that ever changes.
         if row["column_name"]:
-            table["columns"].append(
-                {
-                    "name": row["column_name"],
-                    "data_type": row["data_type"],
-                    "description": row["column_description"],
-                    "value_description": row["value_description"],
-                    "format": row["format"],
-                    "sample_values": parse_sample_values(row["sample_values"]),
-                    "is_nullable": row["is_nullable"],
-                }
-            )
+            column = {
+                "name": row["column_name"],
+                "data_type": row["data_type"],
+                "description": row["column_description"],
+                "value_description": row["value_description"],
+                "format": row["format"],
+                "sample_values": parse_sample_values(row["sample_values"]),
+                "is_nullable": row["is_nullable"],
+            }
+            if include_unusable:
+                column["unusable"] = bool(row["unusable"])
+            table["columns"].append(column)
     return list(tables.values())
 
 
