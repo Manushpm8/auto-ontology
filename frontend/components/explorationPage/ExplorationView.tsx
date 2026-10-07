@@ -348,7 +348,6 @@ export const ExplorationView = () => {
 
 			if (response.error) {
 				setSemanticError(response.message ?? 'Failed to load terms');
-				loadedSemanticDatabaseIdRef.current = selectedDatabaseId;
 				setSemanticLoading(false);
 				return;
 			}
@@ -392,6 +391,7 @@ export const ExplorationView = () => {
 				const nextGraph = buildDataGraph(response.data ?? { nodes: [], links: [] });
 				if (cancelled) return;
 				setDataGraph(nextGraph);
+				loadedDatabaseIdRef.current = selectedDatabaseId;
 			} catch (loadError) {
 				if (cancelled) return;
 				setDataError(
@@ -399,7 +399,6 @@ export const ExplorationView = () => {
 				);
 			} finally {
 				if (!cancelled) {
-					loadedDatabaseIdRef.current = selectedDatabaseId;
 					setDataLoading(false);
 				}
 			}
