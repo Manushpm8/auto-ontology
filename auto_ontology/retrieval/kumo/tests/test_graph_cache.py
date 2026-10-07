@@ -662,6 +662,21 @@ def test_a_column_gaining_a_description_is_a_new_schema() -> None:
     assert catalog_fingerprint(bare) != catalog_fingerprint(documented)
 
 
+def test_a_re_profiled_column_is_a_new_schema() -> None:
+    """The filter vocabulary is drawn from sample values and cached with the graph."""
+
+    def profiled(*samples: str) -> list[dict[str, Any]]:
+        return [{"name": "t", "columns": [{"name": "tier", "sample_values": samples}]}]
+
+    assert catalog_fingerprint(profiled("SMB")) != catalog_fingerprint(
+        profiled("Small Business")
+    )
+    assert catalog_fingerprint(profiled("a,b", "c")) != catalog_fingerprint(
+        profiled("a", "b,c")
+    )
+    assert catalog_fingerprint(profiled("SMB")) == catalog_fingerprint(profiled("SMB"))
+
+
 def test_a_build_that_returns_a_failure_is_not_kept() -> None:
     """Returned failures were stored like successes and served as hits."""
     cache = GraphCache(max_entries=8, ttl_seconds=60, wait_seconds=30)

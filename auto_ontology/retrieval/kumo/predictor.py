@@ -634,8 +634,12 @@ def build_prediction_context(
             logger.info("kumo: gave up waiting for a build in progress: %s", waited)
             return _refused(str(waited))
         if isinstance(cached, PredictionContext):
+            # The key already says this request's connector reaches the same
+            # database, so use it: the one the graph was built with belongs to
+            # an earlier request and may since have been closed.
             return dataclasses.replace(
                 cached,
+                connector=connectors[0],
                 examples=examples or [],
                 identity=dataclasses.replace(
                     cached.identity,

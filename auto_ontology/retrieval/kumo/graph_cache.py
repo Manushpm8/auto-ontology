@@ -279,7 +279,9 @@ def catalog_fingerprint(relevant_tables: list[dict[str, Any]]) -> str:
 
     Covers what the graph is built from: the tables, their columns, and the types
     and keys the catalog recorded for them. A description changing does not alter
-    the graph but does alter the prompt, so it is included too.
+    the graph but does alter the prompt, so it is included too, as are a column's
+    sample values: the filter vocabulary is drawn from them and cached with the
+    graph, so a re-profiled catalog would otherwise keep offering old spellings.
     """
     parts: list[str] = []
     for table in sorted(relevant_tables or [], key=lambda t: str(t.get("name") or "")):
@@ -307,6 +309,9 @@ def catalog_fingerprint(relevant_tables: list[dict[str, Any]]) -> str:
                     _term(column.get("description")),
                 ]
             )
+            samples = list(column.get("sample_values") or [])
+            parts.append(_term(len(samples)))
+            parts.extend(_term(value) for value in samples)
     return hashlib.sha256("".join(parts).encode("utf-8")).hexdigest()
 
 

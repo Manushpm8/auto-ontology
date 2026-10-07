@@ -236,6 +236,20 @@ def test_the_windows_that_give_a_query_its_shape_are_kept() -> None:
     )
 
 
+def test_an_inclusive_threshold_is_kept_but_an_excluded_row_is_not() -> None:
+    """`<=` and `>=` say how big, like `>`; `!=` names a row, like `=`."""
+    redacted = redact_literals(
+        "PREDICT MIN(results.position, 0, 365, days) <= 3 FOR EACH drivers.id "
+        "WHERE drivers.points >= 10 AND drivers.id != 42 AND drivers.team = 7"
+    )
+
+    assert "<= 3" in redacted
+    assert ">= 10" in redacted
+    assert "!= ?" in redacted
+    assert "drivers.team = ?" in redacted
+    assert "42" not in redacted
+
+
 def test_an_empty_entity_list_reads_as_empty() -> None:
     assert "IN (0 values)" in redact_literals("PREDICT x FOR customers.cid IN ()")
 

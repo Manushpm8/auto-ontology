@@ -193,6 +193,19 @@ def test_a_follow_up_gets_its_own_examples_through_the_entry_point() -> None:
     assert [e["question"] for e in second.examples] == ["second"]
 
 
+def test_a_hit_queries_through_this_request_s_connector() -> None:
+    """The connector the graph was built with may have closed with its request."""
+    predictor._GRAPH_CACHE.clear()
+    earlier = _Warehouse()
+    current = _Warehouse()
+
+    _build(earlier, [])
+    hit = _build(current, [])
+
+    assert hit.identity.cache == "hit"
+    assert hit.connector is current
+
+
 def test_a_value_cannot_pose_as_two_fields() -> None:
     """Joining on a separator lets a value containing it forge another schema."""
     assert _term("a:b") != _term("a") + _term("b")

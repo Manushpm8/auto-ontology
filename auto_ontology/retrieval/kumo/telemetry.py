@@ -38,8 +38,9 @@ _STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
 _IN_LIST = re.compile(r"\bIN\s*\(([^()]*)\)", re.IGNORECASE)
 # An equality against a bare number. A threshold is written with an inequality
 # and says how big, which is query shape; an equality against a number names one
-# row, which is an identity.
-_EQUALS_NUMBER = re.compile(r"(=\s*)-?\d+(?:\.\d+)?\b")
+# row, which is an identity. The `=` closing a `<=` or `>=` is a threshold, not
+# an equality; `!=` still names the row it excludes, so it goes like `=` does.
+_EQUALS_NUMBER = re.compile(r"((?<![<>])=\s*)-?\d+(?:\.\d+)?\b")
 
 # Bumped when a field in RunRecord is renamed or removed, so a reader can tell
 # which shape it is looking at rather than discovering the change by breaking.
