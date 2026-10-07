@@ -2253,3 +2253,55 @@ def test_deleting_a_table_untags_sql_that_only_read_its_pii_columns(
 def test_deleting_no_columns_is_a_noop() -> None:
     untag_attributes_of_columns_being_deleted([])
     untag_attributes_of_columns_being_deleted(["", ""])
+
+
+def _column_exists(column_id: str) -> bool:
+    return bool(
+        store().query_read(
+            select(s.catalog_column.c.id).where(s.catalog_column.c.id == column_id)
+        )
+    )
+
+
+def test_a_failed_pii_cleanup_does_not_delete_the_column(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cleanup and delete are one transaction: neither lands if untag raises."""
+    from auto_ontology.catalog.store import db as catalog_db
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    tagged.label(tag_id=pii, column_id=tagged.column)
+
+    def boom(_ids: list[str]) -> None:
+        raise RuntimeError("untag failed")
+
+    monkeypatch.setattr(catalog_db, "untag_attributes_of_columns_being_deleted", boom)
+
+    with pytest.raises(RuntimeError, match="untag failed"):
+        catalog_db.delete_columns_batch([tagged.column])
+
+    assert _column_exists(tagged.column)
+    assert tagged.column in {row["id"] for row in list_tag_targets(pii)}
+
+
+def test_a_failed_pii_cleanup_does_not_delete_the_table(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_ontology.catalog.store import db as catalog_db
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    tagged.label(tag_id=pii, column_id=tagged.column)
+
+    def boom(_ids: list[str]) -> None:
+        raise RuntimeError("untag failed")
+
+    monkeypatch.setattr(catalog_db, "untag_attributes_of_columns_being_deleted", boom)
+
+    with pytest.raises(RuntimeError, match="untag failed"):
+        catalog_db.delete_table(tagged.table)
+
+    assert _column_exists(tagged.column)
+    assert store().query_read(
+        select(s.catalog_table.c.id).where(s.catalog_table.c.id == tagged.table)
+    )
+    assert tagged.column in {row["id"] for row in list_tag_targets(pii)}
