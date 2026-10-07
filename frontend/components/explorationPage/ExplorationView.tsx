@@ -1950,9 +1950,10 @@ export const ExplorationView = () => {
 		(next: string | null) => {
 			setSelectedDatabaseId(next);
 			clearGraphInteraction();
-			if (layer === ExplorationLayer.Data) {
-				router.replace('/exploration?view=data', { scroll: false });
-			}
+			router.replace(
+				layer === ExplorationLayer.Data ? '/exploration?view=data' : '/exploration',
+				{ scroll: false },
+			);
 		},
 		[clearGraphInteraction, layer, router],
 	);
