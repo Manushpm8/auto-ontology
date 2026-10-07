@@ -315,7 +315,9 @@ def test_every_prediction_leaves_a_record(caplog: Any) -> None:
         pql="PREDICT x FOR customers.customer_id IN (1)",
     )
     try:
-        with caplog.at_level(logging.INFO, logger="auto_ontology.retrieval.kumo.telemetry"):
+        with caplog.at_level(
+            logging.INFO, logger="auto_ontology.retrieval.kumo.telemetry"
+        ):
             predictor.run_prediction("q", _LLM(), context)
     finally:
         pql_gen.generate_pql = original
@@ -406,7 +408,9 @@ def test_a_prediction_that_raised_still_leaves_a_record(caplog: Any) -> None:
 
     pql_gen.generate_pql = boom
     try:
-        with caplog.at_level(logging.INFO, logger="auto_ontology.retrieval.kumo.telemetry"):
+        with caplog.at_level(
+            logging.INFO, logger="auto_ontology.retrieval.kumo.telemetry"
+        ):
             with pytest.raises(RuntimeError):
                 predictor.run_prediction("who churns?", _LLM(), context)
     finally:

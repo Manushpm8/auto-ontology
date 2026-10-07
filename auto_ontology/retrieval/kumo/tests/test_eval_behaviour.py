@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from auto_ontology.retrieval.kumo.column_reference import build_column_reference, safe_values
+from auto_ontology.retrieval.kumo.column_reference import (
+    build_column_reference,
+    safe_values,
+)
 from auto_ontology.retrieval.kumo.pql_gen import (
     _forecast_anchor,
     _stale_anchor_note,
