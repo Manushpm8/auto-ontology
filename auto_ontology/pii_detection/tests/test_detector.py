@@ -42,6 +42,55 @@ def test_direct_identifier_is_auto_tagged() -> None:
 
 
 @pytest.mark.parametrize(
+    ("column_name", "category"),
+    [
+        ("email", "email_address"),
+        ("email_address", "email_address"),
+        ("ssn", "government_id"),
+        ("mobile", "phone_number"),
+        ("phone", "phone_number"),
+        ("password", "credential"),
+    ],
+)
+def test_direct_rules_still_match_the_field_itself(
+    column_name: str, category: str
+) -> None:
+    decision = PiiDetector().detect(
+        ColumnInput(column_name=column_name, table_name="events")
+    )
+
+    assert decision.status is PiiStatus.PII
+    assert decision.category == category
+    assert decision.source == "rules"
+
+
+@pytest.mark.parametrize(
+    "column_name",
+    [
+        "email_domain",
+        "email_sent_at",
+        "ssn_hash",
+        "mobile_app_version",
+        "password_reset_token",
+    ],
+)
+def test_direct_rules_do_not_match_qualified_lookalikes(column_name: str) -> None:
+    """Short tokens such as ``email`` used to match anywhere in the column name.
+
+    Direct rules must stay silent: ``email_sent_at`` is a timestamp, not an
+    address. Without a backend that becomes review, not ``not_pii`` -- an LLM
+    can still decide.
+    """
+    column = ColumnInput(column_name=column_name, table_name="customers")
+
+    assert evaluate_rules(column) is None
+
+    decision = PiiDetector().detect(column)
+    assert decision.status is PiiStatus.REVIEW
+    assert decision.source == "fallback"
+
+
+@pytest.mark.parametrize(
     ("column_name", "table_name", "category"),
     [
         ("emailaddress", "people", "email_address"),

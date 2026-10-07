@@ -45,7 +45,7 @@ def _matches(pattern: _Pattern, normalized: str, compact: str) -> bool:
 
 DIRECT_PII_PATTERNS = (
     _pattern(
-        r"ssn|social security(?: number)?",
+        r"social security(?: number)?",
         "government_id",
         compact=r"(?:ssn|socialsecurity(?:number)?)$",
     ),
@@ -60,12 +60,12 @@ DIRECT_PII_PATTERNS = (
         compact=r"(?:taxpayerid|taxid|nationalid)$",
     ),
     _pattern(
-        r"e mail|email(?: address)?",
+        r"e mail|email address",
         "email_address",
         compact=r"(?:email|emailaddress)$",
     ),
     _pattern(
-        r"phone|mobile|telephone|fax",
+        r"phone number|mobile phone|mobile number|cell phone|fax number",
         "phone_number",
         compact=r"(?:phone|phonenumber|mobile|telephone|fax|faxnumber)$",
     ),
@@ -85,7 +85,7 @@ DIRECT_PII_PATTERNS = (
         compact=r"(?:bankaccount(?:number)?|iban|swiftcode)$",
     ),
     _pattern(
-        r"password|passcode|pin code",
+        r"passcode|pin code",
         "credential",
         compact=r"(?:password|passcode|pincode)$",
     ),
