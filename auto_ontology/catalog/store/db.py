@@ -85,7 +85,7 @@ def _spec_for(label: str):
     return entity_spec(aliases.get(str(label).lower(), label))
 
 
-def _column_ids_of_schema(schema_node_id) -> list[str]:
+def _column_ids_of_schema(schema_node_id: str) -> list[str]:
     return [
         row["id"]
         for row in store().query_read(
@@ -101,7 +101,7 @@ def _column_ids_of_schema(schema_node_id) -> list[str]:
     ]
 
 
-def _column_ids_of_table(table_id) -> list[str]:
+def _column_ids_of_table(table_id: str) -> list[str]:
     return [
         row["id"]
         for row in store().query_read(
