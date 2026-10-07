@@ -329,7 +329,13 @@ export const ExplorationView = () => {
 	const loadedSemanticDatabaseIdRef = useRef<string | null | undefined>(undefined);
 
 	useEffect(() => {
-		if (loadedSemanticDatabaseIdRef.current === selectedDatabaseId) return undefined;
+		if (loadedSemanticDatabaseIdRef.current === selectedDatabaseId) {
+			// A cancelled in-flight load leaves semanticLoading true without
+			// updating the ref. If this database is already loaded, skip the
+			// fetch and drop the overlay so the page cannot get stuck.
+			setSemanticLoading(false);
+			return undefined;
+		}
 		let cancelled = false;
 
 		const loadGraph = async () => {
@@ -364,7 +370,12 @@ export const ExplorationView = () => {
 
 	useEffect(() => {
 		if (layer !== ExplorationLayer.Data) return undefined;
-		if (loadedDatabaseIdRef.current === selectedDatabaseId) return undefined;
+		if (loadedDatabaseIdRef.current === selectedDatabaseId) {
+			// Same race as the semantic effect: returning early without
+			// clearing dataLoading leaves ExplorationLoader covering the page.
+			setDataLoading(false);
+			return undefined;
+		}
 		let cancelled = false;
 
 		const loadGraph = async () => {
