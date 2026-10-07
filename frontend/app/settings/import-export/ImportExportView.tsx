@@ -11,12 +11,14 @@ import { Button } from '@/common/Button';
 import { FileUpload } from '@/common/FileUpload';
 import { Icon, IconName } from '@/common/icons';
 import { ConfirmModal } from '@/common/modal';
+import { ProgressBar } from '@/common/ProgressBar';
 import { SkeletonRows } from '@/common/Skeleton';
 import { Toast } from '@/common/Toast';
 import { Toggle } from '@/common/Toggle';
 import { ButtonTheme, Size } from '@/enums/button';
 import { ModelFormat } from '@/enums/modelInterchange';
 import { ToastVariant } from '@/enums/toast';
+import { useSmoothProgress } from '@/lib/useSmoothProgress';
 import type { Database } from '@/types/datasources';
 import type { ImportEntityCounts, ImportSummary } from '@/types/modelInterchange';
 
@@ -75,6 +77,7 @@ export const ImportExportView = () => {
 	const [exporting, setExporting] = useState(false);
 	const [exportError, setExportError] = useState<string | null>(null);
 	const [exportMessage, setExportMessage] = useState<string | null>(null);
+	const exportProgress = useSmoothProgress();
 
 	const [importFile, setImportFile] = useState<File | null>(null);
 	const [replace, setReplace] = useState(true);
@@ -129,16 +132,31 @@ export const ImportExportView = () => {
 		if (selectedDbIds.size === 0 || exporting) return;
 		setExporting(true);
 		setExportError(null);
-		const res = await modelInterchangeApi.exportModel(Array.from(selectedDbIds), exportFormat);
-		setExporting(false);
-
-		if (res.error) {
-			setExportError(res.message ?? 'Failed to export model.');
-			return;
+		// The YAML arrives in one response, so this eases toward 90% while we
+		// wait, then `complete()` snaps to 100% when the file is ready.
+		exportProgress.start({
+			tauMs:
+				2200 + selectedDbIds.size * 450 + (exportFormat === ModelFormat.OSSIE ? 1200 : 0),
+		});
+		try {
+			const res = await modelInterchangeApi.exportModel(
+				Array.from(selectedDbIds),
+				exportFormat,
+			);
+			if (res.error) {
+				exportProgress.fail();
+				setExportError(res.message ?? 'Failed to export model.');
+				return;
+			}
+			await exportProgress.complete();
+			downloadBlob(res.blob, EXPORT_FILENAME[exportFormat]);
+			setExportMessage(`Model exported as ${FORMAT_LABEL[exportFormat]}.`);
+		} catch {
+			exportProgress.fail();
+			setExportError('Failed to export model.');
+		} finally {
+			setExporting(false);
 		}
-
-		downloadBlob(res.blob, EXPORT_FILENAME[exportFormat]);
-		setExportMessage(`Model exported as ${FORMAT_LABEL[exportFormat]}.`);
 	};
 
 	const handleImportFileChange = (file: File | null) => {
@@ -265,6 +283,16 @@ export const ImportExportView = () => {
 
 				{exportError ? (
 					<p className="mt-3 text-sm text-red-600 dark:text-red-400">{exportError}</p>
+				) : null}
+
+				{exporting ? (
+					<ProgressBar
+						value={exportProgress.value}
+						showValue
+						label="Exporting"
+						className="mt-4"
+						aria-label={`Exporting model, ${Math.round(exportProgress.value)} percent`}
+					/>
 				) : null}
 
 				<div className="mt-4 flex justify-end">
