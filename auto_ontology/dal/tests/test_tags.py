@@ -1465,6 +1465,34 @@ def test_a_rule_taking_back_pii_from_a_column_untags_its_attributes(
     assert _processed(s.sql_attribute, tagged.sql_attribute) is False
 
 
+def test_a_failed_pii_cascade_does_not_take_the_column_label(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Delete and cascade are one transaction: a failed untag keeps the label."""
+    import auto_ontology.dal.tags as tags_dal
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    rule_id = tagged.rule("pii-columns")
+    targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=rule_id, tag_ids=[pii], targets=targets)
+
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == tagged.column)
+        .values(name="net_proceeds")
+    )
+
+    def boom(_rows: object) -> None:
+        raise RuntimeError("cascade failed")
+
+    monkeypatch.setattr(tags_dal, "_cascade_pii_off_columns", boom)
+
+    with pytest.raises(RuntimeError, match="cascade failed"):
+        remove_labels_no_longer_matched(rule_id=rule_id, targets=targets)
+
+    assert tagged.column in {row["id"] for row in list_tag_targets(pii)}
+
+
 def test_a_rule_taking_back_pii_keeps_sql_when_another_tagged_column_remains(
     tagged, sql_query_cleanup
 ) -> None:

@@ -1051,6 +1051,11 @@ def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select])
     Taking the system ``PII`` tag off a column also takes it off that column's
     attributes -- the same cascade as the tags API. Propagated attribute labels
     have no ``rule_id``, so this statement would otherwise leave them behind.
+
+    One transaction for the delete and that cascade. Nested
+    :func:`write_transaction` calls in the untag reuse this one, so a failed
+    attribute cleanup rolls the column labels back and the next replay retries
+    instead of leaving attributes tagged after the column is not.
     """
     kept = [
         and_(_target_column(kind).is_not(None), _target_column(kind).in_(matched))
@@ -1059,13 +1064,14 @@ def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select])
     conditions: list[ColumnElement[bool]] = [s.tag_target.c.rule_id == rule_id]
     if kept:
         conditions.append(not_(or_(*kept)))
-    rows = store().query_write(
-        s.tag_target.delete()
-        .where(*conditions)
-        .returning(s.tag_target.c.tag_id, s.tag_target.c.column_id)
-    )
-    _cascade_pii_off_columns(rows)
-    return len(rows)
+    with write_transaction():
+        rows = store().query_write(
+            s.tag_target.delete()
+            .where(*conditions)
+            .returning(s.tag_target.c.tag_id, s.tag_target.c.column_id)
+        )
+        _cascade_pii_off_columns(rows)
+        return len(rows)
 
 
 def _cascade_pii_off_columns(deleted: list[dict[str, Any]]) -> None:
