@@ -50,6 +50,12 @@ def test_direct_identifier_is_auto_tagged() -> None:
         ("mobile", "phone_number"),
         ("phone", "phone_number"),
         ("password", "credential"),
+        ("user_email", "email_address"),
+        ("work_email", "email_address"),
+        ("personal_email", "email_address"),
+        ("home_phone", "phone_number"),
+        ("cell_phone", "phone_number"),
+        ("customer_ssn", "government_id"),
     ],
 )
 def test_direct_rules_still_match_the_field_itself(
@@ -72,14 +78,36 @@ def test_direct_rules_still_match_the_field_itself(
         "ssn_hash",
         "mobile_app_version",
         "password_reset_token",
+        "no_email",
+        "has_email",
+        "is_mobile",
+        "no_ssn",
+        "email_address_hash",
+        "phone_number_id",
+        "cell_email",
+        "has_first_name",
+        "no_last_name",
+        "first_name_hash",
+        "no_address",
+        "wallet_address",
+        "contract_address",
+        "has_age",
+        "average_age",
+        "gender_id",
+        "has_salary",
+        "salary_hash",
+        "credit_score_model",
+        "no_customer_id",
+        "customer_id_hash",
     ],
 )
-def test_direct_rules_do_not_match_qualified_lookalikes(column_name: str) -> None:
-    """Short tokens such as ``email`` used to match anywhere in the column name.
+def test_rules_do_not_match_qualified_lookalikes(column_name: str) -> None:
+    """Rules must match the whole column name, not a suffix or subphrase.
 
-    Direct rules must stay silent: ``email_sent_at`` is a timestamp, not an
-    address. Without a backend that becomes review, not ``not_pii`` -- an LLM
-    can still decide.
+    ``email_sent_at`` is a timestamp, ``no_email`` / ``has_first_name`` are
+    flags, and ``email_address_hash`` / ``customer_id_hash`` are derived.
+    Without a backend that becomes review, not ``not_pii`` -- an LLM can
+    still decide.
     """
     column = ColumnInput(column_name=column_name, table_name="customers")
 
@@ -98,6 +126,8 @@ def test_direct_rules_do_not_match_qualified_lookalikes(column_name: str) -> Non
         ("fullname", "people", "person_name"),
         ("preferredname", "people", "person_name"),
         ("postaladdressline1", "customers", "postal_address"),
+        ("home_address", "customers", "postal_address"),
+        ("mailing_address", "customers", "postal_address"),
         ("customerid", "customers", "identifier"),
         ("id", "customers", "identifier"),
         ("customer_id", "customers", "identifier"),
@@ -144,13 +174,36 @@ def test_unqualified_id_suffix_is_not_a_person_identifier(column_name: str) -> N
     assert decision.source == "fallback"
 
 
-def test_ambiguous_name_uses_table_context() -> None:
+@pytest.mark.parametrize(
+    ("column_name", "category"),
+    [
+        ("full_name", "person_name"),
+        ("first_name", "person_name"),
+        ("address", "postal_address"),
+        ("age", "personal_attribute"),
+        ("gender", "personal_attribute"),
+        ("salary", "financial"),
+    ],
+)
+def test_conditional_rules_match_the_field_on_person_tables(
+    column_name: str, category: str
+) -> None:
     decision = PiiDetector().detect(
-        ColumnInput(column_name="full_name", table_name="employees")
+        ColumnInput(column_name=column_name, table_name="employees")
     )
 
     assert decision.status is PiiStatus.PII
-    assert decision.category == "person_name"
+    assert decision.category == category
+    assert decision.source == "rules"
+
+
+@pytest.mark.parametrize("table_name", ["customer_orders", "user_sessions"])
+def test_person_token_in_table_name_is_not_enough(table_name: str) -> None:
+    """``customer_orders`` contains customer but is not a person table."""
+    column = ColumnInput(column_name="address", table_name=table_name)
+
+    assert evaluate_rules(column) is None
+    assert PiiDetector().detect(column).status is PiiStatus.REVIEW
 
 
 def test_exact_name_on_a_person_table_is_pii() -> None:
