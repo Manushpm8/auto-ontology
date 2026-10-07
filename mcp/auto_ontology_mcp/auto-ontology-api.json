@@ -3502,16 +3502,34 @@
         "operationId": "get_api_exploration_graph",
         "parameters": [
           {
-            "description": "Max nodes returned; always capped at 500 server-side.",
+            "description": "Max nodes returned when database_id is omitted; always capped at 500. Ignored when database_id is set.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 500,
-              "description": "Max nodes returned; always capped at 500 server-side.",
+              "description": "Max nodes returned when database_id is omitted; always capped at 500. Ignored when database_id is set.",
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "When set, scope the graph to this database and skip the 500-node cap that applies to the unfiltered catalog.",
+            "in": "query",
+            "name": "database_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When set, scope the graph to this database and skip the 500-node cap that applies to the unfiltered catalog.",
+              "title": "Database Id"
             }
           }
         ],
@@ -3667,16 +3685,34 @@
         "operationId": "get_api_exploration_semantic_graph",
         "parameters": [
           {
-            "description": "Max nodes returned; always capped at 500 server-side.",
+            "description": "Max nodes returned when database_id is omitted; always capped at 500. Ignored when database_id is set.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 500,
-              "description": "Max nodes returned; always capped at 500 server-side.",
+              "description": "Max nodes returned when database_id is omitted; always capped at 500. Ignored when database_id is set.",
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "When set, return every term linked to a table in this database. The 500-node cap that applies to the unfiltered glossary is skipped.",
+            "in": "query",
+            "name": "database_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When set, return every term linked to a table in this database. The 500-node cap that applies to the unfiltered glossary is skipped.",
+              "title": "Database Id"
             }
           }
         ],

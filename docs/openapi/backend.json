@@ -6570,20 +6570,38 @@
     },
     "/api/exploration/graph": {
       "get": {
-        "description": "Return the full data-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the data graph from one request instead of\nwalking the catalog tree (databases \u2192 schemas \u2192 tables) with a request\nper level. Node count is capped at ``MAX_EXPLORATION_GRAPH_NODES``\nregardless of *limit*.",
+        "description": "Return the data-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the data graph from one request instead of\nwalking the catalog tree (databases \u2192 schemas \u2192 tables) with a request\nper level.\n\nWithout *database_id*, node count is capped at ``MAX_EXPLORATION_GRAPH_NODES``\nregardless of *limit*. With *database_id*, every table in that database\nis returned and *limit* is ignored.",
         "operationId": "get_data_exploration_graph_api_exploration_graph_get",
         "parameters": [
           {
-            "description": "Max nodes returned; always capped at 500 server-side.",
+            "description": "Max nodes returned when database_id is omitted; always capped at 500. Ignored when database_id is set.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 500,
-              "description": "Max nodes returned; always capped at 500 server-side.",
+              "description": "Max nodes returned when database_id is omitted; always capped at 500. Ignored when database_id is set.",
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "When set, scope the graph to this database and skip the 500-node cap that applies to the unfiltered catalog.",
+            "in": "query",
+            "name": "database_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When set, scope the graph to this database and skip the 500-node cap that applies to the unfiltered catalog.",
+              "title": "Database Id"
             }
           }
         ],
@@ -6710,20 +6728,38 @@
     },
     "/api/exploration/semantic-graph": {
       "get": {
-        "description": "Return the full semantic-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the semantic graph from one request instead of\nfetching related terms once per term (an N+1). Node count is capped at\n``MAX_EXPLORATION_GRAPH_NODES`` regardless of *limit*.",
+        "description": "Return the semantic-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the semantic graph from one request instead of\nfetching related terms once per term (an N+1).\n\nWithout *database_id*, node count is capped at ``MAX_EXPLORATION_GRAPH_NODES``\nregardless of *limit*. With *database_id*, every term linked to a table\nin that database is returned and *limit* is ignored.",
         "operationId": "get_semantic_exploration_graph_api_exploration_semantic_graph_get",
         "parameters": [
           {
-            "description": "Max nodes returned; always capped at 500 server-side.",
+            "description": "Max nodes returned when database_id is omitted; always capped at 500. Ignored when database_id is set.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 500,
-              "description": "Max nodes returned; always capped at 500 server-side.",
+              "description": "Max nodes returned when database_id is omitted; always capped at 500. Ignored when database_id is set.",
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "When set, return every term linked to a table in this database. The 500-node cap that applies to the unfiltered glossary is skipped.",
+            "in": "query",
+            "name": "database_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When set, return every term linked to a table in this database. The 500-node cap that applies to the unfiltered glossary is skipped.",
+              "title": "Database Id"
             }
           }
         ],
