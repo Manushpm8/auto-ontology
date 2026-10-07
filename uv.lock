@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'win32'",
@@ -201,7 +201,7 @@ wheels = [
 [[package]]
 name = "apache-ossie-nvidia-auto-ontology"
 version = "0.1.0.dev0"
-source = { git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia#3cb21f240b1f0be3151a0ea57bd5b5eb91792f04" }
+source = { git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia&rev=263a266508ced31988806713e2244e3f1aaf1c31#263a266508ced31988806713e2244e3f1aaf1c31" }
 dependencies = [
     { name = "pyyaml" },
     { name = "sqlglot" },
@@ -280,7 +280,6 @@ dependencies = [
     { name = "langgraph" },
     { name = "mysql-connector-python" },
     { name = "nemo-retriever" },
-    { name = "nvidia-sdfm", extra = ["kumorfm"] },
     { name = "pandas" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
@@ -299,6 +298,11 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+kumo = [
+    { name = "nvidia-sdfm", extra = ["kumorfm"] },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -308,7 +312,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.19.1" },
-    { name = "apache-ossie-nvidia-auto-ontology", git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia" },
+    { name = "apache-ossie-nvidia-auto-ontology", git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia&rev=263a266508ced31988806713e2244e3f1aaf1c31" },
     { name = "databricks-sql-connector", specifier = ">=4.4.0" },
     { name = "duckdb", specifier = ">=1.5.5" },
     { name = "fastapi", specifier = ">=0.141.1" },
@@ -320,7 +324,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "mysql-connector-python", specifier = ">=26.7.0" },
     { name = "nemo-retriever", specifier = ">=26.8.1" },
-    { name = "nvidia-sdfm", extras = ["kumorfm"], specifier = ">=0.2.1" },
+    { name = "nvidia-sdfm", extras = ["kumorfm"], marker = "extra == 'kumo'", specifier = ">=0.2.1" },
     { name = "pandas", specifier = ">=2.3.3,<3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
     { name = "psycopg-pool", specifier = ">=3.3.1" },
@@ -338,6 +342,7 @@ requires-dist = [
     { name = "trino", specifier = ">=0.339.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
 ]
+provides-extras = ["kumo"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3530,8 +3535,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "sys_platform != 'win32'" },
-    { name = "jeepney", marker = "sys_platform != 'win32'" },
+    { name = "cryptography" },
+    { name = "jeepney" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
