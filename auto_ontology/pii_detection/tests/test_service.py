@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pandas as pd
@@ -230,3 +231,113 @@ def test_propagation_without_a_pii_tag_does_nothing(
     monkeypatch.setattr(service, "tag_attributes_of_tagged_columns", unexpected)
 
     assert service.propagate_pii_to_attributes() == service.PiiPropagationResult()
+
+
+def _non_pii_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "id": "p1",
+                "column_name": "product_name",
+                "table_name": "products",
+                "description": "Display name",
+            },
+            {
+                "id": "p2",
+                "column_name": "account_type",
+                "table_name": "accounts",
+                "description": "Type",
+            },
+            {
+                "id": "p3",
+                "column_name": "created_at",
+                "table_name": "events",
+                "description": "Created",
+            },
+        ]
+    )
+
+
+def test_each_batch_is_marked_before_the_next(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(service, "PII_COLUMN_BATCH", 1)
+    processed: list[list[str]] = []
+    monkeypatch.setattr(
+        service,
+        "mark_columns_pii_processed",
+        lambda column_ids: processed.append(list(column_ids)) or len(column_ids),
+    )
+
+    result = service.detect_and_tag_pii(_non_pii_frame(), detector=PiiDetector())
+
+    assert [ids[0] for ids in processed] == ["p1", "p2", "p3"]
+    assert result.scanned == 3
+    assert result.processed == 3
+    assert result.rules_decided == 3
+
+
+def test_a_failed_batch_keeps_earlier_processed_marks(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(service, "PII_COLUMN_BATCH", 1)
+    processed: list[list[str]] = []
+
+    def mark(column_ids: list[str]) -> int:
+        if processed:
+            raise RuntimeError("bind limit")
+        processed.append(list(column_ids))
+        return len(column_ids)
+
+    monkeypatch.setattr(service, "mark_columns_pii_processed", mark)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="bind limit"):
+            service.detect_and_tag_pii(_non_pii_frame(), detector=PiiDetector())
+
+    assert processed == [["p1"]]
+    assert "interrupted after 1 column(s) processed of 3 scanned" in caplog.text
+
+
+def test_a_tag_failure_does_not_mark_that_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(service, "PII_COLUMN_BATCH", 1)
+    processed: list[list[str]] = []
+    monkeypatch.setattr(
+        service,
+        "mark_columns_pii_processed",
+        lambda column_ids: processed.append(list(column_ids)) or len(column_ids),
+    )
+    monkeypatch.setattr(
+        service, "get_or_create_tag", lambda **_kwargs: {"id": "pii-tag"}
+    )
+    monkeypatch.setattr(service, "fetch_tags_map", lambda _kind, _ids: {})
+
+    def attach(**kwargs: Any) -> list[dict[str, str]]:
+        if kwargs["item_id"] == "email-2":
+            raise RuntimeError("attach failed")
+        return [{"id": "pii-tag", "name": "PII"}]
+
+    monkeypatch.setattr(service, "attach_tag", attach)
+    frame = pd.DataFrame(
+        [
+            {
+                "id": "email-1",
+                "column_name": "email_address",
+                "table_name": "customers",
+                "description": "a",
+            },
+            {
+                "id": "email-2",
+                "column_name": "email_address",
+                "table_name": "users",
+                "description": "b",
+            },
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="attach failed"):
+        service.detect_and_tag_pii(frame, detector=PiiDetector())
+
+    assert processed == [["email-1"]]

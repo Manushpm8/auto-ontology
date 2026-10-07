@@ -12,6 +12,7 @@ from typing import Any
 
 import pandas as pd
 
+from auto_ontology.dal.session import IN_QUERY_BATCH
 from auto_ontology.dal.tags import (
     PII_TAG_NAME,
     TARGET_COLUMN,
@@ -30,6 +31,10 @@ from auto_ontology.pii_detection.models import ColumnInput, PiiStatus
 logger = logging.getLogger(__name__)
 
 AUTO_TAG_THRESHOLD = 0.9
+# Same size as the DAL ``IN`` batches: classify, tag, and mark this many
+# columns before the next chunk, so a later failure still keeps earlier
+# ``pii_processed`` marks and the next ingest can continue.
+PII_COLUMN_BATCH = IN_QUERY_BATCH
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,48 +65,27 @@ def _is_processed(value: Any) -> bool:
     return value is not None and not pd.isna(value) and bool(value)
 
 
-def detect_and_tag_pii(
-    columns_df: pd.DataFrame,
-    *,
-    detector: PiiDetector | None = None,
-    threshold: float = AUTO_TAG_THRESHOLD,
+def _add_results(left: PiiTaggingResult, right: PiiTaggingResult) -> PiiTaggingResult:
+    """Sum two enrichment passes into one operational total."""
+
+    return PiiTaggingResult(
+        scanned=left.scanned + right.scanned,
+        processed=left.processed + right.processed,
+        rules_decided=left.rules_decided + right.rules_decided,
+        llm_decided=left.llm_decided + right.llm_decided,
+        review=left.review + right.review,
+        tagged=left.tagged + right.tagged,
+        already_tagged=left.already_tagged + right.already_tagged,
+    )
+
+
+def _apply_batch(
+    records: list[tuple[str, ColumnInput]],
+    classifier: PiiDetector,
+    threshold: float,
 ) -> PiiTaggingResult:
-    """Classify persisted columns and attach the shared ``PII`` tag.
+    """Classify one batch, attach tags, then persist processed marks."""
 
-    ``columns_df`` is the frame returned by catalog ingestion, so every row is
-    expected to carry its stable catalog-column id. Detection sees metadata
-    only; sample values are deliberately not part of :class:`ColumnInput`.
-    """
-
-    if columns_df is None or columns_df.empty:
-        return PiiTaggingResult()
-
-    records: list[tuple[str, ColumnInput]] = []
-    for row in columns_df.to_dict(orient="records"):
-        if _is_processed(row.get("pii_processed")):
-            continue
-        column_id = _optional_text(row.get("id"))
-        column_name = _optional_text(row.get("column_name"))
-        if column_id is None or column_name is None:
-            logger.warning(
-                "Skipping PII detection for a catalog column without id/name"
-            )
-            continue
-        records.append(
-            (
-                column_id,
-                ColumnInput(
-                    column_name=column_name,
-                    table_name=_optional_text(row.get("table_name")),
-                    description=_optional_text(row.get("description")),
-                ),
-            )
-        )
-
-    if not records:
-        return PiiTaggingResult()
-
-    classifier = detector or PiiDetector(LlmPiiClassifier())
     decisions = classifier.detect_many(column for _, column in records)
     rules_decided = sum(decision.source == "rules" for _, decision in decisions)
     llm_decided = sum(decision.source == "llm" for _, decision in decisions)
@@ -142,7 +126,7 @@ def detect_and_tag_pii(
             tagged += 1
 
     processed = mark_columns_pii_processed(processed_ids)
-    result = PiiTaggingResult(
+    return PiiTaggingResult(
         scanned=len(records),
         processed=processed,
         rules_decided=rules_decided,
@@ -151,18 +135,104 @@ def detect_and_tag_pii(
         tagged=tagged,
         already_tagged=already_tagged,
     )
+
+
+def detect_and_tag_pii(
+    columns_df: pd.DataFrame,
+    *,
+    detector: PiiDetector | None = None,
+    threshold: float = AUTO_TAG_THRESHOLD,
+) -> PiiTaggingResult:
+    """Classify persisted columns and attach the shared ``PII`` tag.
+
+    ``columns_df`` is the frame returned by catalog ingestion, so every row is
+    expected to carry its stable catalog-column id. Detection sees metadata
+    only; sample values are deliberately not part of :class:`ColumnInput`.
+
+    Work is applied in batches of :data:`PII_COLUMN_BATCH`: each chunk is
+    classified, tagged, and marked processed before the next one starts. A
+    failure in a later chunk therefore leaves earlier ``pii_processed`` marks
+    in place, so the next ingest continues instead of re-classifying the
+    whole catalog.
+    """
+
+    if columns_df is None or columns_df.empty:
+        return PiiTaggingResult()
+
+    records: list[tuple[str, ColumnInput]] = []
+    for row in columns_df.to_dict(orient="records"):
+        if _is_processed(row.get("pii_processed")):
+            continue
+        column_id = _optional_text(row.get("id"))
+        column_name = _optional_text(row.get("column_name"))
+        if column_id is None or column_name is None:
+            logger.warning(
+                "Skipping PII detection for a catalog column without id/name"
+            )
+            continue
+        records.append(
+            (
+                column_id,
+                ColumnInput(
+                    column_name=column_name,
+                    table_name=_optional_text(row.get("table_name")),
+                    description=_optional_text(row.get("description")),
+                ),
+            )
+        )
+
+    if not records:
+        return PiiTaggingResult()
+
+    classifier = detector or PiiDetector(LlmPiiClassifier())
+    total = PiiTaggingResult()
+    batch_count = (len(records) + PII_COLUMN_BATCH - 1) // PII_COLUMN_BATCH
+    try:
+        for batch_index, offset in enumerate(
+            range(0, len(records), PII_COLUMN_BATCH), start=1
+        ):
+            part = _apply_batch(
+                records[offset : offset + PII_COLUMN_BATCH],
+                classifier,
+                threshold,
+            )
+            total = _add_results(total, part)
+            if batch_count > 1:
+                logger.info(
+                    "PII detection batch %d/%d: %d scanned, %d processed, "
+                    "%d rules, %d LLM, %d review, %d tagged, %d already tagged",
+                    batch_index,
+                    batch_count,
+                    part.scanned,
+                    part.processed,
+                    part.rules_decided,
+                    part.llm_decided,
+                    part.review,
+                    part.tagged,
+                    part.already_tagged,
+                )
+    except Exception:
+        logger.warning(
+            "PII detection interrupted after %d column(s) processed of %d "
+            "scanned; remaining unprocessed columns will retry on the next "
+            "ingest",
+            total.processed,
+            len(records),
+        )
+        raise
+
     logger.info(
         "PII detection finished: %d scanned, %d processed, %d rules, %d LLM, "
         "%d review, %d tagged, %d already tagged",
-        result.scanned,
-        result.processed,
-        result.rules_decided,
-        result.llm_decided,
-        result.review,
-        result.tagged,
-        result.already_tagged,
+        total.scanned,
+        total.processed,
+        total.rules_decided,
+        total.llm_decided,
+        total.review,
+        total.tagged,
+        total.already_tagged,
     )
-    return result
+    return total
 
 
 @dataclass(frozen=True, slots=True)

@@ -70,7 +70,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
 from auto_ontology.dal import schema as s
-from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.dal.session import IN_QUERY_BATCH, store, write_transaction
 
 #: The rule ``uq_tag_name_lower`` indexes, as a comparison the DAL can run.
 _FOLDED_NAME = func.lower(func.trim(s.tag.c.name))
@@ -604,8 +604,11 @@ def _with_rule(row: dict[str, Any]) -> dict[str, Any]:
 def fetch_tags_map(kind: str, item_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """``{item_id: [tag, ...]}`` for objects of one *kind*.
 
-    One query for the whole set, so a page listing a term's attributes reads
-    their tags once rather than once per row.
+    One query for the whole set when it fits, so a page listing a term's
+    attributes reads their tags once rather than once per row. Larger id lists
+    are split into batches of :data:`IN_QUERY_BATCH` so a first ingest of a
+    catalog bigger than psycopg's 65535 bind parameters cannot raise on the
+    ``IN``.
 
     Only id and name: this is the chip a detail page draws beside the object,
     and the timestamps :func:`list_tags` returns describe the tag rather than
@@ -617,18 +620,19 @@ def fetch_tags_map(kind: str, item_ids: list[str]) -> dict[str, list[dict[str, A
     if not item_ids:
         return {}
 
-    rows = store().query_read(
-        select(column.label("item_id"), s.tag.c.id, s.tag.c.name)
-        .select_from(s.tag_target.join(s.tag, s.tag.c.id == s.tag_target.c.tag_id))
-        .where(column.in_(item_ids))
-        .order_by(func.lower(s.tag.c.name), s.tag.c.id)
-    )
-
     tags: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        tags.setdefault(row["item_id"], []).append(
-            {"id": row["id"], "name": row["name"]}
+    for offset in range(0, len(item_ids), IN_QUERY_BATCH):
+        chunk = item_ids[offset : offset + IN_QUERY_BATCH]
+        rows = store().query_read(
+            select(column.label("item_id"), s.tag.c.id, s.tag.c.name)
+            .select_from(s.tag_target.join(s.tag, s.tag.c.id == s.tag_target.c.tag_id))
+            .where(column.in_(chunk))
+            .order_by(func.lower(s.tag.c.name), s.tag.c.id)
         )
+        for row in rows:
+            tags.setdefault(row["item_id"], []).append(
+                {"id": row["id"], "name": row["name"]}
+            )
     return tags
 
 

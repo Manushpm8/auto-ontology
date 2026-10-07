@@ -71,7 +71,8 @@ def _run_pii_detection(columns_df: Any, database_name: str) -> None:
         detect_and_tag_pii(columns_df)
     except Exception:
         logger.exception(
-            "PII detection failed for database %s; catalog ingestion will continue",
+            "PII detection failed for database %s; catalog ingestion will "
+            "continue. Unprocessed columns will be retried on the next ingest",
             database_name,
         )
     run_pii_propagation(database_name)

@@ -207,6 +207,7 @@ def test_pii_failure_does_not_fail_catalog_ingestion(
 
     text = _messages(caplog)
     assert "PII detection failed for database pagila" in text
+    assert "Unprocessed columns will be retried on the next ingest" in text
     assert "Data ingestion finished successfully for database pagila" in text
 
 

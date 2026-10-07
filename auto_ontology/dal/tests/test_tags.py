@@ -60,6 +60,7 @@ from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.pii import (  # noqa: E402
+    mark_columns_pii_processed,
     realign_sql_attribute_pii,
     tag_attributes_of_tagged_columns,
     untag_attributes_of_column,
@@ -911,6 +912,21 @@ def test_the_map_resolves_every_object_in_one_pass(tagged) -> None:
     }
 
 
+def test_the_map_chunks_id_lists_past_the_bind_batch(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A large ingest must not expand one ``IN`` past psycopg's bind cap."""
+    monkeypatch.setattr("auto_ontology.dal.tags.IN_QUERY_BATCH", 2)
+    extras = [_add(s.term, name=f"{tagged.prefix}-T{i}") for i in range(5)]
+    for term_id in extras:
+        tagged.label(term_id=term_id)
+
+    found = fetch_tags_map(TARGET_TERM, extras)
+
+    assert set(found) == set(extras)
+    assert all(found[term_id][0]["id"] == tagged.tag for term_id in extras)
+
+
 def test_the_map_reads_only_the_kind_it_was_asked_for(tagged) -> None:
     """Ids are unique across tables, but the column filtered on is not."""
     tagged.label_one_of_each()
@@ -922,6 +938,29 @@ def test_an_unknown_kind_is_a_programming_error(tagged) -> None:
     """Not a missing object -- a caller naming something the API never had."""
     with pytest.raises(ValueError, match="Unknown tag target"):
         fetch_tags_map("database", [tagged.database])
+
+
+def test_mark_columns_pii_processed_chunks_id_lists_past_the_bind_batch(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same bind-parameter cap as ``fetch_tags_map``, on the write that stops a re-run."""
+    monkeypatch.setattr("auto_ontology.dal.pii.IN_QUERY_BATCH", 2)
+    extras = [
+        _add(s.catalog_column, table_id=tagged.table, name=f"col{i}") for i in range(5)
+    ]
+
+    assert mark_columns_pii_processed(extras) == 5
+    assert mark_columns_pii_processed(extras) == 0
+    rows = store().query_read(
+        select(s.catalog_column.c.pii_processed).where(
+            s.catalog_column.c.id.in_(extras)
+        )
+    )
+    assert all(row["pii_processed"] for row in rows)
+
+
+def test_mark_columns_pii_processed_is_a_no_op_on_an_empty_list() -> None:
+    assert mark_columns_pii_processed([]) == 0
 
 
 # --------------------------------------------------------------------------

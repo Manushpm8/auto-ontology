@@ -10,7 +10,7 @@ from sqlalchemy import Select, Text, exists, literal, not_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.dal import schema as s
-from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.dal.session import IN_QUERY_BATCH, store, write_transaction
 from auto_ontology.dal.tags import (
     PII_TAG_NAME,
     TARGET_COLUMN,
@@ -22,21 +22,32 @@ from auto_ontology.dal.tags import (
 
 
 def mark_columns_pii_processed(column_ids: list[str]) -> int:
-    """Mark successfully classified catalog columns as processed."""
+    """Mark successfully classified catalog columns as processed.
+
+    Ids are updated in batches of :data:`IN_QUERY_BATCH`. A first ingest of a
+    large catalog can have more columns than psycopg's 65535 bind parameters,
+    and a single ``IN`` of that many literals would raise -- silently, since
+    ingest swallows a detection failure, and permanently, since nothing would
+    then be marked processed to shrink the next pass.
+    """
 
     if not column_ids:
         return 0
 
-    rows = store().query_write(
-        s.catalog_column.update()
-        .where(
-            s.catalog_column.c.id.in_(column_ids),
-            s.catalog_column.c.pii_processed.is_(False),
+    marked = 0
+    for offset in range(0, len(column_ids), IN_QUERY_BATCH):
+        chunk = column_ids[offset : offset + IN_QUERY_BATCH]
+        rows = store().query_write(
+            s.catalog_column.update()
+            .where(
+                s.catalog_column.c.id.in_(chunk),
+                s.catalog_column.c.pii_processed.is_(False),
+            )
+            .values(pii_processed=True)
+            .returning(s.catalog_column.c.id)
         )
-        .values(pii_processed=True)
-        .returning(s.catalog_column.c.id)
-    )
-    return len(rows)
+        marked += len(rows)
+    return marked
 
 
 def _column_attributes_of_tagged_columns(tag_id: str) -> Select:
