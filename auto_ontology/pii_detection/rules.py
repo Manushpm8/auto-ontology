@@ -124,7 +124,7 @@ CONDITIONAL_PII_PATTERNS = (
         compact=r"(?:salary|income|creditscore)$",
     ),
     _pattern(
-        r"id|employee id|customer id|user id|contact id|account number",
+        r"employee id|customer id|user id|contact id|account number",
         "identifier",
         compact=(
             r"(?:person|employee|customer|user|contact|account)id$"

@@ -13,6 +13,7 @@ from auto_ontology.pii_detection import (
     PiiStatus,
 )
 from auto_ontology.pii_detection import detector as detector_module
+from auto_ontology.pii_detection.rules import evaluate_rules
 
 
 class StubBackend:
@@ -49,6 +50,9 @@ def test_direct_identifier_is_auto_tagged() -> None:
         ("preferredname", "people", "person_name"),
         ("postaladdressline1", "customers", "postal_address"),
         ("customerid", "customers", "identifier"),
+        ("id", "customers", "identifier"),
+        ("customer_id", "customers", "identifier"),
+        ("employee_id", "employees", "identifier"),
     ],
 )
 def test_compact_sql_identifiers_match_rules(
@@ -69,6 +73,26 @@ def test_compact_id_suffix_does_not_match_unrelated_word() -> None:
     )
 
     assert decision.status is PiiStatus.REVIEW
+
+
+@pytest.mark.parametrize(
+    "column_name",
+    ["store_id", "country_id", "last_update_id"],
+)
+def test_unqualified_id_suffix_is_not_a_person_identifier(column_name: str) -> None:
+    """Bare ``id`` used to match any ``*_id`` on a person table and auto-tag it.
+
+    The identifier rule must stay silent: ``last_update_id`` is an audit FK,
+    not a person identifier. Without a backend that becomes review, not
+    ``not_pii`` -- an LLM can still decide.
+    """
+    column = ColumnInput(column_name=column_name, table_name="customers")
+
+    assert evaluate_rules(column) is None
+
+    decision = PiiDetector().detect(column)
+    assert decision.status is PiiStatus.REVIEW
+    assert decision.source == "fallback"
 
 
 def test_ambiguous_name_uses_table_context() -> None:
