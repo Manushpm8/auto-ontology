@@ -31,7 +31,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from gsf.retrieval.kumo.budget import Budget
+from auto_ontology.retrieval.kumo.budget import Budget
 
 logger = logging.getLogger(__name__)
 

@@ -30,13 +30,13 @@ from typing import Any
 
 import pandas as pd
 
-from gsf.retrieval.kumo.budget import (
+from auto_ontology.retrieval.kumo.budget import (
     Budget,
     RefusedForCapacity,
     Spend,
 )
-from gsf.retrieval.kumo.column_reference import build_column_reference
-from gsf.retrieval.kumo.graph_cache import (
+from auto_ontology.retrieval.kumo.column_reference import build_column_reference
+from auto_ontology.retrieval.kumo.graph_cache import (
     BuildTimedOut,
     CacheKey,
     GraphCache,
@@ -44,9 +44,9 @@ from gsf.retrieval.kumo.graph_cache import (
     catalog_fingerprint,
     join_fingerprint,
 )
-from gsf.retrieval.kumo.pql_gen import quote_ident
-from gsf.retrieval.kumo.kumo_model import key_columns
-from gsf.retrieval.kumo.telemetry import (
+from auto_ontology.retrieval.kumo.pql_gen import quote_ident
+from auto_ontology.retrieval.kumo.kumo_model import key_columns
+from auto_ontology.retrieval.kumo.telemetry import (
     CACHE_DISABLED,
     CACHE_HIT,
     CACHE_MISS,

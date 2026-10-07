@@ -15,7 +15,7 @@ naming and safe to repeat before it goes in.
 
 import pytest
 
-from gsf.retrieval.kumo.column_reference import (
+from auto_ontology.retrieval.kumo.column_reference import (
     MAX_VALUES_PER_COLUMN,
     build_column_reference,
     is_safe_value,

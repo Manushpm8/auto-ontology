@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 from pytest import LogCaptureFixture
 
-from gsf.retrieval.kumo.graph_cache import built_graph_fingerprint
-from gsf.retrieval.kumo.telemetry import (
+from auto_ontology.retrieval.kumo.graph_cache import built_graph_fingerprint
+from auto_ontology.retrieval.kumo.telemetry import (
     CACHE_HIT,
     CACHE_MISS,
     GraphIdentity,
@@ -251,7 +251,7 @@ def test_the_recorded_query_is_the_redacted_one() -> None:
     """The redaction has to be where the record is made, not left to the caller."""
     import inspect
 
-    from gsf.retrieval.kumo import predictor
+    from auto_ontology.retrieval.kumo import predictor
 
     source = inspect.getsource(predictor._run_prediction)
 
@@ -345,7 +345,7 @@ def test_the_recorded_error_goes_through_redaction() -> None:
     """Redaction has to be where the record is made, not left to callers."""
     import inspect
 
-    from gsf.retrieval.kumo import predictor
+    from auto_ontology.retrieval.kumo import predictor
 
     assert "redact_error(" in inspect.getsource(predictor._run_prediction)
     assert "redact_error(" in inspect.getsource(predictor.run_prediction)

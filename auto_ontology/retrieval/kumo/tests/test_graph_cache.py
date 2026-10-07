@@ -16,7 +16,7 @@ import pytest
 from pathlib import Path
 from typing import Any
 
-from gsf.retrieval.kumo.graph_cache import (
+from auto_ontology.retrieval.kumo.graph_cache import (
     BuildTimedOut,
     CacheKey,
     GraphCache,
@@ -154,7 +154,7 @@ def test_an_invalidated_entry_is_built_again() -> None:
 
 def test_different_join_paths_do_not_share_a_graph() -> None:
     """Join paths become the graph's edges, so they change its shape."""
-    from gsf.retrieval.kumo.graph_cache import join_fingerprint
+    from auto_ontology.retrieval.kumo.graph_cache import join_fingerprint
 
     one = [
         {
@@ -187,7 +187,7 @@ def test_different_join_paths_do_not_share_a_graph() -> None:
 
 def test_the_join_name_does_not_depend_on_the_order_hops_arrive() -> None:
     """The set of joins decides the graph, not the order a traversal found them."""
-    from gsf.retrieval.kumo.graph_cache import join_fingerprint
+    from auto_ontology.retrieval.kumo.graph_cache import join_fingerprint
 
     a = {
         "path": [
@@ -215,7 +215,7 @@ def test_the_join_name_does_not_depend_on_the_order_hops_arrive() -> None:
 
 def test_two_connections_to_the_same_database_name_are_told_apart() -> None:
     """Two deployments can describe one catalog while reading different data."""
-    from gsf.retrieval.kumo.predictor import _connector_identity
+    from auto_ontology.retrieval.kumo.predictor import _connector_identity
 
     class Snowflake:
         database_name = "sales"
@@ -234,7 +234,7 @@ def test_two_connections_to_the_same_database_name_are_told_apart() -> None:
 
 def test_a_connection_secret_does_not_appear_in_the_key() -> None:
     """A key is written to logs; a connection string carries a password."""
-    from gsf.retrieval.kumo.predictor import _connector_identity
+    from auto_ontology.retrieval.kumo.predictor import _connector_identity
 
     class Postgres:
         database_name = "sales"
@@ -250,8 +250,8 @@ def test_examples_are_not_shared_between_questions() -> None:
     """Examples are retrieved per question, so holding them answers the wrong one."""
     import dataclasses
 
-    from gsf.retrieval.kumo.predictor import PredictionContext
-    from gsf.retrieval.kumo.telemetry import GraphIdentity
+    from auto_ontology.retrieval.kumo.predictor import PredictionContext
+    from auto_ontology.retrieval.kumo.telemetry import GraphIdentity
 
     held = PredictionContext(
         kumo_model=None,
@@ -281,8 +281,8 @@ def test_two_duckdb_files_with_the_same_database_name_are_told_apart(
     """DuckDB names a database after its file stem, so /prod and /staging collide."""
     import duckdb
 
-    from gsf.connectors.duckdb import DuckDBDatabase
-    from gsf.retrieval.kumo.predictor import _connector_identity
+    from auto_ontology.connectors.duckdb import DuckDBDatabase
+    from auto_ontology.retrieval.kumo.predictor import _connector_identity
 
     connectors = []
     for deployment in ("prod", "staging"):
@@ -297,7 +297,7 @@ def test_two_duckdb_files_with_the_same_database_name_are_told_apart(
 
 def test_a_connector_that_cannot_say_where_it_points_is_not_cached() -> None:
     """A connector added later must not inherit another deployment's graph."""
-    from gsf.retrieval.kumo.predictor import _cache_key, _connector_identity
+    from auto_ontology.retrieval.kumo.predictor import _cache_key, _connector_identity
 
     class Anonymous:
         database_name = "sales"
@@ -315,7 +315,7 @@ def test_a_connector_that_cannot_say_where_it_points_is_not_cached() -> None:
 
 def test_kyuubi_is_identified_by_its_parsed_settings() -> None:
     """Kyuubi keeps its host and catalog in _settings rather than named fields."""
-    from gsf.retrieval.kumo.predictor import _connector_identity
+    from auto_ontology.retrieval.kumo.predictor import _connector_identity
 
     class Kyuubi:
         database_name = "sales"
@@ -335,8 +335,8 @@ def test_one_duckdb_file_reached_two_ways_is_one_source(tmp_path: Path) -> None:
 
     import duckdb
 
-    from gsf.connectors.duckdb import DuckDBDatabase
-    from gsf.retrieval.kumo.predictor import _connector_identity
+    from auto_ontology.connectors.duckdb import DuckDBDatabase
+    from auto_ontology.retrieval.kumo.predictor import _connector_identity
 
     path = tmp_path / "sales.duckdb"
     duckdb.connect(str(path)).close()
@@ -355,8 +355,8 @@ def test_one_duckdb_file_reached_two_ways_is_one_source(tmp_path: Path) -> None:
 
 def test_two_in_memory_duckdbs_are_not_one_source() -> None:
     """Each in-memory database is its own; neither holds the other's tables."""
-    from gsf.connectors.duckdb import DuckDBDatabase
-    from gsf.retrieval.kumo.predictor import _connector_identity
+    from auto_ontology.connectors.duckdb import DuckDBDatabase
+    from auto_ontology.retrieval.kumo.predictor import _connector_identity
 
     first = DuckDBDatabase(":memory:", read_only=False)
     second = DuckDBDatabase(":memory:", read_only=False)
@@ -615,8 +615,8 @@ def test_giving_up_leaves_the_flight_for_whoever_is_still_building() -> None:
 
 def test_the_wait_is_the_budget_the_build_was_given() -> None:
     """Two requests coalescing cannot be under different limits."""
-    from gsf.retrieval.kumo.budget import Budget
-    from gsf.retrieval.kumo.predictor import _GRAPH_CACHE
+    from auto_ontology.retrieval.kumo.budget import Budget
+    from auto_ontology.retrieval.kumo.predictor import _GRAPH_CACHE
 
     assert _GRAPH_CACHE._wait == Budget.from_env().max_seconds
 
@@ -625,7 +625,7 @@ def test_a_budget_is_the_deployments_not_the_callers() -> None:
     """If it ever became per-request it would have to join the cache key."""
     import inspect
 
-    from gsf.retrieval.kumo import predictor
+    from auto_ontology.retrieval.kumo import predictor
 
     assert (
         "budget"

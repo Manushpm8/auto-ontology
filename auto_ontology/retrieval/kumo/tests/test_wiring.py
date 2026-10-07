@@ -17,8 +17,8 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from gsf.retrieval.kumo import predictor
-from gsf.retrieval.kumo.graph_cache import _term
+from auto_ontology.retrieval.kumo import predictor
+from auto_ontology.retrieval.kumo.graph_cache import _term
 
 CATALOG = [
     {
@@ -251,7 +251,7 @@ def test_giving_up_on_a_hung_build_reaches_the_caller_as_a_refusal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """BuildTimedOut must become a graceful answer, not escape as an exception."""
-    from gsf.retrieval.kumo.graph_cache import BuildTimedOut
+    from auto_ontology.retrieval.kumo.graph_cache import BuildTimedOut
 
     def timed_out(self: Any, key: Any, build: Any, **kwargs: Any) -> Any:
         raise BuildTimedOut("Preparing this prediction is taking longer than 300s")
@@ -269,7 +269,7 @@ def test_a_population_too_large_is_refused_not_annotated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A refusal downgraded to a note would answer over a slice and look fine."""
-    from gsf.retrieval.kumo import pql_gen
+    from auto_ontology.retrieval.kumo import pql_gen
 
     monkeypatch.setattr(
         pql_gen, "_resolve_indices", lambda *a, **k: ([1, 2, 3], 48_391)
@@ -298,8 +298,8 @@ def test_every_prediction_leaves_a_record(caplog: Any) -> None:
     import json
     import logging
 
-    from gsf.retrieval.kumo import pql_gen
-    from gsf.retrieval.kumo.pql_gen import PqlGenerationResult
+    from auto_ontology.retrieval.kumo import pql_gen
+    from auto_ontology.retrieval.kumo.pql_gen import PqlGenerationResult
 
     predictor._GRAPH_CACHE.clear()
     context = _build(_Warehouse(), [])
@@ -395,7 +395,7 @@ def test_a_prediction_that_raised_still_leaves_a_record(caplog: Any) -> None:
     import json
     import logging
 
-    from gsf.retrieval.kumo import pql_gen
+    from auto_ontology.retrieval.kumo import pql_gen
 
     predictor._GRAPH_CACHE.clear()
     context = _build(_Warehouse(), [])
@@ -406,7 +406,7 @@ def test_a_prediction_that_raised_still_leaves_a_record(caplog: Any) -> None:
 
     pql_gen.generate_pql = boom
     try:
-        with caplog.at_level(logging.INFO, logger="gsf.retrieval.kumo.telemetry"):
+        with caplog.at_level(logging.INFO, logger="auto_ontology.retrieval.kumo.telemetry"):
             with pytest.raises(RuntimeError):
                 predictor.run_prediction("who churns?", _LLM(), context)
     finally:
@@ -442,7 +442,7 @@ def test_a_request_refused_before_predicting_still_leaves_a_record(
     monkeypatch.setenv("KUMO_MAX_TABLES", "1")
     predictor._GRAPH_CACHE.clear()
 
-    with caplog.at_level(logging.INFO, logger="gsf.retrieval.kumo.telemetry"):
+    with caplog.at_level(logging.INFO, logger="auto_ontology.retrieval.kumo.telemetry"):
         answer = _build(_Warehouse(), [])
 
     assert isinstance(answer, dict)
@@ -457,7 +457,7 @@ def test_an_unreadable_table_leaves_a_record(caplog: Any) -> None:
 
     predictor._GRAPH_CACHE.clear()
 
-    with caplog.at_level(logging.INFO, logger="gsf.retrieval.kumo.telemetry"):
+    with caplog.at_level(logging.INFO, logger="auto_ontology.retrieval.kumo.telemetry"):
         _build(_OneTableFails(), [])
 
     written = _records(caplog)

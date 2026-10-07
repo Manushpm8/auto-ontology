@@ -16,7 +16,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from gsf.retrieval.kumo.pql_gen import (
+from auto_ontology.retrieval.kumo.pql_gen import (
     PqlPopulationTooLargeError,
     _count_entities,
     _population_refusal,
@@ -121,7 +121,7 @@ def test_a_refusal_is_not_something_the_repair_loop_can_fix() -> None:
 
 
 def test_a_truncated_answer_names_what_it_left_out() -> None:
-    from gsf.retrieval.kumo.predictor import _format_result
+    from auto_ontology.retrieval.kumo.predictor import _format_result
 
     class Result:
         success = True
@@ -141,7 +141,7 @@ def test_a_truncated_answer_names_what_it_left_out() -> None:
 
 
 def test_an_answer_over_everything_does_not_apologise_for_it() -> None:
-    from gsf.retrieval.kumo.predictor import _format_result
+    from auto_ontology.retrieval.kumo.predictor import _format_result
 
     class Result:
         success = True
@@ -167,7 +167,7 @@ def test_predict_all_refuses_a_population_it_cannot_cover() -> None:
     so whoever wires it up should find the contract already stated rather than
     discover it as an uncaught exception in production.
     """
-    from gsf.retrieval.kumo import pql_gen
+    from auto_ontology.retrieval.kumo import pql_gen
 
     warehouse = _Warehouse(rows=48_391)
 

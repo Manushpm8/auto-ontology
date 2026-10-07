@@ -15,7 +15,7 @@ import time
 import pandas as pd
 import pytest
 
-from gsf.retrieval.kumo.budget import Budget, BudgetExceeded, Spend
+from auto_ontology.retrieval.kumo.budget import Budget, BudgetExceeded, Spend
 
 
 def _frame(rows: int, heavy: bool = False) -> pd.DataFrame:
