@@ -104,6 +104,36 @@ def test_ambiguous_name_uses_table_context() -> None:
     assert decision.category == "person_name"
 
 
+def test_exact_name_on_a_person_table_is_pii() -> None:
+    decision = PiiDetector().detect(
+        ColumnInput(column_name="name", table_name="customers")
+    )
+
+    assert decision.status is PiiStatus.PII
+    assert decision.category == "person_name"
+    assert decision.source == "rules"
+
+
+@pytest.mark.parametrize(
+    "column_name",
+    ["username", "filename", "category_name", "company_name"],
+)
+def test_generic_name_suffix_is_not_a_person_name(column_name: str) -> None:
+    """Bare ``name`` used to match any column ending in name on a person table.
+
+    The person-name rule must stay silent: ``filename`` is not a person name.
+    Without a backend that becomes review, not ``not_pii`` -- an LLM can still
+    decide.
+    """
+    column = ColumnInput(column_name=column_name, table_name="customers")
+
+    assert evaluate_rules(column) is None
+
+    decision = PiiDetector().detect(column)
+    assert decision.status is PiiStatus.REVIEW
+    assert decision.source == "fallback"
+
+
 def test_product_name_is_not_pii() -> None:
     decision = PiiDetector().detect(
         ColumnInput(column_name="product_name", table_name="products")

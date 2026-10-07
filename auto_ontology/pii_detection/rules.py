@@ -105,9 +105,11 @@ CONDITIONAL_PII_PATTERNS = (
     _pattern(
         r"first name|last name|full name|middle name|maiden name",
         "person_name",
-        compact=r"(?:firstname|lastname|fullname|middlename|maidenname|preferredname)$",
+        compact=(
+            r"(?:firstname|lastname|fullname|middlename|maidenname|preferredname)$"
+            r"|^name$"
+        ),
     ),
-    _pattern(r"name", "person_name", compact=r"name$"),
     _pattern(
         r"address|street|postal code|zip code",
         "postal_address",
