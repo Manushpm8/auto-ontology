@@ -127,7 +127,10 @@ def test_retrieve_additional_tables_searches_question_and_entities(
         object(), "q", ["e1", "e2"], "db"
     )
 
-    assert [q for q, _, _ in seen] == ["q", "e1", "e2"]
+    # The searches run on a thread pool, so the order they are called in is the
+    # scheduler's; the order their results are kept in is not.
+    assert sorted(q for q, _, _ in seen) == ["e1", "e2", "q"]
+    assert [t["name"] for t in out] == ["q", "e1", "e2"]
     expected_k = max(1, SQL_GEN_MAX_ENTITIES // len(seen))
     assert all(k == expected_k for _, k, _ in seen)
     assert all(db == "db" for _, _, db in seen)
