@@ -90,7 +90,7 @@ _client: Any = None
 
 
 def _ensure_init() -> Any:
-    """Open the SDFM client once, from env vars, and return it.
+    """Open the RelationalClient once, from env vars, and return it.
 
     The client is the only supported entry point to the engine, which refuses
     direct use. Opening it makes no request, so a bad URL surfaces on the first
