@@ -5,6 +5,8 @@
 import threading
 from typing import cast
 
+import pytest
+
 from auto_ontology.retrieval.text_to_sql.agents import candidates_preparation
 from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
@@ -139,7 +141,7 @@ def test_retrieve_additional_tables_searches_question_and_entities(
 
 
 def test_a_table_two_searches_return_merges_the_same_way_whichever_finishes_first(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The real deduper keeps the first non-empty description it sees.
 
@@ -149,7 +151,13 @@ def test_a_table_two_searches_return_merges_the_same_way_whichever_finishes_firs
     """
     entity_done = threading.Event()
 
-    def fake_get_relevant_tables(retriever, query, k=1, database_name=None, **kwargs):
+    def fake_get_relevant_tables(
+        retriever: object,
+        query: str,
+        k: int = 1,
+        database_name: str | None = None,
+        **kwargs: object,
+    ) -> list[dict]:
         if query == "q":
             assert entity_done.wait(5)
         else:
