@@ -138,6 +138,36 @@ def test_retrieve_additional_tables_searches_question_and_entities(
     assert len(out) == 3
 
 
+def test_a_table_two_searches_return_merges_the_same_way_whichever_finishes_first(
+    monkeypatch,
+) -> None:
+    """The real deduper keeps the first non-empty description it sees.
+
+    The question's search is made to finish last. Collected in completion order,
+    the entity's description would win; collected in submission order, the
+    question's does, every time.
+    """
+    entity_done = threading.Event()
+
+    def fake_get_relevant_tables(retriever, query, k=1, database_name=None, **kwargs):
+        if query == "q":
+            assert entity_done.wait(5)
+        else:
+            entity_done.set()
+        return [{"id": "t1", "name": "t1", "description": f"found by {query}"}]
+
+    monkeypatch.setattr(
+        candidates_preparation, "get_relevant_tables", fake_get_relevant_tables
+    )
+
+    out = CandidatePreparationAgent()._retrieve_additional_tables(
+        object(), "q", ["e1"], "db"
+    )
+
+    assert [t["id"] for t in out] == ["t1"]
+    assert out[0]["description"] == "found by q"
+
+
 def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> None:
     retrieve_started = threading.Event()
     release_retrieve = threading.Event()
